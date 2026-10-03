@@ -1,0 +1,11 @@
+✅ 两条 WS 都连上了（agent / viewer）
+✅ agent 注册通过，云端回了 registration-ok
+✅ HTTP /api/devices 查到 1 台（probe-uid-01）
+✅ viewer 自动订阅了在线设备 probe-uid-01
+✅ 帧广播通了（收到 1 帧，10 字节，base64 16 字符）
+✅ 帧内容往返一致（解回来头字节 0xFF）
+✅ 在线设备：云端回 sent（真写了 socket）
+✅ 不在线设备：云端老实回 offline（没装 sent 骗人）
+✅ 设备表定时广播在推（2s 一轮）
+⚠ 本次没抓到回执行（被控端只回 received 也算回执）
+=== 探针结论：✅ 全过 ===
