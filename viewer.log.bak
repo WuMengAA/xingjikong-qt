@@ -1,0 +1,38 @@
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/LogDialog.qml:83:29: QML QQuickRectangle: The current style does not support customization of this control (property: "background" item: QQuickRectangle(0x1fdc9d05fe0, parent=0x0, geometry=0,0 0x0)). Please customize a non-native style (such as Basic, Fusion, Material, etc). For more information, see: https://doc.qt.io/qt-6/qtquickcontrols2-customize.html#customization-reference
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/MediaDialog.qml:86:17: Unable to assign QQuickListViewAttached to QQuickItem
+[viewer] 云端地址 ws://127.0.0.1:8788/ws/viewer
+[viewer] 正在连云端 ws://127.0.0.1:8788/ws/viewer
+[viewer] 已连上云端 ws://127.0.0.1:8788/ws/viewer，正在鉴权…
+[viewer] ✅ 云端鉴权通过（mode=token）
+[viewer] 云端确认订阅 TEST1
+[viewer] 云端回话：管理端在线（云端在线管理端 1 个）
+[viewer] 设备表更新：在线 1 台
+[viewer] 切到 TEST1，向云端订阅它的画面
+[viewer] 云端确认订阅 TEST1
+[viewer] 画面在动：第 1 帧（seq=137，190314 字节，0.0 fps）
+[viewer] 界面自检图已存 C:/Users/Administrator/Documents/stelarith-viewer-qt/shots/qml-page0.png
+[viewer] 界面自检图已存 C:/Users/Administrator/Documents/stelarith-viewer-qt/shots/qml-page1.png
+[viewer] 界面自检图已存 C:/Users/Administrator/Documents/stelarith-viewer-qt/shots/qml-page2.png
+[viewer] 界面自检图已存 C:/Users/Administrator/Documents/stelarith-viewer-qt/shots/qml-light0.png
+[viewer] 界面自检图已存 C:/Users/Administrator/Documents/stelarith-viewer-qt/shots/qml-light1.png
+[viewer] 界面自检图已存 C:/Users/Administrator/Documents/stelarith-viewer-qt/shots/qml-light2.png
+[viewer] 指令 list_shortcut_candidates → sent（云端已写入被控端连接）
+[viewer] 指令 process_list → sent（云端已写入被控端连接）
+[viewer] 指令 list_shortcut_candidates → executed（）
+[viewer] 指令 process_list → executed（）
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] WARN: qrc:/qt/qml/Stelarith/qml/SoftwareDialog.qml:225:33: Unable to assign [undefined] to QString
+[viewer] 界面自检图已存 C:/Users/Administrator/Documents/stelarith-viewer-qt/shots/qml-softdialog.png
+[viewer] 画面在动：第 31 帧（seq=167，231204 字节，0.5 fps）
+[viewer] 画面在动：第 61 帧（seq=197，231059 字节，0.5 fps）
+[viewer] 画面在动：第 91 帧（seq=227，231074 字节，0.5 fps）
+[viewer] 画面在动：第 121 帧（seq=257，231125 字节，0.5 fps）
+[viewer] 画面在动：第 151 帧（seq=287，231061 字节，0.5 fps）

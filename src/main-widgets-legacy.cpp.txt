@@ -1,0 +1,505 @@
+// 星集控 · 管理端（D4）
+//   连云端 ws://127.0.0.1:8788/ws/viewer
+//   看教室机真画面（被控端截屏直传） + 设备列表 + 真下发指令
+//
+// 三条纪律（从前面几步继承下来的）：
+//   1. 画面没到就显示"没画面"，不拿纯色/占位图假装成功；
+//   2. 指令按钮只认云端回的真实 state（sent=云端真写了连接，offline=没在线），不自己报成功；
+//   3. 断开/推帧失败必须写进日志，不许静默。
+
+#include "viewerbackend.h"
+
+#include <QApplication>
+#include <QWidget>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QListWidget>
+#include <QListWidgetItem>
+#include <QLabel>
+#include <QMouseEvent>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QWebSocket>
+#include <QAbstractSocket>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QJsonValue>
+#include <QImage>
+#include <QPixmap>
+#include <QStatusBar>
+#include <QTimer>
+#include <QDialog>
+#include <QPlainTextEdit>
+#include <QScrollBar>
+#include <QFileInfo>
+#include <QStringList>
+#include <QDir>
+#include <QDateTime>
+#include <QDebug>
+#include <cstdio>
+#include <cstdarg>
+#include <chrono>
+
+// 云端地址与令牌不再由界面层持有：ViewerBackend::start() 自己从
+// STE_VIEWER_URL / STE_VIEWER_TOKEN 读取（地址默认 ws://127.0.0.1:8788/ws/viewer；
+// 令牌**不给**默认值 —— 空令牌会被云端明确拒绝，宁可启动时报清楚）。
+// GUI 程序的 stdout 在别的控制台里看不见，日志必须自己落一份文件，否则"跑起来了"没法证明
+static const char *kLogFile = "C:/Users/Administrator/Documents/stelarith-viewer-qt/viewer.log";
+static const char *kShotDir = "C:/Users/Administrator/Documents/stelarith-viewer-qt/shots";
+static FILE *g_log = nullptr;
+static void writeLog(const char *s) {
+    if (!g_log) {
+        g_log = fopen(kLogFile, "w");
+        if (!g_log) { fprintf(stderr, "[viewer] FAIL 日志写不进 %s\n", kLogFile); return; }
+    }
+    fprintf(g_log, "%s\n", s);
+    fflush(g_log);
+}
+
+/* GUI 程序默认把日志丢给 OutputDebugString（什么也看不到），必须自己接管到 stdout/stderr */
+static void installMessageHandler()
+{
+    qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &, const QString &msg) {
+        const char *tag = "INFO";
+        switch (type) {
+        case QtFatalMsg:   tag = "FATAL"; break;
+        case QtCriticalMsg:tag = "CRIT";  break;
+        case QtWarningMsg: tag = "WARN";  break;
+        default:           tag = "INFO";  break;
+        }
+        const QByteArray b = msg.toUtf8();
+        const char *line = "[viewer] %s: %s";
+        char buf[2048];
+        snprintf(buf, sizeof(buf), line, tag, b.constData());
+        writeLog(buf);
+    });
+}
+
+// logf 不再 static：ViewerBackend（viewerbackend.cpp）与界面共用同一份落盘日志。
+// 声明见 viewerbackend.h —— 改这里记得两处一致。
+void logf(const char *fmt, ...) {
+    char buf[2048];
+    va_list ap; va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
+    writeLog(buf);
+    fprintf(stdout, "%s\n", buf); fflush(stdout);
+}
+
+// 协议封装 makeEnvelope 已随逻辑一起搬进 viewerbackend.cpp —— 界面层不再拼协议报文。
+
+/* D5 基础操控：在画面 Label 上捕获鼠标，把坐标归一化（0..1）后发给被控端 */
+class ScreenLabel : public QLabel {
+public:
+    std::function<void(const QString &, double, double)> onPointer;
+    explicit ScreenLabel(QWidget *p = nullptr) : QLabel(p) { setMouseTracking(true); }
+protected:
+    void mousePressEvent(QMouseEvent *e) override { emitPointer(QStringLiteral("down"), e); }
+    void mouseMoveEvent(QMouseEvent *e) override {
+        if (e->buttons() & Qt::LeftButton) emitPointer(QStringLiteral("move"), e);
+    }
+    void mouseReleaseEvent(QMouseEvent *e) override { emitPointer(QStringLiteral("up"), e); }
+private:
+    void emitPointer(const QString &kind, QMouseEvent *e) {
+        if (!onPointer) return;
+        const double nx = (double)e->pos().x() / qMax(1, width());
+        const double ny = (double)e->pos().y() / qMax(1, height());
+        onPointer(kind, nx, ny);
+    }
+};
+
+class ViewerWindow : public QWidget {
+public:
+    explicit ViewerWindow(QWidget *parent = nullptr) : QWidget(parent) {
+        setWindowTitle(QString::fromUtf8("星集控 · 管理端（D4）"));
+        resize(980, 660);
+
+        // ---- 左：设备列表 ----
+        m_list = new QListWidget(this);
+        m_list->setMinimumWidth(260);
+        m_list->setMaximumWidth(320);
+        QObject::connect(m_list, &QListWidget::itemSelectionChanged, this, &ViewerWindow::onSelectionChanged);
+
+        // ---- 右：画面 ----
+        auto *scr = new ScreenLabel(this);
+        m_screen = scr;
+        scr->onPointer = [this](const QString &kind, double nx, double ny) { m_backend->sendPointer(kind, nx, ny); };
+        m_screen->setMinimumSize(560, 380);
+        m_screen->setStyleSheet("background:#101318; color:#8892a0; border:1px solid #2a3040;");
+        m_screen->setAlignment(Qt::AlignCenter);
+        m_screen->setText(QString::fromUtf8("（等待教室机画面…）"));
+
+        m_stat = new QLabel(this);
+        m_stat->setStyleSheet("color:#c8d0dc;");
+        m_stat->setText(QString::fromUtf8("还没连上云端"));
+
+        auto *hint = new QLabel(this);
+        hint->setWordWrap(true);
+        hint->setStyleSheet("color:#7d8695; font-size:11px;");
+        hint->setText(QString::fromUtf8(
+            "这里放的是教室机真画面（截屏直传）。在画面上**按住拖动＝真在教室机上移动/点击鼠标**；"
+            "下面输入框敲字再点「发文字」＝真在教室机打字（基础操控＝SendInput 注入）。"
+            "锁屏/关机/重启按钮＝真发到机器并**真执行**（回执会变成「机器真的做了 / 没做成」，绿/红）。"));
+
+        auto *right = new QVBoxLayout();
+        right->addWidget(m_screen, 1);
+        right->addWidget(m_stat);
+        right->addWidget(hint);
+
+        // ---- 底部按钮 ----
+        m_btnLock    = new QPushButton(QString::fromUtf8("锁屏"), this);
+        m_btnShutdown= new QPushButton(QString::fromUtf8("关机"), this);
+        m_btnReboot  = new QPushButton(QString::fromUtf8("重启"), this);
+        m_btnRefresh = new QPushButton(QString::fromUtf8("刷新画面"), this);
+        m_btnShot    = new QPushButton(QString::fromUtf8("存现场图"), this);
+        QObject::connect(m_btnLock,    &QPushButton::clicked, this, [this]{ m_backend->sendAction(QStringLiteral("lock")); });
+        QObject::connect(m_btnShutdown,&QPushButton::clicked, this, [this]{ m_backend->sendAction(QStringLiteral("shutdown")); });
+        QObject::connect(m_btnReboot,  &QPushButton::clicked, this, [this]{ m_backend->sendAction(QStringLiteral("reboot")); });
+        QObject::connect(m_btnRefresh, &QPushButton::clicked, this, [this]{ m_backend->requestDevices(); });
+        QObject::connect(m_btnShot,    &QPushButton::clicked, this, [this]{ saveSnapshot(); });
+
+        auto *btnRow = new QHBoxLayout();
+        btnRow->addWidget(m_btnLock);
+        btnRow->addWidget(m_btnShutdown);
+        btnRow->addWidget(m_btnReboot);
+        btnRow->addWidget(m_btnRefresh);
+        btnRow->addWidget(m_btnShot);
+        btnRow->addStretch(1);
+
+        auto *left = new QVBoxLayout();
+        left->addWidget(new QLabel(QString::fromUtf8("设备（选一台看它的画面）"), this));
+        left->addWidget(m_list, 1);
+        left->addLayout(btnRow);
+
+        // D5 基础操控：打字到被控端
+        m_typeEdit = new QLineEdit(this);
+        m_typeEdit->setPlaceholderText(QString::fromUtf8("敲字，点「发文字」＝真在教室机打字"));
+        m_btnType = new QPushButton(QString::fromUtf8("发文字"), this);
+        QObject::connect(m_btnType, &QPushButton::clicked, this, [this] {
+            const QString t = m_typeEdit->text();
+            if (!t.isEmpty()) { m_backend->sendType(t); m_typeEdit->clear(); }
+        });
+        auto *typeRow = new QHBoxLayout();
+        typeRow->addWidget(m_typeEdit, 1);
+        typeRow->addWidget(m_btnType);
+        left->addLayout(typeRow);
+        // ── 批次 1：教室刚需工具（探活 / 音量 / 软件查看与结束 / 日志尾部）──
+        m_btnPing = new QPushButton(QString::fromUtf8("探活"), this);
+        m_btnSoft = new QPushButton(QString::fromUtf8("软件"), this);
+        m_btnLog  = new QPushButton(QString::fromUtf8("日志"), this);
+        m_btnShotNow = new QPushButton(QString::fromUtf8("远屏截图"), this);
+        QObject::connect(m_btnPing, &QPushButton::clicked, this, [this]{ m_backend->sendPing(); });
+        QObject::connect(m_btnSoft, &QPushButton::clicked, this, [this]{ m_backend->sendAction(QStringLiteral("process_list")); });
+        QObject::connect(m_btnLog,  &QPushButton::clicked, this, [this]{ m_backend->sendAction(QStringLiteral("log_tail")); });
+        QObject::connect(m_btnShotNow, &QPushButton::clicked, this, [this]{ m_backend->sendAction(QStringLiteral("screenshot")); });
+
+        m_volEdit = new QLineEdit(this);
+        m_volEdit->setPlaceholderText(QString::fromUtf8("0-100"));
+        m_volEdit->setMaximumWidth(70);
+        m_btnVol = new QPushButton(QString::fromUtf8("设音量"), this);
+        QObject::connect(m_btnVol, &QPushButton::clicked, this, [this]{
+            const QString t = m_volEdit->text().trimmed();
+            bool okNum = false;
+            const int v = t.toInt(&okNum);
+            QJsonObject p;
+            // 数字就发数字，非数字原样发过去（由被控端判断并回落默认值，回执里写实际值）
+            p.insert(QStringLiteral("value"), okNum ? QJsonValue(v) : QJsonValue(t));
+            m_backend->sendAction(QStringLiteral("set_volume"), p);
+        });
+
+        auto *toolRow = new QHBoxLayout();
+        toolRow->addWidget(m_btnPing);
+        toolRow->addWidget(m_volEdit);
+        toolRow->addWidget(m_btnVol);
+        toolRow->addWidget(m_btnSoft);
+        toolRow->addWidget(m_btnLog);
+        toolRow->addWidget(m_btnShotNow);
+        toolRow->addStretch(1);
+        left->addLayout(toolRow);
+
+        auto *ctlHint = new QLabel(this);
+        ctlHint->setStyleSheet("color:#7d8695; font-size:11px;");
+        ctlHint->setText(QString::fromUtf8("在右侧画面上按住拖动＝移动/点击教室机鼠标。「软件」里选中某行可结束进程（受保护进程会被拒绝）。"));
+        left->addWidget(ctlHint);
+
+        auto *root = new QHBoxLayout(this);
+        root->addLayout(left);
+        root->addLayout(right);
+        setLayout(root);
+
+        // ---- 网络 ----
+        // Qt6 的 QWebSocket 构造是三参 (origin, version, parent)，只给 parent 会重载歧义；
+        // 而且它是 QObject 子类，不接 QObject*，用 setParent 挂到窗口上
+        // ---- 逻辑层（网络/协议/数据全在 ViewerBackend，界面只负责显示）----
+        m_backend = new ViewerBackend(this);
+        QObject::connect(m_backend, &ViewerBackend::statusTextChanged, this, [this] {
+            setStatus(m_backend->statusText(), m_backend->statusWarn());
+        });
+        QObject::connect(m_backend, &ViewerBackend::devicesChanged, this, [this] { rebuildDeviceList(); });
+        QObject::connect(m_backend, &ViewerBackend::currentUidChanged, this, [this] {
+            m_screen->setText(QStringLiteral("%1\n（这里以前那台画面）").arg(m_backend->currentUid()));
+            updateStatLine();
+        });
+        QObject::connect(m_backend, &ViewerBackend::frameChanged, this, [this] { showFrame(); });
+        QObject::connect(m_backend, &ViewerBackend::statsChanged, this, [this] { updateStatLine(); });
+        QObject::connect(m_backend, &ViewerBackend::frameDropped, this, [this](const QString &reason) {
+            m_screen->setText(reason);
+            updateStatLine();
+        });
+        QObject::connect(m_backend, &ViewerBackend::resultReceived, this,
+                         [this](const QString &uid, const QString &action, const QString &state,
+                                const QString &result, const QString &error, const QString &detail,
+                                const QJsonObject &data) {
+                             onResult(uid, action, state, result, error, detail, data);
+                         });
+        m_backend->start();
+        // 开机自检图：4 秒后自己存一张到 shots/，用来确认「画面真的画出来了」不是空窗口
+        QTimer::singleShot(4000, this, [this] { saveSnapshot(); });
+    }
+
+private:
+    /** 把「现在这个窗口长什么样」存成图——老师要留现场，也用来证明画面真的画出来了 */
+    void saveSnapshot() {
+        QDir().mkpath(QString::fromUtf8(kShotDir));
+        const QString ts = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+        const QString winPath = QStringLiteral("%1/window-%2.png").arg(kShotDir).arg(ts);
+        const QString scrPath = QStringLiteral("%1/screen-%2.jpg").arg(kShotDir).arg(ts);
+        QWidget::grab().save(winPath);
+        if (!m_screen->pixmap().isNull()) m_screen->pixmap().save(scrPath, "JPG");
+        logf("[viewer] 现场图已存：窗口 %s ｜ 画面 %s",
+             winPath.toUtf8().constData(),
+             m_screen->pixmap().isNull() ? "（此刻还没画面，只有窗口）" : scrPath.toUtf8().constData());
+    }
+
+    void setStatus(const QString &s, bool warn = false) {
+        m_stat->setText(s);
+        m_stat->setStyleSheet(warn ? "color:#ff8a8a;" : "color:#c8d0dc;");
+    }
+
+    void updateStatLine() {
+        const QString cur = m_backend->currentUid();
+        if (cur.isEmpty()) {
+            setStatus(QString::fromUtf8("还没选设备"));
+            return;
+        }
+        setStatus(QStringLiteral("%1  ·  %2 fps  ·  最近帧 %3 KB  ·  已收 %4 帧")
+                      .arg(cur)
+                      .arg(m_backend->fps(), 0, 'f', 1)
+                      .arg(m_backend->lastFrameBytes() / 1024)
+                      .arg(m_backend->frameCount()));
+    }
+
+    /** 设备表变了 → 重建左侧列表（数据在 backend，这里只负责画） */
+    void rebuildDeviceList() {
+        const QJsonArray a = m_backend->devices();
+        const QString cur = m_backend->currentUid();
+        m_list->clear();
+        int idx = -1;
+        for (int i = 0; i < a.size(); ++i) {
+            const QJsonObject d = a.at(i).toObject();
+            const QString uid = d.value(QStringLiteral("uid")).toString();
+            const double mb = d.value(QStringLiteral("bytesIn")).toDouble() / 1024.0 / 1024.0;
+            auto *it = new QListWidgetItem(QStringLiteral("%1  ·  %2 帧 · %3 MB")
+                                               .arg(uid)
+                                               .arg(d.value(QStringLiteral("framesIn")).toInt())
+                                               .arg(mb, 0, 'f', 1));
+            it->setData(Qt::UserRole, uid);
+            m_list->addItem(it);
+            if (uid == cur) idx = i;
+        }
+        if (m_list->count() == 0) {
+            m_screen->setText(QString::fromUtf8("（没有教室机在线。\n开着的机器会自己出现在这）"));
+        }
+        if (idx >= 0) m_list->setCurrentRow(idx);
+        updateStatLine();
+    }
+
+    /** 新帧到了 → 缩放后画到屏幕上（缩放是界面的事，backend 只管给原图） */
+    void showFrame() {
+        const QImage img = m_backend->frame();
+        if (img.isNull()) return;
+        m_screen->setPixmap(QPixmap::fromImage(
+            img.scaled(m_screen->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+        m_screen->setText(QString());
+    }
+
+    void onSelectionChanged() {
+        const QListWidgetItem *it = m_list->currentItem();
+        if (!it) return;
+        const QString uid = it->data(Qt::UserRole).toString();
+        if (uid.isEmpty() || uid == m_backend->currentUid()) return;
+        // 订阅与画面提示都由 backend 的 currentUidChanged 信号驱动，这里只转达"用户选了哪台"
+        m_backend->setCurrentUid(uid);
+    }
+
+    // ↓ onTextMessage / refreshDevices / applyFrame / applyFrameBytes / sendInstruction /
+    //   sendPing / sendInput / sendType —— 已全部搬进 ViewerBackend（见 viewerbackend.cpp），
+    //   界面不再直接碰协议与 socket。
+
+    /** 动作的附加数据（协议 v1 的可选 data 字段）：进程列表弹窗、日志弹窗、路径/数值显示。 */
+    void handleActionResultData(const QString &action, const QJsonObject &data) {
+        if (action == QStringLiteral("process_list")) { showSoftwareList(data); return; }
+        if (action == QStringLiteral("log_tail"))     { showLog(data);        return; }
+        if (action == QStringLiteral("ping")) {
+            // 往返时间由 backend 算好放进 data.rttMs（只有它知道发出时刻）
+            const qint64 rtt = (qint64)data.value(QStringLiteral("rttMs")).toDouble(-1);
+            const QString cur = m_backend->currentUid();
+            setStatus(QStringLiteral("✓ 探活通了：%1 在线，往返约 %2 ms").arg(cur).arg(rtt));
+            logf("[viewer] ✅ 探活通了：%s，RTT≈%lld ms", cur.toUtf8().constData(), (long long)rtt);
+            return;
+        }
+        if (action == QStringLiteral("set_volume")) {
+            const int v = data.value(QStringLiteral("volume")).toInt();
+            const bool clamped = data.contains(QStringLiteral("clampedFrom"));
+            setStatus(QStringLiteral("✓ 教室机音量已设为 %1%%2").arg(v)
+                          .arg(clamped ? QStringLiteral("（原值越界，已夹紧）") : QString()));
+            return;
+        }
+        if (action == QStringLiteral("screenshot")) {
+            setStatus(QStringLiteral("✓ 截图已存在教室机：%1（%2 字节）")
+                          .arg(data.value(QStringLiteral("path")).toString())
+                          .arg(data.value(QStringLiteral("bytes")).toInt()));
+            logf("[viewer] 截图落盘：%s", data.value(QStringLiteral("path")).toString().toUtf8().constData());
+            return;
+        }
+        if (action == QStringLiteral("launch_app")) {
+            setStatus(QStringLiteral("✓ 已让教室机打开：%1").arg(data.value(QStringLiteral("target")).toString()));
+            return;
+        }
+        if (action == QStringLiteral("process_stop")) {
+            setStatus(QStringLiteral("✓ 已结束 %1（pid %2，方式 %3）")
+                          .arg(data.value(QStringLiteral("name")).toString())
+                          .arg(data.value(QStringLiteral("pid")).toInt())
+                          .arg(data.value(QStringLiteral("how")).toString()));
+            return;
+        }
+    }
+
+    /** 「软件」弹窗：列出教室机有主窗口的进程；选中一行可结束它（受保护的会被被控端拒绝）。 */
+    void showSoftwareList(const QJsonObject &data) {
+        const QJsonArray items = data.value(QStringLiteral("items")).toArray();
+        QDialog dlg(this);
+        dlg.setWindowTitle(QStringLiteral("教室机正在运行的软件（%1 项%2）")
+                               .arg(items.size())
+                               .arg(data.value(QStringLiteral("truncated")).toBool()
+                                        ? QStringLiteral("，列表已截断") : QString()));
+        dlg.resize(760, 480);
+        auto *lay = new QVBoxLayout(&dlg);
+        auto *list = new QListWidget(&dlg);
+        for (const QJsonValue &v : items) {
+            const QJsonObject o = v.toObject();
+            const QString prot = o.value(QStringLiteral("protected")).toString();
+            auto *it = new QListWidgetItem(
+                QStringLiteral("%1   (pid %2 · %3 MB)%4\n    %5")
+                    .arg(o.value(QStringLiteral("name")).toString())
+                    .arg(o.value(QStringLiteral("pid")).toInt())
+                    .arg(o.value(QStringLiteral("mem_mb")).toInt())
+                    .arg(prot.isEmpty() ? QString() : QStringLiteral("   ⛔ %1").arg(prot))
+                    .arg(o.value(QStringLiteral("title")).toString()));
+            it->setData(Qt::UserRole, o.value(QStringLiteral("pid")).toInt());
+            if (!prot.isEmpty()) it->setForeground(Qt::gray);   // 受保护的标灰，一眼看出不能关
+            list->addItem(it);
+        }
+        lay->addWidget(list, 1);
+        auto *row = new QHBoxLayout();
+        auto *btnStop = new QPushButton(QStringLiteral("结束选中进程"), &dlg);
+        QObject::connect(btnStop, &QPushButton::clicked, &dlg, [this, list, &dlg]{
+            const QListWidgetItem *it = list->currentItem();
+            if (!it) return;
+            QJsonObject p;
+            p.insert(QStringLiteral("pid"), it->data(Qt::UserRole).toInt());
+            m_backend->sendAction(QStringLiteral("process_stop"), p);
+            dlg.accept();
+        });
+        auto *btnClose = new QPushButton(QStringLiteral("关闭"), &dlg);
+        QObject::connect(btnClose, &QPushButton::clicked, &dlg, [&dlg]{ dlg.accept(); });
+        row->addWidget(btnStop);
+        row->addStretch(1);
+        row->addWidget(btnClose);
+        lay->addLayout(row);
+        logf("[viewer] 软件列表：%d 项", (int)items.size());
+        dlg.exec();
+    }
+
+    /** 「日志」弹窗：教室机被控端日志尾部（装机后没有 stdout，故障只能靠它）。 */
+    void showLog(const QJsonObject &data) {
+        const QJsonArray lines = data.value(QStringLiteral("lines")).toArray();
+        QStringList out;
+        for (const QJsonValue &v : lines) out << v.toString();
+        QDialog dlg(this);
+        dlg.setWindowTitle(QStringLiteral("教室机日志尾部（%1 行）").arg(out.size()));
+        dlg.resize(880, 540);
+        auto *lay = new QVBoxLayout(&dlg);
+        auto *edit = new QPlainTextEdit(&dlg);
+        edit->setReadOnly(true);
+        edit->setPlainText(out.join(QChar('\n')));
+        edit->verticalScrollBar()->setValue(edit->verticalScrollBar()->maximum());
+        lay->addWidget(edit, 1);
+        auto *row = new QHBoxLayout();
+        row->addWidget(new QLabel(data.value(QStringLiteral("path")).toString(), &dlg), 1);
+        auto *btnClose = new QPushButton(QStringLiteral("关闭"), &dlg);
+        QObject::connect(btnClose, &QPushButton::clicked, &dlg, [&dlg]{ dlg.accept(); });
+        row->addWidget(btnClose);
+        lay->addLayout(row);
+        logf("[viewer] 日志尾部 %d 行", (int)out.size());
+        dlg.exec();
+    }
+
+    /** 指令结果（来自 backend 的 resultReceived 信号）：只负责把它显示成人看得懂的话。 */
+    void onResult(const QString &uid, const QString &action, const QString &state,
+                  const QString &result, const QString &error, const QString &detail,
+                  const QJsonObject &data) {
+        if (state == QStringLiteral("executed")) {
+            // 被控端真执行完的回执——这是真凭实据
+            if (result == QStringLiteral("done")) {
+                setStatus(QStringLiteral("✓ 机器真的做了「%1」").arg(action), false);
+                logf("[viewer] ✅ 真执行成功：%s@%s", action.toUtf8().constData(), uid.toUtf8().constData());
+                // 有附加数据就按动作分派展示（进程列表 / 日志 / 音量实际值 / 截图路径）
+                if (!data.isEmpty()) handleActionResultData(action, data);
+            } else {
+                setStatus(QStringLiteral("✗ 机器没做成「%1」：%2").arg(action).arg(error), true);
+                logf("[viewer] ❌ 真执行失败：%s@%s → %s", action.toUtf8().constData(),
+                     uid.toUtf8().constData(), error.toUtf8().constData());
+            }
+            return;
+        }
+        if (state == QStringLiteral("sent")) {
+            setStatus(QStringLiteral("✓ 云端已把「%1」写进 %2 的连接（真下发）。等机器回执…")
+                          .arg(action).arg(uid), false);
+        } else {
+            setStatus(QStringLiteral("✗ %1 没发成（%2）").arg(action).arg(detail), true);
+        }
+    }
+
+    ViewerBackend *m_backend = nullptr;   // 逻辑层：连接/协议/设备表/画面/指令（见 viewerbackend.*）
+    QListWidget *m_list = nullptr;
+    QLabel *m_screen = nullptr;
+    QLabel *m_stat = nullptr;
+    QPushButton *m_btnLock = nullptr;
+    QPushButton *m_btnShutdown = nullptr;
+    QPushButton *m_btnReboot = nullptr;
+    QPushButton *m_btnRefresh = nullptr;
+    QPushButton *m_btnShot = nullptr;
+    QLineEdit *m_typeEdit = nullptr;
+    QPushButton *m_btnType = nullptr;
+    // 批次 1：教室刚需工具
+    QPushButton *m_btnPing = nullptr;
+    QPushButton *m_btnSoft = nullptr;
+    QPushButton *m_btnLog = nullptr;
+    QPushButton *m_btnShotNow = nullptr;
+    QLineEdit *m_volEdit = nullptr;
+    QPushButton *m_btnVol = nullptr;
+};
+
+int main(int argc, char *argv[])
+{
+    installMessageHandler();
+    QApplication app(argc, argv);
+
+    // 云端地址与令牌改由 ViewerBackend::start() 自己读环境变量
+    // （STE_VIEWER_URL / STE_VIEWER_TOKEN）——界面层不再关心连接参数
+
+    ViewerWindow w;
+    w.show();
+    return app.exec();
+}
