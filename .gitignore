@@ -1,0 +1,23 @@
+# 构建产物
+build/
+shots/
+shots-d4/
+shots-d5/
+
+# 运行日志与自检产物（一次能堆几百 MB）
+*.log
+*.out
+*.err
+
+# 抓屏截图
+*.jpg
+*.png
+
+# 打包产物（MSI 18MB、wixpdb）
+msi/*.msi
+msi/*.wixpdb
+
+# deploy 里的 Qt 运行时（18MB 二进制，可从 Qt 安装目录重新部署）
+# 注意：deploy 下的 .bat / .cmd / .ps1 / agent.env.example 是源码，必须保留
+deploy/*.dll
+deploy/*.exe

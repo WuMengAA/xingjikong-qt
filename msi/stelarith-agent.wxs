@@ -1,0 +1,233 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="星集控被控端"
+      Manufacturer="Stelarith"
+      Version="0.5.0"
+      UpgradeCode="2F6C4F0E-6C21-4E24-9F79-8E5ED49A5C31"
+      Scope="perMachine"
+      Language="2052">
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- 用 ProgramFiles64Folder（C:Program Files）：被控端是 64 位 exe，且和 NSIS 版装同一处；
+         32 位包若用 ProgramFiles6432Folder 会装进 C:Program Files (x86)，两边就分叉了。 -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Stelarith">
+    <Directory Id="D1" Name="generic">
+    </Directory>
+    <Directory Id="D2" Name="iconengines">
+    </Directory>
+    <Directory Id="D3" Name="imageformats">
+    </Directory>
+    <Directory Id="D4" Name="networkinformation">
+    </Directory>
+    <Directory Id="D5" Name="platforms">
+    </Directory>
+    <Directory Id="D6" Name="shots">
+    </Directory>
+    <Directory Id="D7" Name="styles">
+    </Directory>
+    <Directory Id="D8" Name="tls">
+    </Directory>
+    <Directory Id="D9" Name="translations">
+    </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="星集控被控端" Level="1">
+      <Component Id="C1" Directory="INSTALLFOLDER">
+        <File Source="deploy/agent.env" KeyPath="yes" />
+      </Component>
+      <Component Id="C2" Directory="INSTALLFOLDER">
+        <File Source="deploy/agent.env.example" KeyPath="yes" />
+      </Component>
+      <Component Id="C3" Directory="INSTALLFOLDER">
+        <File Source="deploy/D3Dcompiler_47.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C4" Directory="D1">
+        <File Source="deploy/generic/qtuiotouchplugin.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C5" Directory="D2">
+        <File Source="deploy/iconengines/qsvgicon.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C6" Directory="D3">
+        <File Source="deploy/imageformats/qgif.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C7" Directory="D3">
+        <File Source="deploy/imageformats/qico.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C8" Directory="D3">
+        <File Source="deploy/imageformats/qjpeg.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C9" Directory="D3">
+        <File Source="deploy/imageformats/qsvg.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C10" Directory="INSTALLFOLDER">
+        <File Source="deploy/install-autostart.ps1" KeyPath="yes" />
+      </Component>
+      <Component Id="C11" Directory="INSTALLFOLDER">
+        <File Source="deploy/msi-post-install.cmd" KeyPath="yes" />
+      </Component>
+      <Component Id="C12" Directory="D4">
+        <File Source="deploy/networkinformation/qnetworklistmanager.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C13" Directory="INSTALLFOLDER">
+        <File Source="deploy/opengl32sw.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C14" Directory="D5">
+        <File Source="deploy/platforms/qwindows.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C15" Directory="INSTALLFOLDER">
+        <File Source="deploy/Qt6Core.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C16" Directory="INSTALLFOLDER">
+        <File Source="deploy/Qt6Gui.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C17" Directory="INSTALLFOLDER">
+        <File Source="deploy/Qt6Network.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C18" Directory="INSTALLFOLDER">
+        <File Source="deploy/Qt6Svg.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C19" Directory="INSTALLFOLDER">
+        <File Source="deploy/Qt6WebSockets.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C20" Directory="INSTALLFOLDER">
+        <File Source="deploy/Qt6Widgets.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C21" Directory="D6">
+        <File Source="deploy/shots/shot-1791014981701.png" KeyPath="yes" />
+      </Component>
+      <Component Id="C22" Directory="INSTALLFOLDER">
+        <File Source="deploy/start-agent.bat" KeyPath="yes" />
+      </Component>
+      <Component Id="C23" Directory="INSTALLFOLDER">
+        <File Source="deploy/stelarith-agent-qt.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="C24" Directory="D7">
+        <File Source="deploy/styles/qmodernwindowsstyle.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C25" Directory="INSTALLFOLDER">
+        <File Source="deploy/TEST1-NOTES.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="C26" Directory="D8">
+        <File Source="deploy/tls/qcertonlybackend.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C27" Directory="D8">
+        <File Source="deploy/tls/qschannelbackend.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="C28" Directory="D9">
+        <File Source="deploy/translations/qt_ar.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C29" Directory="D9">
+        <File Source="deploy/translations/qt_bg.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C30" Directory="D9">
+        <File Source="deploy/translations/qt_ca.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C31" Directory="D9">
+        <File Source="deploy/translations/qt_cs.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C32" Directory="D9">
+        <File Source="deploy/translations/qt_da.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C33" Directory="D9">
+        <File Source="deploy/translations/qt_de.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C34" Directory="D9">
+        <File Source="deploy/translations/qt_en.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C35" Directory="D9">
+        <File Source="deploy/translations/qt_es.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C36" Directory="D9">
+        <File Source="deploy/translations/qt_fa.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C37" Directory="D9">
+        <File Source="deploy/translations/qt_fi.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C38" Directory="D9">
+        <File Source="deploy/translations/qt_fr.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C39" Directory="D9">
+        <File Source="deploy/translations/qt_gd.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C40" Directory="D9">
+        <File Source="deploy/translations/qt_he.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C41" Directory="D9">
+        <File Source="deploy/translations/qt_hr.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C42" Directory="D9">
+        <File Source="deploy/translations/qt_hu.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C43" Directory="D9">
+        <File Source="deploy/translations/qt_it.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C44" Directory="D9">
+        <File Source="deploy/translations/qt_ja.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C45" Directory="D9">
+        <File Source="deploy/translations/qt_ka.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C46" Directory="D9">
+        <File Source="deploy/translations/qt_ko.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C47" Directory="D9">
+        <File Source="deploy/translations/qt_lv.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C48" Directory="D9">
+        <File Source="deploy/translations/qt_nl.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C49" Directory="D9">
+        <File Source="deploy/translations/qt_nn.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C50" Directory="D9">
+        <File Source="deploy/translations/qt_pl.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C51" Directory="D9">
+        <File Source="deploy/translations/qt_pt_BR.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C52" Directory="D9">
+        <File Source="deploy/translations/qt_ru.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C53" Directory="D9">
+        <File Source="deploy/translations/qt_sk.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C54" Directory="D9">
+        <File Source="deploy/translations/qt_tr.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C55" Directory="D9">
+        <File Source="deploy/translations/qt_uk.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C56" Directory="D9">
+        <File Source="deploy/translations/qt_zh_CN.qm" KeyPath="yes" />
+      </Component>
+      <Component Id="C57" Directory="D9">
+        <File Source="deploy/translations/qt_zh_TW.qm" KeyPath="yes" />
+      </Component>
+    </Feature>
+
+    <!-- 装完：跑后置脚本（写默认 agent.env + 建登录自启任务；脚本在 deploy/msi-post-install.cmd）-->
+    <!-- 注意：ExeCommand 里不要写内联 PowerShell（[ 会被当属性引用、反斜杠-v 会被当转义 → WIX0104）；
+          执行逻辑都放 .cmd 脚本里，安装器只调它。
+          ExeCommand 的 CustomAction 必须带 Directory/BinaryRef/FileRef/Property 之一（WIX0037/0044）。
+          坑（2026-10-03 实测）：这里曾用 Directory="SystemFolder" → 在 x64 包里 [SystemFolder]
+          被解析成 C:WindowsSysWOW64（32 位 cmd.exe，deferred+未标 64 位的 action 按 32 位引擎跑），
+          32 位 cmd 在 SYSTEM 上下文执行 .cmd 返回 1 → 1722 → 整包回滚 1603。
+          正解：Directory="System64Folder"（System32，64 位 cmd.exe），工作目录改 INSTALLFOLDER
+          更贴脚本位置，且不依赖 System*Folder 解析。 -->
+    <!-- 坑2（2026-10-03 实测，最致命）：原来 ExeCommand 末尾传了 "[INSTALLFOLDER]" 作为参数，
+          WiX 渲染成 "C:Program FilesStelarith" —— 尾反斜杠+引号在 Windows C 运行时命令行
+          解析器里是"转义引号"（" → 字面引号），导致引号不平衡 → cmd.exe /c 把整条命令行解析错乱
+          → 脚本压根没跑起来（ProgramData 日志一个字节没写、agent.env 没生成、计划任务没建）。
+          Return=ignore 实验铁证：安装成功(0)但脚本产物全无。
+          正解：ExeCommand 不传任何参数，脚本用 %~dp0 自推导安装目录。 -->
+    <CustomAction Id="PostInstall" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+      ExeCommand='"[System64Folder]cmd.exe" /c "[INSTALLFOLDER]msi-post-install.cmd"' />
+
+    <InstallExecuteSequence>
+      <Custom Action="PostInstall" After="InstallFiles" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

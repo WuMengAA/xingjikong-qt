@@ -1,0 +1,45 @@
+Stelarith controlled client - TEST1 install & destructive real-trigger notes
+=========================================================================
+
+0) What this bundle is
+   - stelarith-agent-qt.exe  (SHA256 84FA67BEB8A320AB62214F6137A15D535D5EF167B27FCAE278DA125F5D6E1D2C)
+   - Qt6 runtime DLLs (Core/Gui/Widgets/Network/Svg/WebSockets) + platforms/qwindows.dll
+     + styles/qmodernwindowsstyle.dll  -- all bundled, no Qt install needed
+   - start-agent.bat : sets env vars and launches the agent in the user session
+   - agent.env.example : copy to agent.env and fill TEST1 token/uid/url
+   - install-autostart.ps1 : copies bundle to C:\Program Files\Stelarith and creates a
+                             LOGON-triggered scheduled task (NOT a service) so it starts
+                             in the interactive session after each logon.
+
+1) Why logon task, not a service
+   A real Windows Service runs in Session0 and CANNOT reach the interactive desktop:
+   LockWorkStation / SendInput / screen capture would target the wrong (blank) session.
+   The logon task runs as the logged-on user in their own session, so the agent can
+   lock the screen, inject input and grab real frames. This is intentional.
+
+2) Install on TEST1 (run as Administrator in the deploy folder)
+   copy agent.env.example agent.env
+   notepad agent.env            (fill STE_QT_WS_TOKEN + STE_QT_UID + cloud URL)
+   .\install-autostart.ps1
+
+3) Verify it is alive (non-destructive)
+   - Log off / log on (or just run start-agent.bat once).
+   - Tray icon should appear. Right-click it: 状态 / 打开数据目录 / 打开日志目录 / 退出被控端.
+     !! Windows HIDES NEW tray icons by default. If you do not see it, go to
+        设置 > 个性化 > 任务栏 > 其他系统托盘图标  and turn "Stelarith agent" ON.
+        (Otherwise the agent looks "not installed" even though it is running.)
+   - Cloud should show device "TEST1" online.
+   - From the console / mobile page, send action "exec-test" -> expect result "done"
+     (proves the real-execution link is wired, writes %TEMP%\ste-exec-ok.txt on TEST1).
+   - Send action "input" kind "type" text "hello" -> expect "done", text appears on TEST1.
+
+4) Destructive real-trigger (ONLY on TEST1, never on the production machine)
+   Do these one at a time, watching the physical TEST1 screen each time:
+   a) lock    -> screen locks. Unlock manually. Confirms LockWorkStation path.
+   b) shutdown-> machine powers off. Confirms ExitWindowsEx(EWX_SHUTDOWN|EWX_FORCE).
+   c) reboot  -> machine restarts. Confirms ExitWindowsEx(EWX_REBOOT|EWX_FORCE).
+   Each must return result "done" AND the physical effect must be observed.
+   ack "done" != real effect: always confirm on the real screen.
+
+5) Uninstall
+   .\install-autostart.ps1 -Uninstall
