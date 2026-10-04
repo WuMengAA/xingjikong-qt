@@ -50,6 +50,7 @@
 #include <QThread>      // QThread::msleep（camera_record 确认"真的在录"时等两秒）
 // 2026-10-04：首次运行配置窗（OOBE）——让老师在界面里填配置，而不是手改 agent.env。
 #include <QDialog>
+#include <QMessageBox>   // 2026-10-05：单例锁重复启动提示
 #include <QWidget>
 #include <QLabel>
 #include <QLineEdit>
@@ -59,6 +60,11 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QDialogButtonBox>
+// 2026-10-04：OOBE 绑定班级（消费激活码 POST 站点 /api/device/activate）
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QUrlQuery>
 #include <windows.h>
 #include <tlhelp32.h>   // 进程快照（process_list / process_stop）
 #include <psapi.h>      // 进程工作集内存
@@ -93,11 +99,13 @@ int g_heartbeatMs = kHeartbeatIntervalMs;   // 实际心跳间隔：云端下发
 int g_timeoutMs = 30000;                    // 云端判离线阈值（只用于日志说明，不自己判）
 QTimer *g_hbTimer = nullptr;   // 心跳定时器（registered 拿到参数后要能改间隔，所以放外面）
 
-
 // ---- WebRTC 推流状态（内嵌采集页）----
+// ⚠️ 这四行曾经在一次误合并里被整段删掉（只删声明、没删使用），编译期满屏
+//    "g_rtcView: 未声明的标识符"。改这块时留意：声明和使用必须同时存在。
 static QWebEngineView *g_rtcView = nullptr;
 static QTimer *g_rtcTick = nullptr;
 static bool g_rtcOn = false;
+
 QString g_logPath;             // 被控端日志落盘（装机后没有 stdout，没日志就只能靠猜）
 QString g_shotDir;             // 截图/存图目录（screenshot 动作与抓屏都用它）
 
@@ -746,6 +754,64 @@ bool saveAgentEnv(const QString &url, const QString &token, const QString &uid)
     return true;
 }
 
+/* ══════════ 班级绑定（2026-10-04：OOBE 里消费激活码，把本机绑到班级） ══════════
+ * 背景：管理员生成一次性、绑班级的接入码（XJK-XXXX-XXX）；教室端在配置向导里
+ * 填进去，保存时调站点 `POST /api/device/activate?code=…&uid=…` 消费，
+ * 站点落库 device_bindings（uid→class）。这就是"被控端绑定界面"。
+ * 站点地址从云端 ws 地址推导：ws://host:8788/ws/agent → http://host:8090
+ * （站点与云端同机部署；端口默认 8090，可用 STE_QT_SITE_PORT 覆盖）。
+ * 消费失败不阻断保存——绑定是可选项，配错了以后还能在面板改。
+ */
+
+// 云端 ws 地址 → 站点 http 基址（nullptr = 推导不出）
+QString siteBaseFromWsUrl(const QString &wsUrl)
+{
+    const QUrl u(wsUrl.trimmed());
+    if (!u.isValid() || u.host().isEmpty()) return QString();
+    const QString port = qEnvironmentVariable("STE_QT_SITE_PORT").trimmed();
+    const QString scheme = (u.scheme().compare(QStringLiteral("wss"), Qt::CaseInsensitive) == 0)
+                               ? QStringLiteral("https")
+                               : QStringLiteral("http");
+    return QStringLiteral("%1://%2:%3").arg(scheme, u.host(),
+                                            port.isEmpty() ? QStringLiteral("8090") : port);
+}
+
+// 消费接入码（异步）。回调里报结果；本机 uid 用于绑定。
+void consumeActivationCodeAsync(const QString &siteBase, const QString &code, const QString &uid)
+{
+    auto *mgr = new QNetworkAccessManager();
+    QUrl url(siteBase + QStringLiteral("/api/device/activate"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("code"), code.trimmed());
+    q.addQueryItem(QStringLiteral("uid"), uid.trimmed().isEmpty() ? QHostInfo::localHostName() : uid.trimmed());
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    // POST 空 body；消费端点同时接受 query 与 body（query 优先）
+    QNetworkReply *reply = mgr->post(req, QByteArray("{}"));
+
+    QObject::connect(reply, &QNetworkReply::finished, reply, [reply, mgr] {
+        reply->deleteLater();
+        mgr->deleteLater();
+        const QByteArray body = reply->readAll();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 200) {
+            // 成功：{"ok":true,"classId":"…","className":"…","uid":"…"}
+            QJsonParseError pe;
+            const QJsonDocument doc = QJsonDocument::fromJson(body, &pe);
+            const QString cls = pe.error == QJsonParseError::NoError
+                                    ? doc.object().value(QStringLiteral("className")).toString()
+                                    : QString();
+            qInfo().noquote() << QStringLiteral("[agent-qt] ✅ 已绑定班级：%1").arg(cls.isEmpty() ? QStringLiteral("（返回无班级名）") : cls);
+        } else {
+            // 失败：404 码无效/过期；403 密钥错；其它
+            qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 班级绑定失败（HTTP %1）：%2")
+                                        .arg(status).arg(QString::fromUtf8(body).trimmed().left(200));
+        }
+    });
+}
+
 // 打开"配置向导"。首运行（未配置）自动调一次；托盘菜单「配置…」也走它。
 // 保存成功 → 立即用新配置重连；点「以后再说」→ 原样保持未配置态（不丢可见告警）。
 void openConfigDialog()
@@ -808,6 +874,17 @@ void openConfigDialog()
     uidHint->setWordWrap(true);
     uidHint->setStyleSheet(hintStyle);
     form->addRow(QString(), uidHint);
+
+    // —— 班级接入码（可选）—— 2026-10-04：被控端绑定界面
+    auto *codeEdit = new QLineEdit();
+    codeEdit->setPlaceholderText(QStringLiteral("例如 XJK-XXXX-XXX（管理员发的接入码）"));
+    form->addRow(QStringLiteral("班级接入码（可选）"), codeEdit);
+    auto *codeHint = new QLabel(QStringLiteral(
+        "想把这台机器绑到班级就填：保存时会自动用它完成绑定，绑定结果写在日志里。"
+        "没有接入码可留空，之后在管理面板里也能绑定。"));
+    codeHint->setWordWrap(true);
+    codeHint->setStyleSheet(hintStyle);
+    form->addRow(QString(), codeHint);
 
     // 就地提示（校验失败/测试结果都写这里，**不弹二次窗口**）
     auto *err = new QLabel();
@@ -910,6 +987,20 @@ void openConfigDialog()
             updateTray(TrayState::Disconnected, QStringLiteral("正在用新配置连接…"));
             connectNow();
         }
+
+        // 填了班级接入码 → 消费绑定（异步，失败不阻断；结果记日志）
+        const QString code = cleanLine(codeEdit->text());
+        if (!code.isEmpty()) {
+            const QString siteBase = siteBaseFromWsUrl(url);
+            if (!siteBase.isEmpty()) {
+                qInfo().noquote() << QStringLiteral("[agent-qt] 绑定接入码 → %1/api/device/activate (uid=%2)")
+                                         .arg(siteBase, uid.trimmed().isEmpty() ? QHostInfo::localHostName() : uid.trimmed());
+                consumeActivationCodeAsync(siteBase, code, uid);
+            } else {
+                qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法从云端地址推导站点地址，跳过绑定（可之后在面板绑定）");
+            }
+        }
+
         dlg.accept();
     });
 
@@ -2177,11 +2268,54 @@ static const char *kRtcPage = R"RTCPAGE(<!doctype html><html><head><meta charset
   var cv = document.getElementById('cv');
   var ctx = cv.getContext('2d');
   var pc = null;
-  var st = { state: 'init', frames: 0, err: '' };
+  // sentOffer/offeredAt/answeredAt：用来自愈"offer 发出去没人理"这件事。
+  // 以前采集页只为一个 pc 发一次 offer，一旦它发早了（那时没人订阅，云端直接丢）就再也不重发，
+  // 之后怎么订阅都是黑屏，而且日志上看不出任何异常。
+  var st = { state: 'init', frames: 0, err: '', sentOffer: false, offeredAt: 0, answeredAt: 0, sdplen: -1, icePending: 0, dupAnswer: 0 };
   window.__st = st;
   window.__sigq = [];
   function sig(kind, sdp, cand) { window.__sigq.push({ kind: kind, sdp: sdp || '', candidate: cand || '' }); }
-  window.__signal = function (o) { sig(o.kind, o.sdp, o.candidate); };
+  // 远端（管理端）信令**只喂 pc，绝不回送**：__signal 收的是对端推来的 answer / ice，
+  // 要是再把它塞回 sigq 由 rtcTickOnce 发回云端，就是两端无限互发 candidate 的死循环。
+  var pendingIce = [];
+  window.__signal = function (o) {
+    if (!pc) { st.err = 'signal-nopc'; return; }
+    if (o.kind === 'answer') {
+      if (!o.sdp) { st.err = 'answer-nosdp'; return; }
+      // answer 必须**幂等**：一个 pc 只吃得下一次 setRemoteDescription(answer)。
+      // 喂第二次时 signalingState 已经是 stable，Chromium 直接抛
+      // "Called in wrong state: stable"，而且这一抛之后 pc 的状态刷不回去
+      // （真出现过 sdplen=-1、gd/cc 全乱），整条流就废了。
+      // 重复 answer 的来源是真实存在的：管理端一退订再重订（重协商），
+      // 被控端就会为同一个 pc 收到两份 answer。
+      if (pc.signalingState !== 'have-local-offer') {
+        st.dupAnswer = (st.dupAnswer || 0) + 1;
+        return;
+      }
+      st.answeredAt = Date.now();
+      pc.setRemoteDescription({ type: 'answer', sdp: o.sdp }).then(function () {
+        st.sdplen = o.sdp.length;
+        // 候选可能比 answer 先到（网络乱序/云端转发快于 answer 落地）。
+        // 那时候 remoteDescription 还是 null，addIceCandidate 直接抛
+        // InvalidStateError —— 这个错只在页面里，C++ 侧一个字都收不到，
+        // 两端日志都"正常"，实际谁也没连上。所以先攒着，answer 落地再一起喂。
+        var q = pendingIce; pendingIce = []; st.icePending = 0;
+        q.forEach(function (c) {
+          try { pc.addIceCandidate(c); } catch (e) { st.err = 'iceflush:' + e; }
+        });
+        if (pc.connectionState === 'connected') st.state = 'streaming';
+        st.gather = pc.iceGatheringState; st.conn = pc.iceConnectionState;
+      }).catch(function (e) { st.err = 'answer:' + e; st.state = 'failed'; });
+    } else if (o.kind === 'ice') {
+      // 对端推来的是 JSON 字符串（我们发它的本端 candidate 也是 JSON.stringify 出来的），
+      // addIceCandidate 只接受对象，直接传字符串会报
+      // "not of type 'RTCIceCandidateInit'" —— 而这条报错只落在页面里，C++ 侧完全看不见。
+      var c = (typeof o.candidate === 'string') ? JSON.parse(o.candidate) : o.candidate;
+      if (!c || !c.candidate) { st.err = 'ice-empty'; return; }
+      if (!pc.remoteDescription) { pendingIce.push(c); st.icePending = pendingIce.length; return; }
+      pc.addIceCandidate(c).catch(function (e) { st.err = 'ice:' + e; });
+    }
+  };
   window.__drain = function () { var a = window.__sigq; window.__sigq = []; return a; };
   window.__pushFrame = function (b64) {
     try {
@@ -2205,7 +2339,15 @@ static const char *kRtcPage = R"RTCPAGE(<!doctype html><html><head><meta charset
       st.senders = pc.getSenders().length;
       st.tracks = pc.getSenders().reduce(function (n, s) { return n + s.track.length; }, 0);
       pc.ontrack = function () { st.state = 'streaming'; };
-      pc.onicecandidate = function (ev) { if (ev && ev.candidate) sig('ice', '', ev.candidate); };
+      // 只有候选串非空才算一个真候选：Chromium 在某些阶段会给 candidate 对象但 .candidate 是空串，
+      // 那种空 candidate 发过去既没用还会让对端 addIceCandidate 直接报错
+      pc.onicecandidate = function (ev) {
+        // 必须 JSON.stringify 成**字符串**：这里直接把 ev.candidate（一个 RTCIceCandidate
+        // 对象）塞进 sigq，出页面时就变成了个不透明的 QVariant，C++ 侧
+        // o.value("candidate").toString() 对对象返回空串 → 包里压根插不上 candidate 键
+        // → 云端只看到 {"kind":"ice"} → 对端收不到候选、ICE 永远完不成，两端日志都像没事。
+        if (ev && ev.candidate && ev.candidate.candidate) sig('ice', '', JSON.stringify(ev.candidate));
+      };
       pc.onconnectionstatechange = function () {
         if (pc.connectionState === 'connected') st.state = 'streaming';
         if (pc.connectionState === 'failed') { st.err = 'pc-failed'; st.state = 'failed'; }
@@ -2214,17 +2356,36 @@ static const char *kRtcPage = R"RTCPAGE(<!doctype html><html><head><meta charset
         .then(function () {
             st.gather = pc.iceGatheringState;
             st.conn = pc.iceConnectionState;
+            st.sentOffer = true;
+            st.offeredAt = Date.now();
             sig('offer', pc.localDescription.sdp, '');
         })
         .catch(function (e) { st.err = 'offer:' + e; st.state = 'failed'; });
     } catch (e) { st.err = 'start:' + e; st.state = 'failed'; }
     return st.state;
   };
-  window.__reset = function () { try { if (pc) pc.close(); } catch (e) {} st.state = 'init'; st.err = ''; };
+  window.__reset = function () {
+    try { if (pc) pc.close(); } catch (e) {}
+    pendingIce = []; st.icePending = 0;
+    st.state = 'init'; st.err = ''; st.sentOffer = false; st.offeredAt = 0; st.answeredAt = 0; st.sdplen = -1;
+  };
+  // 自愈：offer 发出去 8 秒还没等到 answer，就重建 pc 重新 offer。
+  // 触发条件是"确实没人接"，不是无脑重发 —— 有人看的时候不会白烧 CPU。
+  window.__tickRetry = function () {
+    if (!pc || st.answeredAt) return;
+    if (!st.sentOffer || Date.now() - st.offeredAt <= 8000) return;
+    // __startStream 见到 negotiating/streaming 就直接 return，所以这里必须先清干净再重来
+    try { if (pc) pc.close(); } catch (e) {}
+    pc = null; st.state = 'init'; st.err = ''; st.sentOffer = false;
+    window.__startStream();
+  };
+  // 云端回执说"这条信令没送到对端"时立刻重来，不用等超时
+  window.__forceReoffer = function () { if (pc) st.offeredAt = 0; };
   // 诊断出口：pc / sigq 是闭包内的，页面全局作用域访问不到，只能从这里拿
   window.__diag = function () {
-    return JSON.stringify(st) + ' | q=' + sigq.length + ' | pc=' + (pc ? 'y' : 'n')
+    return JSON.stringify(st) + ' | q=' + window.__sigq.length + ' | pc=' + (pc ? 'y' : 'n')
          + ' | gd=' + (pc ? pc.iceGatheringState : '-') + ' | cc=' + (pc ? pc.iceConnectionState : '-')
+         + ' | ss=' + (pc ? pc.signalingState : '-')
          + ' | sdp=' + (pc && pc.localDescription ? pc.localDescription.sdp.length : -1);
   };
 })();
@@ -2249,6 +2410,8 @@ static void rtcSendSignal(const QString &kind, const QString &sdp, const QString
 
 // 每 200ms：抓屏 → JPEG → 灌进采集页画布 → canvas 出帧 → 取回本端信令
 static int g_rtcDiagTick = 0;
+// 云端回执说"这条信令没送到对端"时置位，下一个 tick 就重新 offer（不用干等 8 秒超时）
+static bool g_rtcForceReoffer = false;
 static void rtcTickOnce()
 {
     if (!g_rtcOn || !g_rtcView) return;
@@ -2264,15 +2427,16 @@ static void rtcTickOnce()
     // 采集页是 setHtml 异步加载的：rtcStart 那一下页面可能还没 ready，
     // 这时的 runJavaScript 会静默失败。所以每 tick 都调一次 __startStream（幂等：已在 negotiating/streaming 就直接 return）。
     g_rtcView->page()->runJavaScript(QStringLiteral("window.__startStream();"));
-    const QPixmap pm = sc->grabWindow();
-    if (pm.isNull()) { qWarning("[rtc] FAIL 抓屏是空图"); return; }
-    QByteArray buf;
-    QBuffer dev(&buf);
-    if (!dev.open(QIODevice::WriteOnly)) { qWarning("[rtc] FAIL 缓冲打不开"); return; }
-    pm.save(&dev, "JPEG", 55);
-    dev.close();
-    g_rtcView->page()->runJavaScript(
-        QStringLiteral("window.__pushFrame('%1')").arg(QString::fromUtf8(buf.toBase64())));
+    // 自愈先跑：上一次 offer 没等到 answer（多半是发出时没人订阅、被云端丢了）就重来一次
+    if (g_rtcForceReoffer) {
+        g_rtcForceReoffer = false;
+        g_rtcView->page()->runJavaScript(QStringLiteral("window.__forceReoffer();"));
+    }
+    g_rtcView->page()->runJavaScript(QStringLiteral("window.__tickRetry();"));
+    // 取信令（offer / ice）排在抓屏**之前**：抓屏偶发 GetDIBits 失败返回空图，
+    // 原来这一步排在抓屏之后，一次失败就把整轮信令吞掉 → offer 永远发不出去，
+    // 页面里 sigq 越堆越多，日志上还看不出任何异常。
+    // 不能拿信号量等回调：回调要靠主线程事件循环派发，在 timer 回调里阻塞就是死等。
     g_rtcView->page()->runJavaScript(QStringLiteral("window.__drain()"), [](const QVariant &v) {
         if (!v.canConvert<QJsonArray>()) return;
         const QJsonArray arr = v.toJsonArray();
@@ -2288,30 +2452,38 @@ static void rtcTickOnce()
             }
         }
     });
+    const QPixmap pm = sc->grabWindow();
+    if (pm.isNull()) { qWarning("[rtc] FAIL 抓屏是空图"); return; }
+    QByteArray buf;
+    QBuffer dev(&buf);
+    if (!dev.open(QIODevice::WriteOnly)) { qWarning("[rtc] FAIL 缓冲打不开"); return; }
+    pm.save(&dev, "JPEG", 55);
+    dev.close();
+    g_rtcView->page()->runJavaScript(
+        QStringLiteral("window.__pushFrame('%1')").arg(QString::fromUtf8(buf.toBase64())));
 }
 
 // 把 QString 转义成 JS 字符串字面量。QString 没有 toJson，只能手拼。
 // 每一步单独赋值：MSVC 下 QStringLiteral 宏内部带 '+」，裸在链式表达式里会把加法解析搅乱。
-static QString rtcJsString(const QString &v)
+// 把 QString 变成 JS 里的**字符串表达式**。
+//
+// 这里踩过一个很难查的坑：以前的版本只转义反斜杠和双引号，然后拼成 "..." 字面量。
+// SDP 里每一行结尾都是 CRLF，裸换行一旦进到 JS 字符串字面量里就是非法 token ——
+// runJavaScript 抛 SyntaxError 而且**完全静默**（页面控制台什么都不打，C++ 侧一个错都收不到），
+// 表现就是"信令发到云端、云端也说 ok 中继了，但对端 pc 根本没消费过"，永远连不上。
+// base64 只含 [A-Za-z0-9+/=]，物理上不可能产生语法错，所以统一走 atob()。
+static QString rtcJsB64(const QString &v)
 {
-    const QString bs = QStringLiteral("\\\\");      // 反斜杠 → 两个反斜杠（JS 转义）
-    const QString eq = QStringLiteral("\\\"");
-    // replace 是非 const 成员，q1/q2/src 都不能是 const，否则重载解析会挑中那些"要改 this"的重载
-    QString src = v;
-    QString q1 = src.replace(QLatin1Char('\\'), bs);
-    QString q2 = q1.replace(QStringLiteral("\""), eq);   // 匹配串用 QString：QChar 版只吃单字符
-    const QString tpl = QStringLiteral("\"%1\"");
-    const QString out = tpl.arg(q2);
-    return out;
+    return QStringLiteral("atob('%1')").arg(QString::fromLatin1(v.toUtf8().toBase64()));
 }
 
 // 管理端回过来的 answer / ice，喂给采集页的 RTCPeerConnection
 static void rtcFeedSignal(const QString &kind, const QString &sdp, const QString &cand)
 {
     if (!g_rtcView) return;
-    const QString a = rtcJsString(kind);
-    const QString b = rtcJsString(sdp);
-    const QString c = rtcJsString(cand);
+    const QString a = rtcJsB64(kind);
+    const QString b = rtcJsB64(sdp);
+    const QString c = rtcJsB64(cand);
     const QString p1 = QStringLiteral("window.__signal({kind:");
     const QString p2 = QStringLiteral(",sdp:");
     const QString p3 = QStringLiteral(",candidate:");
@@ -2401,6 +2573,23 @@ void handleControlText(const QString &text)
     }
     if (type == QStringLiteral("rtc-stop")) {
         qInfo("[rtc] 云端要停推流（没人看了）"); rtcStop(QStringLiteral("云端 rtc-stop"));
+        return;
+    }
+    // 云端把本端信令的投递结果回给本端（ok/to/detail）：这是唯一能证明"信令到底送没送到"的信号。
+    // 以前接到就丢，offer 被云端丢了也就没人知道 —— 只能靠猜。
+    if (type == QStringLiteral("rtc-relayed")) {
+        const bool ok = pay.value(QStringLiteral("ok")).toBool();
+        const QString rtype = pay.value(QStringLiteral("type")).toString();
+        if (!ok) {
+            qWarning("[rtc] FAIL 云端回执：%s 没送到（%s）→ 下个 tick 重发 offer",
+                     rtype.toUtf8().constData(),
+                     pay.value(QStringLiteral("detail")).toString().toUtf8().constData());
+            g_rtcForceReoffer = true;
+        } else {
+            qInfo("[rtc] 云端回执：%s 已投给 %s 个对端",
+                  rtype.toUtf8().constData(),
+                  pay.value(QStringLiteral("to")).toString().toUtf8().constData());
+        }
         return;
     }
     if (type == QStringLiteral("rtc-offer")) {
@@ -2508,6 +2697,24 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);   // 要托盘 → QApplication（托盘在 QtWidgets 里）
 
+    // ── 单例锁（2026-10-05 · 用户要求"防多进程启动"）────────────────────────
+    // 场景：计划任务开机自启 + 装机引导 + 老师手点 start-agent.bat，多个入口叠加，
+    // 实测出现过 2 个实例在跑 —— 重复连云端抢连接、日志互相覆盖。
+    // 用命名互斥体：第二个实例启动即退出，并给个可见提示。
+    // ⚠️ 用 Local\（不用 Global\）：Global 需 SeCreateGlobalPrivilege，普通用户/受限
+    //    上下文下 CreateMutexW 可能返回 NULL（拿不到锁）→ 单例形同虚设。Local\ 同
+    //    会话内足够（计划任务与手动启动同属交互会话）。
+    static HANDLE g_singletonMutex = nullptr;
+    g_singletonMutex = CreateMutexW(nullptr, TRUE, L"Local\\StelarithAgentQt_Singleton");
+    if (!g_singletonMutex || GetLastError() == ERROR_ALREADY_EXISTS) {
+        // 拿不到锁（极端环境）或已存在实例 → 提示 + 退出（不留进程、不连云端）
+        QMessageBox::information(nullptr,
+            QStringLiteral("星集控 · 被控端"),
+            QStringLiteral("被控端已在运行（另一个实例正在工作）。\n本次启动自动退出，请勿重复启动。"));
+        if (g_singletonMutex) CloseHandle(g_singletonMutex);
+        return 0;
+    }
+
     // 关键：常驻托盘程序**不能**在"最后一个窗口关闭时退出"。
     // 默认 quitOnLastWindowClosed=true —— 配置窗是本进程唯一的窗口，老师一点「以后再说」/
     // 保存关窗，整个被控端就跟着退了（托盘也一起没），比不配置还糟。必须关掉这个默认行为。
@@ -2519,6 +2726,8 @@ int main(int argc, char *argv[])
     // WebRTC 专用：QtWebEngine 的 Chromium 沙箱会让 WebRTC 的 ICE 收集永远停在 "new"
     //（不报任何错，画面就是出不来）；mDNS 地址隐藏会让内网拿到 .local 域名也连不上。
     // 被控端跑在教室机/本机这类受控 Windows 上，关掉是安全的。
+    // ⚠️ 这行必须在任何 QWebEngineView 创建**之前**执行（环境变量要早于 Chromium 启动），
+    //   挪到后面就失效，症状是"ICE 永远 gathering= new、画面黑屏且无任何报错"。
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox --disable-features=WebRtcHideLocalIpsWithMdns");
     qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &, const QString &msg) {
         FILE *out = (type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg)
@@ -2695,5 +2904,8 @@ int main(int argc, char *argv[])
         QTimer::singleShot(700, &app, [] { openConfigDialog(); });
     }
 
-    return app.exec();
+    const int rc = app.exec();
+    // 释放单例锁（2026-10-05）：正常退出才放，进程结束前交给系统清理兜底
+    if (g_singletonMutex) { CloseHandle(g_singletonMutex); g_singletonMutex = nullptr; }
+    return rc;
 }
