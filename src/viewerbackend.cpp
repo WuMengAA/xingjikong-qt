@@ -374,6 +374,7 @@ void ViewerBackend::setRtcState(const QString &s)
 void ViewerBackend::initRtcView()
 {
     if (m_rtcView) return;
+    cancelRtcViewReap();   // 上一轮倒计时还没到，别把刚要复用的页面收掉
 
     // WebEngine 是 Chromium：默认沙箱在没配 seccomp 的环境下会拒跑 RTCPeerConnection 的
     // ICE 传输（被控端已经踩过同一个坑，同样用 qputenv 关掉）。必须在创建 view 之前设。
@@ -443,17 +444,21 @@ void ViewerBackend::initRtcView()
             });
         // 页面还没 load 完时 runJavaScript 是对着 about:blank 执行的，window.__setOffer 不存在，
         // 调用会**静默失败**（C++ 侧连个错都收不到）→ 表现为"收到 offer 了但毫无反应"。
-        // 所以 offer 先存着，等这一刻再灌。
+        // ⚠️ 顺序陷阱（2026-10-05 修）：m_rtcPageReady 必须在 offer 补灌**之前**置位。
+        // deliverOffer() 内部拿这个标志决定"直接灌 JS"还是"再存回 m_pendingOffer 等下一轮"，
+        // 原先这行写在 offer 补灌之后 → 补灌那一下永远判成"页面没就绪" → offer 被原样塞回队列，
+        // pc 从头到尾建不起来，后面攒的候选只能喂给 null pc，日志里只留两行 ice-before-pc。
+        m_rtcPageReady = true;
+
+        // 远端候选补灌必须排在 offer 之后：页面里的 pc 是 __setOffer 里同步 new 出来的，
+        // 顺序反了 addIceCandidate 就会撞上 "pc 还不存在"，JS 侧只记一行 ice-before-pc 然后丢掉，
+        // 候选就这么无声无息少了一批，ICE 死活连不上还查不出原因。
         if (!m_pendingOffer.isEmpty()) {
             const QString sdp = m_pendingOffer;
             m_pendingOffer.clear();
             deliverOffer(sdp);
         }
 
-        // 远端候选补灌必须排在 offer 之后：页面里的 pc 是 __setOffer 里同步 new 出来的，
-        // 顺序反了 addIceCandidate 就会撞上 "pc 还不存在"，JS 侧只记一行 ice-before-pc 然后丢掉，
-        // 候选就这么无声无息少了一批，ICE 死活连不上还查不出原因。
-        m_rtcPageReady = true;
         if (!m_pendingIce.isEmpty()) {
             const QStringList queued = m_pendingIce;
             m_pendingIce.clear();
@@ -582,6 +587,51 @@ void ViewerBackend::deliverOffer(const QString &sdp)
     logf("[viewer] RTC offer 已灌进收流页（sdp %d 字符 → base64 %d）", sdp.size(), b64.size());
 }
 
+/**
+ * 真删离屏收流页。
+ * deleteLater 而不是 delete：page 上还排着 runJavaScript 回调（补灌候选、抽帧都走它），
+ * 当场删会打在半路。析构里统一收口（见 ~ViewerBackend）。
+ */
+void ViewerBackend::releaseRtcView()
+{
+    if (!m_rtcView) return;
+    m_rtcView->close();          // 不给 close 的话 Chromium 的渲染进程不退出
+    m_rtcView->deleteLater();
+    m_rtcView = nullptr;
+    m_rtcPageReady = false;      // 必须一起清：下次靠它判"这页能不能灌 JS"
+    m_pendingOffer.clear();
+    m_pendingIce.clear();
+    setRtcState(QStringLiteral("idle"));
+    logf("[viewer] 收流页已回收（Chromium 渲染进程随之退出）");
+}
+
+void ViewerBackend::cancelRtcViewReap()
+{
+    if (m_rtcReap && m_rtcReap->isActive()) m_rtcReap->stop();
+}
+
+// 延迟回收：给"刚断又马上重连"留窗口，避免断线抖动时反复重建 Chromium（重建一次几百毫秒）。
+// 真正等多久由 STE_RTC_IDLE_MS（默认 20 秒）决定，从"跟云端断开"那一刻开始算。
+void ViewerBackend::scheduleRtcViewReap()
+{
+    if (!m_rtcReap) {
+        m_rtcReap = new QTimer(this);
+        m_rtcReap->setSingleShot(true);
+        m_rtcReap->setInterval(5000);
+        QObject::connect(m_rtcReap, &QTimer::timeout, this, [this]() { releaseRtcView(); });
+    }
+    m_rtcReap->stop();
+    if (!m_offlineSince) return;          // 还在线上，没什么可收的
+    // 空 = 默认 20 秒；显式写 0 = 关掉（别让默认值把开关吃掉）
+    const QByteArray envIdle = qgetenv("STE_RTC_IDLE_MS");
+    const qint64 limit = envIdle.isEmpty() ? 20000 : QString::fromLocal8Bit(envIdle).toLongLong();
+    const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_offlineSince;
+    if (limit <= 0) return;
+    if (elapsed >= limit) { releaseRtcView(); return; }   // 早就算超了，立刻收
+    m_rtcReap->setInterval((int)(limit - elapsed));
+    m_rtcReap->start();
+}
+
 /** JS 侧 ontrack 触发：真正拿到远端视频轨。 */
 void ViewerBackend::rtcGotTrack()
 {
@@ -628,6 +678,8 @@ void ViewerBackend::sendEnvelope(const QString &type, const QJsonObject &payload
 void ViewerBackend::onConnected()
 {
     m_connected = true;
+    m_offlineSince = 0;      // 离线看门狗解除（配合 onDisconnected 里的回收）
+    if (m_rtcReap && m_rtcReap->isActive()) cancelRtcViewReap();
     emit connectedChanged();
     logf("[viewer] 已连上云端 %s，正在鉴权…", m_url.toUtf8().constData());
     setStatus(QStringLiteral("已连上云端，正在鉴权…"), false);
@@ -642,6 +694,14 @@ void ViewerBackend::onConnected()
 void ViewerBackend::onDisconnected()
 {
     m_connected = false;
+    // 离线看门狗：跟云端断了这么久还没连回来，收流页里那个 Chromium 渲染进程（~137MB）
+    // 已经送不出任何画面，留着纯占内存。判据用"跟云端断多久"而不是"多久没收到信令"——
+    // 画面稳定后对端本来就不发东西，按后者数会误杀正在看的画面。
+    // 阈值可用 STE_RTC_IDLE_MS 覆盖（毫秒，默认 20000），排障时调小值能快验。
+    // 只认**第一次**断连：下面每次重连失败都会再走到 onDisconnected，
+    // 起点刷新一次倒计时就往后推一次，看门狗永远走不到头（实测断线 26 秒、重连失败 3 次没触发）。
+    if (!m_offlineSince) m_offlineSince = QDateTime::currentMSecsSinceEpoch();
+    scheduleRtcViewReap();
     emit connectedChanged();
     if (m_authFailed) {
         // 鉴权失败再重连只会一遍遍失败：把原因留在屏幕上，别循环
@@ -797,8 +857,12 @@ void ViewerBackend::onTextMessage(const QString &text)
     } else if (type == QStringLiteral("rtc-answer")) {
         logf("[viewer] 收到意外的 rtc-answer（管理端是 answer 侧，不该收到）");
     } else if (type == QStringLiteral("rtc-start") || type == QStringLiteral("rtc-stop")) {
-        logf("[viewer] 云端广播 %s（这是给被控端的推流开关，管理端只记录）",
-             type.toUtf8().constData());
+        // rtc-stop 就是"没人看了"的确切信号：收流页留 5 秒没人来就回收（省那 137MB）。
+        // rtc-start 不用管回收 —— 下一份 offer 到达时 initRtcView() 自己会建回来。
+        if (type == QStringLiteral("rtc-stop")) scheduleRtcViewReap();
+        logf("[viewer] 云端广播 %s（推流开关，管理端据此%s收流页）",
+             type.toUtf8().constData(),
+             type == QStringLiteral("rtc-stop") ? "回收" : "保持");
     } else if (type == QStringLiteral("rtc-relayed")) {
         // 云端回给我们自己的信令投递结果——排查"发出去到底到没到"就靠这条
         logf("[viewer] RTC 信令已中继 type=%s ok=%s to=%s %s",

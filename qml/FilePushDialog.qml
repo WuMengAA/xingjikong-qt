@@ -165,16 +165,19 @@ Popup {
                     if (backend.fileState === "sending")
                         return "正在推：" + backend.fileBytes + " / " + backend.fileTotal + " 字节";
                     if (backend.fileState === "failed")
-                        return "推失败：" + backend.fileError;
+                        return "✕ 推失败：" + backend.fileError;
                     if (backend.fileState === "done")
                         return "✅ 已推到：" + backend.fileTarget;
                     if (backend.fileError === "已取消")
                         return "已取消";
                     return "选好文件后点「开始推送」";
                 }
-                color: (backend.fileState === "failed") ? "#C0392B"
+                // 失败态不再用红色（#C0392B）：黑白稿集里"强调"只有反白+描边一种手段，
+                // 这里改成反白字加粗、前缀 ✕，深色下是白字压深底，浅色下是黑字压白底。
+                color: (backend.fileState === "failed") ? (dlg.theme ? dlg.theme.fg : "#FAFAFA")
                                                         : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
                 font.pixelSize: 12
+                font.bold: backend.fileState === "failed"
                 elide: Text.ElideMiddle
             }
 

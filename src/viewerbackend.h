@@ -223,9 +223,21 @@ private:
      * "called in wrong state"，表现为"第一台机器有画面、切到第二台永远黑屏"。
      */
     void deliverOffer(const QString &sdp);
+    /**
+     * 没人看的时候把离屏收流页（Chromium 渲染进程，实测 ~137MB）回收掉。
+     *
+     * 和被控端的 releaseRtcView() 是对称的一套：那边回收采集页，这边回收收流页。
+     * 两边都不回收的话，几十台机器常年挂着的 WebEngine 就是纯粹的固定开销 ——
+     * 老师只看其中一两台，剩下的 137MB × N 全在空转。
+     */
+    void releaseRtcView();
+    void scheduleRtcViewReap();
+    void cancelRtcViewReap();
 
     QWebSocket *m_ws = nullptr;
     QTimer *m_fpsTimer = nullptr;
+    QTimer *m_rtcReap = nullptr;          // 收流页延迟回收（scheduleRtcViewReap）
+    qint64 m_offlineSince = 0;            // 与云端断开的起始时刻（0 = 在线）
 
     QString m_url;
     QString m_token;
