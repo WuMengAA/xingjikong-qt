@@ -16,6 +16,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 class QTimer;
 class QWebSocket;
@@ -56,8 +57,19 @@ class ViewerBackend : public QObject
     // 只收、不发——发是 agent 侧的事。
     Q_PROPERTY(bool rtcReady READ rtcReady NOTIFY rtcStateChanged)
     Q_PROPERTY(QString rtcState READ rtcState NOTIFY rtcStateChanged)
+    // 当前画面**实际来自哪条链路**："none"（还没帧）/ "jpeg"（被控端 JPEG 推送）
+    // / "rtc"（WebRTC 实时流）。界面要靠它告诉用户"现在看的是实时还是轮询"，
+    // 否则 RTC 通没通、有没有降级回落，只能靠猜。
+    Q_PROPERTY(QString frameSource READ frameSource NOTIFY frameSourceChanged)
 
 public:
+    // 帧的来源。以前两路都调同一个 applyFrameBytes 且不区分来源，结果被控端的 JPEG
+    // 轮询帧和 WebRTC 抽出来的帧互相覆盖同一张 m_frame —— 画面在两个源之间来回跳、
+    // 帧率虚高一倍，而日志上看起来一切正常。
+    enum FrameSource {
+        PushJpeg,   ///< 被控端经云端推来的 JPEG（二进制帧 / 文本 frame / 裸帧三条老路径）
+        RtcGrab     ///< WebRTC 收流页抽出来的帧
+    };
     explicit ViewerBackend(QObject *parent = nullptr);
     /** 析构：QWebEngineView 必须在 event loop 停止之后销毁，否则 Chromium 直接崩。 */
     ~ViewerBackend() override;
@@ -71,6 +83,15 @@ public:
     bool statusWarn() const { return m_statusWarn; }
     QJsonArray devices() const { return m_devices; }
     QString currentUid() const { return m_currentUid; }
+
+    /**
+     * 只给自检用：退订 → 重订，逼被控端把 WebRTC 连接重建一次（重新 offer）。
+     *
+     * 正常界面用不到：被控端只在 rtc-start 时建一次连接，而首次订阅必然触发 rtc-start。
+     * 需要它的场景是"被控端那次 offer 发出去时并没人订阅（云端丢了），之后再订阅就没新 offer"，
+     * 界面上退订重订一次是唯一不需要改被控端代码的重来办法。
+     */
+    Q_INVOKABLE void rtcRenegotiate(const QString &uid);
     QImage frame() const { return m_frame; }
     double fps() const { return m_fps; }
     int frameCount() const { return m_frameCount; }
@@ -91,6 +112,7 @@ public:
     // RTC 读数
     bool rtcReady() const { return m_rtcReady; }
     QString rtcState() const { return m_rtcState; }
+    QString frameSource() const { return m_frameSource; }
 
     /** 切到某台设备 → 向云端订阅它的画面。 */
     void setCurrentUid(const QString &uid);
@@ -126,7 +148,12 @@ public:
     Q_INVOKABLE void setRtcFrame(const QString &b64);
     /** 远端 answer 的 SDP 字符串（正常流里管理端不产出，仅日志记录）。 */
     Q_INVOKABLE void rtcGotAnswer(const QString &sdp);
-    /** 远端 ICE candidate 的 JSON 字符串。 */
+    /**
+     * 收流页**本端** RTCPeerConnection 产出的 ICE candidate（JS 侧 onicecandidate 回调）。
+     *
+     * 只做一件事：发给云端转交被控端。**不再回灌给自己** —— 自己的候选本来就是从
+     * 这个 pc 里出来的，再 addIceCandidate 回去只会让 Chromium 静默报 ice-FAIL。
+     */
     Q_INVOKABLE void rtcGotIce(const QString &candidateJson);
     /** JS 侧的诊断输出（setOffer/ontrack/ICE 全程）。 */
     Q_INVOKABLE void rtcDiag(const QString &s);
@@ -146,6 +173,8 @@ signals:
     void fileProgressChanged();
     /** WebRTC 收流链路状态变化（ready / negotiating / failed / idle）。 */
     void rtcStateChanged();
+    /** 画面来源切换（jpeg ↔ rtc）——界面上那个链路徽标靠它刷新。 */
+    void frameSourceChanged();
     /** 帧没画成（解码失败等）——界面可以往屏幕上说明一句，别让画面无声无息不动。 */
     void frameDropped(const QString &reason);
     /** 鉴权被拒：界面应停止重连并把原因显示出来。 */
@@ -166,7 +195,8 @@ private:
     void onTextMessage(const QString &text);
     void onBinaryMessage(const QByteArray &buf);
     void refreshDevices(const QJsonArray &arr);
-    void applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header);
+    void applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,
+                         FrameSource src = PushJpeg);
     void tickFps();
     void sendEnvelope(const QString &type, const QJsonObject &payload);
     void sendNextChunk();
@@ -176,6 +206,23 @@ private:
     // ── WebRTC 收流内部 ──
     void initRtcView();          // 懒建 QWebEngineView + 注入 answer 侧 JS
     void setRtcState(const QString &s);
+    /**
+     * 把**远端**（被控端）的 ICE candidate 灌进收流页的 RTCPeerConnection。
+     *
+     * 和 rtcGotIce() 是严格相反的两个方向，别再合并：
+     *   本端候选 → rtcGotIce()   → 发云端
+     *   远端候选 → addRemoteIce() → 注入页面（**不回发云端**，否则被控端收到自己的候选，回环）
+     *
+     * 页面 load 完成前先入队（见 m_pendingIce），就绪后按序补灌。
+     */
+    void addRemoteIce(const QString &candJson);
+    /**
+     * 把 offer 灌进收流页（页面没就绪就先存 m_pendingOffer，就绪时补灌）。
+     *
+     * ⚠️ 灌之前会先 __resetPc()：被控端每个 offer 都是一个全新 peer，复用旧 pc 会
+     * "called in wrong state"，表现为"第一台机器有画面、切到第二台永远黑屏"。
+     */
+    void deliverOffer(const QString &sdp);
 
     QWebSocket *m_ws = nullptr;
     QTimer *m_fpsTimer = nullptr;
@@ -206,8 +253,30 @@ private:
 
     // ── WebRTC 收流现场 ──
     QWebEngineView *m_rtcView = nullptr;
+    QString m_pendingOffer;   // 收流页 load 完成前到的 offer 先存这儿（见 initRtcView 的补灌）
     bool m_rtcReady = false;
     QString m_rtcState = QStringLiteral("idle");
+
+    // 收流页 load 完成前到的远端 ICE 先排这儿，就绪后补灌。
+    // 为什么必须有这个队列：判断"页面能不能用"不能看 m_rtcView 是否非空 —— view 对象一 new
+    // 出来就非空了，但 page->load() 是异步的，那段时间里 runJavaScript 是对着 about:blank
+    // 执行的，window.__addIce 还不存在，调用**静默失败**（C++ 侧连个错都收不到），
+    // 表现就是"ICE 收到了但 ICE 永远连不上"。offer 那边早就有 m_pendingOffer 处理同一件事，
+    // 这一半当时漏了。
+    bool m_rtcPageReady = false;
+    QStringList m_pendingIce;
+    // 队列上限：被控端一次建连最多也就几十个候选，超了说明有异常（比如对端在疯狂重连），
+    // 与其无限攒着把内存吃光，不如丢掉并留一行日志。
+    static const int kMaxPendingIce = 128;
+
+    // ── 画面来源（JPEG 推送 vs WebRTC 实时流）──
+    QString m_frameSource = QStringLiteral("none");
+    // 最后一次收到 RTC 帧的时刻（ms）。用来判断"RTC 还活着吗"：
+    // 活着就不要让 JPEG 轮询帧把它盖掉，超过 kRtcStaleMs 没来就认为断了、自动让 JPEG 接管。
+    qint64 m_rtcLastFrameMs = 0;
+    // 这个数直接决定"多久没 RTC 帧算断"。1.5s 是被控端抽帧节拍（25fps≈40ms）的近 40 倍，
+    // 网络抖一两拍不会误判；又短于 JPEG 轮询的可见间隔，断了能在人感觉到之前就降回来。
+    static const qint64 kRtcStaleMs = 1500;
 
     QJsonArray m_devices;
     QImage m_frame;

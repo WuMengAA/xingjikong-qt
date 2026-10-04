@@ -115,7 +115,7 @@ Popup {
                 Text {
                     anchors.centerIn: parent
                     text: "分钟后关机"
-                    color: dlg.theme ? dlg.theme.op : "#EDEDED"
+                    color: dlg.theme ? dlg.theme.op : "#C8C8C8"
                     font.pixelSize: 11
                 }
                 MouseArea {
@@ -138,7 +138,7 @@ Popup {
                 Text {
                     anchors.centerIn: parent
                     text: "分钟后重启"
-                    color: dlg.theme ? dlg.theme.op : "#EDEDED"
+                    color: dlg.theme ? dlg.theme.op : "#C8C8C8"
                     font.pixelSize: 11
                 }
                 MouseArea {
@@ -187,7 +187,7 @@ Popup {
                     anchors.verticalCenter: parent.verticalCenter
                     x: 12
                     text: (modelData.what === "reboot" ? "重启" : "关机") + "  " + (modelData.at || "")
-                    color: dlg.theme ? dlg.theme.op : "#EDEDED"
+                    color: dlg.theme ? dlg.theme.op : "#C8C8C8"
                     font.pixelSize: 12
                 }
                 Text {
@@ -235,7 +235,7 @@ Popup {
                 Text {
                     anchors.centerIn: parent
                     text: dlg.chosenId ? ("取消 " + dlg.chosenId) : "（先选一条上面待执行的）"
-                    color: dlg.chosenId ? (dlg.theme ? dlg.theme.op : "#EDEDED") : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                    color: dlg.chosenId ? (dlg.theme ? dlg.theme.op : "#C8C8C8") : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
                     font.pixelSize: 11
                 }
                 MouseArea {
@@ -268,7 +268,7 @@ Popup {
                 wrapMode: Text.WordWrap
                 text: "被控端到期**默认不会真关机**：装教室机时要把 STE_QT_ALLOW_SCHED_FIRE 设成 1（回执里会带 fireAllowed 说明当前状态）"
                 color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
-                font.pixelSize: 10
+                font.pixelSize: 11
             }
         }
     }

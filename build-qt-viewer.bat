@@ -40,6 +40,12 @@ cmake -S . -B build -G Ninja ^
   -DCMAKE_C_COMPILER="%MSVCCL%\cl.exe" ^
   -DCMAKE_CXX_COMPILER="%MSVCCL%\cl.exe" || exit /b 1
 
-cmake --build build --config Release
+rem Parallelism: this box has only ~14GB RAM. Ninja's default (one job per core)
+rem makes several big qmlcache .cpp compile at once and cl.exe dies with
+rem C1060 (compiler heap exhausted) -- a misleading error that costs rounds.
+rem Cap at 2 by default; override with JOBS=<n>.
+if "%JOBS%"=="" set JOBS=2
+
+cmake --build build --config Release -j %JOBS%
 echo [exit] %errorlevel%
 exit /b %errorlevel%

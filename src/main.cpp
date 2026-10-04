@@ -184,10 +184,60 @@ int main(int argc, char *argv[])
 
     backend.start();
 
+    // ── T-4 真机验证驱动（仅自检开关，不改协议层）──
+    // 设 STE_SELFTEST_RTC=<任意非空> 就在设备上自动订阅第一台在线设备，
+    // 用来在无鼠标的环境（脚本/后台）里把「订阅 → 云端 rtc-start → 被控端 offer →
+    // 这里 answer → ontrack 出画面」整条链路跑一遍。
+    // 只复用 backend 已有的 public API（devices() / setCurrentUid()），一行协议代码都不碰。
+    const QString rtcUidEnv = qEnvironmentVariable("STE_SELFTEST_RTC");
+    if (!rtcUidEnv.isEmpty()) {
+        // 3 秒：本地回环 WS 上，鉴权→拉设备表是毫秒级，3 秒足够稳（设备表到不了就明确报出来，
+        // 不静默跳过 —— 静默跳过会让"没验到"被当成"验过了"）
+        // STE_SELFTEST_RTC=1 或 =auto → 订阅第一台；=TEST1 这种具体设备号 → 直接订阅它。
+        // 为什么要支持指定：同一时刻云端可能有多台在线（旧的截图像轮播那台 + 新的 WebRTC 那台），
+        // 只订"第一台"可能订到旧的那台，验出来的是旧通道、不是 WebRTC。
+        QTimer::singleShot(3000, &backend, [&backend, rtcUidEnv] {
+            QString uid;
+            if (rtcUidEnv == QStringLiteral("1") || rtcUidEnv.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0) {
+                const QJsonArray devs = backend.devices();
+                if (devs.isEmpty()) {
+                    logf("[viewer] 自检：设备表是空的，没东西可订阅（云端没在线设备？）");
+                    return;
+                }
+                uid = devs.first().toObject().value(QStringLiteral("uid")).toString();
+            } else {
+                uid = rtcUidEnv;
+            }
+            if (uid.isEmpty()) {
+                logf("[viewer] 自检：拿不到要订阅的 uid，跳过自动订阅");
+                return;
+            }
+            // 后缀 !reset：先退订再重订一次。
+            // 为什么要这个开关：被控端的采集页只会为**一个** RTCPeerConnection 发一次 offer
+            // （st.state 一旦是 negotiating/streaming，__startStream 直接 return），
+            // 而 offer 可能在"没人订阅这台"的时候就被发出去了，云端那条"没人订阅"直接丢包。
+            // 之后再订阅也不会有新的 offer —— 表现就是"订阅成功但永远不来画面"。
+            // 退订让云端发 rtc-stop、重订让云端发 rtc-start，被控端才会重建连接、重新 offer。
+            bool needReset = false;
+            QString uid2 = uid;
+            if (uid2.endsWith(QStringLiteral("!reset"), Qt::CaseInsensitive)) {
+                uid2 = uid2.left(uid2.size() - 6);
+                needReset = true;
+            }
+            logf("[viewer] 自检：自动订阅 %s（走完整订阅链路%s）",
+                 uid2.toUtf8().constData(), needReset ? "，先强制重新协商" : "");
+            if (needReset) backend.rtcRenegotiate(uid2);
+            else backend.setCurrentUid(uid2);
+        });
+    }
+
     // 开机自检图：**三页各抓一张**（0 概览 / 1 控制 / 2 设置）。
     // 界面到底"画出来了没有"要能自证 —— 不能拿"进程活着"当证据。
     // （窗口被别的窗口挡住时，grabWindow 依然抓得到自身内容，所以这条路可用。）
-    const QString shotDir = QStringLiteral("D:/Stelarith/Stelarith-viewer-qt/shots");
+    // 自检图落盘目录。这里曾经硬编码成迁移前的旧路径（D:/Stelarith/Stelarith-viewer-qt），
+    // 目录恰好还在，于是图一直被写进那个废弃工程里，当前工程下反而看不到 —— 找图找了半天。
+    // 改成相对 exe 工作目录推导，跟着工程走，不再写死盘符路径。
+    const QString shotDir = QDir::currentPath() + QStringLiteral("/shots");
     QDir().mkpath(shotDir);
     // 两轮 × 三页 = 6 张：第一轮黑白、第二轮浅色。
     // 深色好看、浅色发花是常见病，所以两种主题**每页都要抓**，不能只看一页。

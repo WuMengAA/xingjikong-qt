@@ -117,7 +117,7 @@ Popup {
                 x: 124
                 width: parent.width - 142
                 text: dlg.pendingUrl ? ("已选：" + dlg.pendingName) : "（还没选文件）"
-                color: dlg.pendingUrl ? (dlg.theme ? dlg.theme.op : "#EDEDED")
+                color: dlg.pendingUrl ? (dlg.theme ? dlg.theme.op : "#C8C8C8")
                                       : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
                 font.pixelSize: 12
                 elide: Text.ElideMiddle
