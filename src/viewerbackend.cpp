@@ -820,6 +820,22 @@ void ViewerBackend::onTextMessage(const QString &text)
     } else if (type == QStringLiteral("rtc-offer")) {
         // 被控端发起了建连：把它带过来的 offer 灌进离屏 QWebEngineView，
         // setRemoteDescription 之后 createAnswer 回云端（__setOffer 里做完了全流程）
+        //
+        // ⚠️ 必须先把 offer 里的 uid 同步到 m_currentUid（2026-10-05 修）。
+        // offer 携带的 uid 是"这条协商属于哪台机器"的**权威来源**，比本地的设备表可靠：
+        // rtcGotAnswer() / rtcGotIce() 回云端时都只认 m_currentUid，而它可能被
+        // refreshDevices() 在"设备表短暂为空"（云端重启/被控端掉线重连）时清空，
+        // 或者 viewer 刚起来设备表还没到就是空的。那样 answer 会带着空 uid 回去，
+        // 云端 devices.get("") 找不到设备 → answer 静默丢在云端，
+        // 被控端 offeredAt 一直不变、answeredAt 永远是 0，卡在 pc-failed 无限重发 offer。
+        // 现象是"两端都连上了、JPEG 兜底画面在动，就是 RTC 永远建不起来"。
+        const QString offerUid = rtcField(pay, QLatin1String("uid"));
+        if (!offerUid.isEmpty() && offerUid != m_currentUid) {
+            logf("[viewer] RTC offer 带的 uid=%s 与本地当前 uid=%s 不一致，以 offer 为准修正",
+                 offerUid.toUtf8().constData(), m_currentUid.toUtf8().constData());
+            m_currentUid = offerUid;
+            emit currentUidChanged();
+        }
         initRtcView();
         const QString sdp = rtcField(pay, QLatin1String("sdp"));
         if (sdp.isEmpty()) {
@@ -839,6 +855,14 @@ void ViewerBackend::onTextMessage(const QString &text)
         }
     } else if (type == QStringLiteral("rtc-ice")) {
         // 被控端的 ICE candidate → 转给离屏 view 里的 RTCPeerConnection
+        //
+        // 同样以报文里的 uid 为准（见上面 rtc-offer 分支的长注释）：ICE 可能**先于 offer** 到达，
+        // 那一刻 m_currentUid 很可能还是空的，不补的话本端候选回给云端时 uid 也是空 → 丢。
+        const QString iceUid = rtcField(pay, QLatin1String("uid"));
+        if (!iceUid.isEmpty() && iceUid != m_currentUid) {
+            m_currentUid = iceUid;
+            emit currentUidChanged();
+        }
         const QString cand = rtcField(pay, QLatin1String("candidate"));
         if (cand.isEmpty()) {
             // 同样把原始报文摊开：candidate 空有三种来路（被控端发了空串、包了两层没剥到、
