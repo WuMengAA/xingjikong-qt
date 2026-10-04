@@ -36,67 +36,67 @@
 
     <Feature Id="Main" Title="星集控被控端" Level="1">
       <Component Id="C1" Directory="INSTALLFOLDER">
-        <File Source="deploy/agent.env" KeyPath="yes" />
-      </Component>
-      <Component Id="C2" Directory="INSTALLFOLDER">
         <File Source="deploy/agent.env.example" KeyPath="yes" />
       </Component>
-      <Component Id="C3" Directory="INSTALLFOLDER">
+      <Component Id="C2" Directory="INSTALLFOLDER">
         <File Source="deploy/D3Dcompiler_47.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C4" Directory="D1">
+      <Component Id="C3" Directory="D1">
         <File Source="deploy/generic/qtuiotouchplugin.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C5" Directory="D2">
+      <Component Id="C4" Directory="D2">
         <File Source="deploy/iconengines/qsvgicon.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C6" Directory="D3">
+      <Component Id="C5" Directory="D3">
         <File Source="deploy/imageformats/qgif.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C7" Directory="D3">
+      <Component Id="C6" Directory="D3">
         <File Source="deploy/imageformats/qico.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C8" Directory="D3">
+      <Component Id="C7" Directory="D3">
         <File Source="deploy/imageformats/qjpeg.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C9" Directory="D3">
+      <Component Id="C8" Directory="D3">
         <File Source="deploy/imageformats/qsvg.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C10" Directory="INSTALLFOLDER">
+      <Component Id="C9" Directory="INSTALLFOLDER">
         <File Source="deploy/install-autostart.ps1" KeyPath="yes" />
       </Component>
-      <Component Id="C11" Directory="INSTALLFOLDER">
+      <Component Id="C10" Directory="INSTALLFOLDER">
         <File Source="deploy/msi-post-install.cmd" KeyPath="yes" />
       </Component>
-      <Component Id="C12" Directory="D4">
+      <Component Id="C11" Directory="D4">
         <File Source="deploy/networkinformation/qnetworklistmanager.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C13" Directory="INSTALLFOLDER">
+      <Component Id="C12" Directory="INSTALLFOLDER">
         <File Source="deploy/opengl32sw.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C14" Directory="D5">
+      <Component Id="C13" Directory="D5">
         <File Source="deploy/platforms/qwindows.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C15" Directory="INSTALLFOLDER">
+      <Component Id="C14" Directory="INSTALLFOLDER">
         <File Source="deploy/Qt6Core.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C16" Directory="INSTALLFOLDER">
+      <Component Id="C15" Directory="INSTALLFOLDER">
         <File Source="deploy/Qt6Gui.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C17" Directory="INSTALLFOLDER">
+      <Component Id="C16" Directory="INSTALLFOLDER">
         <File Source="deploy/Qt6Network.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C18" Directory="INSTALLFOLDER">
+      <Component Id="C17" Directory="INSTALLFOLDER">
         <File Source="deploy/Qt6Svg.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C19" Directory="INSTALLFOLDER">
+      <Component Id="C18" Directory="INSTALLFOLDER">
         <File Source="deploy/Qt6WebSockets.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C20" Directory="INSTALLFOLDER">
+      <Component Id="C19" Directory="INSTALLFOLDER">
         <File Source="deploy/Qt6Widgets.dll" KeyPath="yes" />
       </Component>
-      <Component Id="C21" Directory="D6">
+      <Component Id="C20" Directory="D6">
         <File Source="deploy/shots/shot-1791014981701.png" KeyPath="yes" />
+      </Component>
+      <Component Id="C21" Directory="D6">
+        <File Source="deploy/shots/shot-1791090813739.png" KeyPath="yes" />
       </Component>
       <Component Id="C22" Directory="INSTALLFOLDER">
         <File Source="deploy/start-agent.bat" KeyPath="yes" />

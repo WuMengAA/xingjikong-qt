@@ -42,7 +42,14 @@ function ensureDirId(rel) {
   return id;
 }
 
-const files = walk(DEPLOY).filter((f) => !f.dir);
+// ⚠️ 根级 deploy/agent.env **不进 MSI**：那是本机（TEST1）的真实配置，含明文令牌 dev-cloud-token
+//    与测试回路地址 ws://127.0.0.1:8788。打进去的后果有两个，都不该发生：
+//      1) 任何机器装上就带着 TEST1 的配置（连开发回路、用公开的开发令牌）；
+//      2) "装完没 agent.env → 首次运行弹配置向导（OOBE）"这条设计直接失效——
+//         有配置文件时程序判定为"已配置"，老师根本不会看到填写界面。
+//    装后默认**没有** agent.env，由老师从配置向导里填；agent.env.example 是纯占位模板
+//    （<token-matching-cloud-CLOUD_WS_TOKEN> 这种），照常进包供参照。
+const files = walk(DEPLOY).filter((f) => !f.dir && f.rel !== "agent.env");
 const dirs = [...new Set(files.map((f) => f.rel.split('/').slice(0, -1).join('/')))].filter(Boolean);
 
 // 输出 Directory 树

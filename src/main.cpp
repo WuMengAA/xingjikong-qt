@@ -27,6 +27,7 @@
 #include <QDesktopServices>
 #include <QTimer>
 #include <QScreen>
+#include <QWebEngineView>
 #include <QPixmap>
 #include <QDateTime>
 #include <QDir>
@@ -47,17 +48,30 @@
 #include <QSet>
 #include <QProcess>
 #include <QThread>      // QThread::msleep（camera_record 确认"真的在录"时等两秒）
+// 2026-10-04：首次运行配置窗（OOBE）——让老师在界面里填配置，而不是手改 agent.env。
+#include <QDialog>
+#include <QWidget>
+#include <QLabel>
+#include <QLineEdit>
+#include <QCheckBox>
+#include <QPushButton>
+#include <QFormLayout>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QDialogButtonBox>
 #include <windows.h>
 #include <tlhelp32.h>   // 进程快照（process_list / process_stop）
 #include <psapi.h>      // 进程工作集内存
 #include <mmsystem.h>   // waveOutSetVolume（set_volume，Rust 版实测零依赖可用）
 #include <shellapi.h>   // ShellExecuteW（launch_app）+ SHFileOperationW（media_delete 进回收站）
+#include <sapi.h>       // 2026-10-04：大屏通知 TTS 语音播报（Windows SAPI 5，微软免费离线语音）
 #include <cstdio>
 
 // 音量与进程内存信息要显式链接（MSVC 下 pragma 最省事，不必动 CMakeLists）
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shell32.lib")  // SHFileOperationW
+#pragma comment(lib, "sapi.lib")     // ISpVoice（通知 TTS）
 
 namespace {
 
@@ -78,6 +92,12 @@ int g_heartbeatSeq = 0;
 int g_heartbeatMs = kHeartbeatIntervalMs;   // 实际心跳间隔：云端下发就听云端的
 int g_timeoutMs = 30000;                    // 云端判离线阈值（只用于日志说明，不自己判）
 QTimer *g_hbTimer = nullptr;   // 心跳定时器（registered 拿到参数后要能改间隔，所以放外面）
+
+
+// ---- WebRTC 推流状态（内嵌采集页）----
+static QWebEngineView *g_rtcView = nullptr;
+static QTimer *g_rtcTick = nullptr;
+static bool g_rtcOn = false;
 QString g_logPath;             // 被控端日志落盘（装机后没有 stdout，没日志就只能靠猜）
 QString g_shotDir;             // 截图/存图目录（screenshot 动作与抓屏都用它）
 
@@ -103,6 +123,15 @@ QString g_fileRecvTarget;          // 目标文件绝对路径（file_push 时�
 QFile *g_fileRecvFile = nullptr;   // 接收文件句柄（WriteOnly）
 int g_fileRecvNext = 0;            // 下一个期望的分片序号（必须按序，乱序即失败）
 qint64 g_fileRecvBytes = 0;        // 累计已写入字节（file_done 时与声明值比对）
+
+// ── 配置/连接可见性状态（2026-10-04）──
+// 目标：配置缺失时"明显报错"，不和"配了但连不上"混为一谈。
+enum class TrayState { Connected, Disconnected, Unconfigured };
+bool g_configured = true;            // URL+TOKEN 是否齐全（loadEnvFile 后判定）
+bool g_unconfigured = false;         // 已进入"未配置"态（不连接/不重试）
+bool g_unconfiguredNotified = false; // 未配置气泡只弹一次
+bool g_reconnectNow = false;         // 保存新配置后：断线回调里立刻重连（别等退避）
+bool g_configDialogOpen = false;     // 配置窗防重入（首运行自动弹 + 手动点可能撞车）
 
 QString envOr(const char *key, const QString &fallback)
 {
@@ -152,11 +181,22 @@ QByteArray makeFrameBytes(const QString &uid, int seq, const QByteArray &jpeg)
 
 void scheduleReconnect();
 
+// 定义在后面（托盘区），这里前向声明供 connectNow/sendRegister 提前调用
+void updateTray(TrayState st, const QString &detail);
+void goUnconfigured();
+
 void connectNow()
 {
-    const QString url = qEnvironmentVariable("STE_QT_WS_URL");
+    const QString url = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
     if (url.isEmpty()) {
-        fprintf(stderr, "[agent-qt] FAIL: 未配置 STE_QT_WS_URL，无法连云端\n");
+        // 老代码只 return，连重试都不排 —— 配置缺失时进程静默停摆，老师以为装好了。
+        // 现在进"未配置"态：可见（图标+日志+气泡），且不重试。
+        goUnconfigured();
+        return;
+    }
+    if (qEnvironmentVariable("STE_QT_WS_TOKEN").trimmed().isEmpty()) {
+        // 令牌没配：连上去也过不了握手，直接判"未配置"，别做无意义重连。
+        goUnconfigured();
         return;
     }
     qInfo("[agent-qt] 连接 %s …", qPrintable(url));
@@ -175,9 +215,12 @@ void sendRegister()
 {
     g_uid = envOr("STE_QT_UID", QHostInfo::localHostName());
     const QString &uid = g_uid;
-    const QString token = qEnvironmentVariable("STE_QT_WS_TOKEN");
+    const QString token = qEnvironmentVariable("STE_QT_WS_TOKEN").trimmed();
     if (token.isEmpty()) {
-        fprintf(stderr, "[agent-qt] FAIL: 未配置 STE_QT_WS_TOKEN（被云端拒收）\n");
+        // 不许把空令牌发出去白等云端拒（老代码 L194-195 照发）——直接进"未配置"态，可见且停止重试。
+        goUnconfigured();
+        if (g_ws && g_ws->state() != QAbstractSocket::UnconnectedState) g_ws->close();
+        return;
     }
     // caps：告诉云端这台机器能做什么（现在云端不用，先占位——协议规范 v1 第四节）
     QJsonObject caps;
@@ -566,27 +609,313 @@ int loadEnvFile(const QString &path)
 QSystemTrayIcon *g_tray = nullptr;
 QAction *g_actStatus = nullptr;
 
-QIcon makeTrayIcon(bool online)
+QIcon makeTrayIcon(TrayState st)
 {
     QPixmap pm(32, 32);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
-    // 浅色填充 + 深色描边：任务栏托盘底色深浅不定，这样两种底色下都看得见
-    p.setPen(QPen(QColor(0x10, 0x10, 0x10), 2));
-    p.setBrush(online ? QBrush(QColor(0xF0, 0xF0, 0xF0)) : QBrush(Qt::NoBrush));
+    // 三态：已连=实心 / 断线=空心 / 未配置=红色空心+一道斜杠。
+    // 未配置刻意"不靠颜色单独表达"（深浅托盘底都能辨），一眼区别于普通断线。
+    const bool unconfig = (st == TrayState::Unconfigured);
+    const QColor stroke = unconfig ? QColor(0xC0, 0x30, 0x30) : QColor(0x10, 0x10, 0x10);
+    p.setPen(QPen(stroke, 2));
+    p.setBrush(st == TrayState::Connected ? QBrush(QColor(0xF0, 0xF0, 0xF0)) : QBrush(Qt::NoBrush));
     p.drawEllipse(QPointF(16, 16), 9, 9);
+    if (unconfig) {
+        p.setPen(QPen(stroke, 3));
+        p.drawLine(QPointF(7.5, 24.5), QPointF(24.5, 7.5));
+    }
     p.end();
     return QIcon(pm);
 }
 
-void updateTray(bool online, const QString &detail)
+// 人话说明"缺了哪几项"（tooltip / 气泡 / 日志共用一处，避免三处措辞不一致）
+QString unconfiguredReason()
+{
+    QStringList miss;
+    if (qEnvironmentVariable("STE_QT_WS_URL").trimmed().isEmpty())
+        miss << QStringLiteral("STE_QT_WS_URL（云端地址）");
+    if (qEnvironmentVariable("STE_QT_WS_TOKEN").trimmed().isEmpty())
+        miss << QStringLiteral("STE_QT_WS_TOKEN（设备令牌）");
+    return miss.isEmpty() ? QStringLiteral("配置不完整")
+                          : QStringLiteral("缺少 ") + miss.join(QStringLiteral("、"));
+}
+
+void updateTray(TrayState st, const QString &detail)
 {
     if (!g_tray) return;
-    g_tray->setIcon(makeTrayIcon(online));
+    g_tray->setIcon(makeTrayIcon(st));
     const QString uid = g_uid.isEmpty() ? QStringLiteral("(未注册)") : g_uid;
     g_tray->setToolTip(QStringLiteral("星集控 · 被控端\n%1\n%2").arg(uid, detail));
     if (g_actStatus) g_actStatus->setText(QStringLiteral("状态：%1").arg(detail));
+}
+
+// 未配置气泡只弹一次（g_unconfiguredNotified 保证不反复弹）。
+// **必须在托盘 show() 之后调用**（setVisible 之前弹不出来）；Session0/无托盘时 g_tray 为空、自然跳过，
+// 此时靠"图标 + 日志"独立表达未配置。
+void notifyUnconfiguredOnce()
+{
+    if (!g_tray || g_unconfiguredNotified) return;
+    g_unconfiguredNotified = true;
+    g_tray->showMessage(
+        QStringLiteral("星集控 · 未配置"),
+        QStringLiteral("本机尚未接入集控：%1。\n右键托盘图标 →「配置…」填写后即可接入（也可手改同目录 agent.env）。")
+            .arg(unconfiguredReason()),
+        QSystemTrayIcon::Warning, 10000);
+}
+
+// 进入"未配置"态：告警只报一次，且**必须走 Qt 日志（qWarning）** ——
+// 它会经 qInstallMessageHandler → appendLogFile 落盘；fprintf 只进 stderr、不进日志文件，事后排查看不到。
+void goUnconfigured()
+{
+    if (!g_unconfigured) {
+        g_unconfigured = true;
+        // 用 QDebug 流式而非 qWarning("%s", qPrintable(...))：后者经 toLocal8Bit 会把中文
+        // 转成 GBK 本地码页，落盘(UTF-8)后变乱码；流式全程保持 Unicode。
+        qWarning().noquote()
+            << QStringLiteral("[agent-qt] FAIL: 未配置 —— %1；本机尚未接入集控，不连接云端、不重试。"
+                              "右键托盘图标 →「配置…」填写 STE_QT_WS_URL / STE_QT_WS_TOKEN，"
+                              "或把 agent.env 放到程序同目录后重启。")
+                   .arg(unconfiguredReason());
+    }
+    // 托盘可能尚未创建（启动早期调用）—— updateTray/notify 会在 g_tray 为空时安全跳过。
+    updateTray(TrayState::Unconfigured,
+               QStringLiteral("未配置：%1（右键托盘 →「配置…」）").arg(unconfiguredReason()));
+    notifyUnconfiguredOnce();
+}
+
+/* ══════════ 首次运行配置窗（OOBE）（2026-10-04） ══════════
+ * 背景：装完第一次打开时，老师面对的是一个托盘图标 + 一个要手改的 agent.env 文本文件，
+ * 门槛太高（要认得 `set KEY=VALUE`、要找对目录、要知道令牌从哪来）。
+ * 这里给一个界面：三个字段填完点「保存并连接」，写回 exe 同目录的 agent.env 并立即重连。
+ */
+
+// 单行清理：去掉可能被粘进来的换行（否则会污染配置文件、注入多余行）。
+QString cleanLine(const QString &s)
+{
+    QString t = s;
+    t.remove(QLatin1Char('\r'));
+    t.remove(QLatin1Char('\n'));
+    return t.trimmed();
+}
+
+// exe 同目录的 agent.env 路径（读、写都走这里，避免两处各拼一次字符串拼歪）
+QString agentEnvPath()
+{
+    return QCoreApplication::applicationDirPath() + QStringLiteral("/agent.env");
+}
+
+/**
+ * 把界面上的配置写回 exe 同目录的 agent.env，并**直接更新进程环境变量**。
+ *
+ * ⚠️ 关键坑：写完**绝不能**指望 loadEnvFile() 把新值刷进进程。
+ * loadEnvFile 的规则是"真环境变量优先、不覆盖"（`if (!qgetenv(key).isEmpty()) continue;`）。
+ * 进程里 STE_QT_WS_URL/TOKEN 很可能已经存在（哪怕值是旧的），于是保存后 loadEnvFile 会
+ * 原封不动保留旧值 —— 表现得像"保存成功，但连的、注册的还是老配置"这个静默陷阱。
+ * 所以这里用 qputenv 把新值**直接覆盖**（qputenv 会替换同名变量）。
+ *
+ * 编码：UTF-8 无 BOM。纯 ASCII 输入 → 文件字节级就是纯 ASCII（读端三种编码都认）。
+ * 格式：`set KEY=VALUE`（不带引号），与 deploy/agent.env、读端解析器一致。
+ * @returns 文件是否写入成功
+ */
+bool saveAgentEnv(const QString &url, const QString &token, const QString &uid)
+{
+    // 固定 4 行：1 行 ASCII 注释 + 3 个必需键（UID 留空也写一行，便于人看/手改）
+    QString text;
+    text += QStringLiteral("rem Stelarith control agent - local config (auto-generated, safe to edit)\r\n");
+    text += QStringLiteral("set STE_QT_WS_URL=") + url + QStringLiteral("\r\n");
+    text += QStringLiteral("set STE_QT_WS_TOKEN=") + token + QStringLiteral("\r\n");
+    text += QStringLiteral("set STE_QT_UID=") + uid + QStringLiteral("\r\n");
+
+    QFile f(agentEnvPath());
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 无法写入配置 %1 —— %2")
+                                    .arg(agentEnvPath(), f.errorString());
+        return false;
+    }
+    f.write(text.toUtf8());   // UTF-8 无 BOM
+    f.close();
+
+    // 直接覆盖进程内环境变量（不管之前有没有旧值），这样保存即刻生效、无需重启。
+    qputenv("STE_QT_WS_URL", url.toUtf8());
+    qputenv("STE_QT_WS_TOKEN", token.toUtf8());
+    qputenv("STE_QT_UID", uid.toUtf8());   // 空值=清除，sendRegister 会回退到电脑名
+
+    qInfo().noquote() << QStringLiteral("[agent-qt] 已保存配置 → %1（4 行，UTF-8 无 BOM）").arg(agentEnvPath());
+    return true;
+}
+
+// 打开"配置向导"。首运行（未配置）自动调一次；托盘菜单「配置…」也走它。
+// 保存成功 → 立即用新配置重连；点「以后再说」→ 原样保持未配置态（不丢可见告警）。
+void openConfigDialog()
+{
+    if (g_configDialogOpen) return;   // 防重入
+    g_configDialogOpen = true;
+    qInfo().noquote() << QStringLiteral("[agent-qt] 打开配置窗口");
+
+    QDialog dlg;
+    dlg.setWindowTitle(QStringLiteral("星集控 · 配置向导"));
+    dlg.setMinimumWidth(480);
+
+    auto *root = new QVBoxLayout(&dlg);
+
+    auto *intro = new QLabel(QStringLiteral(
+        "这台电脑还没有接入学校的集控系统。请把管理员给的下面几项填进去，"
+        "点「保存并连接」即可，不用重启。\n"
+        "不知道填什么？找发给你安装包、或负责这台设备的管理员要。"));
+    intro->setWordWrap(true);
+    root->addWidget(intro);
+
+    auto *form = new QFormLayout();
+    root->addLayout(form);
+
+    const QString hintStyle = QStringLiteral("color:#888;");
+
+    // —— 云端地址 ——
+    auto *urlEdit = new QLineEdit(qEnvironmentVariable("STE_QT_WS_URL").trimmed());
+    urlEdit->setPlaceholderText(QStringLiteral("例如 ws://10.0.0.5:8788/ws/agent"));
+    form->addRow(QStringLiteral("云端地址"), urlEdit);
+    auto *urlHint = new QLabel(QStringLiteral("就是集控服务器在哪。管理员给你的一串 ws:// 开头的地址，照抄即可。"));
+    urlHint->setWordWrap(true);
+    urlHint->setStyleSheet(hintStyle);
+    form->addRow(QString(), urlHint);
+
+    // —— 设备令牌（打码显示 + 可切换明文核对）——
+    auto *tokenEdit = new QLineEdit(qEnvironmentVariable("STE_QT_WS_TOKEN").trimmed());
+    tokenEdit->setEchoMode(QLineEdit::Password);
+    tokenEdit->setPlaceholderText(QStringLiteral("管理员提供的设备令牌"));
+    auto *tokenRow = new QWidget();
+    auto *tokenLay = new QHBoxLayout(tokenRow);
+    tokenLay->setContentsMargins(0, 0, 0, 0);
+    tokenLay->addWidget(tokenEdit, 1);
+    auto *showCb = new QCheckBox(QStringLiteral("显示"));
+    tokenLay->addWidget(showCb);
+    form->addRow(QStringLiteral("设备令牌"), tokenRow);
+    auto *tokenHint = new QLabel(QStringLiteral(
+        "相当于这台电脑接入集控的\"门禁卡\"，一机一串，由管理员发放。"
+        "默认打码显示，勾「显示」可核对是否抄错。"));
+    tokenHint->setWordWrap(true);
+    tokenHint->setStyleSheet(hintStyle);
+    form->addRow(QString(), tokenHint);
+
+    // —— 设备名（可选）——
+    auto *uidEdit = new QLineEdit(qEnvironmentVariable("STE_QT_UID").trimmed());
+    uidEdit->setPlaceholderText(QHostInfo::localHostName());
+    form->addRow(QStringLiteral("设备名（可选）"), uidEdit);
+    auto *uidHint = new QLabel(QStringLiteral(
+        "这台电脑在集控里显示的名字。留空就用电脑本名，一般不用改。"));
+    uidHint->setWordWrap(true);
+    uidHint->setStyleSheet(hintStyle);
+    form->addRow(QString(), uidHint);
+
+    // 就地提示（校验失败/测试结果都写这里，**不弹二次窗口**）
+    auto *err = new QLabel();
+    err->setWordWrap(true);
+    err->setStyleSheet(QStringLiteral("color:#c03030;"));
+    err->hide();
+    root->addWidget(err);
+
+    auto *boxes = new QDialogButtonBox();
+    auto *testBtn = boxes->addButton(QStringLiteral("测试连接"), QDialogButtonBox::ActionRole);
+    auto *saveBtn = boxes->addButton(QStringLiteral("保存并连接"), QDialogButtonBox::AcceptRole);
+    auto *laterBtn = boxes->addButton(QStringLiteral("以后再说"), QDialogButtonBox::RejectRole);
+    root->addWidget(boxes);
+
+    // 勾「显示」→ 明文，取消 → 回到打码
+    QObject::connect(showCb, &QCheckBox::toggled, tokenEdit, [tokenEdit](bool on) {
+        tokenEdit->setEchoMode(on ? QLineEdit::Normal : QLineEdit::Password);
+    });
+
+    // 「以后再说」= 直接关掉，不做任何改动（未配置态的托盘告警照旧）
+    QObject::connect(laterBtn, &QPushButton::clicked, &dlg, [&dlg] { dlg.reject(); });
+
+    // 「测试连接」：只为验证地址可达（令牌要等保存后才能真正接入，故只报"能否连上"）
+    QObject::connect(testBtn, &QPushButton::clicked, &dlg, [&, testBtn] {
+        const QString url = cleanLine(urlEdit->text());
+        if (url.isEmpty()) {
+            err->setStyleSheet(QStringLiteral("color:#c03030;"));
+            err->setText(QStringLiteral("请先填写「云端地址」，再点测试。"));
+            err->show();
+            return;
+        }
+        const QUrl u(url);
+        if (!u.isValid() || u.host().isEmpty()) {
+            err->setStyleSheet(QStringLiteral("color:#c03030;"));
+            err->setText(QStringLiteral("这个地址看起来不对，请检查是否形如 ws://主机:端口/ws/agent。"));
+            err->show();
+            return;
+        }
+        err->setStyleSheet(QStringLiteral("color:#666;"));
+        err->setText(QStringLiteral("正在测试连接…"));
+        err->show();
+        testBtn->setEnabled(false);
+
+        auto *probe = new QWebSocket();
+        probe->setParent(&dlg);   // 关窗后自动销毁，避免回调里引用已析构的控件
+        auto *t = new QTimer(probe);
+        t->setSingleShot(true);
+        QObject::connect(t, &QTimer::timeout, probe, [&, probe, t, testBtn] {
+            probe->abort();
+            err->setStyleSheet(QStringLiteral("color:#c03030;"));
+            err->setText(QStringLiteral("连接失败：等待超时。请确认地址正确、网络通畅、集控服务器已启动。"));
+            testBtn->setEnabled(true);
+        });
+        QObject::connect(probe, &QWebSocket::connected, probe, [&, probe, t, testBtn] {
+            t->stop();
+            err->setStyleSheet(QStringLiteral("color:#1a7f37;"));
+            err->setText(QStringLiteral("地址可达：已连上服务器。（能否成功接入还要看令牌，保存后看托盘图标。）"));
+            testBtn->setEnabled(true);
+            probe->close();
+        });
+        QObject::connect(probe, &QWebSocket::errorOccurred, probe,
+                         [&, probe, t, testBtn](QAbstractSocket::SocketError) {
+                             if (!t->isActive()) return;   // 已被 connected/timeout 分支处理
+                             t->stop();
+                             err->setStyleSheet(QStringLiteral("color:#c03030;"));
+                             err->setText(QStringLiteral("连接失败：连不上这个地址，请核对地址与服务器是否已启动。"));
+                             testBtn->setEnabled(true);
+                         });
+        t->start(5000);
+        probe->open(u);
+    });
+
+    // 「保存并连接」：校验 → 写文件 + qputenv → 立即重连 → 关窗
+    QObject::connect(saveBtn, &QPushButton::clicked, &dlg, [&] {
+        const QString url = cleanLine(urlEdit->text());
+        const QString token = cleanLine(tokenEdit->text());
+        const QString uid = cleanLine(uidEdit->text());
+        if (url.isEmpty() || token.isEmpty()) {
+            err->setStyleSheet(QStringLiteral("color:#c03030;"));
+            err->setText(QStringLiteral("请先填写「云端地址」和「设备令牌」——这两项是接入集控必需的，缺一不可。"));
+            err->show();
+            return;   // 原地提示，不关窗、不弹二次窗口
+        }
+        if (!saveAgentEnv(url, token, uid)) {
+            err->setStyleSheet(QStringLiteral("color:#c03030;"));
+            err->setText(QStringLiteral("写入配置文件失败（可能是程序目录没有写权限）。请用管理员身份重装后再试。"));
+            err->show();
+            return;
+        }
+        // 保存成功 → 立刻用新配置重连，并把可见状态从"未配置"恢复
+        g_configured = true;
+        g_unconfigured = false;
+        g_unconfiguredNotified = false;
+        g_registered = false;
+        g_backoffMs = 1000;
+        if (g_ws && g_ws->state() != QAbstractSocket::UnconnectedState) {
+            g_reconnectNow = true;   // 断线回调里立刻重连，不等退避
+            g_ws->close();
+        } else {
+            updateTray(TrayState::Disconnected, QStringLiteral("正在用新配置连接…"));
+            connectNow();
+        }
+        dlg.accept();
+    });
+
+    dlg.exec();
+    g_configDialogOpen = false;
+    qInfo().noquote() << QStringLiteral("[agent-qt] 配置窗口已关闭");
 }
 
 bool enableShutdownPriv()
@@ -600,6 +929,186 @@ bool enableShutdownPriv()
     tkp.PrivilegeCount = 1;
     tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
     return AdjustTokenPrivileges(h, FALSE, &tkp, 0, NULL, NULL) && GetLastError() == ERROR_SUCCESS;
+}
+
+/* ══════════ 2026-10-04 · 大屏通知（乙阶段 2：notify 动作 + 灵动岛/居中弹窗/全屏 + TTS） ══════════ */
+
+// TTS 朗读（Windows SAPI 5 · 微软免费离线语音）。失败**不抛**、只记日志 ——
+// 通知弹窗是主链路，朗读只是增强；SAPI 不可用时（极端环境）通知照常显示。
+// 同步 Speak：教室机播报场景，朗读阻塞数百 ms 可接受；比异步简单且不会堆叠。
+static void speakText(const QString &text)
+{
+    if (text.trimmed().isEmpty()) return;
+    ISpVoice *sp = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_SpVoice, nullptr, CLSCTX_ALL, IID_ISpVoice, (void **)&sp);
+    if (FAILED(hr) || !sp) {
+        qWarning().noquote() << QStringLiteral("[agent-qt] TTS 不可用（SAPI 初始化失败 HR=0x%1），通知不朗读，仅显示")
+                                    .arg((uint)hr, 0, 16);
+        return;
+    }
+    // UTF-8 → 宽字符；SAPI 默认读中文需要系统装中文语音（Win10 自带 Huihui 等）
+    const QString say = text.left(120);   // 防长广播把朗读拖到天荒地老
+    const int wlen = say.length() + 1;
+    std::wstring wstr(wlen, L'\0');
+    say.toWCharArray(&wstr[0]);
+    hr = sp->Speak(wstr.c_str(), SPF_DEFAULT, nullptr);
+    if (FAILED(hr))
+        qWarning().noquote() << QStringLiteral("[agent-qt] TTS Speak 失败 HR=0x%1（通知已显示，朗读跳过）")
+                                    .arg((uint)hr, 0, 16);
+    sp->Release();
+}
+
+// 大屏通知窗口：无边框 + 置顶 + Tool（不进任务栏）。
+// 三种形态（用户 2026-10-04 拍板）：
+//   · popup     —— 居中弹窗（圆角卡片）；同时经托盘 showMessage 进 Windows 通知中心留存
+//   · island    —— 顶部灵动岛（细长圆角胶囊，顶部居中，自动收起）
+//   · fullscreen—— 全屏遮罩（大字居中，紧急通知）
+// 单例：同一时间只显示一个（新通知顶掉旧的），防止堆叠霸屏。
+class NotifyWindow : public QWidget
+{
+public:
+    enum Kind { Popup, Island, Fullscreen };
+
+    static void showNotice(Kind kind, const QString &title, const QString &content, int seconds, bool tts)
+    {
+        // 单例：先关掉旧的（同一时间只一个通知窗口）
+        if (g_notify) {
+            g_notify->hide();
+            g_notify->deleteLater();
+        }
+        g_notify = new NotifyWindow(kind, title, content, seconds, tts);
+        g_notify->showWindow();
+    }
+
+private:
+    explicit NotifyWindow(Kind kind, const QString &title, const QString &content, int seconds, bool tts)
+        : m_kind(kind), m_title(title), m_content(content), m_seconds(seconds), m_tts(tts)
+    {
+        setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
+        setAttribute(Qt::WA_DeleteOnClose);
+        // 真透明背景：圆角外透出桌面，而不是一块黑底（2026-10-04 用户要求"圆角+透明背景"）
+        setAttribute(Qt::WA_TranslucentBackground);
+
+        // 长度限制：标题/正文各限长，超长截断加省略号——防止长广播把固定高度的窗撑爆
+        // （2026-10-04 用户要求"长度限制"；显示与 TTS 都读同一份截断文本，口径一致）
+        static const int kTitleCap = 24;
+        static const int kContentCap = 64;
+        const QString t = (m_title.length() > kTitleCap)
+                              ? m_title.left(kTitleCap) + QStringLiteral("…")
+                              : m_title;
+        QString c = m_content.trimmed();
+        if (c.length() > kContentCap)
+            c = c.left(kContentCap) + QStringLiteral("…");
+        m_combined = c.isEmpty() ? t : t + QStringLiteral("：") + c;
+
+        auto *lay = new QVBoxLayout(this);
+        lay->setContentsMargins(24, 16, 24, 16);
+        m_label = new QLabel(m_combined, this);
+        m_label->setAlignment(Qt::AlignCenter);
+        m_label->setWordWrap(false);
+        // 字号随长度自适应（短则大，长则缩）—— 复刻旧插件 BuildSingleLineFontSize 思路
+        m_label->setStyleSheet(QStringLiteral(
+            "font-weight:700; color:#ffffff; background:transparent;"
+            "font-size:%1px;").arg(fontSizeFor(m_combined.length())));
+        lay->addWidget(m_label);
+
+        // 淡入：先透明再渐显（Qt 无内置透明度动画，用 QPropertyAnimation 要引动画模块——省了，
+        // 直接 opacity 立即显示即可，教室大屏场景不需要过度动画）
+    }
+
+    ~NotifyWindow() { if (g_notify == this) g_notify = nullptr; }
+
+    void showWindow()
+    {
+        QScreen *screen = QGuiApplication::primaryScreen();
+        if (!screen) { close(); return; }
+        const QRect geo = screen->geometry();
+
+        if (m_kind == Fullscreen) {
+            setGeometry(geo);
+            // 全屏遮罩：半透明黑底 + 居中大字（紧急感）
+            setStyleSheet(QStringLiteral("background:rgba(0,0,0,200); border:none;"));
+        } else if (m_kind == Island) {
+            // 灵动岛：顶部居中细长胶囊（≈ 高度 64px、宽度随内容 60% 屏宽）
+            const int w = qMin(geo.width() * 6 / 10, 720);
+            const int h = 64;
+            setGeometry(geo.x() + (geo.width() - w) / 2, geo.y() + 24, w, h);
+            setStyleSheet(QStringLiteral(
+                "background:rgba(20,20,20,215); border-radius:%1px; border:none;").arg(h / 2));
+            m_label->setStyleSheet(m_label->styleSheet() + QStringLiteral(" font-size:22px;"));
+        } else {
+            // popup 居中弹窗：圆角卡片，宽 40% 屏、高 140
+            const int w = qMin(geo.width() * 2 / 5, 520);
+            const int h = 140;
+            setGeometry(geo.x() + (geo.width() - w) / 2, geo.y() + (geo.height() - h) / 2, w, h);
+            setStyleSheet(QStringLiteral(
+                "background:rgba(30,30,30,215); border-radius:16px; border:1px solid #666;"));
+        }
+
+        show();
+        raise();
+        activateWindow();
+
+        // TTS 朗读（调用方要求时）：读截断后的完整内容（标题：正文），与显示一致
+        if (m_tts) speakText(m_combined);
+
+        // 到点自动收起；0/缺省 → 自适应（短 5s、长内容按字数抬高，复刻旧插件公式）
+        const int durMs = m_seconds > 0
+                              ? qMin(m_seconds, 3600) * 1000
+                              : qMax(5000.0, 2500.0 + m_combined.length() * 120.0);
+        QTimer::singleShot(durMs, this, &QWidget::close);
+    }
+
+    static int fontSizeFor(int len)
+    {
+        // 短 → 特大（48px）；长 → 逐步缩小，最低 18px
+        if (len <= 8) return 48;
+        if (len <= 16) return 36;
+        if (len <= 32) return 28;
+        if (len <= 64) return 22;
+        return 18;
+    }
+
+    Kind m_kind;
+    QString m_title;
+    QString m_content;
+    QString m_combined;
+    int m_seconds;
+    bool m_tts;
+    QLabel *m_label = nullptr;
+    static NotifyWindow *g_notify;
+};
+
+NotifyWindow *NotifyWindow::g_notify = nullptr;
+
+// 解析 params（kind/title/content/seconds/notice_id/flags）并弹窗。
+// 返回 "" = 成功；非空 = 错误（调用方转 failed 回执）。
+static QString notifyFromParams(const QJsonObject &params)
+{
+    const QString kind = params.value(QStringLiteral("kind")).toString().trimmed().toLower();
+    const QString title = params.value(QStringLiteral("title")).toString().trimmed();
+    if (title.isEmpty())
+        return QStringLiteral("notify 缺 title");
+    const QString content = params.value(QStringLiteral("content")).toString();
+    const int seconds = params.value(QStringLiteral("seconds")).toInt(0);
+    // flags.speech → TTS 朗读（缺省不读，避免每教室都响）
+    const QJsonObject flags = params.value(QStringLiteral("flags")).toObject();
+    const bool tts = flags.value(QStringLiteral("speech")).toBool(false)
+                     || flags.value(QStringLiteral("speech_enabled")).toBool(false);
+
+    NotifyWindow::Kind k = NotifyWindow::Popup;
+    if (kind == QStringLiteral("island")) k = NotifyWindow::Island;
+    else if (kind == QStringLiteral("fullscreen")) k = NotifyWindow::Fullscreen;
+    else k = NotifyWindow::Popup;   // popup 及未知值一律居中弹窗（安全默认）
+
+    NotifyWindow::showNotice(k, title, content, seconds, tts);
+
+    // popup 额外进 Windows 通知中心（静默通知列表留存）——托盘存在时才发得出来
+    if (k == NotifyWindow::Popup && g_tray) {
+        g_tray->showMessage(title, content.trimmed().isEmpty() ? title : content,
+                            QSystemTrayIcon::Information, 10000);
+    }
+    return QString();   // 成功
 }
 
 ExecOut executeAction(const QString &action, const QJsonObject &params)
@@ -1632,6 +2141,23 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
+    // 2026-10-04（乙阶段 2）：大屏通知（notify）——popup 居中弹窗 / island 灵动岛 / fullscreen 全屏遮罩，
+    // 可配 TTS 朗读。站点广播（broadcast.ts）改走云端 WS 指令通道后，教室大屏不再依赖 CIMS。
+    if (action == QStringLiteral("notify")) {
+        const QString err = notifyFromParams(params);
+        if (!err.isEmpty()) {
+            out.result = QStringLiteral("failed");
+            out.error = err;
+            return out;
+        }
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("notice_id"),
+                        params.value(QStringLiteral("notice_id")).toVariant().toJsonValue());
+        out.data.insert(QStringLiteral("kind"),
+                        params.value(QStringLiteral("kind")).toString(QStringLiteral("popup")));
+        return out;
+    }
+
     out.result = QStringLiteral("failed");
     out.error = QStringLiteral("未知指令：%1").arg(action);
     return out;
@@ -1641,6 +2167,195 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
 //
 // 入向统一：v1 信封与旧扁平格式都化成 (type, payload, id)，
 // 这样"云端切了 v1-strict / 退回 legacy"两种情况下本端都还能读懂，不会静默失联。
+
+// ===== WebRTC 推流：内藏一个 QWebEngineView 跑采集页（canvas.captureStream）=====
+// 不用 getDisplayMedia：那要用户手势授权，教室机无人值守必死。
+static const char *kRtcPage = R"RTCPAGE(<!doctype html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;background:#000"><canvas id="cv" width="640" height="400"></canvas>
+<script>
+(function () {
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var pc = null;
+  var st = { state: 'init', frames: 0, err: '' };
+  window.__st = st;
+  window.__sigq = [];
+  function sig(kind, sdp, cand) { window.__sigq.push({ kind: kind, sdp: sdp || '', candidate: cand || '' }); }
+  window.__signal = function (o) { sig(o.kind, o.sdp, o.candidate); };
+  window.__drain = function () { var a = window.__sigq; window.__sigq = []; return a; };
+  window.__pushFrame = function (b64) {
+    try {
+      var img = new Image();
+      img.onload = function () { try { ctx.drawImage(img, 0, 0, cv.width, cv.height); st.frames++; } catch (e) { st.err = 'draw:' + e; } };
+      img.onerror = function () { st.err = 'decode-fail'; };
+      img.src = 'data:image/jpeg;base64,' + b64;
+    } catch (e) { st.err = 'push:' + e; }
+  };
+  window.__startStream = function () {
+    try {
+      if (st.state === 'negotiating' || st.state === 'streaming') return st.state;
+      // 不配 iceServers：只收 host candidate。被控端与管理端在同一校园网/内网，够用；
+      // 且不受外网 STUN 通不通影响（教室机演示时 STUN 一慢，ICE 收集就卡住，画面上不来）。
+      pc = new RTCPeerConnection();
+      var stream = cv.captureStream(15);
+      stream.getTracks().forEach(function (t) { try { pc.addTrack(t, stream); } catch (e) { st.err = 'addtrack:' + e; } });
+      st.state = 'negotiating';
+      st.gather = pc.iceGatheringState;
+      st.conn = pc.iceConnectionState;
+      st.senders = pc.getSenders().length;
+      st.tracks = pc.getSenders().reduce(function (n, s) { return n + s.track.length; }, 0);
+      pc.ontrack = function () { st.state = 'streaming'; };
+      pc.onicecandidate = function (ev) { if (ev && ev.candidate) sig('ice', '', ev.candidate); };
+      pc.onconnectionstatechange = function () {
+        if (pc.connectionState === 'connected') st.state = 'streaming';
+        if (pc.connectionState === 'failed') { st.err = 'pc-failed'; st.state = 'failed'; }
+      };
+      pc.createOffer().then(function (o) { return pc.setLocalDescription(o); })
+        .then(function () {
+            st.gather = pc.iceGatheringState;
+            st.conn = pc.iceConnectionState;
+            sig('offer', pc.localDescription.sdp, '');
+        })
+        .catch(function (e) { st.err = 'offer:' + e; st.state = 'failed'; });
+    } catch (e) { st.err = 'start:' + e; st.state = 'failed'; }
+    return st.state;
+  };
+  window.__reset = function () { try { if (pc) pc.close(); } catch (e) {} st.state = 'init'; st.err = ''; };
+  // 诊断出口：pc / sigq 是闭包内的，页面全局作用域访问不到，只能从这里拿
+  window.__diag = function () {
+    return JSON.stringify(st) + ' | q=' + sigq.length + ' | pc=' + (pc ? 'y' : 'n')
+         + ' | gd=' + (pc ? pc.iceGatheringState : '-') + ' | cc=' + (pc ? pc.iceConnectionState : '-')
+         + ' | sdp=' + (pc && pc.localDescription ? pc.localDescription.sdp.length : -1);
+  };
+})();
+</script></body></html>)RTCPAGE";
+
+// 本端信令（offer / ice）发回云端，云端中继给管理端。
+static void rtcSendSignal(const QString &kind, const QString &sdp, const QString &cand)
+{
+    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) {
+        qWarning("[rtc] FAIL 信令没发出去（socket 不在线）kind=%s", qPrintable(kind));
+        return;
+    }
+    QJsonObject body;
+    body.insert(QStringLiteral("kind"), kind);
+    if (!sdp.isEmpty()) body.insert(QStringLiteral("sdp"), sdp);
+    if (!cand.isEmpty()) body.insert(QStringLiteral("candidate"), cand);
+    QJsonObject pay;
+    pay.insert(QStringLiteral("payload"), body);
+    pay.insert(QStringLiteral("from"), QStringLiteral("agent"));
+    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("rtc-") + kind, pay));
+}
+
+// 每 200ms：抓屏 → JPEG → 灌进采集页画布 → canvas 出帧 → 取回本端信令
+static int g_rtcDiagTick = 0;
+static void rtcTickOnce()
+{
+    if (!g_rtcOn || !g_rtcView) return;
+    if (++g_rtcDiagTick % 10 == 0) {   // 每 2 秒捞一次采集页内部状态
+        g_rtcView->page()->runJavaScript(
+            QStringLiteral("window.__diag()"),
+            [](const QVariant &v) {
+                qWarning("[rtc] tick %s", qPrintable(v.toString()));
+            });
+    }
+    QScreen *sc = QGuiApplication::primaryScreen();
+    if (!sc) { qWarning("[rtc] FAIL 没拿到屏幕，停推"); g_rtcOn = false; return; }
+    // 采集页是 setHtml 异步加载的：rtcStart 那一下页面可能还没 ready，
+    // 这时的 runJavaScript 会静默失败。所以每 tick 都调一次 __startStream（幂等：已在 negotiating/streaming 就直接 return）。
+    g_rtcView->page()->runJavaScript(QStringLiteral("window.__startStream();"));
+    const QPixmap pm = sc->grabWindow();
+    if (pm.isNull()) { qWarning("[rtc] FAIL 抓屏是空图"); return; }
+    QByteArray buf;
+    QBuffer dev(&buf);
+    if (!dev.open(QIODevice::WriteOnly)) { qWarning("[rtc] FAIL 缓冲打不开"); return; }
+    pm.save(&dev, "JPEG", 55);
+    dev.close();
+    g_rtcView->page()->runJavaScript(
+        QStringLiteral("window.__pushFrame('%1')").arg(QString::fromUtf8(buf.toBase64())));
+    g_rtcView->page()->runJavaScript(QStringLiteral("window.__drain()"), [](const QVariant &v) {
+        if (!v.canConvert<QJsonArray>()) return;
+        const QJsonArray arr = v.toJsonArray();
+        for (const QJsonValue &it : arr) {
+            const QJsonObject o = it.toObject();
+            const QString kind = o.value(QStringLiteral("kind")).toString();
+            if (kind == QLatin1String("offer")) {
+                rtcSendSignal(QStringLiteral("offer"), o.value(QStringLiteral("sdp")).toString(), QString());
+            } else if (kind == QLatin1String("ice")) {
+                rtcSendSignal(QStringLiteral("ice"), QString(), o.value(QStringLiteral("candidate")).toString());
+            } else if (kind == QLatin1String("err")) {
+                qWarning("[rtc] FAIL 采集页报错：%s", qPrintable(o.value(QStringLiteral("msg")).toString()));
+            }
+        }
+    });
+}
+
+// 把 QString 转义成 JS 字符串字面量。QString 没有 toJson，只能手拼。
+// 每一步单独赋值：MSVC 下 QStringLiteral 宏内部带 '+」，裸在链式表达式里会把加法解析搅乱。
+static QString rtcJsString(const QString &v)
+{
+    const QString bs = QStringLiteral("\\\\");      // 反斜杠 → 两个反斜杠（JS 转义）
+    const QString eq = QStringLiteral("\\\"");
+    // replace 是非 const 成员，q1/q2/src 都不能是 const，否则重载解析会挑中那些"要改 this"的重载
+    QString src = v;
+    QString q1 = src.replace(QLatin1Char('\\'), bs);
+    QString q2 = q1.replace(QStringLiteral("\""), eq);   // 匹配串用 QString：QChar 版只吃单字符
+    const QString tpl = QStringLiteral("\"%1\"");
+    const QString out = tpl.arg(q2);
+    return out;
+}
+
+// 管理端回过来的 answer / ice，喂给采集页的 RTCPeerConnection
+static void rtcFeedSignal(const QString &kind, const QString &sdp, const QString &cand)
+{
+    if (!g_rtcView) return;
+    const QString a = rtcJsString(kind);
+    const QString b = rtcJsString(sdp);
+    const QString c = rtcJsString(cand);
+    const QString p1 = QStringLiteral("window.__signal({kind:");
+    const QString p2 = QStringLiteral(",sdp:");
+    const QString p3 = QStringLiteral(",candidate:");
+    const QString p4 = QStringLiteral("});");
+    const QString js = p1 + a + p2 + b + p3 + c + p4;
+    g_rtcView->page()->runJavaScript(js);
+}
+
+static void rtcStart()
+{
+    if (g_rtcOn && g_rtcView) return;
+    if (!g_rtcView) {
+        // 必须 show 一次（只 show 再 hide 会让 Chromium unmap，出黑帧）；放屏幕外不影响用户
+        g_rtcView = new QWebEngineView();
+        g_rtcView->setAttribute(Qt::WA_DeleteOnClose, false);
+        g_rtcView->show();
+        g_rtcView->setGeometry(-3000, -3000, 640, 400);
+        g_rtcView->page()->setHtml(QString::fromUtf8(kRtcPage), QUrl(QStringLiteral("http://127.0.0.1/agent.html")));
+    }
+    g_rtcOn = true;
+    if (!g_rtcTick) {
+        g_rtcTick = new QTimer();
+        g_rtcTick->setInterval(200);
+        QObject::connect(g_rtcTick, &QTimer::timeout, []() { rtcTickOnce(); });
+    }
+    g_rtcTick->start();
+    g_rtcView->page()->runJavaScript(QStringLiteral("window.__startStream();"));
+    // 诊断：把采集页内部状态和 RTCPeerConnection 可用性捞出来（推不出来时必须看得到原因，不许静默）
+    g_rtcView->page()->runJavaScript(QStringLiteral("JSON.stringify(window.__st) + ' | PC=' + (typeof RTCPeerConnection)"),
+                                     [](const QVariant &v) {
+                                         qWarning("[rtc] diag %s", qPrintable(v.toString()));
+                                     });
+    qInfo("[rtc] 推流已开（有人在看）");
+}
+
+static void rtcStop(const QString &why)
+{
+    if (!g_rtcOn) return;
+    g_rtcOn = false;
+    if (g_rtcTick) g_rtcTick->stop();
+    if (g_rtcView) g_rtcView->page()->runJavaScript(QStringLiteral("window.__reset();"));
+    qInfo("[rtc] 推流已停：%s", qPrintable(why));
+}
+
 void handleControlText(const QString &text)
 {
     const QByteArray raw = text.toUtf8();
@@ -1672,7 +2387,7 @@ void handleControlText(const QString &text)
             if (g_hbTimer) g_hbTimer->setInterval(g_heartbeatMs);
         }
         if (to > 0) g_timeoutMs = to;
-        updateTray(true, QStringLiteral("已连接"));
+        updateTray(TrayState::Connected, QStringLiteral("已连接"));
         qInfo("[agent-qt] ✅ 云端已确认注册 v1（uid=%s，server=%s，心跳 %d ms，超时 %d ms）",
               qPrintable(pay.value(QStringLiteral("uid")).toString()),
               qPrintable(pay.value(QStringLiteral("server")).toString()),
@@ -1680,6 +2395,26 @@ void handleControlText(const QString &text)
         return;
     }
 
+    if (type == QStringLiteral("rtc-start")) {
+        qInfo("[rtc] 云端要开推流（有人在看）"); rtcStart();
+        return;
+    }
+    if (type == QStringLiteral("rtc-stop")) {
+        qInfo("[rtc] 云端要停推流（没人看了）"); rtcStop(QStringLiteral("云端 rtc-stop"));
+        return;
+    }
+    if (type == QStringLiteral("rtc-offer")) {
+        rtcFeedSignal(QStringLiteral("offer"), pay.value(QStringLiteral("sdp")).toString(), QString());
+        return;
+    }
+    if (type == QStringLiteral("rtc-answer")) {
+        rtcFeedSignal(QStringLiteral("answer"), pay.value(QStringLiteral("sdp")).toString(), QString());
+        return;
+    }
+    if (type == QStringLiteral("rtc-ice")) {
+        rtcFeedSignal(QStringLiteral("ice"), QString(), pay.value(QStringLiteral("candidate")).toString());
+        return;
+    }
     if (type == QStringLiteral("error")) {
         // 统一错误通道：云端拒绝必须看得见（fail-silent 红线）。code 是机器可读的，message 是人话。
         fprintf(stderr, "[agent-qt] FAIL: 云端拒绝 → %s：%s\n",
@@ -1773,8 +2508,18 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);   // 要托盘 → QApplication（托盘在 QtWidgets 里）
 
+    // 关键：常驻托盘程序**不能**在"最后一个窗口关闭时退出"。
+    // 默认 quitOnLastWindowClosed=true —— 配置窗是本进程唯一的窗口，老师一点「以后再说」/
+    // 保存关窗，整个被控端就跟着退了（托盘也一起没），比不配置还糟。必须关掉这个默认行为。
+    app.setQuitOnLastWindowClosed(false);
+
     // Windows GUI 程序里 qInfo 默认走 OutputDebugString，重定向到文件就是空的——
     // 被控端没有日志等于瞎子。这里把 Qt 日志全部接管到 stdout/stderr。
+
+    // WebRTC 专用：QtWebEngine 的 Chromium 沙箱会让 WebRTC 的 ICE 收集永远停在 "new"
+    //（不报任何错，画面就是出不来）；mDNS 地址隐藏会让内网拿到 .local 域名也连不上。
+    // 被控端跑在教室机/本机这类受控 Windows 上，关掉是安全的。
+    qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox --disable-features=WebRtcHideLocalIpsWithMdns");
     qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &, const QString &msg) {
         FILE *out = (type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg)
                         ? stderr : stdout;
@@ -1786,19 +2531,28 @@ int main(int argc, char *argv[])
             abort();
     });
 
+    // 数据目录放 %LOCALAPPDATA%\xingjikong\（与既有约定一致，覆盖升级天然保留历史）。
+    // 截图目录默认**不再**落在当前工作目录 —— 装机后 cwd 是哪全看启动器，落在那儿等于丢了。
+    // ⚠️ 这段必须**早于任何日志**：appendLogFile 在 g_logPath 为空时直接丢日志，
+    //    而下面读 agent.env 之后的"未配置"告警要靠它落盘留证（否则用户/运维都看不到）。
+    const QString dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
+    QDir().mkpath(dataDir);
+    g_shotDir = qEnvironmentVariable("STE_QT_SHOT_DIR", dataDir + QStringLiteral("/shots"));
+    if (!g_shotDir.isEmpty()) QDir().mkpath(g_shotDir);
+    g_logPath = qEnvironmentVariable("STE_QT_LOG", dataDir + QStringLiteral("/agent-qt.log"));
+
     // 自启时计划任务**直接拉 exe**（不再经 bat）→ 配置得由自己从同目录的 agent.env 读。
     // 2026-10-03 实测：计划任务里套一层 `cmd /c start-agent.bat` 会**卡住不退出**，
     // 任务永远 Running、被控端根本没被拉起。
     const int envN = loadEnvFile(QCoreApplication::applicationDirPath() + QStringLiteral("/agent.env"));
     if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（exe 同目录）", envN);
 
-    // 数据目录放 %LOCALAPPDATA%\xingjikong\（与既有约定一致，覆盖升级天然保留历史）。
-    // 截图目录默认**不再**落在当前工作目录 —— 装机后 cwd 是哪全看启动器，落在那儿等于丢了。
-    const QString dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
-    QDir().mkpath(dataDir);
-    g_shotDir = qEnvironmentVariable("STE_QT_SHOT_DIR", dataDir + QStringLiteral("/shots"));
-    if (!g_shotDir.isEmpty()) QDir().mkpath(g_shotDir);
-    g_logPath = qEnvironmentVariable("STE_QT_LOG", dataDir + QStringLiteral("/agent-qt.log"));
+    // ── 配置校验（2026-10-04）：缺 URL 或 TOKEN = 未配置，必须可见地报出来（图标+日志+气泡），
+    //    不再"进程在跑、静默重试"让老师误以为装好了。此刻托盘还没建，goUnconfigured 只负责落盘告警；
+    //    托盘建好后会再刷一次"未配置"图标并弹一次气泡。 ──
+    g_configured = !qEnvironmentVariable("STE_QT_WS_URL").trimmed().isEmpty()
+                   && !qEnvironmentVariable("STE_QT_WS_TOKEN").trimmed().isEmpty();
+    if (!g_configured) goUnconfigured();
 
     // ── 调度与媒体库的持久化路径（2026-10-03 修复）──
     // 这三个变量**只在文件头声明过、从来没赋过值**：
@@ -1827,6 +2581,14 @@ int main(int argc, char *argv[])
         g_actStatus = menu->addAction(QStringLiteral("状态：正在启动…"));
         g_actStatus->setEnabled(false);      // 只显示，不可点
         menu->addSeparator();
+        // 首次运行配置窗的入口：老师在界面里填云端地址/令牌/设备名，写回同目录 agent.env。
+        auto *actConfig = menu->addAction(QStringLiteral("配置…"));
+        QObject::connect(actConfig, &QAction::triggered, &app, [] { openConfigDialog(); });
+        // 未配置时"去哪儿配"的落点：直接打开 exe 同目录（agent.env 就放这儿）
+        auto *actEnv = menu->addAction(QStringLiteral("打开 agent.env 所在目录"));
+        QObject::connect(actEnv, &QAction::triggered, &app, [] {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(QCoreApplication::applicationDirPath()));
+        });
         auto *actData = menu->addAction(QStringLiteral("打开数据目录"));
         QObject::connect(actData, &QAction::triggered, &app, [] {
             const QString dir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
@@ -1840,8 +2602,15 @@ int main(int argc, char *argv[])
         auto *actQuit = menu->addAction(QStringLiteral("退出被控端"));
         QObject::connect(actQuit, &QAction::triggered, &app, &QApplication::quit);
         g_tray->setContextMenu(menu);
-        updateTray(false, QStringLiteral("正在连接…"));
-        g_tray->show();
+        if (g_unconfigured) {
+            // 配置校验时已落过盘；这里把图标刷成"未配置"，气泡留到 show() 之后再弹
+            updateTray(TrayState::Unconfigured,
+                       QStringLiteral("未配置：%1（右键托盘 →「配置…」）").arg(unconfiguredReason()));
+        } else {
+            updateTray(TrayState::Disconnected, QStringLiteral("正在连接…"));
+        }
+        g_tray->show();             // 先设图标再 show，避免 "No Icon set" 警告
+        notifyUnconfiguredOnce();   // show 之后再弹气泡（托盘可见才弹得出来）
         qInfo("[agent-qt] 托盘已就绪");
     } else {
         fprintf(stderr, "[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口\n");
@@ -1860,7 +2629,16 @@ int main(int argc, char *argv[])
     // （Qt 6.8 的 aboutToClose() 不带参数，拿不到 close code，所以退到 socket 错误串 + 上下文判断。）
     QObject::connect(g_ws, &QWebSocket::disconnected, &app, [] {
         g_registered = false;
-        updateTray(false, QStringLiteral("未连接（重试中）"));
+        // 未配置态：不改图标、不重试（连接本就没意义，别把"未配置"覆盖回"未连接（重试中）"）
+        if (g_unconfigured) return;
+        // 保存新配置后主动断开的这一跳：立刻用新配置重连，不排退避
+        if (g_reconnectNow) {
+            g_reconnectNow = false;
+            updateTray(TrayState::Disconnected, QStringLiteral("正在用新配置连接…"));
+            QTimer::singleShot(0, connectNow);
+            return;
+        }
+        updateTray(TrayState::Disconnected, QStringLiteral("未连接（重试中）"));
         fprintf(stderr, "[agent-qt] FAIL: 云端断开（%lld 帧已发）\n", g_frameBytes);
         if (!g_registered) {   // 连上了却从没拿到 registered 就被断开 = 握手/令牌没过
             fprintf(stderr, "[agent-qt]   └ 本轮 register 未通过云端校验 —— 先查令牌（STE_QT_WS_TOKEN）与云端 CLOUD_WS_TOKEN 是否一致，再看云端 events.log\n");
@@ -1906,6 +2684,16 @@ int main(int argc, char *argv[])
 
     connectNow();
     QMetaObject::invokeMethod(&timer, "timeout", Qt::QueuedConnection);
+
+    // ── 首次运行（未配置）自动弹一次配置向导 ──
+    // 判据：走到这里 g_unconfigured=true ⇔ agent.env 不存在 或 URL/令牌为空（loadEnvFile 后判定）。
+    // 用 singleShot 延后到事件循环起来、窗口就绪之后再 exec，绝不在构造函数里直接 exec 阻塞启动。
+    // 只在有托盘/桌面时弹（Session0 服务态没有桌面，弹窗会无人可关、卡死进程）。
+    // 老师点「以后再说」即可跳过；关掉后未配置态的托盘告警照旧保留。
+    if (g_unconfigured && g_tray) {
+        qInfo().noquote() << QStringLiteral("[agent-qt] 检测到未配置，稍后自动打开配置向导（可点「以后再说」跳过）");
+        QTimer::singleShot(700, &app, [] { openConfigDialog(); });
+    }
 
     return app.exec();
 }
