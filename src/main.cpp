@@ -25,7 +25,17 @@
 // 2026-10-04 换了个新文件名（viewer-run.log）。原因：老 viewer.log 从某次起再也没被写过，
 // 而 writeLog 失败时会静默丢日志（fail-silent 红线），现象和"程序没起来"完全一样 ——
 // 没法区分就没法排障。换名 + 写不进就喊出来，一次就能分清（见 writeLog）。
-static const char *kLogFile = "D:/Stelarith/Stelarith-viewer-qt/viewer-run.log";
+//
+// ⚠️ 这里曾经**硬编码成迁移前的旧工程路径**（D:/Stelarith/Stelarith-viewer-qt/viewer-run.log）。
+// 后果和 shotDir 那次一模一样：目录恰好还在，于是日志一直被写进那个废弃工程里，
+// 当前工程下反而找不到 —— 上次修了 shotDir 却漏了这一处，白找半天。
+// 现在改成随工作目录走（跟 shotDir 一致），并留 STE_VIEWER_LOG 供部署时显式指定。
+static QString logFilePath()
+{
+    const QString env = QString::fromLocal8Bit(qgetenv("STE_VIEWER_LOG")).trimmed();
+    if (!env.isEmpty()) return env;
+    return QDir::currentPath() + QStringLiteral("/viewer-run.log");
+}
 static FILE *g_log = nullptr;
 static bool g_logTried = false;
 
@@ -33,15 +43,17 @@ static void writeLog(const char *s)
 {
     if (!g_log && !g_logTried) {
         g_logTried = true;
-        g_log = fopen(kLogFile, "w");
+        const QByteArray path = logFilePath().toLocal8Bit();
+        g_log = fopen(path.constData(), "w");
         if (!g_log) {
             // 写不进必须**喊出来**：静默丢日志的时候，现场只剩下"好像跑了但什么都没记"，
             // 比压根没日志还贵。控制台跑这一步一定看得见。
-            fprintf(stderr, "[viewer] FAIL 日志写不进 %s —— 后面所有日志都会丢，请改用控制台运行\n", kLogFile);
+            fprintf(stderr, "[viewer] FAIL 日志写不进 %s —— 后面所有日志都会丢，请改用控制台运行\n",
+                    path.constData());
             fflush(stderr);
             return;
         }
-        fprintf(g_log, "=== viewer-qt 启动，日志=%s ===\n", kLogFile);
+        fprintf(g_log, "=== viewer-qt 启动，日志=%s ===\n", path.constData());
         fflush(g_log);
     }
     if (!g_log) return;
@@ -339,6 +351,32 @@ int main(int argc, char *argv[])
         auto *w = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         if (!w) return;
         const QString path = shotDir + QStringLiteral("/qml-schedialog.png");
+        if (w->grabWindow().save(path))
+            logf("[viewer] 界面自检图已存 %s", path.toUtf8().constData());
+        else
+            logf("[viewer] FAIL 界面自检图存失败 %s", path.toUtf8().constData());
+    });
+
+    // 第 9.5 张：音量回执（画面右下角那个音量数字）。
+    //
+    // 为什么单独补这一步：viewfoot 里的音量**只认 set_volume 回执里的 data.volume**，
+    // 不认滑块拖出来的值（那是本机数字，被控端没确认过，写上去就是假装成功）。
+    // 自检原来一条 set_volume 都不发，所以那个数字永远是 -1、永远不显示 ——
+    // 光看界面截图会误以为"音量显示这块坏了"，其实是没喂过数据。
+    // 这里真发一条，抓到的图里才能看出"回执到了 → 数字真的亮出来"。
+    QTimer::singleShot(24000, &backend, [&backend, &engine] {
+        QJsonObject p;
+        p.insert(QStringLiteral("value"), 55);
+        QMetaObject::invokeMethod(&backend, "sendAction",
+                                  Q_ARG(QString, QStringLiteral("set_volume")),
+                                  Q_ARG(QJsonObject, p));
+        if (!engine.rootObjects().isEmpty()) engine.rootObjects().first()->setProperty("page", 1);
+    });
+    QTimer::singleShot(26500, &app, [&engine, shotDir] {
+        if (engine.rootObjects().isEmpty()) return;
+        auto *w = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        if (!w) return;
+        const QString path = shotDir + QStringLiteral("/qml-volume.png");
         if (w->grabWindow().save(path))
             logf("[viewer] 界面自检图已存 %s", path.toUtf8().constData());
         else
