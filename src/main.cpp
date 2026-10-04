@@ -105,6 +105,17 @@ QTimer *g_hbTimer = nullptr;   // 心跳定时器（registered 拿到参数后�
 static QWebEngineView *g_rtcView = nullptr;
 static QTimer *g_rtcTick = nullptr;
 static bool g_rtcOn = false;
+// 采集页回收定时器（2026-10-05 内存优化）：没人看画面这件事在机房里是常态（几十台机器
+// 同时挂着被控端，老师只看其中一两台）。原来 rtc-stop 只让页面里跑一个 __reset()，
+// QWebEngineView 和它拉起来的 Chromium 渲染进程（QtWebEngineProcess，实测 ~137MB 常驻）
+// 一直不回收 → 一年到头内存只涨不降。这里改成"停推 → 延迟几秒 → 真删 view"。
+static QTimer *g_rtcReap = nullptr;
+// 云端离线起始时刻（0 = 在线）：采集页回收的兜底触发源。
+// 为什么不能只靠云端的 rtc-stop 广播：实测管理端进程被强杀（不是正常退订）时，
+// 云端不会补发这一下 —— 采集页和它拉起来的 Chromium 渲染进程（~137MB）就一直挂着。
+// 而"云端连不上"这个信号是本地就能看出来的，而且连接断了画面本来也到不了任何人眼里的，
+// 拿它当回收触发源不会误杀正在看的画面。
+static qint64 g_offlineSince = 0;
 
 QString g_logPath;             // 被控端日志落盘（装机后没有 stdout，没日志就只能靠猜）
 QString g_shotDir;             // 截图/存图目录（screenshot 动作与抓屏都用它）
@@ -2412,9 +2423,28 @@ static void rtcSendSignal(const QString &kind, const QString &sdp, const QString
 static int g_rtcDiagTick = 0;
 // 云端回执说"这条信令没送到对端"时置位，下一个 tick 就重新 offer（不用干等 8 秒超时）
 static bool g_rtcForceReoffer = false;
+static void rtcStop(const QString &why);   // 定义在下面（rtcStart/rtcStop 那一段），这里要给 tick 用
+
 static void rtcTickOnce()
 {
     if (!g_rtcOn || !g_rtcView) return;
+
+    // 云端离线看门狗：跟云端断了这么久还没连回来，就当没人看画面，停推 + 回收采集页。
+    // 判据不用"多久没收到对端信令"—— 画面稳定后对端本来就不发东西了，那样数会误杀正在看的画面；
+    // 改用"跟云端断多久"，断了的这条链路本来就送不到任何一个人眼里，回收没有代价。
+    // 阈值可用 STE_RTC_IDLE_MS 覆盖，方便排障时调小值快验。
+    if (g_offlineSince) {
+        const qint64 off = QDateTime::currentMSecsSinceEpoch() - g_offlineSince;
+        // 空 = 用默认 20 秒；显式写 0 = 关掉这个兜底（别让默认值把开关吃掉）
+        const QByteArray envIdle = qgetenv("STE_RTC_IDLE_MS");
+        const qint64 limit = envIdle.isEmpty() ? 20000 : QString::fromLocal8Bit(envIdle).toLongLong();
+        if (limit <= 0) return;
+        if (off > limit) {
+            rtcStop(QStringLiteral("与云端断开 %1 秒，画面送不出去，先收采集页").arg(off / 1000));
+            return;
+        }
+    }
+
     if (++g_rtcDiagTick % 10 == 0) {   // 每 2 秒捞一次采集页内部状态
         g_rtcView->page()->runJavaScript(
             QStringLiteral("window.__diag()"),
@@ -2492,9 +2522,41 @@ static void rtcFeedSignal(const QString &kind, const QString &sdp, const QString
     g_rtcView->page()->runJavaScript(js);
 }
 
+// 真删采集页。用 deleteLater 而不是 delete：正在往事件循环里排的 runJavaScript 回调
+// 还攥着 page 指针，当场 delete 会打在半路上。
+static void releaseRtcView()
+{
+    if (!g_rtcView) return;
+    g_rtcView->close();
+    g_rtcView->deleteLater();
+    g_rtcView = nullptr;
+    qInfo("[rtc] 采集页已回收（Chromium 渲染进程随之退出）");
+}
+
+// 延迟回收：给"刚停又马上要看"留一段窗口，避免 rtc-stop/rtc-start 抖动时反复拉起/销毁
+// Chromium（重建一次要几百毫秒，还会在云端留下一次 offer 重协商）。
+static void scheduleRtcViewReap()
+{
+    if (!g_rtcReap) {
+        g_rtcReap = new QTimer();
+        g_rtcReap->setSingleShot(true);
+        g_rtcReap->setInterval(5000);
+        QObject::connect(g_rtcReap, &QTimer::timeout, []() { releaseRtcView(); });
+    }
+    g_rtcReap->stop();
+    g_rtcReap->start();
+}
+
+static void cancelRtcViewReap()
+{
+    if (g_rtcReap && g_rtcReap->isActive()) g_rtcReap->stop();
+}
+
 static void rtcStart()
 {
     if (g_rtcOn && g_rtcView) return;
+    g_offlineSince = 0;           // 重新推流 = 还在线上，离线看门狗解除
+    cancelRtcViewReap();          // 上一轮还在倒计时就别回收了，直接复用现有的 view
     if (!g_rtcView) {
         // 必须 show 一次（只 show 再 hide 会让 Chromium unmap，出黑帧）；放屏幕外不影响用户
         g_rtcView = new QWebEngineView();
@@ -2526,6 +2588,8 @@ static void rtcStop(const QString &why)
     if (g_rtcTick) g_rtcTick->stop();
     if (g_rtcView) g_rtcView->page()->runJavaScript(QStringLiteral("window.__reset();"));
     qInfo("[rtc] 推流已停：%s", qPrintable(why));
+    // 采集页先留着 5 秒，没人重新点开就回收（省的是那 137MB 的 Chromium 渲染进程）
+    scheduleRtcViewReap();
 }
 
 void handleControlText(const QString &text)
@@ -2831,6 +2895,7 @@ int main(int argc, char *argv[])
     QObject::connect(g_ws, &QWebSocket::connected, &app, [] {
         qInfo("[agent-qt] 已连上云端（等待 register 回执）");
         g_backoffMs = 1000;      // 连上了就重置退避
+        g_offlineSince = 0;      // 离线看门狗重新计
         sendRegister();
     });
 
@@ -2838,6 +2903,9 @@ int main(int argc, char *argv[])
     // （Qt 6.8 的 aboutToClose() 不带参数，拿不到 close code，所以退到 socket 错误串 + 上下文判断。）
     QObject::connect(g_ws, &QWebSocket::disconnected, &app, [] {
         g_registered = false;
+        // 采集页回收兜底的起点只认**第一次**断连：每退避重连失败一次就把起点刷新一次的话，
+        // 倒计时会被无限往后推，看门狗永远走不到头（实测断线 26 秒、重连失败 3 次就没触发过）。
+        if (!g_offlineSince) g_offlineSince = QDateTime::currentMSecsSinceEpoch();
         // 未配置态：不改图标、不重试（连接本就没意义，别把"未配置"覆盖回"未连接（重试中）"）
         if (g_unconfigured) return;
         // 保存新配置后主动断开的这一跳：立刻用新配置重连，不排退避
