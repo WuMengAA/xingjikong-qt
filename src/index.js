@@ -5,13 +5,16 @@
 //   POST /api/instructions    下发指令（设备不在线返回 409，绝不谎报 sent）
 //   GET  /api/events          事件流水（最近 50 条）
 //   GET  /api/frame?uid=...   最近一帧（管理端 D4 用；内存里，不落盘）
+//   GET  /api/instructions/notice?notice_id=...  按通知查回执（站点广播对账，2026-10-04）
+//   指令队列：已下发未回执的落盘（见 store.js）——设备重连按原顺序补发、云端重启不丢
 
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import { PORT, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
-  HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE } from './config.js';
+  HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS } from './config.js';
 import { verifyViewerTicket } from './ticket.js';
+import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 
 /** 发一条协议消息（自动按对端版本选格式），失败不静默。 */
@@ -33,12 +36,47 @@ function sndErr(ws, code, detail) {
 import {
   pushEvent, markConnected, markDisconnected, addFrame, setRecentFrame,
   listDevices, getDevice, sendInstruction, listEvents, listPending, ensureEventsFile,
-  addViewer, removeViewer, subscribeViewer, pinViewer, autoSubscribeViewers,
+  addViewer, removeViewer, subscribeViewer, unsubscribeViewer, pinViewer, autoSubscribeViewers,
   broadcastFrame, broadcastDevices, broadcastToViewers, recordResult, getResult, viewerCount,
   touchHeartbeat, sweepStale,
+  rtcSignalToAgent, rtcRelayToViewers, rtcRelayToAgent,
 } from './registry.js';
 
+/**
+ * 设备重连成功后，把它"已下发但没等到回执"的指令按原下发顺序补发。
+ * 这是本功能的核心动作：没有它，教室机离线一次、那条指令就永久漏了。
+ * 补发用**原来的 id**（设备回执按 id 配对），状态仍是未回执，等设备真回执了才销账。
+ */
+function replayPending(ws, uid) {
+  const items = listPending(uid);
+  if (!items.length) return;
+  let sent = 0;
+  for (const it of items) {
+    const text = (ws.__v1 === true)
+      ? wrapOutgoing(true, 'instruction', { action: it.action, params: it.params }, String(it.id))
+      : JSON.stringify({ type: 'instruction', action: it.action, params: it.params, id: it.id, at: new Date(it.dispatchedAt).toISOString() });
+    try {
+      ws.send(text);
+      sent++;
+    } catch (e) {
+      pushEvent('error', '重连补发失败：写 socket 出错', { uid, id: it.id, action: it.action, error: e.message });
+      break;
+    }
+  }
+  pushEvent('info', '设备重连：补发未回执指令', { uid, total: items.length, sent });
+}
+
 ensureEventsFile();
+initStore();                 // 打开指令队列（已下发未回执的落盘文件），重启后从这里恢复
+if (!storeReady()) pushEvent('error', '指令队列不可持久化：本次运行期间设备重连补发与重启不丢均失效');
+
+// 启动先清一次：把上轮残留的过期未回执/已回执行处理掉，再开始收新指令
+{
+  const r = sweepQueue();
+  if (r.expiredByTtl || r.expiredByCap || r.purged) {
+    pushEvent('info', '启动队列清扫完成', r);
+  }
+}
 
 if (DEV_TOKEN_IS_DEFAULT) {
   console.warn(`[cloud] ⚠ 正在使用内置开发令牌 "${DEV_TOKEN}"，生产环境请设环境变量 CLOUD_WS_TOKEN`);
@@ -59,6 +97,26 @@ const server = http.createServer((req, res) => {
     res.end(body);
   };
 
+  // HTTP 管理面鉴权（2026-10-04 · 乙阶段收尾 + 补洞）：
+  // /api/instructions / /api/devices / /api/events / /api/frame / /api/instructions/pending
+  // 是"发指令/读设备表/读画面/读事件"的管理操作，此前完全无鉴权 ——
+  // 本机任意进程都能发指令、读教室机画面（被控端是 Windows 单机场景，
+  // 可信边界收紧到"持 viewer 令牌"）。/api/frame 是实时画面，最敏感，必须关死。
+  // 用 VIEWER_TOKEN（与桌面管理端同一信任级），Bearer 头；缺/错 → 401 fail-closed。
+  // ⚠️ 站点广播（broadcast.ts）是唯一合法调用方，已同步带 Bearer 头。
+  const isManageApi =
+    u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
+    u.pathname === '/api/events' || u.pathname === '/api/frame' ||
+    u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice';
+  if (isManageApi) {
+    const auth = req.headers.authorization || '';
+    const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+    if (!token || token !== VIEWER_TOKEN) {
+      pushEvent('warn', 'HTTP 管理面鉴权失败，已拒绝', { path: u.pathname });
+      return send(401, { ok: false, error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN>' });
+    }
+  }
+
   if (req.method === 'GET' && u.pathname === '/api/devices') {
     return send(200, { ok: true, count: listDevices().length, devices: listDevices() });
   }
@@ -69,7 +127,15 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && u.pathname === '/api/instructions/pending') {
     const uid = u.searchParams.get('uid');
-    return send(200, { ok: true, pending: uid ? listPending(uid) : Object.fromEntries(listPending(uid ?? '')) });
+    // 带 uid → 该设备"已下发未回执"的数组（按原顺序）；不带 → 全部设备按 uid 分组
+    return send(200, { ok: true, pending: listPending(uid) });
+  }
+
+  if (req.method === 'GET' && u.pathname === '/api/instructions/notice') {
+    // 站点广播对账：按 notice_id 查这批指令的回执状态（2026-10-04）
+    const noticeId = Number(u.searchParams.get('notice_id') || 0);
+    if (!noticeId) return send(400, { ok: false, error: '缺 notice_id' });
+    return send(200, { ok: true, noticeId, receipts: receiptsByNotice(noticeId) });
   }
 
   if (req.method === 'GET' && u.pathname === '/api/frame') {
@@ -200,17 +266,30 @@ viewerWss.on('connection', (ws) => {
     }
 
     switch (p.type) {
+      // WebRTC 信令（P1-A 实时画面）：云端只转发、不解析内容；对方不在线/没订阅都如实回执，不静默
+      case 'rtc-offer':
+      case 'rtc-answer':
+      case 'rtc-ice': {
+        const uid = p.payload.uid;
+        // 管理端主动建 offer 时用（from='viewer'）；收到 from='cloud' 说明是订阅开关，不该走信令分支
+        const r = rtcRelayToAgent(uid, p.type, p.payload);
+        snd(ws, 'rtc-relayed', { uid, ok: r.ok, to: r.to, type: p.type, detail: r.detail || '' });
+        return;
+      }
       case 'subscribe': {
         pinViewer(ws); // 管理端自己挑了 → 以后不再自动给它补别的设备
         const uid = p.payload.uid;
         const ok = subscribeViewer(ws, uid);
         snd(ws, 'subscribed', { uid: ok ? uid : null, ok });
+        // 有人在看了 -> 通知设备把 WebRTC 实时推流起起来（设备端起不来会自己回落到截图像轮播）
+        if (ok) rtcSignalToAgent(uid, 'rtc-start', { uid });
         return;
       }
       case 'unsubscribe': {
         // 按需拉流预留：不再看这台就退订，云端将来可据此让设备停推
         const ok = unsubscribeViewer(ws, p.payload.uid);
         snd(ws, 'unsubscribed', { uid: ok ? p.payload.uid : null, ok });
+        if (ok) rtcSignalToAgent(p.payload.uid, 'rtc-stop', { uid: p.payload.uid });
         return;
       }
       case 'devices':
@@ -264,6 +343,16 @@ setInterval(() => {
   }
 }, SWEEP_INTERVAL_MS);
 
+// 指令队列清扫：过期未回执作废 / 每台超上限丢最旧 / 已回执超保留期删除 —— 否则队列表只增不减。
+setInterval(() => {
+  try {
+    const r = sweepQueue();
+    if (r.expiredByTtl || r.expiredByCap || r.purged) pushEvent('info', '指令队列清扫完成', r);
+  } catch (e) {
+    pushEvent('error', '指令队列清扫异常', { error: e.message });
+  }
+}, QUEUE_SWEEP_INTERVAL_MS);
+
 wss.on('connection', (ws) => {
   let registered = false;
   let uid = null;
@@ -314,6 +403,8 @@ wss.on('connection', (ws) => {
         heartbeatMs: HEARTBEAT_INTERVAL_MS,
         timeoutMs: HEARTBEAT_TIMEOUT_MS,
       });
+      // 重连补发：这台机器掉线期间"已下发未回执"的指令，按原顺序重发给它（内部无待补发则不动作）。
+      replayPending(ws, uid);
       return;
     }
 
@@ -337,6 +428,19 @@ wss.on('connection', (ws) => {
     const p = parseIncoming(data.toString('utf8'));
     if (!p.ok) { sndErr(ws, p.code, p.detail); return; }
     if (!p.legacy) ws.__v1 = true;
+
+    if (p.type === 'rtc-offer' || p.type === 'rtc-answer' || p.type === 'rtc-ice') {
+      // 设备 -> 管理端 的信令：只投给订阅了这台的管理端（同源的已在 registry 层被防回声挡掉）
+      const r = rtcRelayToViewers(uid, p.type, p.payload);
+      snd(ws, 'rtc-relayed', { uid, ok: r.ok, to: r.to, type: p.type, detail: r.detail || '' });
+      return;
+    }
+
+    if (p.type === 'rtc-start' || p.type === 'rtc-stop') {
+      // 云端的「有人在看了 / 没人看了」开关：设备端自己起停 WebRTC 推流，这里只记一条事件流水便于排障
+      pushEvent('info', '设备收到 WebRTC 开关 ' + p.type, { uid });
+      return;
+    }
 
     if (p.type === 'heartbeat') {
       // 存活信号：与帧解耦（按需拉流后没人看的机器不推帧，帧不能当存活依据）

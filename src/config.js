@@ -49,3 +49,27 @@ export const PROTOCOL_MODE = (process.env.CLOUD_PROTOCOL_MODE || 'v1-compat').tr
 
 // 事件流水落盘文件
 export const EVENTS_FILE = process.env.CLOUD_EVENTS_FILE || 'events.log';
+
+/* ---------- 指令队列落盘（P0：设备离线一次不能永久漏掉那条指令）----------
+ * 只解决"已下发但没等到回执"这一种丢失：那种指令落盘 → 云端重启不丢 → 设备重连按原顺序补发。
+ * 设备**不在线**时下发的指令不进队列（离线一律仍返回 409，绝不把离线当成功）。
+ * 用 Node 内置的 node:sqlite（本机 v22.22.2 与生产运行的 v24.14.0 均实测可用，零新增依赖）。
+ */
+export const QUEUE_DB_FILE = process.env.CLOUD_QUEUE_DB_FILE || 'instruction-queue.db';
+
+// 未回执指令的存活上限（TTL）：超过就作废、不再补发。
+// 取 24 小时的理由：覆盖单次断电/断网/夜间维护这类"短暂离线"；再久的指令多半已经失效甚至有害
+// ——比如一条"关机/锁屏"隔了一两天、设备一重连就突然执行，那比丢掉更糟。宁可判过期，也不隔夜补刀。
+export const PENDING_TTL_MS = Number(process.env.CLOUD_PENDING_TTL_MS || 24 * 60 * 60 * 1000);
+
+// 单台设备"未回执"指令条数上限：超了丢最旧的那几条（标记 expired，不静默）。
+// 取 50 的理由：一个班一节课的下发量级是个位数，50 足够覆盖一次离线期的正常指令；
+// 又能挡住"面板被刷 / 云端出 bug"把队列撑爆——每台无限增长会让重连瞬间批量执行上百条指令。
+export const PENDING_MAX_PER_DEVICE = Number(process.env.CLOUD_PENDING_MAX_PER_DEVICE || 50);
+
+// 已回执（done/failed/expired）行在队列表里的保留期：只是短时审计追溯，过期即删。
+// 取 24 小时的理由：完整留痕已经在 events.log 里，队列表没必要长期留；删掉避免 DB 无限增大。
+export const SETTLED_RETENTION_MS = Number(process.env.CLOUD_SETTLED_RETENTION_MS || 24 * 60 * 60 * 1000);
+
+// 队列清扫周期：定期把"过期未回执 / 超上限 / 已回执超保留期"的行处理掉。
+export const QUEUE_SWEEP_INTERVAL_MS = Number(process.env.CLOUD_QUEUE_SWEEP_INTERVAL_MS || 5 * 60 * 1000);
