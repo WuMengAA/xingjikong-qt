@@ -27,6 +27,10 @@
 #include <QDesktopServices>
 #include <QTimer>
 #include <QScreen>
+// ⚠️ WebEngine 的拉起时机由"第一次 new QWebEngineView"决定，见 rtcStart()：
+// 只要不在 main 里提前 new，Chromium 就不会在进程启动时被拉起来。
+// 反过来，如果哪天有人在 main 开头 new 一个 QWebEngineView（哪怕只是为了"预热"），
+// 就得回 ~456MB 私有内存 / 78 线程的常驻，跟按需加载互相抵消。
 #include <QWebEngineView>
 #include <QPixmap>
 #include <QDateTime>
@@ -82,6 +86,8 @@
 namespace {
 
 constexpr int kFrameIntervalMs = 2000;   // 2 秒一帧，与 D2 保持一致
+// 采集页回收延迟：rtc-stop 后留这么久，没人重新点开就真删（见 scheduleRtcViewReap）
+constexpr int kRtcReapDelayMs = 5000;
 constexpr int kHeartbeatIntervalMs = 10000; // 心跳缺省值（云端 registered 里给了就以云端为准）
 constexpr int kMaxBackoffMs = 15000;
 constexpr int kProtocolVersion = 1;      // 协议 v1（《星集控-协议规范v1-2026-10-03.md》）
@@ -116,6 +122,8 @@ static QTimer *g_rtcReap = nullptr;
 // 而"云端连不上"这个信号是本地就能看出来的，而且连接断了画面本来也到不了任何人眼里的，
 // 拿它当回收触发源不会误杀正在看的画面。
 static qint64 g_offlineSince = 0;
+static bool g_webEngineReady = false;   // 见 ensureWebEngine()：按需拉，用完不卸（卸载由 Qt 决定）
+static bool g_rtcPageReady = false;     // 采集页 loadFinished 过没有（setHtml 是异步的）
 
 QString g_logPath;             // 被控端日志落盘（装机后没有 stdout，没日志就只能靠猜）
 QString g_shotDir;             // 截图/存图目录（screenshot 动作与抓屏都用它）
@@ -2428,6 +2436,10 @@ static void rtcStop(const QString &why);   // 定义在下面（rtcStart/rtcStop
 static void rtcTickOnce()
 {
     if (!g_rtcOn || !g_rtcView) return;
+    // 页面还在 setHtml 的异步加载窗口里：这会儿 runJavaScript 全是对着 about:blank 执行，
+    // 一律静默失败（__startStream / __diag / __drain 都不存在）。等 loadFinished 起第一枪就行，
+    // 这里直接跳过 —— 顺手把以前"每 tick 对着空白页刷一堆空转调用"也省了。
+    if (!g_rtcPageReady) return;
 
     // 云端离线看门狗：跟云端断了这么久还没连回来，就当没人看画面，停推 + 回收采集页。
     // 判据不用"多久没收到对端信令"—— 画面稳定后对端本来就不发东西了，那样数会误杀正在看的画面；
@@ -2454,8 +2466,8 @@ static void rtcTickOnce()
     }
     QScreen *sc = QGuiApplication::primaryScreen();
     if (!sc) { qWarning("[rtc] FAIL 没拿到屏幕，停推"); g_rtcOn = false; return; }
-    // 采集页是 setHtml 异步加载的：rtcStart 那一下页面可能还没 ready，
-    // 这时的 runJavaScript 会静默失败。所以每 tick 都调一次 __startStream（幂等：已在 negotiating/streaming 就直接 return）。
+    // __startStream 已经在 loadFinished 里起过第一枪（幂等：已在 negotiating/streaming 就直接 return），
+    // 这里再兜一次是给"重连后页面还在、但推流被 __reset 打断"的情况收尾。
     g_rtcView->page()->runJavaScript(QStringLiteral("window.__startStream();"));
     // 自愈先跑：上一次 offer 没等到 answer（多半是发出时没人订阅、被云端丢了）就重来一次
     if (g_rtcForceReoffer) {
@@ -2540,7 +2552,7 @@ static void scheduleRtcViewReap()
     if (!g_rtcReap) {
         g_rtcReap = new QTimer();
         g_rtcReap->setSingleShot(true);
-        g_rtcReap->setInterval(5000);
+        g_rtcReap->setInterval(kRtcReapDelayMs);
         QObject::connect(g_rtcReap, &QTimer::timeout, []() { releaseRtcView(); });
     }
     g_rtcReap->stop();
@@ -2552,17 +2564,59 @@ static void cancelRtcViewReap()
     if (g_rtcReap && g_rtcReap->isActive()) g_rtcReap->stop();
 }
 
+/**
+ * 按需把 WebEngine 拉起来（2026-10-05 内存优化）。
+ *
+ * 为什么不能干脆去掉 QWebEngineView 改用纯 C++ WebRTC：被控端这套采集页（kRtcPage）
+ * 靠的就是 Chromium 自带的 RTCPeerConnection + canvas.captureStream，自己拿 libwebrtc
+ * 重写一遍是几千行的事，也谈不上"就地优化"。
+ *
+ * 能省下的是**进程常驻**那一块：Chromium 一旦起过就在主进程里留着（私有内存 ~456MB、
+ * 78 线程，Qt 删掉 view 也卸不掉）。机房几十台机器整天没人看画面，这份常驻是纯浪费。
+ * 所以把"拉起来"这件事推迟到**真的有人要看**的时刻：rtcStart() 里现拉。
+ *
+ * setHtml 的页面生命周期由 QWebEngineProfile::defaultProfile() 管（keep-alive 项默认 30 秒，
+ * 可在 profile 上再压，但那是后端调），所以这里只管进程，不用管页面。
+ *
+ * 失败必须**大声报**：拉不起来就等于 RTC 不可用，不能像以前那样静默黑屏。
+ */
+static bool ensureWebEngine()
+{
+    if (g_webEngineReady) return true;
+    // 这两行必须在 createWebEngineProcess() 之前：都是喂给 Chromium 的启动参数。
+    // ⚠️ 第一行是 WebRTC 的命门：不关沙箱，ICE 收集会永远停在 "new"，且**不报任何错**。
+    qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
+            "--no-sandbox --disable-features=WebRtcHideLocalIpsWithMdns");
+    // 被控端跑在教室机/本机这类受控 Windows 上，多渲染进程的内存开销没必要摊（我们就一个页面）
+    qputenv("QTWEBENGINE_DISABLE_SANDBOX", "1");
+
+    // ⚠️ 这里**不再**调 QtWebEngineQuick::initialize()。
+    // 实测（2026-10-05）：在 Qt6 动态构建 + Widgets 程序里运行时调它，进程会卡死在启动期
+    //（只剩 2 个线程、11MB、不连网络、不写日志、完全无输出），属于启动期死锁。
+    // 运行时的 Chromium 拉起由 QWebEngineView 本身触发就够（Qt 在 WebEngineWidgets 的
+    // 插件里做了这件事），这个函数是给**静态构建**做 pre-link 用的。
+    // 结论：什么都不用调；真正要保证的只有"环境变量早于第一次 new QWebEngineView"（上面两行）。
+    g_webEngineReady = true;
+    qInfo("[rtc] WebEngine 已按需就绪（Chromium 进程会在首次建 view 时启动）");
+    return true;
+}
+
 static void rtcStart()
 {
     if (g_rtcOn && g_rtcView) return;
     g_offlineSince = 0;           // 重新推流 = 还在线上，离线看门狗解除
     cancelRtcViewReap();          // 上一轮还在倒计时就别回收了，直接复用现有的 view
+    if (!ensureWebEngine()) {     // 有人要看画面了，这会儿才把 Chromium 拉起来
+        qWarning("[rtc] 没有 WebEngine，放弃推流");
+        return;
+    }
     if (!g_rtcView) {
         // 必须 show 一次（只 show 再 hide 会让 Chromium unmap，出黑帧）；放屏幕外不影响用户
         g_rtcView = new QWebEngineView();
         g_rtcView->setAttribute(Qt::WA_DeleteOnClose, false);
         g_rtcView->show();
         g_rtcView->setGeometry(-3000, -3000, 640, 400);
+        g_rtcPageReady = false;
         g_rtcView->page()->setHtml(QString::fromUtf8(kRtcPage), QUrl(QStringLiteral("http://127.0.0.1/agent.html")));
     }
     g_rtcOn = true;
@@ -2572,13 +2626,31 @@ static void rtcStart()
         QObject::connect(g_rtcTick, &QTimer::timeout, []() { rtcTickOnce(); });
     }
     g_rtcTick->start();
-    g_rtcView->page()->runJavaScript(QStringLiteral("window.__startStream();"));
-    // 诊断：把采集页内部状态和 RTCPeerConnection 可用性捞出来（推不出来时必须看得到原因，不许静默）
-    g_rtcView->page()->runJavaScript(QStringLiteral("JSON.stringify(window.__st) + ' | PC=' + (typeof RTCPeerConnection)"),
-                                     [](const QVariant &v) {
-                                         qWarning("[rtc] diag %s", qPrintable(v.toString()));
-                                     });
-    qInfo("[rtc] 推流已开（有人在看）");
+    // ⚠️ 这里**不**再直接 runJavaScript("window.__startStream()")：
+    // page->setHtml() 是异步的，刚 new 出来的 view 还在 about:blank 上，函数根本不存在，
+    // 调用会静默抛 "Uncaught TypeError: window.__startStream is not a function"（C++ 侧收不到任何错）。
+    // 以前日志里那行 TypeError 就是这么来的 —— 靠 rtcTickOnce() 每 200ms 兜一遍蒙对了，
+    // 但窗口期里 __drain/__diag 全都空转，首帧要等好几百毫秒才出。
+    // 现在显式等 loadFinished 再起第一枪，并把这个"页面就绪"状态记下来（rtcTickOnce 用它省掉重试）。
+    g_rtcPageReady = false;
+    QObject::connect(g_rtcView->page(), &QWebEnginePage::loadFinished, g_rtcView->page(),
+                     [](bool ok) {
+                         if (!g_rtcView) return;
+                         g_rtcPageReady = true;
+                         if (!ok) {
+                             qWarning("[rtc] FAIL 采集页加载失败 —— 推流起不来");
+                             return;
+                         }
+                         g_rtcView->page()->runJavaScript(QStringLiteral("window.__startStream();"));
+                         // 诊断：把采集页内部状态和 RTCPeerConnection 可用性捞出来
+                         //（推不出来时必须看得到原因，不许静默）
+                         g_rtcView->page()->runJavaScript(
+                             QStringLiteral("JSON.stringify(window.__st) + ' | PC=' + (typeof RTCPeerConnection)"),
+                             [](const QVariant &v) {
+                                 qWarning("[rtc] diag %s", qPrintable(v.toString()));
+                             });
+                         qInfo("[rtc] 采集页就绪，推流已开");
+                     });
 }
 
 static void rtcStop(const QString &why)
@@ -2708,6 +2780,21 @@ void captureAndSend(const QString &outDir)
     QElapsedTimer cost;
     cost.start();
 
+    // 云端不在就别抓了（2026-10-05）。
+    // 抓屏是这条链路里最贵的一步：grabWindow 要跨进程取整个屏幕位图，再整张 QPixmap 压 JPEG；
+    // 而抓完的结果**一帧都送不出去**（sendBinaryMessage 对着断开的 socket 直接返回 0）。
+    // 原来这里照样每 2 秒抓一张、照样编码、只在最后 if(online) 里丢掉，日志刷满
+    // "帧#N 离线（B 未发）" —— 机房几十台机器一起空转就是这个量级。
+    // 特别注意：这个提前返回要排在 grabWindow 和 JPEG 编码**之前**，否则省不下来。
+    const bool online = g_ws && g_ws->state() == QAbstractSocket::ConnectedState;
+    if (!online) {
+        // 每 30 次（约 1 分钟）留一行心跳式的离线提示：全静默会让"云端挂了"这件事在日志里消失
+        static int skipped = 0;
+        if (++skipped % 30 == 1)
+            qInfo("[agent-qt] 云端不在，跳过抓屏（累计跳过 %d 次）", skipped);
+        return;
+    }
+
     QScreen *screen = QGuiApplication::primaryScreen();
     if (!screen) {
         fprintf(stderr, "[agent-qt] FAIL: 找不到主屏\n");
@@ -2739,20 +2826,15 @@ void captureAndSend(const QString &outDir)
             fprintf(stderr, "[agent-qt] FAIL: 本地存图失败 → %s\n", qPrintable(path));
     }
 
-    const bool online = g_ws && g_ws->state() == QAbstractSocket::ConnectedState;
-    if (online) {
-        // v1 二进制帧：[1B 版本][2B 大端 headerLen][header JSON][JPEG]，带 seq —— 旧裸帧没有序号，
-        // 将来按需拉流、断帧重传、测 fps 全靠它。
-        const QByteArray frame = makeFrameBytes(g_uid, g_frameSeq + 1, jpeg);
-        const qint64 n = g_ws->sendBinaryMessage(frame);
-        g_frameSeq++;
-        g_frameBytes += jpeg.size();   // 只累计 JPEG 净荷，跟云端 bytesIn 对账才对得上
-        qInfo("[agent-qt] 帧#%d 推送 %lld B 净荷（含帧头 %lld B，累计 %.2f MB，耗时 %lldms）",
-              g_frameSeq, (qint64)jpeg.size(), n, g_frameBytes / 1048576.0, cost.elapsed());
-    } else {
-        qInfo("[agent-qt] 帧#%d 离线（%lld B 未发）—— 云端不在，先只本地抓屏",
-              ++g_frameSeq, (qint64)jpeg.size());
-    }
+    // 走到这里一定是 online（离线分支已在函数开头提前返回）。
+    // v1 二进制帧：[1B 版本][2B 大端 headerLen][header JSON][JPEG]，带 seq —— 旧裸帧没有序号，
+    // 将来按需拉流、断帧重传、测 fps 全靠它。
+    const QByteArray frame = makeFrameBytes(g_uid, g_frameSeq + 1, jpeg);
+    const qint64 n = g_ws->sendBinaryMessage(frame);
+    g_frameSeq++;
+    g_frameBytes += jpeg.size();   // 只累计 JPEG 净荷，跟云端 bytesIn 对账才对得上
+    qInfo("[agent-qt] 帧#%d 推送 %lld B 净荷（含帧头 %lld B，累计 %.2f MB，耗时 %lldms）",
+          g_frameSeq, (qint64)jpeg.size(), n, g_frameBytes / 1048576.0, cost.elapsed());
 }
 
 } // namespace
@@ -2787,12 +2869,10 @@ int main(int argc, char *argv[])
     // Windows GUI 程序里 qInfo 默认走 OutputDebugString，重定向到文件就是空的——
     // 被控端没有日志等于瞎子。这里把 Qt 日志全部接管到 stdout/stderr。
 
-    // WebRTC 专用：QtWebEngine 的 Chromium 沙箱会让 WebRTC 的 ICE 收集永远停在 "new"
-    //（不报任何错，画面就是出不来）；mDNS 地址隐藏会让内网拿到 .local 域名也连不上。
-    // 被控端跑在教室机/本机这类受控 Windows 上，关掉是安全的。
-    // ⚠️ 这行必须在任何 QWebEngineView 创建**之前**执行（环境变量要早于 Chromium 启动），
-    //   挪到后面就失效，症状是"ICE 永远 gathering= new、画面黑屏且无任何报错"。
-    qputenv("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox --disable-features=WebRtcHideLocalIpsWithMdns");
+    // ⚠️ 这里原来有一行 qputenv("QTWEBENGINE_CHROMIUM_FLAGS", ...)，2026-10-05 挪进
+    //    ensureWebEngine() 了 —— 因为 Chromium 现在是**按需加载**（不是进程启动就起），
+    //    环境变量必须紧贴"拉起 Chromium"那一刻设，放进程开头反而可能与实际启动时机脱节。
+    //    那一行的作用（不关沙箱 → ICE 永远停在 "new"、黑屏且无报错）见那里的注释。
     qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &, const QString &msg) {
         FILE *out = (type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg)
                         ? stderr : stdout;
