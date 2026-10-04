@@ -19,6 +19,7 @@
 
 class QTimer;
 class QWebSocket;
+class QWebEngineView;
 
 /** 全局日志（定义在 main.cpp；backend 与界面共用同一份落盘日志）。 */
 void logf(const char *fmt, ...);
@@ -48,8 +49,18 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QString fileError READ fileError NOTIFY fileProgressChanged)
     Q_PROPERTY(QString fileTarget READ fileTarget NOTIFY fileProgressChanged)
 
+    // ── WebRTC 收流（T-3，2026-10-04）──
+    // 管理端做 answer 侧：被控端 captureStream 推 video track → 云端中继 →
+    // 这里 QWebEngineView 离屏跑 RTCPeerConnection.setRemoteDescription(offer) →
+    // createAnswer 回云端 → ontrack 拿到 track 塞进 <video> → 抽帧走现有 frame 通道。
+    // 只收、不发——发是 agent 侧的事。
+    Q_PROPERTY(bool rtcReady READ rtcReady NOTIFY rtcStateChanged)
+    Q_PROPERTY(QString rtcState READ rtcState NOTIFY rtcStateChanged)
+
 public:
     explicit ViewerBackend(QObject *parent = nullptr);
+    /** 析构：QWebEngineView 必须在 event loop 停止之后销毁，否则 Chromium 直接崩。 */
+    ~ViewerBackend() override;
 
     /** 读环境变量（STE_VIEWER_URL / STE_VIEWER_TOKEN）并开始连接。 */
     void start();
@@ -76,6 +87,10 @@ public:
     int filePercent() const { return m_filePercent; }
     QString fileError() const { return m_fileError; }
     QString fileTarget() const { return m_fileTarget; }
+
+    // RTC 读数
+    bool rtcReady() const { return m_rtcReady; }
+    QString rtcState() const { return m_rtcState; }
 
     /** 切到某台设备 → 向云端订阅它的画面。 */
     void setCurrentUid(const QString &uid);
@@ -106,6 +121,18 @@ public:
     /** 中断当前推送：让被控端把半截文件关掉、清会话（不留下半个坏文件在那台机器上）。 */
     Q_INVOKABLE void cancelPush();
 
+    // ── QWebChannel 回调（JS → C++，收流页里的 __qt.* 就是调这四个）──
+    /** JS 抽到的一帧 JPEG（base64，可能带 data: 前缀）；复用 frame 通道交给 QML。 */
+    Q_INVOKABLE void setRtcFrame(const QString &b64);
+    /** 远端 answer 的 SDP 字符串（正常流里管理端不产出，仅日志记录）。 */
+    Q_INVOKABLE void rtcGotAnswer(const QString &sdp);
+    /** 远端 ICE candidate 的 JSON 字符串。 */
+    Q_INVOKABLE void rtcGotIce(const QString &candidateJson);
+    /** JS 侧的诊断输出（setOffer/ontrack/ICE 全程）。 */
+    Q_INVOKABLE void rtcDiag(const QString &s);
+    /** JS 侧 ontrack 触发（真正拿到远端视频轨）。 */
+    Q_INVOKABLE void rtcGotTrack();
+
 signals:
     void connectedChanged();
     void authedChanged();
@@ -117,6 +144,8 @@ signals:
     void cloudUrlChanged();
     /** 文件推送进度：状态/文件名/已推字节/百分比/失败原因/落盘路径，全走这一个信号。 */
     void fileProgressChanged();
+    /** WebRTC 收流链路状态变化（ready / negotiating / failed / idle）。 */
+    void rtcStateChanged();
     /** 帧没画成（解码失败等）——界面可以往屏幕上说明一句，别让画面无声无息不动。 */
     void frameDropped(const QString &reason);
     /** 鉴权被拒：界面应停止重连并把原因显示出来。 */
@@ -144,6 +173,10 @@ private:
     void setFileFail(const QString &why);
     void clearFilePush();
 
+    // ── WebRTC 收流内部 ──
+    void initRtcView();          // 懒建 QWebEngineView + 注入 answer 侧 JS
+    void setRtcState(const QString &s);
+
     QWebSocket *m_ws = nullptr;
     QTimer *m_fpsTimer = nullptr;
 
@@ -170,6 +203,11 @@ private:
     QString m_pushPath;        // 本机文件路径（便于报错时把路径直接说出来）
     QFile m_pushFile;          // 本机文件句柄（推完/取消就关，不留着）
     qint64 m_pushNext = 0;     // 下一片的 seq（被控端只认严格递增）
+
+    // ── WebRTC 收流现场 ──
+    QWebEngineView *m_rtcView = nullptr;
+    bool m_rtcReady = false;
+    QString m_rtcState = QStringLiteral("idle");
 
     QJsonArray m_devices;
     QImage m_frame;

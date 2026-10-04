@@ -9,6 +9,7 @@
 #include "viewerbackend.h"
 
 #include <QGuiApplication>
+#include <QApplication>
 #include <QImage>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -24,7 +25,7 @@
 // 2026-10-04 换了个新文件名（viewer-run.log）。原因：老 viewer.log 从某次起再也没被写过，
 // 而 writeLog 失败时会静默丢日志（fail-silent 红线），现象和"程序没起来"完全一样 ——
 // 没法区分就没法排障。换名 + 写不进就喊出来，一次就能分清（见 writeLog）。
-static const char *kLogFile = "C:/Users/Administrator/Documents/stelarith-viewer-qt/viewer-run.log";
+static const char *kLogFile = "D:/Stelarith/Stelarith-viewer-qt/viewer-run.log";
 static FILE *g_log = nullptr;
 static bool g_logTried = false;
 
@@ -116,6 +117,12 @@ int loadEnvFile(const QString &path)
         if (line.startsWith(QLatin1Char('#'))) continue;
         if (line.startsWith(QStringLiteral("rem"), Qt::CaseInsensitive)) continue;
         if (line.startsWith(QStringLiteral("set "), Qt::CaseInsensitive)) line = line.mid(4).trimmed();
+        // 与被控端 stelarith-control-qt 同一个 bug、同一处修法（2026-10-04）：
+        // `set "KEY=VALUE"` 的引号包住的是整个 KEY=VALUE，不是只包 VALUE。不先剥这层整体引号，
+        // key 会解析成 "STE_VIEWER_TOKEN（带前导引号）→ qputenv 设了个没人读的变量名 →
+        // 配置静默失效，表现为"能启动但连不上云端，且不报错"。
+        if (line.size() >= 2 && line.startsWith(QLatin1Char('"')) && line.endsWith(QLatin1Char('"')))
+            line = line.mid(1, line.size() - 2).trimmed();
         const int eq = line.indexOf(QLatin1Char('='));
         if (eq <= 0) continue;
         const QString key = line.left(eq).trimmed();
@@ -153,7 +160,10 @@ private:
 int main(int argc, char *argv[])
 {
     installMessageHandler();
-    QGuiApplication app(argc, argv);
+    // QApplication 而不是 QGuiApplication：T-3 的 WebRTC 收流要 QWebEngineView（Widgets 版），
+    // 后者必须在 QApplication 上跑。QGuiApplication 下 WebEngine 初始化即崩（不是 warning，是崩）。
+    // 副作用只是多链 Qt6::Widgets（本来就链了，为了 QFileDialog），没有额外负担。
+    QApplication app(argc, argv);
 
     // 双击即用：配置（云端地址/令牌）从 exe 同目录的 viewer.env 读 —— 不要求先设环境变量。
     // 必须在 backend.start() 之前读完：start() 里立刻取 STE_VIEWER_URL / STE_VIEWER_TOKEN。
@@ -177,7 +187,7 @@ int main(int argc, char *argv[])
     // 开机自检图：**三页各抓一张**（0 概览 / 1 控制 / 2 设置）。
     // 界面到底"画出来了没有"要能自证 —— 不能拿"进程活着"当证据。
     // （窗口被别的窗口挡住时，grabWindow 依然抓得到自身内容，所以这条路可用。）
-    const QString shotDir = QStringLiteral("C:/Users/Administrator/Documents/stelarith-viewer-qt/shots");
+    const QString shotDir = QStringLiteral("D:/Stelarith/Stelarith-viewer-qt/shots");
     QDir().mkpath(shotDir);
     // 两轮 × 三页 = 6 张：第一轮黑白、第二轮浅色。
     // 深色好看、浅色发花是常见病，所以两种主题**每页都要抓**，不能只看一页。
