@@ -325,17 +325,57 @@
         </div>
         <div class="row">
           <label>动作</label>
-          <select id="insAction">
-            <option value="screenshot">screenshot（截图）</option>
-            <option value="volume">volume（调音量）</option>
-            <option value="lock">lock（锁屏）</option>
-            <option value="shutdown">shutdown（关机）</option>
-            <option value="restart">restart（重启）</option>
-            <option value="kill_process">kill_process（结束进程）</option>
-            <option value="list_process">list_process（进程列表）</option>
-            <option value="open_url">open_url（打开网页）</option>
-            <option value="message">message（弹消息）</option>
-            <option value="upgrade">upgrade（OTA 升级）</option>
+          <!-- ⚠️ 这里的动作名必须和被控端 executeAction() 分发表里那一串**逐字一致**。
+               旧版这一栏写的是 volume/restart/kill_process/list_process/open_url/message/upgrade
+               ——被控端一个都不认，点了只会收到 回执 failed: 未知指令：<动作名>。
+               现按被控端源码（Stelarith-control-qt/src/main.cpp）逐个核过，共 32 个。 -->
+          <select id="insAction" onchange="onActionChange()">
+            <optgroup label="基础与状态">
+              <option value="ping" data-params="{}">ping（连通性探测）</option>
+              <option value="screenshot" data-params="{}">screenshot（截屏）</option>
+              <option value="lock" data-params="{}">lock（锁屏）</option>
+              <option value="shutdown" data-params="{}">shutdown（关机）</option>
+              <option value="reboot" data-params="{}">reboot（重启）</option>
+              <option value="set_volume" data-params='{"value":50}'>set_volume（音量 0-100）</option>
+              <option value="input" data-params='{"kind":"move","x":0.5,"y":0.5}'>input（键鼠注入：kind/x/y）</option>
+            </optgroup>
+            <optgroup label="应用与进程">
+              <option value="launch_app" data-params='{"target":"notepad"}'>launch_app（启动程序：target）</option>
+              <option value="open_app" data-params='{"target":"notepad"}'>open_app（launch_app 别名）</option>
+              <option value="list_shortcut_candidates" data-params="{}">list_shortcut_candidates（列可启动项）</option>
+              <option value="process_list" data-params="{}">process_list（进程列表）</option>
+              <option value="process_stop" data-params='{"pid":1234}'>process_stop（按 pid 结束进程）</option>
+            </optgroup>
+            <optgroup label="通知">
+              <option value="notify" data-params='{"kind":"popup","title":"标题","content":"正文"}'>notify（通知：kind/title/content）</option>
+            </optgroup>
+            <optgroup label="摄像头">
+              <option value="camera_list" data-params="{}">camera_list（摄像头列表）</option>
+              <option value="camera_snapshot" data-params='{"device":"video0"}'>camera_snapshot（抓拍：device）</option>
+              <option value="camera_record_start" data-params="{}">camera_record_start（开始录像）</option>
+              <option value="camera_record_stop" data-params="{}">camera_record_stop（结束录像）</option>
+            </optgroup>
+            <optgroup label="媒体与文件">
+              <option value="media_list" data-params="{}">media_list（媒体库列表）</option>
+              <option value="media_delete" data-params='{"path":""}'>media_delete（删媒体：path）</option>
+              <option value="media_session_start" data-params='{"path":""}'>media_session_start（起播：path）</option>
+              <option value="media_session_stop" data-params="{}">media_session_stop（停止播放）</option>
+              <option value="file_push" data-params="{}">file_push（开文件推送会话）</option>
+              <option value="file_chunk" data-params='{"seq":0}'>file_chunk（推分片：seq）</option>
+              <option value="file_done" data-params="{}">file_done（推完收尾）</option>
+            </optgroup>
+            <optgroup label="计划任务">
+              <option value="schedule_shutdown" data-params='{"delay_sec":3600}'>schedule_shutdown（定时关机）</option>
+              <option value="schedule_reboot" data-params='{"delay_sec":3600}'>schedule_reboot（定时重启）</option>
+              <option value="list_schedules" data-params="{}">list_schedules（列计划）</option>
+              <option value="cancel_schedule" data-params='{"id":""}'>cancel_schedule（按 id 取消）</option>
+            </optgroup>
+            <optgroup label="远控与维护">
+              <option value="remote_control_start" data-params='{"fps":20}'>remote_control_start（开远控）</option>
+              <option value="remote_control_stop" data-params="{}">remote_control_stop（关远控）</option>
+              <option value="log_tail" data-params="{}">log_tail（拉本机日志尾）</option>
+              <option value="self_update" data-params="{}">self_update（OTA 自更新）</option>
+            </optgroup>
           </select>
         </div>
         <div class="row">
@@ -706,6 +746,15 @@ async function calcSha256() {
 }
 
 // ---- 指令 ----
+// 选动作时把参数模板塞进输入框：免得每次都手敲 {"level":50} 这种早该废弃的键。
+// 只填**模板**，不校验必填——必填校验在被控端（它回 failed 时带原因，比这里猜得准）。
+function onActionChange() {
+  const sel = document.getElementById('insAction');
+  const el = document.getElementById('insParams');
+  const tpl = sel.options[sel.selectedIndex].getAttribute('data-params') || '{}';
+  el.value = tpl;
+}
+
 async function sendInstruction() {
   const uid = document.getElementById('insTarget').value;
   const action = document.getElementById('insAction').value;

@@ -35,6 +35,21 @@ function asciiHeaderName(name) {
   return String(name).replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
 }
 
+/**
+ * 版本号比较：返回 -1/0/1，语义与 scripts/publish-release.mjs 的 cmpVersion 完全一致。
+ * 云端这里是唯一调用点（OTA 防倒退），两边必须同一套规则，否则"脚本能发、后台发了却被拦"，
+ * 或者反过来（后台能发、脚本报错）。改一处就要改两处。
+ */
+function cmpVersion(a, b) {
+  const pa = String(a).split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b).split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
 /* ---------- .env 读写（管理面板用）---------- */
 function readEnvFile() {
   if (!existsSync(ENV_FILE)) return {};
@@ -382,24 +397,83 @@ const server = http.createServer((req, res) => {
       let payload;
       try { payload = JSON.parse(body || '{}'); }
       catch (e) { return send(400, { ok: false, error: 'JSON 解析失败: ' + e.message }); }
-      const { product = 'agent', version, url, sha256, size, notes, mandatory } = payload;
+      const { product = 'agent', version, url, sha256, size, notes, mandatory, allowDowngrade } = payload;
       if (!version || !url) return send(400, { ok: false, error: '缺 version 或 url' });
+      if (!/^\d+(\.\d+)*$/.test(String(version))) {
+        return send(400, { ok: false, error: 'version 形如 0.6.1' });
+      }
+      if (!/^https?:\/\/.+/i.test(String(url))) {
+        return send(400, { ok: false, error: 'url 必须是 http(s) 地址' });
+      }
+      // 🚨 sha256 必填且必须是 64 位小写十六进制。
+      // 以前这里写的是 `sha256: sha256 || ''` —— 忘了在页面上点「计算 SHA256」也能发布成功，
+      // 而**被控端对空/非法 sha256 一律拒收**（不做无校验更新），结果是
+      // "管理台显示已发布 0.6.2、全校教室机一个都升不了"，且首页下载页也拿不到校验值。
+      // 这种"发布了却没人能装"的假成功，比直接报错坏得多。
+      const sha = String(sha256 || '').trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(sha)) {
+        return send(400, {
+          ok: false,
+          error: 'sha256 必须是 64 位小写十六进制（页面上点「计算 SHA256」选一次安装包即可）。缺了它被控端会拒绝这次更新，等于没发布。',
+        });
+      }
+      // size 只认「number」或「纯数字字符串」。
+      // 直接 Number(size) 会把 true/[]/'' 这种也放过去（Number(true)===1），
+      // 结果清单里躺着一个 size:1 —— 看不出错、但谁也别想据此判断下载是否完整。
+      let sizeNum = NaN;
+      if (typeof size === 'number') sizeNum = size;
+      else if (typeof size === 'string' && /^\d{1,15}$/.test(size.trim())) sizeNum = parseInt(size, 10);
+      if (!Number.isInteger(sizeNum) || sizeNum <= 0) {
+        return send(400, { ok: false, error: 'size 必须是正整数（点「计算 SHA256」时会一并填好）' });
+      }
 
-      // 读取现有清单（有则改，无则建）
+      // 读取现有清单（有则改，无则建）。
+      // ⚠️ 这里**故意不再 catch 成空对象**：旧写法遇到带 BOM 的 ota.json（PowerShell 的
+      //    Set-Content -Encoding UTF8 会写 BOM）就会 JSON.parse 抛错 → 被 catch 吞掉 →
+      //    manifest 重置为 {products:{}} → **把另一个产品的条目整条抹掉**。
+      //    文件坏掉应该吵出来，而不是静默清空别人的发布。
       let manifest = { products: {} };
       if (existsSync(OTA_MANIFEST_FILE)) {
-        try { manifest = JSON.parse(readFileSync(OTA_MANIFEST_FILE, 'utf8')); }
-        catch { manifest = { products: {} }; }
+        const raw = readFileSync(OTA_MANIFEST_FILE);
+        if (raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf) {
+          return send(400, {
+            ok: false,
+            error: `${OTA_MANIFEST_FILE} 带 UTF-8 BOM，JSON.parse 会失败（云端会当成"没发布过版本"）。请另存为「UTF-8 无 BOM」后重试。`,
+          });
+        }
+        try {
+          manifest = JSON.parse(raw.toString('utf8'));
+        } catch (e) {
+          // 解析不了就拒绝，**不要**用空清单覆盖它
+          return send(400, { ok: false, error: `现有 ${OTA_MANIFEST_FILE} 不是合法 JSON（${e.message}），已拒绝写入以免覆盖其它产品条目` });
+        }
+        if (!manifest || typeof manifest !== 'object') manifest = { products: {} };
       }
-      if (!manifest.products) manifest.products = {};
+      if (!manifest.products || typeof manifest.products !== 'object') manifest.products = {};
+
+      // 版本倒退 = 把全校教室机"升级"到旧版本。与 publish-release.mjs 同一道护栏，
+      // 确属回滚才允许（后台传 allowDowngrade:true）。
+      const prev = manifest.products[product];
+      if (prev && prev.version && cmpVersion(String(version), String(prev.version)) < 0 && allowDowngrade !== true) {
+        return send(400, {
+          ok: false,
+          error: `拒绝发布：${product} 当前最新是 v${prev.version}，这次要发的 v${version} 更低。这会把所有教室机降级；确属回滚请带 allowDowngrade:true。`,
+        });
+      }
+
       manifest.products[product] = {
-        version, url, sha256: sha256 || '', size: Number(size) || 0,
-        notes: notes || '', mandatory: !!mandatory,
+        version, url, sha256: sha, size: sizeNum, notes: notes || '', mandatory: !!mandatory,
       };
+      // 与 publish-release.mjs 对齐：同样盖一层生成信息，便于事后分辨是谁写的
+      manifest.generatedAt = new Date().toISOString();
+      manifest.generatedBy = 'POST /api/admin/ota（云端管理台）';
       try {
-        writeFileSync(OTA_MANIFEST_FILE, JSON.stringify(manifest, null, 2), 'utf8');
+        // 显式 Buffer ⇒ 绝不带 BOM（与脚本侧同一条硬要求）
+        const text = JSON.stringify(manifest, null, 2) + '\n';
+        writeFileSync(OTA_MANIFEST_FILE, Buffer.from(text, 'utf8'));
+        JSON.parse(readFileSync(OTA_MANIFEST_FILE, 'utf8')); // 写完回读，坏 JSON 当场炸
         pushEvent('info', '管理面板发布了 OTA', { product, version });
-        return send(200, { ok: true, product, version, note: 'OTA 清单已写入，立即生效' });
+        return send(200, { ok: true, product, version, sha256: sha, size: sizeNum, note: 'OTA 清单已写入，立即生效' });
       } catch (e) {
         return send(500, { ok: false, error: '写入 ota.json 失败: ' + e.message });
       }
