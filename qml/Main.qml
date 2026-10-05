@@ -17,7 +17,12 @@ ApplicationWindow {
     width: 1180
     height: 760
     minimumWidth: 940
-    minimumHeight: 620
+    // 2026-10-06：620 → 680。右栏动作区是**固定高度**的一列（ColumnLayout，子项都是固定高），
+    // 空间不够时不会被压缩，只会溢出到窗口外压住底部标签栏。
+    // 加了「通知」整行（+36px）后，右栏内容约 543px，而 620 高时可用只有约 520px —— 会溢出。
+    // ⚠️ 右栏高度预算已经很紧：**下次再往右栏加按钮，应该先把它改成可滚动（Flickable）
+    //    而不是继续抬最小高度**。见 docs/管理端功能一览.md 的动作栏说明。
+    minimumHeight: 680
     visible: true
     title: "星集控"
     color: th.win
@@ -853,10 +858,13 @@ ApplicationWindow {
                             delegate: Btn { d: modelData }
                         }
                     }
+                    // 通知：和上面那两列按钮不同，它要**凑内容**（形态/标题/正文/时长/播报/紧急），
+                    // 所以给整行宽度单独摆一行，而不是挤进 2 列网格当第 9 个。
+                    Btn { d: ({ l: "通知", a: "", t: false }); wide: true }
                 }
 
-                // 没做出来的能力单独躺着、标明没做，不混进能点的组里
-                Btn { d: ({ l: "通知", a: "", t: true }); wide: true }
+                // （这里原先有个 t:true 的置灰「通知」——"没做出来的能力单独躺着，标明没做"。
+                //   2026-10-06 它做出来了，已并进上面的「让它做事」分组，不再单独躺着。）
 
                 // 给被控端打字
                 Rectangle {
@@ -1386,6 +1394,8 @@ ApplicationWindow {
 
     MediaDialog { id: mediaDlg; theme: root.th }
     ScheduleDialog { id: schedDlg; theme: root.th }
+    // 通知弹窗（2026-10-06 加）：被控端的大屏通知早就实现了，只有管理端这个发送方漏了。
+    NotifyDialog { id: notifyDlg; theme: root.th }
     // 注意类名是 FilePushDialog 不是 FileDialog：同个文件里要 import QtQuick.Dialogs 拿原生
     // 选文件对话框，两个 FileDialog 撞名 qml 编译期就冲突了，所以弹窗这侧改名（2026-10-03）
     FilePushDialog { id: fileDlg; theme: root.th }
@@ -1403,11 +1413,13 @@ ApplicationWindow {
         mediaDlg.close()
         schedDlg.close()
         fileDlg.close()
+        notifyDlg.close()
         if      (which === "software") softwareDlg.open()
         else if (which === "log")      logDlg.open()
         else if (which === "media")    mediaDlg.open()
         else if (which === "sched")    schedDlg.open()
         else if (which === "file")     fileDlg.open()
+        else if (which === "notify")   notifyDlg.open()
     }
 
     // 右侧所有动作按钮的统一入口。以前这段分支散在 Repeater 的 onClicked 里，
@@ -1431,6 +1443,9 @@ ApplicationWindow {
             openOnly("sched")
         } else if (d.l === "文件") {
             openOnly("file")
+        } else if (d.l === "通知") {
+            // 通知不是"点一下就发"——它要凑形态/标题/正文/时长/播报，所以开弹窗再发。
+            openOnly("notify")
         } else if (d.l === "远控开") {
             backend.sendAction("remote_control_start", { "fps": 20 })
         } else if (d.a !== "") {

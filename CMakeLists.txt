@@ -39,6 +39,7 @@ qt_add_qml_module(viewer-qt
     qml/MediaDialog.qml
     qml/ScheduleDialog.qml
     qml/FilePushDialog.qml
+    qml/NotifyDialog.qml
 )
 
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::WebSockets Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel)
