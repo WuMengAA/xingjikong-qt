@@ -15,6 +15,7 @@ Unicode true
 !include "MUI2.nsh"
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"     ; ${GetParameters} / ${GetOptions}：无人值守装机传参用（2026-10-06 加）
 
 !define APPNAME "星集控被控端"
 !define APPID   "StelarithAgentQt"
@@ -49,9 +50,37 @@ Function .onInit
 	StrCpy $Url   "ws://127.0.0.1:8788/ws/agent"
 	StrCpy $Token ""
 	StrCpy $Uid   "TEST1"
+
+	; ── 无人值守装机：从命令行读配置（2026-10-06 加）────────────────────────
+	; 为什么必须有：云端的 assets/provision/install-agent.ps1（浏览器点一下 → 教室机双击 bat
+	; 那条链）就是 `Start-Process $pkg -ArgumentList "/S"` 静默装的。静默模式下向导页不显示，
+	; 这三项如果只能手填，无人值守这条路就断了 —— 而它恰恰是"零成本维护"的入口。
+	; 用法：stelarith-agent-setup.exe /S /UID=class_xlzx_2028_08 /URL=wss://.../ws/agent /TOKEN=xxx
+	; 不给参数就退回上面的默认值（行为与改动前一致）。
+	${GetParameters} $R0
+	${GetOptions} $R0 "/UID="   $R1
+	${If} $R1 != ""
+		StrCpy $Uid $R1
+	${EndIf}
+	${GetOptions} $R0 "/URL="   $R1
+	${If} $R1 != ""
+		StrCpy $Url $R1
+	${EndIf}
+	${GetOptions} $R0 "/TOKEN=" $R1
+	${If} $R1 != ""
+		StrCpy $Token $R1
+	${EndIf}
 FunctionEnd
 
 Function ConfigPageCreate
+	; ⚠️ 静默安装(/S)必须**跳过本页**：无桌面时 nsDialogs::Create 返回 error，
+	;    而下面的 ${If} $0 == error { Abort } 会把**整个安装**中止掉。
+	;    实测：不改这里，`setup.exe /S` 退出码 2、什么都没装 —— 云端那条无人值守装机链
+	;    (install-agent.ps1 第 95 行 /S) 就是死在这一步，而且现场只看到"装了但没反应"。
+	${If} ${Silent}
+		Abort
+	${EndIf}
+
 	!insertmacro MUI_HEADER_TEXT "装机参数" "这三项因机器而异；装完会写成 agent.env"
 	nsDialogs::Create 1018
 	Pop $0
