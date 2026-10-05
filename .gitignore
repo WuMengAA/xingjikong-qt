@@ -19,3 +19,6 @@ node_modules/
 
 # 装机台账（运行时数据，同 events.log 一样不进版本库）
 assets/provision-log.jsonl
+
+# 安装包产物（.exe/.msi/.zip 大文件可从源码重打，见 docs/打包说明，不入版本库）
+assets/pkg/

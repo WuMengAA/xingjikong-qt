@@ -96,9 +96,9 @@ export function currentAgentPackage() {
   return pickPackage('.exe', 'agent-setup') || pickPackage('.exe', 'setup');
 }
 
-/** 管理端安装包（.msi，取 stelarith-viewer-msi*.msi）。 */
+/** 管理端安装包（绿色版 .zip，优先；旧 .msi 兜底）。 */
 export function currentViewerPackage() {
-  return pickPackage('.msi', 'viewer');
+  return pickPackage('.zip', 'viewer') || pickPackage('.msi', 'viewer');
 }
 
 /* ---------- 装机台账（2026-10-05）----------
@@ -160,7 +160,7 @@ export function buildViewerProvisionBat(label, token) {
     '@echo off',
     'title Stelarith Viewer - Provisioning',
     'cd /d "%~dp0"',
-    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$d = $PWD.Path; $ps = Join-Path $d \'install-viewer.ps1\'; Write-Host \'[*] Downloading provisioning script...\'; Invoke-WebRequest -Uri \'' + scriptUrl + '\' -OutFile $ps -UseBasicParsing -TimeoutSec 120; Write-Host \'[*] Running installer. If a UAC box appears, choose Yes.\'; & $ps -Cloud \'' + viewerWsUrl() + '\' -Token \'' + token + '\' -InstallerUrl \'' + installerUrl + '\'; Write-Host \'\'; Read-Host \'Press Enter to exit\'"',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$d = $PWD.Path; $ps = Join-Path $d \'install-viewer.ps1\'; Write-Host \'[*] Downloading provisioning script...\'; Invoke-WebRequest -Uri \'' + scriptUrl + '\' -OutFile $ps -UseBasicParsing -TimeoutSec 120; Write-Host \'[*] Running installer. If a UAC box appears, choose Yes.\'; & $ps -Cloud \'' + viewerWsUrl() + '\' -Token \'' + token + '\' -InstallerUrl \'' + installerUrl + '\' -WithAutostart; Write-Host \'\'; Read-Host \'Press Enter to exit\'"',
     '',
   ].join('\r\n');
 }
