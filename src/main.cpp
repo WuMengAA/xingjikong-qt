@@ -1,15 +1,18 @@
 // 星集控 · 管理端（Qt Quick 版入口）
 //
 // 界面在 qml/（依据《星集控-电脑端界面稿集-黑白-2026-10-03.html》），逻辑在 ViewerBackend（C++）。
-// 本文件只做三件事：
+// 本文件只做四件事：
 //   1) 接管日志 —— GUI 程序默认把日志丢给 OutputDebugString，什么也看不到
 //   2) 把 backend 挂给 QML（context property，QML 里直接用 `backend`）
 //   3) 提供画面帧给 QML 的 Image（image://frames/...）
+//   4) 托盘常驻入口（2026-10-06 加）—— 原先后台在收流，界面上没有任何"我还活着"的入口
 
 #include "singleinstance.h"
 #include "viewerbackend.h"
 
-#include <QGuiApplication>
+#include <QApplication>   // 2026-10-06：要托盘必须 QApplication（QSystemTrayIcon 属 QtWidgets）。
+                          // Qt6Widgets 本来就链了（styles/Qt6Widgets.dll 也在绿色包里），
+                          // 所以换 app 类型不增加任何打包负担。
 #include <QImage>
 #include <QMessageBox>
 #include <QQmlApplicationEngine>
@@ -17,6 +20,18 @@
 #include <QQuickImageProvider>
 #include <QTimer>
 #include <QFile>
+#include <QFileInfo>
+#include <QString>
+#include <QSystemTrayIcon>
+#include <QMenu>
+#include <QAction>
+#include <QIcon>
+#include <QPainter>
+#include <QPen>
+#include <QBrush>
+#include <QColor>
+#include <QDesktopServices>
+#include <QUrl>
 #include <cstdarg>
 #include <cstdio>
 
@@ -24,7 +39,19 @@
 // 2026-10-04 换了个新文件名（viewer-run.log）。原因：老 viewer.log 从某次起再也没被写过，
 // 而 writeLog 失败时会静默丢日志（fail-silent 红线），现象和"程序没起来"完全一样 ——
 // 没法区分就没法排障。换名 + 写不进就喊出来，一次就能分清（见 writeLog）。
-static const char *kLogFile = "D:/Stelarith/Stelarith-viewer-qt/viewer-run.log";
+// ⚠️ 2026-10-06 修（真机级）：这里原本**硬编码成开发机的工程路径**
+//   `D:/Stelarith/Stelarith-viewer-qt/viewer-run.log`。
+// 后果：装到老师机/教室机上那个目录**根本不存在** → fopen("w") 直接失败 →
+//   绿色包在真机上**一个字的文件日志都不写**（只剩 stdout/stderr，而双击启动时没人看得到）。
+//   现场表现就是"程序好像跑了但什么都没记"，比压根没日志还难查。
+// 现在：默认跟 exe 走（exe 同目录的 viewer-run.log），并留 STE_VIEWER_LOG 供部署时显式指定。
+static QString logFilePath()
+{
+    const QString env = QString::fromLocal8Bit(qgetenv("STE_VIEWER_LOG")).trimmed();
+    if (!env.isEmpty()) return env;
+    return QCoreApplication::applicationDirPath() + QStringLiteral("/viewer-run.log");
+}
+
 static FILE *g_log = nullptr;
 static bool g_logTried = false;
 
@@ -32,15 +59,17 @@ static void writeLog(const char *s)
 {
     if (!g_log && !g_logTried) {
         g_logTried = true;
-        g_log = fopen(kLogFile, "w");
+        const QByteArray pathLocal = logFilePath().toLocal8Bit();
+        g_log = fopen(pathLocal.constData(), "w");
         if (!g_log) {
             // 写不进必须**喊出来**：静默丢日志的时候，现场只剩下"好像跑了但什么都没记"，
             // 比压根没日志还贵。控制台跑这一步一定看得见。
-            fprintf(stderr, "[viewer] FAIL 日志写不进 %s —— 后面所有日志都会丢，请改用控制台运行\n", kLogFile);
+            fprintf(stderr, "[viewer] FAIL 日志写不进 %s —— 后面所有日志都会丢，请改用控制台运行\n",
+                    pathLocal.constData());
             fflush(stderr);
             return;
         }
-        fprintf(g_log, "=== viewer-qt 启动，日志=%s ===\n", kLogFile);
+        fprintf(g_log, "=== viewer-qt 启动，日志=%s ===\n", pathLocal.constData());
         fflush(g_log);
     }
     if (!g_log) return;
@@ -156,10 +185,19 @@ private:
     ViewerBackend *m_backend;
 };
 
+// ⚠️ 管理端应用版本号的**唯一真源**（2026-10-06 补：这份发布副本原先连版本常量都没有）。
+// 与被控端 kAppVersion 对齐到同一套版本号，便于运维一眼对齐两端；改版本只改这里。
+static constexpr const char *kViewerVersion = "0.6.0";
+
 int main(int argc, char *argv[])
 {
     installMessageHandler();
-    QGuiApplication app(argc, argv);
+    // QApplication（不是 QGuiApplication）：托盘 QSystemTrayIcon 属 QtWidgets，
+    // 只有 QApplication 才建得起来。Qt6Widgets.dll 与 styles/ 本来就在绿色包里（为了 QFileDialog），
+    // 所以这一步不增加任何打包负担、也不需要动 CMakeLists 的依赖表。
+    QApplication app(argc, argv);
+    QCoreApplication::setApplicationVersion(QString::fromLatin1(kViewerVersion));
+    logf("[viewer] viewer-qt 版本 %s（日志：%s）", kViewerVersion, logFilePath().toLocal8Bit().constData());
 
     // ── 单机只允许一个管理端（2026-10-05 与被控端同款新增）──────────────────
     // 场景：桌面快捷方式 + 登录自启 + 老师又手点一次 → 两个实例抢同一台老师的屏幕，
@@ -193,6 +231,45 @@ int main(int argc, char *argv[])
     }
 
     backend.start();
+
+    // ── 托盘常驻（2026-10-06 补）───────────────────────────────────────────
+    // 为什么补：管理端在后台收流，任务栏里既没有窗口也没有图标 —— 老师机上"它还在不在"
+    // 原先没有任何肉眼可见的入口，出问题只能靠翻日志文件。
+    // 图标用 QPainter 现画（不依赖外部 .ico，省一个资源文件，也就少一处"打包漏了"）。
+    if (QSystemTrayIcon::isSystemTrayAvailable()) {
+        QPixmap pm(32, 32);
+        pm.fill(Qt::transparent);
+        {
+            QPainter p(&pm);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setBrush(QColor(20, 130, 200));
+            p.setPen(QPen(QColor(235, 235, 235), 3));
+            p.drawRect(6, 6, 20, 20);
+        }
+
+        auto *tray = new QSystemTrayIcon(QIcon(pm), &app);
+        tray->setToolTip(QStringLiteral("星集控 · 管理端 v%1").arg(QString::fromLatin1(kViewerVersion)));
+
+        auto *menu = new QMenu();
+        auto *actStatus = menu->addAction(QStringLiteral("状态：运行中"));
+        actStatus->setEnabled(false);                       // 只显示，不可点
+        menu->addSeparator();
+        auto *actLog = menu->addAction(QStringLiteral("打开日志目录"));
+        QObject::connect(actLog, &QAction::triggered, &app, [] {
+            QDesktopServices::openUrl(
+                QUrl::fromLocalFile(QFileInfo(logFilePath()).absolutePath()));
+        });
+        menu->addSeparator();
+        auto *actQuit = menu->addAction(QStringLiteral("退出管理端"));
+        QObject::connect(actQuit, &QAction::triggered, &app, &QApplication::quit);
+
+        tray->setContextMenu(menu);
+        tray->show();          // 先设图标再 show，避免 "No Icon set" 警告
+        logf("[viewer] 托盘已就绪（v%s）", kViewerVersion);
+    } else {
+        // 老实说清楚：这不叫"被任务栏溢出区折叠"，是这儿压根建不了（典型 Session0）。
+        logf("[viewer] WARN 系统托盘不可用（Session0？）—— 收流不受影响，但没有可见入口");
+    }
 
     return app.exec();
 }
