@@ -71,17 +71,28 @@ Ok "现有规则 $($existing.Count) 条"
 
 $cloudFqdn = "$CloudHost.$Zone"
 $catchAll = $null
-$merged = New-Object System.Collections.ArrayList
+# cloudflared 的 ingress 是【从上往下、先命中先生效】；通配规则 *.zone 会吞掉所有子域，
+# 所以云端规则必须插在**第一条通配规则之前**，否则永远匹配不到（干跑时抓到过这个 bug）。
+$before = New-Object System.Collections.ArrayList
+$after  = New-Object System.Collections.ArrayList
+$seenWild = $false
 foreach ($r in $existing) {
     $h = $null
-    if ($r.PSObject.Properties.Name -contains 'hostname') { $h = $r.hostname }
-    if (-not $h) { if ($null -eq $catchAll) { $catchAll = [ordered]@{ service = "http_status:404" } }; continue }
+    try { $h = $r.hostname } catch { }
+    if (-not $h) {
+        if ($null -eq $catchAll) { $catchAll = [ordered]@{ service = "http_status:404" } }
+        continue
+    }
     if ($h -eq $cloudFqdn) { Warn "丢弃旧的 $h 规则（下面按正确顺序重建）"; continue }
-    [void]$merged.Add($r)
+    if ($h -like '*`**') { $seenWild = $true }
+    if ($seenWild) { [void]$after.Add($r) } else { [void]$before.Add($r) }
 }
-# 云端路由要放在通配规则【之前】（ingress 从上往下匹配，先命中先生效）
-[void]$merged.Add([ordered]@{ hostname = $cloudFqdn; service = "http://localhost:$CloudPort" })
 if (-not $catchAll) { $catchAll = [ordered]@{ service = "http_status:404" }; Warn "无 catch-all，补一条 http_status:404" }
+
+$merged = New-Object System.Collections.ArrayList
+foreach ($r in $before) { [void]$merged.Add($r) }
+[void]$merged.Add([ordered]@{ hostname = $cloudFqdn; service = "http://localhost:$CloudPort" })
+foreach ($r in $after) { [void]$merged.Add($r) }
 [void]$merged.Add($catchAll)
 
 Write-Host ""
@@ -89,13 +100,22 @@ Info "合并后的 ingress（顺序有意义）："
 $i = 0
 foreach ($r in $merged) {
     $line = "    {0,2}. " -f $i
-    if ($r.PSObject.Properties.Name -contains 'hostname') { $line += "$($r.hostname)  " }
-    if ($r.PSObject.Properties.Name -contains 'path') { $line += "path=$($r.path)  " }
+    $h = $null; try { $h = $r.hostname } catch { }
+    $p = $null; try { $p = $r.path } catch { }
+    if ($h) { $line += "$h  " }
+    if ($p) { $line += "path=$p  " }
     $line += "-> $($r.service)"
     Write-Host $line
     $i++
 }
 Write-Host ""
+
+# 干跑时把真正要提交的 JSON 打出来 —— 眼见为实，避免"显示对、传的不对"。
+if ($WhatIfOnly) {
+    Info "将提交的 JSON（-WhatIfOnly 干跑，未推送）："
+    Write-Host (@{ config = @{ ingress = @($merged); "warp-routing" = @{ enabled = $false } } } | ConvertTo-Json -Depth 20)
+    Write-Host ""
+}
 
 if ($WhatIfOnly) { Warn "-WhatIfOnly：未推送（干跑）。"; exit 0 }
 
