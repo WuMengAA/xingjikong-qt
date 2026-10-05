@@ -35,9 +35,11 @@
 #include <cstdarg>
 #include <cstdio>
 
-// ⚠️ 管理端应用版本号的**唯一真源**在下面 kViewerVersion 处（0.6.0，2026-10-06 两边合并后统一）。
+// ⚠️ 管理端应用版本号的**唯一真源**在下面 kViewerVersion 处（0.6.1，2026-10-06 两边合并后统一）。
 // 合并前两份副本各有一份常量（外层 0.6.0 / 内层 0.5.0），同一文件里出现两次会
 // C2374 重定义 —— 现在只留下面那一份。改版本只改那处。
+// ⚠️ MSI 那条路（msi/viewer-qt.wxs）里的 Version 还是 0.5.0、长期没跟着走 ——
+//    **当前发布走绿色 zip，不经过 MSI**；哪天要出 MSI 必须先补那个版本号。
 
 // ── 日志：落盘 + 打屏（backend 与界面共用这一份）──
 // 2026-10-04 换了个新文件名（viewer-run.log）。原因：老 viewer.log 从某次起再也没被写过，
@@ -191,7 +193,7 @@ private:
 
 // ⚠️ 管理端应用版本号的**唯一真源**（2026-10-06 补：这份发布副本原先连版本常量都没有）。
 // 与被控端 kAppVersion 对齐到同一套版本号，便于运维一眼对齐两端；改版本只改这里。
-static constexpr const char *kViewerVersion = "0.6.0";
+static constexpr const char *kViewerVersion = "0.6.1";
 
 int main(int argc, char *argv[])
 {

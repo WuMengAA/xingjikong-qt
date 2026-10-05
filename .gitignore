@@ -11,6 +11,13 @@ shots/
 # 这两样都随编译重新生成，进库只增不减、还必然分叉。
 deploy/
 msi/
+
+# ── 出包产物（2026-10-06 补）──
+# scripts/make-portable.mjs 产出 dist/pkg-<版本>/ 与 stelarith-viewer-portable-<版本>.zip，
+# 一跑就是 400M（125M 的 zip + 272M 解压）。它完全能从 build/ 重新生成，进库只增不减。
+# ⚠️ 同门的被控端仓库已经把 dist/stelarith-agent-setup.exe（67MB）提交进去了，
+#    每次重打包再存一份 —— 那边的问题没动，但这边不要再犯同一个错。
+dist/
 _archive/*.log
 _archive/*.out
 _archive/*.bak

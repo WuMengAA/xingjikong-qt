@@ -34,15 +34,18 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+// 参数拼装抽到纯 JS 里，好让 node 能跑断言（scripts/test-notify-params.mjs）。
+// 见该文件顶部：契约来自 control-qt 的 notifyFromParams()，别凭记忆改。
+import "NotifyParams.js" as NP
 
 Popup {
     id: dlg
     property var theme: null
 
-    // 与被控端 NotifyWindow 的 kTitleCap / kContentCap 保持一致。
-    // 改这里必须同步改那边，否则计数显示的和实际截断的对不上。
-    readonly property int capTitle: 24
-    readonly property int capContent: 64
+    // 截断上限从 NotifyParams.js 取（那边是唯一一处常量，同时被 node 断言盯着）。
+    // 与被控端 NotifyWindow 的 kTitleCap / kContentCap 一致 —— 改这三个数要同步改那边。
+    readonly property int capTitle: NP.CAP_TITLE
+    readonly property int capContent: NP.CAP_CONTENT
 
     // 当前选择
     property string kind: "popup"        // popup | island | fullscreen
@@ -442,25 +445,17 @@ Popup {
 
     function send() {
         if (backend.currentUid === "") { dlg.error = "没选设备"; return; }
-        const t = titleInput.text.trim();
-        if (t === "") { dlg.error = "标题必填"; return; }
-
-        // 只带被控端**真的会读**的字段。notice_id 是站点侧对账用的（它有 notice_kinds 表），
-        // 管理端没有这张表，带了也没人认，所以不发。
-        let flags = { "speech": dlg.speech };
-        if (dlg.kind === "fullscreen") flags["severity"] = dlg.severity;
-        if (dlg.emergency) flags["emergency_confirm"] = true;
-
-        let params = {
-            "kind": dlg.kind,
-            "title": t,
-            "content": bodyInput.text,
-            "flags": flags
-        };
-        const sec = parseInt(secInput.text, 10);
-        if (sec > 0) params["seconds"] = sec;
-
-        backend.sendAction("notify", params);
+        const r = NP.buildNotifyParams({
+            kind: dlg.kind,
+            title: titleInput.text,
+            content: bodyInput.text,
+            seconds: secInput.text,
+            speech: dlg.speech,
+            severity: dlg.severity,
+            emergency: dlg.emergency
+        });
+        if (!r.ok) { dlg.error = r.error; return; }
+        backend.sendAction("notify", r.params);
         dlg.error = "";
         dlg.close();
     }
