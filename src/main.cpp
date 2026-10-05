@@ -48,6 +48,12 @@
 #include <QSet>
 #include <QProcess>
 #include <QThread>      // QThread::msleep（camera_record 确认"真的在录"时等两秒）
+// 2026-10-05：OTA 自更新要下载安装包 + 校验 sha256（详见 executeSelfUpdate）。
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QCryptographicHash>
+#include <QRegularExpression>
 // 2026-10-04：首次运行配置窗（OOBE）——让老师在界面里填配置，而不是手改 agent.env。
 #include <QDialog>
 #include <QWidget>
@@ -1116,6 +1122,217 @@ static QString notifyFromParams(const QJsonObject &params)
                             QSystemTrayIcon::Information, 10000);
     }
     return QString();   // 成功
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * OTA 自更新（self_update 指令 · 2026-10-05）
+ *
+ * 链路：云端下发 self_update{url,sha256,version} → 本机下载 → 校验 sha256
+ *       → 派"重启助手" → 静默执行安装包（NSIS /S）→ 助手把新版拉起来。
+ *
+ * 为什么"自己换自己"还能活：安装包第一步就会 Stop-Process 掉本进程，
+ *   所以**必须先派一个独立的重启助手**（等若干秒 → 启动安装目录下的 exe），
+ *   再启动安装包。助手是独立 cmd 进程，不受本进程被杀影响。
+ *
+ * 安全护栏（缺一不可，缺就不升）：
+ *   ① URL 只认 http(s)；② sha256 必须是 64 位小写十六进制（禁止无校验更新）；
+ *   ③ 下载体积上限 kOtaMaxBytes，超限即中止并删档；④ 落盘只在 ota 目录内的 .exe。
+ *
+ * ⚠️ 诚实声明：下载/校验/触发安装这条链路**无法在本机端到端验证**
+ *   （一执行就会把本进程换掉）。故本实现只保证"护栏与逻辑正确、编译通过"，
+ *   真实升级必须在教室机灰度验证后再全网铺开。
+ * 应急开关：设 STE_QT_OTA_DISABLE=1 可在某台机器上硬关掉自更新（默认开）。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+static const qint64 kOtaMaxBytes = 300LL * 1024 * 1024;   // 安装包体积上限 300MB
+
+static QNetworkAccessManager *g_otaNam = nullptr;
+static QNetworkReply *g_otaReply = nullptr;
+static QFile *g_otaFile = nullptr;
+static QCryptographicHash *g_otaHash = nullptr;
+static QString g_otaId, g_otaSha, g_otaVer, g_otaPath;
+static qint64 g_otaGot = 0;
+static bool g_otaBusy = false;
+
+// 统一回执出口（被控端→云端）。断链时不静默：如实记一条，避免"以为回了其实没回"。
+static void sendActionReceipt(const QString &id, const QString &action, const QString &result,
+                              const QString &error = QString(), const QJsonObject &data = QJsonObject())
+{
+    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) {
+        qInfo("[agent-qt] 回执欲发但当前未连接（id=%s result=%s），如实记录", qPrintable(id), qPrintable(result));
+        return;
+    }
+    QJsonObject p;
+    p.insert(QStringLiteral("id"), id);
+    p.insert(QStringLiteral("action"), action);
+    p.insert(QStringLiteral("result"), result);
+    if (!error.isEmpty()) p.insert(QStringLiteral("error"), error);
+    if (!data.isEmpty()) p.insert(QStringLiteral("data"), data);
+    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("receipt"), p));
+    qInfo("[agent-qt] 📤 回执 id=%s action=%s result=%s%s",
+          qPrintable(id), qPrintable(action), qPrintable(result),
+          error.isEmpty() ? "" : qPrintable(" error=" + error));
+}
+
+static void otaOnFinished();   // 前向声明（下载结束回调）
+
+// 启动一次自更新。**异步**：立即回执 started，下载完成后再回 installing/failed。
+static void startSelfUpdate(const QString &id, const QJsonObject &params)
+{
+    const QString action = QStringLiteral("self_update");
+
+    if (qEnvironmentVariableIsSet("STE_QT_OTA_DISABLE")) {
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("本机已设 STE_QT_OTA_DISABLE，拒绝自更新"));
+        return;
+    }
+    if (g_otaBusy) {
+        sendActionReceipt(id, action, QStringLiteral("failed"), QStringLiteral("已有一个更新任务在进行中"));
+        return;
+    }
+
+    const QString url = params.value(QStringLiteral("url")).toString().trimmed();
+    const QString sha = params.value(QStringLiteral("sha256")).toString().trimmed().toLower();
+    const QString ver = params.value(QStringLiteral("version")).toString().trimmed();
+
+    // 护栏①：只认 http(s)（挡掉 file:// / 本地路径注入）
+    if (!url.startsWith(QStringLiteral("http://")) && !url.startsWith(QStringLiteral("https://"))) {
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("url 必须是 http(s) 地址：%1").arg(url));
+        return;
+    }
+    // 护栏②：必须有合法 sha256 —— 没有校验的"更新"等于任意代码执行，一律拒绝
+    static const QRegularExpression hex64(QStringLiteral("^[0-9a-f]{64}$"));
+    if (!hex64.match(sha).hasMatch()) {
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("sha256 必须是 64 位小写十六进制（拒绝无校验更新）"));
+        return;
+    }
+
+    // 落地目录：%LOCALAPPDATA% 下的 xingjikong/ota（注意：注释行末尾不能是反斜杠，
+    // 否则 C/C++ 会当成续行符把下一行吞掉 —— 这里踩过一次，记下）
+    const QString dir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/ota");
+    QDir().mkpath(dir);
+    QString base = QUrl(url).fileName();
+    // 护栏④：只当安装包用，且只落在 ota 目录里的 .exe
+    if (base.isEmpty() || !base.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive))
+        base = QStringLiteral("stelarith-agent-update.exe");
+    g_otaPath = dir + QLatin1Char('/') + base;
+
+    g_otaFile = new QFile(g_otaPath);
+    if (!g_otaFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("无法写入下载文件：%1").arg(g_otaPath));
+        delete g_otaFile; g_otaFile = nullptr;
+        return;
+    }
+
+    g_otaId = id; g_otaSha = sha; g_otaVer = ver; g_otaGot = 0; g_otaBusy = true;
+    if (g_otaHash) delete g_otaHash;
+    g_otaHash = new QCryptographicHash(QCryptographicHash::Sha256);
+    if (!g_otaNam) g_otaNam = new QNetworkAccessManager();
+
+    QNetworkRequest req{QUrl(url)};
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("StelarithAgentQt/%1").arg(kAppVersion));
+
+    // 先回执"已受理"：管理端据此确认指令被接下（长下载不至于看起来"没反应"）
+    sendActionReceipt(id, action, QStringLiteral("started"), QString(),
+                      QJsonObject{{QStringLiteral("stage"), QStringLiteral("downloading")},
+                                  {QStringLiteral("version"), ver}, {QStringLiteral("url"), url}});
+    qInfo("[agent-qt] ⬇ OTA 开始下载 %s → %s（期望 sha256=%s）",
+          qPrintable(url), qPrintable(g_otaPath), qPrintable(sha));
+
+    g_otaReply = g_otaNam->get(req);
+
+    // 注意：这些 lambda **无捕获**，只读命名空间级全局量，避免函数返回后引用悬空。
+    QObject::connect(g_otaReply, &QNetworkReply::readyRead, [] {
+        if (!g_otaReply || !g_otaFile) return;
+        const QByteArray chunk = g_otaReply->readAll();
+        g_otaGot += chunk.size();
+        if (g_otaGot > kOtaMaxBytes) { g_otaReply->abort(); return; }  // 护栏③
+        g_otaFile->write(chunk);
+        g_otaHash->addData(chunk);
+    });
+    QObject::connect(g_otaReply, &QNetworkReply::finished, [] { otaOnFinished(); });
+}
+
+// 下载结束：关文件、验 sha256、通过则派助手 + 执行静默安装；否则如实回 failed。
+static void otaOnFinished()
+{
+    const QString action = QStringLiteral("self_update");
+    QNetworkReply *reply = g_otaReply;
+    if (!reply) return;
+    const QNetworkReply::NetworkError nerr = reply->error();
+    const QString nerrStr = reply->errorString();
+    reply->deleteLater();
+    g_otaReply = nullptr;
+    if (g_otaFile) { g_otaFile->close(); g_otaFile->deleteLater(); g_otaFile = nullptr; }
+    g_otaBusy = false;
+
+    const QString id = g_otaId, ver = g_otaVer, sha = g_otaSha, path = g_otaPath;
+    const qint64 got = g_otaGot;
+    const QString gotSha = g_otaHash ? QString::fromLatin1(g_otaHash->result().toHex()) : QString();
+    if (g_otaHash) { delete g_otaHash; g_otaHash = nullptr; }
+
+    if (got > kOtaMaxBytes) {
+        QFile::remove(path);
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("安装包超过体积上限（%1 字节）").arg(kOtaMaxBytes));
+        return;
+    }
+    if (nerr != QNetworkReply::NoError) {
+        QFile::remove(path);
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("下载失败：%1").arg(nerrStr));
+        return;
+    }
+    if (gotSha != sha) {
+        QFile::remove(path);
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("sha256 校验不符（期望 %1 实得 %2），已删除下载文件").arg(sha, gotSha));
+        return;
+    }
+    qInfo("[agent-qt] ✅ OTA 校验通过（%lld 字节，sha256=%s），准备安装", (long long)got, qPrintable(gotSha));
+
+    // ① 先派重启助手：等安装器把文件换完，再把新版拉起来（本进程随后会被安装器杀掉）
+    const QString exeDir = QCoreApplication::applicationDirPath();
+    const QString helper = exeDir + QStringLiteral("/ota-relaunch.bat");
+    {
+        QFile h(helper);
+        if (h.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            // 纯 ASCII + CRLF：cmd.exe 按 GBK 解析 .bat，中文注释会吞行（同 install-autostart 的教训）
+            const QString content =
+                QStringLiteral("@echo off\r\n"
+                               "rem Stelarith OTA relaunch helper (auto-generated). Pure ASCII.\r\n"
+                               "rem Wait for the installer to replace files, then start the new agent.\r\n"
+                               "ping -n 26 127.0.0.1 >nul\r\n"
+                               "start \"\" \"%1\"\r\n"
+                               "del \"%~f0\"\r\n").arg(exeDir + QStringLiteral("/stelarith-agent-qt.exe"));
+            h.write(content.toUtf8());
+            h.flush();
+            h.close();
+        } else {
+            qInfo("[agent-qt] ⚠ OTA 重启助手写不出（%s）—— 升级后需靠下次登录拉起", qPrintable(helper));
+        }
+    }
+    if (QFile::exists(helper))
+        QProcess::startDetached(QStringLiteral("cmd.exe"), {QStringLiteral("/c"), helper});
+
+    // ② 启动安装包（NSIS 静默 /S）。它会先 Stop-Process 掉本进程，再覆盖文件。
+    const bool launched = QProcess::startDetached(path, {QStringLiteral("/S")});
+    if (!launched) {
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("安装包启动失败：%1").arg(path));
+        return;
+    }
+    // 这是本进程能发出的**最后一条回执**（随后被安装器替换）。
+    // 最终是否成功，以"设备重连后 register 上报的新 version"为准。
+    sendActionReceipt(id, action, QStringLiteral("installing"), QString(),
+                      QJsonObject{{QStringLiteral("stage"), QStringLiteral("installing")},
+                                  {QStringLiteral("version"), ver},
+                                  {QStringLiteral("path"), path}});
+    qInfo("[agent-qt] 🚀 OTA 已启动安装包（/S），重启助手已派发；本进程即将被替换");
 }
 
 ExecOut executeAction(const QString &action, const QJsonObject &params)
@@ -2436,20 +2653,16 @@ void handleControlText(const QString &text)
         const QJsonObject params = pay.value(QStringLiteral("params")).toObject();
         qInfo("[agent-qt] 📥 收到指令 id=%s action=%s（D5 真执行）", qPrintable(id), qPrintable(action));
 
+        // self_update 是**异步**动作（要下载）：不走下面的同步 executeAction，
+        // 由 startSelfUpdate 自己分阶段回执（started → installing/failed）。
+        if (action == QStringLiteral("self_update")) {
+            startSelfUpdate(id, params);
+            return;
+        }
+
         // D5：真执行，再如实回执。绝不许"报 done 其实没做"。
         const ExecOut r = executeAction(action, params);
-        QJsonObject p;
-        p.insert(QStringLiteral("id"), id);
-        p.insert(QStringLiteral("action"), action);
-        p.insert(QStringLiteral("result"), r.result);
-        if (!r.error.isEmpty()) p.insert(QStringLiteral("error"), r.error);
-        // 动作的附加数据（进程列表 / 日志行 / 音量实际值 / 截图路径）。
-        // 协议规范第十节：**可选字段**，客户端不认就忽略，不算错。
-        if (!r.data.isEmpty()) p.insert(QStringLiteral("data"), r.data);
-        g_ws->sendTextMessage(makeEnvelope(QStringLiteral("receipt"), p));
-        qInfo("[agent-qt] 📤 回执 id=%s result=%s%s",
-              qPrintable(id), qPrintable(r.result),
-              r.error.isEmpty() ? "" : qPrintable(" error=" + r.error));
+        sendActionReceipt(id, action, r.result, r.error, r.data);
         return;
     }
 
