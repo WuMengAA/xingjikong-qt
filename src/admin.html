@@ -8,15 +8,17 @@
   :root {
     --bg: #0f1117;
     --panel: #1a1d27;
+    --panel-2: #22263a;
     --border: #2a2d3a;
     --text: #e0e0e8;
-    --text-dim: #8888a0;
+    --text-dim: #8a8ca3;
     --accent: #6c7cff;
     --accent-hover: #5a68f0;
     --green: #4caf50;
     --red: #f44336;
-    --orange: #ff9800;
-    --radius: 8px;
+    --orange: #ffb020;
+    --radius: 10px;
+    --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -28,7 +30,7 @@
   .header {
     background: var(--panel);
     border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
+    padding: 14px 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -36,89 +38,132 @@
     top: 0;
     z-index: 100;
   }
-  .header h1 { font-size: 18px; font-weight: 600; }
-  .header .status { display: flex; gap: 12px; align-items: center; font-size: 13px; color: var(--text-dim); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .dot.online { background: var(--green); }
-  .dot.offline { background: var(--red); }
-  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .header h1 { font-size: 17px; font-weight: 650; letter-spacing: 0.3px; }
+  .header .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .header .status { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--text-dim); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+  .dot.green { background: var(--green); }
+  .dot.red { background: var(--red); }
+  .container { max-width: 1180px; margin: 0 auto; padding: 24px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
   .card {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 20px;
   }
-  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
-  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+  .card h2 { font-size: 13px; font-weight: 650; margin-bottom: 16px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; justify-content: space-between; }
+  .card h2 .badge { font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+  .row { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
   .row:last-child { margin-bottom: 0; }
-  label { font-size: 13px; color: var(--text-dim); min-width: 100px; }
+  label { font-size: 13px; color: var(--text-dim); min-width: 88px; flex: none; padding-top: 2px; }
   input, select {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 12px;
+    border-radius: 7px;
+    padding: 9px 12px;
     color: var(--text);
-    font-size: 14px;
+    font-size: 13px;
     flex: 1;
     outline: none;
+    transition: border-color 0.2s;
   }
-  input:focus { border-color: var(--accent); }
+  input:focus, select:focus { border-color: var(--accent); }
+  input.mono { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2px; }
   input[type="checkbox"] { width: auto; flex: none; }
   .btn {
     background: var(--accent);
     color: #fff;
     border: none;
-    border-radius: 6px;
-    padding: 8px 20px;
-    font-size: 14px;
+    border-radius: 7px;
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 550;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.2s, opacity 0.2s;
+    flex: none;
   }
   .btn:hover { background: var(--accent-hover); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn.danger { background: var(--red); }
   .btn.danger:hover { background: #d32f2f; }
   .btn.green { background: var(--green); }
-  .btn.green:hover { background: #388e3c; }
+  .btn.green:hover { background: #3d9140; }
   .btn.outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
-  .btn.outline:hover { border-color: var(--accent); }
+  .btn.outline:hover { border-color: var(--accent); background: rgba(108,124,255,0.08); }
+  .btn.sm { padding: 5px 12px; font-size: 12px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
-  th { color: var(--text-dim); font-weight: 600; }
-  .tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-  .tag.online { background: rgba(76,175,80,0.15); color: var(--green); }
-  .tag.offline { background: rgba(244,67,54,0.15); color: var(--red); }
-  .tag.warn { background: rgba(255,152,0,0.15); color: var(--orange); }
-  .events { max-height: 400px; overflow-y: auto; }
-  .event { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
-  .event .time { color: var(--text-dim); margin-right: 8px; }
-  .event .level-info { color: var(--text-dim); }
-  .event .level-warn { color: var(--orange); }
-  .event .level-error { color: var(--red); }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--text-dim); font-weight: 600; font-size: 12px; }
+  .tag { padding: 3px 9px; border-radius: 5px; font-size: 11px; font-weight: 600; }
+  .tag.online { background: rgba(76,175,80,0.14); color: var(--green); }
+  .tag.offline { background: rgba(244,67,54,0.14); color: var(--red); }
+  .tag.warn { background: rgba(255,176,32,0.14); color: var(--orange); }
+  .tag.weak { background: rgba(244,67,54,0.14); color: var(--red); }
+  .tag.ok { background: rgba(76,175,80,0.14); color: var(--green); }
+  .events { max-height: 420px; overflow-y: auto; }
+  .event { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; display: flex; gap: 8px; }
+  .event .time { color: var(--text-dim); flex: none; font-family: var(--mono); font-size: 11px; padding-top: 1px; }
+  .event .lv { flex: none; font-weight: 600; }
+  .event .lv-info { color: var(--text-dim); }
+  .event .lv-warn { color: var(--orange); }
+  .event .lv-error { color: var(--red); }
   .event .msg { color: var(--text); }
-  .login-wrap { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-  .login-box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 40px; width: 360px; }
-  .login-box h1 { text-align: center; margin-bottom: 24px; font-size: 20px; }
-  .login-box .hint { font-size: 12px; color: var(--text-dim); text-align: center; margin-top: 16px; }
+  .login-wrap { display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+  .login-box { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 36px 32px; width: 380px; }
+  .login-box h1 { text-align: center; margin-bottom: 6px; font-size: 19px; }
+  .login-box .desc { text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 24px; }
+  .hint { font-size: 12px; color: var(--text-dim); text-align: center; margin-top: 14px; line-height: 1.6; }
   .toast {
     position: fixed;
-    top: 80px;
+    top: 72px;
     right: 24px;
-    background: var(--panel);
+    background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px 20px;
-    font-size: 14px;
+    border-radius: 8px;
+    padding: 12px 18px;
+    font-size: 13px;
     z-index: 200;
-    transition: opacity 0.3s;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    transition: opacity 0.3s, transform 0.3s;
   }
   .toast.ok { border-color: var(--green); }
   .toast.err { border-color: var(--red); }
-  .hidden { display: none; }
+  .hidden { display: none !important; }
   .full { grid-column: 1 / -1; }
-  .actions-cell { display: flex; gap: 8px; flex-wrap: wrap; }
-  .actions-cell .btn { padding: 4px 12px; font-size: 12px; }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 300;
+    display: flex; justify-content: center; align-items: center; padding: 20px;
+  }
+  .modal {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    max-width: 520px;
+    width: 100%;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  }
+  .modal h3 { font-size: 16px; margin-bottom: 12px; }
+  .modal .desc { font-size: 13px; color: var(--text-dim); line-height: 1.7; margin-bottom: 8px; }
+  .modal .warn { background: rgba(255,176,32,0.1); border: 1px solid rgba(255,176,32,0.3); color: var(--orange); border-radius: 8px; padding: 10px 14px; font-size: 12.5px; line-height: 1.6; margin-bottom: 18px; }
+  .modal .actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .token-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .token-card .tk-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .token-card .tk-value { font-family: var(--mono); font-size: 12px; word-break: break-all; color: var(--text); line-height: 1.5; margin-bottom: 8px; }
+  .token-card .tk-row { display: flex; gap: 8px; }
+  .countdown { font-size: 12px; color: var(--orange); margin-top: 6px; }
+  .dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); display: inline-block; margin-left: 6px; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .save-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; padding-top: 14px; border-top: 1px dashed var(--border); }
+  .save-bar .note { font-size: 12px; color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -127,104 +172,110 @@
 <div id="loginPage" class="login-wrap">
   <div class="login-box">
     <h1>星集控 · 云端管理台</h1>
+    <div class="desc">星璃集控云 Web 管理端</div>
     <div class="row">
-      <input type="password" id="loginToken" placeholder="输入管理令牌 (CLOUD_VIEWER_TOKEN)" style="flex:1">
+      <input type="password" id="loginToken" placeholder="输入管理令牌" style="flex:1">
     </div>
-    <button class="btn" style="width:100%; margin-top:8px;" onclick="doLogin()">登录</button>
-    <div class="hint">令牌存在云端 .env 的 CLOUD_VIEWER_TOKEN 里</div>
+    <button class="btn" style="width:100%;" onclick="doLogin()">登录</button>
+    <div class="hint">令牌在云端 .env 的 CLOUD_VIEWER_TOKEN<br>如果刚轮换过令牌，新令牌已自动填入</div>
   </div>
 </div>
 
 <!-- 管理面板 -->
 <div id="mainPage" class="hidden">
   <div class="header">
-    <h1>星集控 · 云端管理台</h1>
+    <div>
+      <h1>星集控 · 云端管理台</h1>
+      <div class="sub">stelarith-cloud-ws · 教室机/管理端统一接入</div>
+    </div>
     <div class="status">
-      <span><span id="hostDot" class="dot offline"></span> <span id="hostStatus">未连接</span></span>
-      <span>设备 <strong id="devCount">0</strong></span>
-      <button class="btn outline" onclick="refreshAll()">刷新</button>
-      <button class="btn outline" onclick="logout()">退出</button>
+      <span class="pill"><span id="hostDot" class="dot red"></span><span id="hostStatus">未连接</span></span>
+      <span class="pill">设备 <strong id="devCount">0</strong></span>
+      <span class="pill" id="tokenStrength"></span>
+      <button class="btn outline sm" onclick="refreshAll()">刷新</button>
+      <button class="btn outline sm" onclick="logout()">退出</button>
     </div>
   </div>
 
   <div class="container">
     <!-- 安全配置 -->
-    <div class="grid">
+    <div class="grid2">
       <div class="card">
-        <h2>安全配置</h2>
+        <h2>安全配置 <span class="badge" id="secState"></span></h2>
+
         <div class="row">
           <label>监听地址</label>
-          <select id="hostSelect">
-            <option value="127.0.0.1">127.0.0.1（锁回环）</option>
+          <select id="hostSelect" onchange="markDirty()">
+            <option value="127.0.0.1">127.0.0.1（仅本机）</option>
             <option value="0.0.0.0">0.0.0.0（放开公网）</option>
           </select>
-          <button class="btn" onclick="applyHost()">应用</button>
+          <span id="hostLive" class="tag warn">待加载</span>
         </div>
+
         <div class="row">
           <label>设备令牌</label>
-          <input type="text" id="wsToken" placeholder="CLOUD_WS_TOKEN">
-          <button class="btn outline" onclick="genToken('wsToken')">生成</button>
+          <input type="text" id="wsToken" class="mono" placeholder="CLOUD_WS_TOKEN" oninput="markDirty()" spellcheck="false">
+          <button class="btn outline sm" onclick="genToken('wsToken')">生成</button>
         </div>
         <div class="row">
           <label>管理令牌</label>
-          <input type="text" id="viewerToken" placeholder="CLOUD_VIEWER_TOKEN">
-          <button class="btn outline" onclick="genToken('viewerToken')">生成</button>
+          <input type="text" id="viewerToken" class="mono" placeholder="CLOUD_VIEWER_TOKEN" oninput="markDirty()" spellcheck="false">
+          <button class="btn outline sm" onclick="genToken('viewerToken')">生成</button>
         </div>
-        <div class="row">
-          <button class="btn green" onclick="saveTokens()">保存令牌并重启</button>
-        </div>
-        <div style="margin-top:8px; font-size:12px; color:var(--text-dim);">
-          ⚠ 换令牌后所有在线设备需用新令牌重连。放开 0.0.0.0 前务必先换强随机令牌。
+
+        <div class="save-bar">
+          <span class="note" id="dirtyNote">无待保存修改</span>
+          <button class="btn green" id="saveBtn" onclick="saveTokens()" disabled>保存并重启</button>
         </div>
       </div>
 
-      <!-- OTA 管理 -->
+      <!-- OTA 版本管理 -->
       <div class="card">
         <h2>OTA 版本管理</h2>
         <div class="row">
           <label>当前版本</label>
-          <input type="text" id="otaVersion" placeholder="0.5.0">
+          <input type="text" id="otaVersion" class="mono" placeholder="0.5.0">
         </div>
         <div class="row">
           <label>下载 URL</label>
-          <input type="text" id="otaUrl" placeholder="https://...">
+          <input type="text" id="otaUrl" placeholder="https://..." spellcheck="false">
         </div>
         <div class="row">
           <label>SHA256</label>
-          <input type="text" id="otaSha256" placeholder="64位十六进制">
-          <button class="btn outline" onclick="calcSha256()">算</button>
+          <input type="text" id="otaSha256" class="mono" placeholder="64 位十六进制" spellcheck="false">
+          <button class="btn outline sm" onclick="calcSha256()">选文件算</button>
         </div>
         <div class="row">
-          <label>文件大小</label>
-          <input type="number" id="otaSize" placeholder="字节">
+          <label>大小(字节)</label>
+          <input type="number" id="otaSize" placeholder="自动填充">
         </div>
         <div class="row">
           <label>更新说明</label>
-          <input type="text" id="otaNotes" placeholder="修复了…">
+          <input type="text" id="otaNotes" placeholder="修复了什么…">
         </div>
         <div class="row">
           <label>强制升级</label>
           <input type="checkbox" id="otaMandatory">
-          <button class="btn" onclick="publishOta()">发布</button>
-          <button class="btn outline" onclick="loadOta()">读取当前</button>
+          <button class="btn sm" onclick="publishOta()">发布</button>
+          <button class="btn outline sm" onclick="loadOta()">读当前</button>
         </div>
       </div>
     </div>
 
     <!-- 设备列表 -->
     <div class="card" style="margin-bottom:16px;">
-      <h2>设备列表</h2>
+      <h2>设备列表 <span class="badge" id="devCountBadge"></span></h2>
       <table>
         <thead>
           <tr><th>UID</th><th>版本</th><th>状态</th><th>在线时长</th><th>帧数</th><th>操作</th></tr>
         </thead>
         <tbody id="deviceTable">
-          <tr><td colspan="6" style="color:var(--text-dim);">暂无设备</td></tr>
+          <tr><td colspan="6" style="color:var(--text-dim); text-align:center; padding:24px;">暂无设备接入</td></tr>
         </tbody>
       </table>
     </div>
 
-    <div class="grid">
+    <div class="grid2">
       <!-- 指令下发 -->
       <div class="card">
         <h2>下发指令</h2>
@@ -244,12 +295,12 @@
             <option value="list_process">list_process（进程列表）</option>
             <option value="open_url">open_url（打开网页）</option>
             <option value="message">message（弹消息）</option>
-            <option value="upgrade">upgrade（OTA升级）</option>
+            <option value="upgrade">upgrade（OTA 升级）</option>
           </select>
         </div>
         <div class="row">
           <label>参数(JSON)</label>
-          <input type="text" id="insParams" placeholder='{"level":50}' value="{}">
+          <input type="text" id="insParams" class="mono" placeholder='{"level":50}' value="{}" spellcheck="false">
         </div>
         <div class="row">
           <button class="btn" onclick="sendInstruction()">发送</button>
@@ -259,10 +310,47 @@
 
       <!-- 事件流水 -->
       <div class="card">
-        <h2>事件流水（最近 50 条）</h2>
+        <h2>事件流水 <span class="badge">最近 50 条</span></h2>
         <div class="events" id="eventList"></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- 令牌轮换确认框 -->
+<div id="confirmModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>确认轮换令牌并重启？</h3>
+    <div class="desc">
+      即将把上面的设备令牌 / 管理令牌写入 .env，并自动重启云端。<br>
+      重启后：<br>
+      ① 所有在线设备将断开，需用<b>新设备令牌</b>重新接入；<br>
+      ② 当前管理会话失效，将用<b>新管理令牌</b>重新登录（自动填入）。
+    </div>
+    <div class="warn">⚠ 请确认已复制保存新令牌。如果丢掉管理令牌，将无法再进入本面板（需上服务器手动改 .env）。</div>
+    <div class="actions">
+      <button class="btn outline" onclick="closeConfirm()">取消</button>
+      <button class="btn danger" onclick="confirmSave()">确认轮换</button>
+    </div>
+  </div>
+</div>
+
+<!-- 保存成功令牌展示 -->
+<div id="tokenModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>✅ 新令牌已生效</h3>
+    <div class="desc" style="margin-bottom:16px;">云端已重启，请立即复制保存以下新令牌（仅此一次完整展示）。</div>
+    <div class="token-card">
+      <div class="tk-label">设备令牌 · CLOUD_WS_TOKEN</div>
+      <div class="tk-value" id="showWsToken"></div>
+      <div class="tk-row"><button class="btn outline sm" onclick="copyText('showWsToken')">复制</button></div>
+    </div>
+    <div class="token-card">
+      <div class="tk-label">管理令牌 · CLOUD_VIEWER_TOKEN</div>
+      <div class="tk-value" id="showViewerToken"></div>
+      <div class="tk-row"><button class="btn outline sm" onclick="copyText('showViewerToken')">复制</button></div>
+    </div>
+    <div class="countdown" id="countdownText">即将自动跳转登录页（用新管理令牌）…</div>
   </div>
 </div>
 
@@ -271,6 +359,8 @@
 <script>
 let token = localStorage.getItem('admin_token') || '';
 let pollTimer = null;
+let dirty = false;
+let pendingSave = null;
 
 // ---- 登录 ----
 function doLogin() {
@@ -298,6 +388,7 @@ async function testLogin() {
 function logout() {
   token = '';
   localStorage.removeItem('admin_token');
+  localStorage.removeItem('_pending_new_viewer');
   location.reload();
 }
 
@@ -319,7 +410,7 @@ function showMain() {
   document.getElementById('loginPage').classList.add('hidden');
   document.getElementById('mainPage').classList.remove('hidden');
   document.getElementById('hostStatus').textContent = '已连接';
-  document.getElementById('hostDot').className = 'dot online';
+  document.getElementById('hostDot').className = 'dot green';
   refreshAll();
   startPolling();
 }
@@ -340,29 +431,31 @@ async function refreshDevices() {
     const tbody = document.getElementById('deviceTable');
     const select = document.getElementById('insTarget');
     if (!r.ok || !r.devices || r.devices.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);">暂无设备</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim); text-align:center; padding:24px;">暂无设备接入</td></tr>';
       select.innerHTML = '<option value="">无在线设备</option>';
       document.getElementById('devCount').textContent = '0';
+      document.getElementById('devCountBadge').textContent = '';
       return;
     }
     document.getElementById('devCount').textContent = r.count;
+    document.getElementById('devCountBadge').textContent = r.count + ' 台';
     tbody.innerHTML = r.devices.map(d => {
       const dur = d.connectedAt ? Math.round((Date.now()-new Date(d.connectedAt).getTime())/1000) + 's' : '-';
       return `<tr>
-        <td>${esc(d.uid)}</td>
+        <td style="font-family:var(--mono); font-size:12px;">${esc(d.uid)}</td>
         <td>${esc(d.version||'-')}</td>
         <td><span class="tag ${d.online?'online':'offline'}">${d.online?'在线':'离线'}</span></td>
         <td>${dur}</td>
         <td>${d.framesIn||0}</td>
-        <td class="actions-cell">
-          <button class="btn outline" onclick="quickSend('${esc(d.uid)}','screenshot')">截图</button>
-          <button class="btn outline" onclick="quickSend('${esc(d.uid)}','lock')">锁屏</button>
-          <button class="btn outline" onclick="quickSend('${esc(d.uid)}','restart')">重启</button>
+        <td style="white-space:nowrap;">
+          <button class="btn outline sm" onclick="quickSend('${esc(d.uid)}','screenshot')">截图</button>
+          <button class="btn outline sm" onclick="quickSend('${esc(d.uid)}','lock')">锁屏</button>
+          <button class="btn outline sm" onclick="quickSend('${esc(d.uid)}','restart')">重启</button>
         </td>
       </tr>`;
     }).join('');
     select.innerHTML = r.devices.map(d => `<option value="${esc(d.uid)}">${esc(d.uid)}</option>`).join('');
-  } catch(e) { toast('刷新设备失败: '+e.message, 'err'); }
+  } catch(e) { /* 轮询失败静默，避免刷屏 */ }
 }
 
 async function refreshEvents() {
@@ -371,8 +464,8 @@ async function refreshEvents() {
     const el = document.getElementById('eventList');
     if (!r.ok || !r.events) { el.innerHTML = ''; return; }
     el.innerHTML = r.events.slice(0,50).map(ev => {
-      const t = ev.at ? new Date(ev.at).toLocaleTimeString('zh-CN') : '';
-      return `<div class="event"><span class="time">${t}</span><span class="level-${ev.level}">[${ev.level}]</span> <span class="msg">${esc(ev.msg)}</span></div>`;
+      const t = ev.at ? new Date(ev.at).toLocaleTimeString('zh-CN', {hour12:false}) : '';
+      return `<div class="event"><span class="time">${t}</span><span class="lv lv-${ev.level}">[${ev.level}]</span><span class="msg">${esc(ev.msg)}</span></div>`;
     }).join('');
   } catch(e) {}
 }
@@ -382,31 +475,50 @@ async function loadConfig() {
   try {
     const r = await api('/api/admin/config');
     if (!r.ok) return;
-    document.getElementById('hostSelect').value = r.host || '127.0.0.1';
-    document.getElementById('wsToken').value = r.wsToken || '';
-    document.getElementById('viewerToken').value = r.viewerToken || '';
+    const hostSel = document.getElementById('hostSelect');
+    const hostLive = document.getElementById('hostLive');
+    hostSel.value = r.host || '127.0.0.1';
+    if (r.host === '0.0.0.0') {
+      hostLive.textContent = '已放开公网';
+      hostLive.className = 'tag warn';
+    } else {
+      hostLive.textContent = '当前仅本机';
+      hostLive.className = 'tag ok';
+    }
+    const wsEl = document.getElementById('wsToken');
+    const vwEl = document.getElementById('viewerToken');
+    if (!wsEl.value) wsEl.value = r.wsToken || '';
+    if (!vwEl.value) vwEl.value = r.viewerToken || '';
+    const ts = document.getElementById('tokenStrength');
+    if (r.wsTokenIsDefault) {
+      ts.textContent = '⚠ 弱令牌';
+      ts.style.color = 'var(--red)';
+    } else {
+      ts.textContent = '令牌已轮换';
+      ts.style.color = 'var(--green)';
+    }
+    dirty = false;
+    updateDirtyUI();
   } catch(e) {}
 }
 
-async function applyHost() {
-  const host = document.getElementById('hostSelect').value;
-  const r = await api('/api/admin/config', 'POST', { host });
-  r.ok ? toast('监听地址已改为 '+host+'，需手动重启云端生效', 'ok') : toast(r.error||'失败', 'err');
-}
+// ---- 未保存标记 ----
+function markDirty() { dirty = true; updateDirtyUI(); }
 
-async function saveTokens() {
-  const wsToken = document.getElementById('wsToken').value.trim();
-  const viewerToken = document.getElementById('viewerToken').value.trim();
-  if (!wsToken || !viewerToken) return toast('令牌不能为空', 'err');
-  if (wsToken === 'dev-cloud-token' || wsToken.length < 16) return toast('设备令牌太弱（最少16位随机），不能保存', 'err');
-  const r = await api('/api/admin/config', 'POST', { wsToken, viewerToken });
-  if (r.ok) {
-    toast('令牌已保存到 .env，云端即将重启', 'ok');
-    token = viewerToken; // 管理令牌可能换了
-    localStorage.setItem('admin_token', token);
-    setTimeout(() => location.reload(), 3000);
+function updateDirtyUI() {
+  const note = document.getElementById('dirtyNote');
+  const btn = document.getElementById('saveBtn');
+  const secState = document.getElementById('secState');
+  if (dirty) {
+    note.innerHTML = '<span class="dirty-dot"></span> 有修改尚未保存（保存后自动重启生效）';
+    note.style.color = 'var(--orange)';
+    btn.disabled = false;
+    if (secState) secState.textContent = '● 未保存';
   } else {
-    toast(r.error || '保存失败', 'err');
+    note.textContent = '无待保存修改';
+    note.style.color = '';
+    btn.disabled = true;
+    if (secState) secState.textContent = '';
   }
 }
 
@@ -414,6 +526,94 @@ function genToken(id) {
   const arr = new Uint8Array(32);
   crypto.getRandomValues(arr);
   document.getElementById(id).value = Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
+  markDirty();
+}
+
+// ---- 保存并重启 ----
+async function saveTokens() {
+  const wsToken = document.getElementById('wsToken').value.trim();
+  const viewerToken = document.getElementById('viewerToken').value.trim();
+  const host = document.getElementById('hostSelect').value;
+
+  if (wsToken.length < 16) return toast('设备令牌太弱（至少 16 位随机），请点"生成"', 'err');
+  if (viewerToken.length < 16) return toast('管理令牌太弱（至少 16 位随机），请点"生成"', 'err');
+
+  const cfg = await api('/api/admin/config');
+  const changed =
+    host !== (cfg.host || '127.0.0.1') ||
+    wsToken !== (cfg.wsToken || '') ||
+    viewerToken !== (cfg.viewerToken || '');
+  if (!changed) { dirty = false; updateDirtyUI(); return toast('没有改动，无需重启', 'ok'); }
+
+  openConfirm({ wsToken, viewerToken, host });
+}
+
+function openConfirm(save) {
+  pendingSave = save;
+  document.getElementById('confirmModal').classList.remove('hidden');
+}
+function closeConfirm() {
+  pendingSave = null;
+  document.getElementById('confirmModal').classList.add('hidden');
+}
+
+async function confirmSave() {
+  const { wsToken, viewerToken, host } = pendingSave;
+  closeConfirm();
+
+  // ① 先把新管理令牌存进 localStorage —— 重启后旧令牌失效，登录页自动填入新令牌
+  localStorage.setItem('admin_token', viewerToken);
+  localStorage.setItem('_pending_new_viewer', viewerToken);
+
+  // ② 展示新令牌卡片（先于请求，让用户先看到要保存什么）
+  document.getElementById('showWsToken').textContent = wsToken;
+  document.getElementById('showViewerToken').textContent = viewerToken;
+  document.getElementById('tokenModal').classList.remove('hidden');
+  let cd = 8;
+  document.getElementById('countdownText').textContent = `即将自动跳转登录页（用新管理令牌）… ${cd}s`;
+  const t = setInterval(() => {
+    cd--;
+    document.getElementById('countdownText').textContent = `即将自动跳转登录页（用新管理令牌）… ${cd}s`;
+    if (cd <= 0) { clearInterval(t); jumpToLogin(); }
+  }, 1000);
+
+  // ③ 用旧令牌发保存请求（云端收到后写 .env 并触发重启）
+  try {
+    const r = await api('/api/admin/config', 'POST', { wsToken, viewerToken, host });
+    if (!r.ok) {
+      clearInterval(t);
+      document.getElementById('countdownText').textContent = '⚠ 保存失败：' + (r.error||'未知错误');
+      return;
+    }
+  } catch(e) {
+    // 请求可能因云端重启而中断 —— 属于预期行为，不报错
+  }
+}
+
+function jumpToLogin() {
+  document.getElementById('tokenModal').classList.add('hidden');
+  const newV = localStorage.getItem('_pending_new_viewer') || '';
+  if (newV) document.getElementById('loginToken').value = newV;
+  document.getElementById('mainPage').classList.add('hidden');
+  document.getElementById('loginPage').classList.remove('hidden');
+  document.getElementById('hostStatus').textContent = '未连接';
+  document.getElementById('hostDot').className = 'dot red';
+  if (pollTimer) clearInterval(pollTimer);
+  toast('云端已重启，请输入新管理令牌登录', 'ok');
+}
+
+function copyText(id) {
+  const el = document.getElementById(id);
+  const txt = el.textContent;
+  navigator.clipboard.writeText(txt).then(
+    () => toast('已复制', 'ok'),
+    () => {
+      const ta = document.createElement('textarea');
+      ta.value = txt; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); ta.remove();
+      toast('已复制', 'ok');
+    }
+  );
 }
 
 // ---- OTA ----
@@ -441,7 +641,7 @@ async function publishOta() {
     notes: document.getElementById('otaNotes').value.trim(),
     mandatory: document.getElementById('otaMandatory').checked,
   };
-  if (!body.version || !body.url) return toast('版本号和URL必填', 'err');
+  if (!body.version || !body.url) return toast('版本号和 URL 必填', 'err');
   const r = await api('/api/admin/ota', 'POST', body);
   r.ok ? toast('OTA 已发布: '+body.version, 'ok') : toast(r.error||'发布失败', 'err');
 }
@@ -468,7 +668,7 @@ async function sendInstruction() {
   const action = document.getElementById('insAction').value;
   let params = {};
   try { params = JSON.parse(document.getElementById('insParams').value || '{}'); }
-  catch(e) { return toast('参数不是合法JSON', 'err'); }
+  catch(e) { return toast('参数不是合法 JSON', 'err'); }
   if (!uid) return toast('请选设备', 'err');
   const r = await api('/api/instructions', 'POST', { uid, action, params });
   const span = document.getElementById('insResult');
@@ -487,11 +687,20 @@ function toast(msg, type='') {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast ' + type;
-  setTimeout(() => t.classList.add('hidden'), 3000);
+  t.classList.remove('hidden');
+  clearTimeout(t._tm);
+  t._tm = setTimeout(() => t.classList.add('hidden'), 3000);
 }
 
 // ---- 启动 ----
-if (token) testLogin();
+// 如果刚轮换过令牌，登录页自动填入新管理令牌
+(function() {
+  const newV = localStorage.getItem('_pending_new_viewer');
+  if (newV && document.getElementById('loginToken')) {
+    document.getElementById('loginToken').value = newV;
+  }
+  if (token) testLogin();
+})();
 </script>
 </body>
 </html>

@@ -13,7 +13,7 @@ import http from 'node:http';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { exec } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
@@ -52,11 +52,32 @@ function updateEnvFile(updates) {
   return true;
 }
 
-/** 重启 StelarithCloud 计划任务（写完 .env 后调用）。*/
+/** 重启 StelarithCloud 计划任务（写完 .env 后调用）。
+ * 用 spawn + detached:true + unref() 产生一个真正脱离父子链的进程，
+ * 它等 2 秒（让 HTTP 响应发出去）→ 结束任务 → 等 1 秒 → 重新运行任务。
+ * 不用 exec 是因为 exec 的 detached 子进程在父进程退出时仍可能被连带清理，
+ * 会导致"面板提示重启但实际没重启、新配置不生效"——这是 2026-10-05 踩过的坑。 */
 function restartCloudTask() {
-  // 用 detached 子进程：等 2s（让 HTTP 响应发出去）→ End → 等 1s → Run
-  const cmd = 'cmd /c "timeout /t 2 >nul && schtasks /End /TN StelarithCloud & timeout /t 1 >nul & schtasks /Run /TN StelarithCloud"';
-  exec(cmd, { windowsHide: true, detached: true }, () => {});
+  const script = join(__dirname, '..', '_restart-cloud.cmd');
+  const content = [
+    '@echo off',
+    'timeout /t 2 /nobreak >nul',
+    'schtasks /End /TN StelarithCloud >nul 2>&1',
+    'timeout /t 1 /nobreak >nul',
+    'schtasks /Run /TN StelarithCloud >nul 2>&1',
+    'del /q "%~f0"',
+  ].join('\r\n');
+  try {
+    writeFileSync(script, content, 'utf8');
+  } catch (e) {
+    pushEvent('error', '写重启脚本失败', { error: e.message });
+    return;
+  }
+  const child = spawn('cmd.exe', ['/c', script], {
+    detached: true, stdio: 'ignore', windowsHide: true,
+  });
+  child.unref();
+  pushEvent('info', '已触发云端重启（2 秒后执行）');
 }
 import { verifyViewerTicket } from './ticket.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
