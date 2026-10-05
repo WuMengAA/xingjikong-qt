@@ -232,6 +232,10 @@ void scheduleReconnect();
 // 定义在后面（托盘区），这里前向声明供 connectNow/sendRegister 提前调用
 void updateTray(TrayState st, const QString &detail);
 void goUnconfigured();
+// 定义在后面（OTA 段）：设置面板里的「立即升级」复用它，所以提前声明。
+static void startSelfUpdate(const QString &id, const QJsonObject &params);
+// 设置与信息面板（定义在 OOBE 配置窗之前）；托盘菜单要用它。
+void openInfoDialog();
 
 void connectNow()
 {
@@ -854,6 +858,166 @@ void consumeActivationCodeAsync(const QString &siteBase, const QString &code, co
 
 // 打开"配置向导"。首运行（未配置）自动调一次；托盘菜单「配置…」也走它。
 // 保存成功 → 立即用新配置重连；点「以后再说」→ 原样保持未配置态（不丢可见告警）。
+/* ══════════════════════════════════════════════════════════════════════════
+ * 升级提示 + 设置与信息面板（2026-10-06）
+ *
+ * 「谁告诉本机有新版本」：云端在 registered 回执里带 latestVersion / updateUrl /
+ * updateSha256（清单来自云端磁盘上的 ota.json）。没发布过版本时这些字段是 null ——
+ * 那是**"未知"**，不是"已是最新"，界面上必须分得清，否则运维会以为升级链路是好的。
+ *
+ * 本机只做三件事：① 比版本号 ② 提示（托盘气泡 + 菜单里多一条 + 面板里一行）
+ * ③ 用户点「立即升级」时**复用已有的 self_update 链路**（下载 → sha256 校验 →
+ *   重启助手 → 静默安装），不另写第二套升级逻辑。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;
+bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
+QAction *g_actUpdate = nullptr;     // 托盘里"发现新版本…"那一条（无更新时隐藏）
+
+/** 比语义化版本（**逐段比数字**，不做字符串比）：
+ *  a>b → 1，a<b → -1，相等或都比不出来 → 0。
+ *  例：0.6.1 > 0.6.0；0.10.0 > 0.9.9（字符串比会得出相反结论）；
+ *      0.4.0-v1 取到数字段 0/4/0，后缀不影响（历史上报过 "0.4.0-v1" 这种值）。 */
+int compareVersion(const QString &a, const QString &b)
+{
+    auto seg = [](const QString &s, int i) -> int {
+        const QStringList parts = s.split(QLatin1Char('.'));
+        if (i >= parts.size()) return 0;            // 段数不够 → 补 0
+        int n = 0; bool got = false;
+        for (const QChar c : parts.at(i)) {
+            if (c.isDigit()) { n = n * 10 + c.digitValue(); got = true; }
+            else if (got) break;                    // 数字之后的东西（如 "-v1"、"-beta"）忽略
+        }
+        return got ? n : 0;
+    };
+    for (int i = 0; i < 4; ++i) {
+        const int x = seg(a, i), y = seg(b, i);
+        if (x != y) return x > y ? 1 : -1;
+    }
+    return 0;
+}
+
+/** 消化云端给的升级信息：记下来 + 该提示就提示。 */
+void applyUpdateInfo(const QJsonObject &pay)
+{
+    g_latestVer   = pay.value(QStringLiteral("latestVersion")).toString().trimmed();
+    g_updateUrl   = pay.value(QStringLiteral("updateUrl")).toString().trimmed();
+    g_updateSha   = pay.value(QStringLiteral("updateSha256")).toString().trimmed();
+    g_updateNotes = pay.value(QStringLiteral("updateNotes")).toString().trimmed();
+    g_updateChecked = true;
+
+    if (g_latestVer.isEmpty()) {
+        // 如实说：云端还没发布过版本（ota.json 不存在）。这不是"已是最新"。
+        qInfo("[agent-qt] 升级检查：云端尚未发布过版本（无 ota.json）→ 本机 v%s 继续跑", kAppVersion);
+        return;
+    }
+    if (compareVersion(g_latestVer, QString::fromLatin1(kAppVersion)) > 0) {
+        const bool canUpgrade = !g_updateUrl.isEmpty() && g_updateSha.length() == 64;
+        qInfo("[agent-qt] ⬆ 发现新版本 v%s（本机 v%s）%s —— 右键托盘 →「设置与信息…」可升级",
+              qPrintable(g_latestVer), kAppVersion,
+              canUpgrade ? "" : "（⚠ 清单缺 url/sha256，先别升，让管理员补 ota.json）");
+        if (g_actUpdate) {
+            g_actUpdate->setVisible(true);
+            g_actUpdate->setText(QStringLiteral("发现新版本 v%1（点此查看）").arg(g_latestVer));
+        }
+        if (g_tray) {
+            g_tray->showMessage(
+                QStringLiteral("星集控 · 被控端"),
+                QStringLiteral("有可用的新版本 v%1（当前 v%2）。\n右键托盘图标 →「设置与信息…」即可升级。")
+                    .arg(g_latestVer, QString::fromLatin1(kAppVersion)),
+                QSystemTrayIcon::Information, 12000);
+        }
+    } else {
+        qInfo("[agent-qt] 升级检查：已是最新（云端 v%s，本机 v%s）",
+              qPrintable(g_latestVer), kAppVersion);
+    }
+}
+
+/** 设置与信息：一眼看清"我是谁、连着谁、什么版本、能不能升"。只读 + 两个动作按钮。 */
+void openInfoDialog()
+{
+    static bool infoOpen = false;      // 防重入：托盘菜单连点两下别叠出三个窗
+    if (infoOpen) return;
+    infoOpen = true;
+
+    QDialog dlg;
+    dlg.setWindowTitle(QStringLiteral("星集控 · 被控端 设置与信息"));
+    dlg.setMinimumWidth(560);
+
+    auto *root = new QVBoxLayout(&dlg);
+    auto *form = new QFormLayout();
+    root->addLayout(form);
+
+    const QString cur = QString::fromLatin1(kAppVersion);
+
+    form->addRow(QStringLiteral("当前版本"), new QLabel(QStringLiteral("v%1").arg(cur)));
+
+    // 升级状态：没查到 / 云端没发布 / 有新版本 / 已是最新 —— 四种态分开写，别含糊
+    QString latestText;
+    const bool newer = g_updateChecked && !g_latestVer.isEmpty()
+                       && compareVersion(g_latestVer, cur) > 0;
+    if (!g_updateChecked)            latestText = QStringLiteral("还没查到（等云端回执；没连上时会一直显示这项）");
+    else if (g_latestVer.isEmpty())  latestText = QStringLiteral("云端还没发布过版本");
+    else if (newer)                  latestText = QStringLiteral("有新版本 v%1 可升级").arg(g_latestVer);
+    else                             latestText = QStringLiteral("已是最新（云端 v%1）").arg(g_latestVer);
+    auto *latestLbl = new QLabel(latestText);
+    if (newer) latestLbl->setStyleSheet(QStringLiteral("color:#d08a00;font-weight:bold;"));
+    form->addRow(QStringLiteral("升级状态"), latestLbl);
+
+    form->addRow(QStringLiteral("设备代号"), new QLabel(g_uid.isEmpty() ? QStringLiteral("(未注册)") : g_uid));
+    form->addRow(QStringLiteral("云端地址"), new QLabel(qEnvironmentVariable("STE_QT_WS_URL")));
+    form->addRow(QStringLiteral("连接状态"),
+                 new QLabel(g_registered ? QStringLiteral("已连接（云端已确认）")
+                                         : QStringLiteral("未连接 / 正在重连")));
+    form->addRow(QStringLiteral("数据目录"),
+                 new QLabel(qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong")));
+    form->addRow(QStringLiteral("日志文件"), new QLabel(g_logPath));
+
+    if (!g_updateNotes.isEmpty()) {
+        auto *notes = new QLabel(g_updateNotes);
+        notes->setWordWrap(true);
+        form->addRow(QStringLiteral("版本说明"), notes);
+    }
+
+    auto *btnRow = new QHBoxLayout();
+    root->addLayout(btnRow);
+
+    auto *btnUpgrade = new QPushButton(QStringLiteral("立即升级"));
+    const bool canUpgrade = newer && !g_updateUrl.isEmpty() && g_updateSha.length() == 64;
+    btnUpgrade->setEnabled(canUpgrade);
+    if (!canUpgrade) {
+        btnUpgrade->setToolTip(QStringLiteral(
+            "现在没有可升级的版本：要么云端还没发布（ota.json），要么清单里缺 url/sha256。\n"
+            "这两项都得由管理员在云端补，本机不猜、不自己找包。"));
+    }
+    QObject::connect(btnUpgrade, &QPushButton::clicked, &dlg, [] {
+        QJsonObject p;
+        p.insert(QStringLiteral("url"), g_updateUrl);
+        p.insert(QStringLiteral("sha256"), g_updateSha);
+        p.insert(QStringLiteral("version"), g_latestVer);
+        // 走的就是云端下发 self_update 用的同一条链路（含四条护栏）
+        qInfo("[agent-qt] 用户在设置面板点了「立即升级」→ v%s", qPrintable(g_latestVer));
+        startSelfUpdate(QStringLiteral("manual"), p);
+    });
+    QObject::connect(btnUpgrade, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    auto *btnLog = new QPushButton(QStringLiteral("打开日志目录"));
+    QObject::connect(btnLog, &QPushButton::clicked, &dlg, [] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(g_logPath).absolutePath()));
+    });
+
+    auto *btnClose = new QPushButton(QStringLiteral("关闭"));
+    QObject::connect(btnClose, &QPushButton::clicked, &dlg, &QDialog::reject);
+
+    btnRow->addWidget(btnUpgrade);
+    btnRow->addWidget(btnLog);
+    btnRow->addStretch();
+    btnRow->addWidget(btnClose);
+
+    dlg.exec();
+    infoOpen = false;
+}
+
 void openConfigDialog()
 {
     if (g_configDialogOpen) return;   // 防重入
@@ -3025,6 +3189,9 @@ void handleControlText(const QString &text)
               qPrintable(pay.value(QStringLiteral("uid")).toString()),
               qPrintable(pay.value(QStringLiteral("server")).toString()),
               g_heartbeatMs, g_timeoutMs);
+        // 升级提示（2026-10-06）：云端把 ota.json 里的最新版本随回执带回，
+        // 这里比一次、该提示就提示（比不出来/没发布过都如实说，不假装"已最新"）。
+        applyUpdateInfo(pay);
         return;
     }
 
@@ -3272,6 +3439,13 @@ int main(int argc, char *argv[])
         // 首次运行配置窗的入口：老师在界面里填云端地址/令牌/设备名，写回同目录 agent.env。
         auto *actConfig = menu->addAction(QStringLiteral("配置…"));
         QObject::connect(actConfig, &QAction::triggered, &app, [] { openConfigDialog(); });
+        // 设置与信息（2026-10-06）：一眼看清 版本 / uid / 云端地址 / 连接状态 / 能不能升级
+        auto *actInfo = menu->addAction(QStringLiteral("设置与信息…"));
+        QObject::connect(actInfo, &QAction::triggered, &app, [] { openInfoDialog(); });
+        // 有新版时才出现的一条：默认隐藏，收到 registered 里的 latestVersion 后按需显示
+        g_actUpdate = menu->addAction(QStringLiteral("发现新版本…"));
+        g_actUpdate->setVisible(false);
+        QObject::connect(g_actUpdate, &QAction::triggered, &app, [] { openInfoDialog(); });
         // 未配置时"去哪儿配"的落点：直接打开 exe 同目录（agent.env 就放这儿）
         auto *actEnv = menu->addAction(QStringLiteral("打开 agent.env 所在目录"));
         QObject::connect(actEnv, &QAction::triggered, &app, [] {
