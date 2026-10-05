@@ -17,11 +17,14 @@
  * 这样就算中途崩了也不会污染"已经发布的版本"。
  */
 
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 const BASE = process.env.CLOUD_OTA_TEST_BASE || 'http://127.0.0.1:18999';
 const TOKEN = process.env.CLOUD_OTA_TEST_TOKEN || 'selftestviewertoken00000001';
 const MANIFEST = process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.selftest.json';
+// 临时清单可能落在仓库外，目录自己建起来（服务端写盘时不会替你 parent 建目录）
+mkdirSync(dirname(MANIFEST), { recursive: true });
 
 const GOOD_SHA = 'a'.repeat(64);
 const GOOD_URL = 'https://control.245959623.xyz/assets/pkg/test.zip';
