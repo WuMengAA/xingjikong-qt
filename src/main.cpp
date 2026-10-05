@@ -21,6 +21,11 @@
 #include <cstdarg>
 #include <cstdio>
 
+// ⚠️ 管理端应用版本号的**唯一真源**（2026-10-05 统一）。
+// 与被控端 kAppVersion、云端 package.json 同一套版本号，便于运维一眼对齐三端。
+// 改版本只改这里（viewer 目前不上报版本给云端，仅用于启动日志/关于信息）。
+static constexpr const char *kViewerVersion = "0.5.0";
+
 // ── 日志：落盘 + 打屏（backend 与界面共用这一份）──
 // 2026-10-04 换了个新文件名（viewer-run.log）。原因：老 viewer.log 从某次起再也没被写过，
 // 而 writeLog 失败时会静默丢日志（fail-silent 红线），现象和"程序没起来"完全一样 ——
@@ -176,6 +181,8 @@ int main(int argc, char *argv[])
     // 后者必须在 QApplication 上跑。QGuiApplication 下 WebEngine 初始化即崩（不是 warning，是崩）。
     // 副作用只是多链 Qt6::Widgets（本来就链了，为了 QFileDialog），没有额外负担。
     QApplication app(argc, argv);
+    QCoreApplication::setApplicationVersion(QString::fromLatin1(kViewerVersion));
+    logf("[viewer] viewer-qt 版本 %s", kViewerVersion);
 
     // 双击即用：配置（云端地址/令牌）从 exe 同目录的 viewer.env 读 —— 不要求先设环境变量。
     // 必须在 backend.start() 之前读完：start() 里立刻取 STE_VIEWER_URL / STE_VIEWER_TOKEN。
