@@ -33,7 +33,6 @@ if (-not (Test-Path (Join-Path $Build 'build.ninja'))) {
         -DCMAKE_BUILD_TYPE=Release `
         -DCMAKE_PREFIX_PATH=$Qt `
         -DCMAKE_MAKE_PROGRAM="$Ninja" `
-        -DCMAKE_C_COMPILER=cl `
         -DCMAKE_CXX_COMPILER=cl
     if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
 }
