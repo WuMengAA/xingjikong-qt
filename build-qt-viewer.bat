@@ -15,7 +15,7 @@ set MSVCCL=%MSVC%\bin\Hostx64\x64
 call "C:\Users\Administrator\.workbuddy\binaries\python\envs\default\Scripts\activate.bat" 2>nul
 
 set PATH=%QT%\bin;%MSVCCL%;%SDK%\bin\%SDKVER%\x64;%PATH%
-set INCLUDE=%MSVC%\include;%SDK%\Include\%SDKVER%\ucrt;%SDK%\Include\%SDKVER%\um;%SDK%\Include\%SDKVER%\shared
+set INCLUDE=%MSVC%\include;%SDK%\Include\%SDKVER%\ucrt;%SDK%\Include\%SDKVER%\um;%SDK%\Include\%SDKVER%\shared;%SDK%\Include\%SDKVER%\winrt
 set LIB=%MSVC%\lib\x64;%SDK%\Lib\%SDKVER%\ucrt\x64;%SDK%\Lib\%SDKVER%\um\x64
 
 cmake --version
@@ -26,11 +26,26 @@ rem Existence checks are enough and never block.
 if exist "%MSVCCL%\cl.exe" echo [ok] cl.exe found
 if exist "%SDK%\bin\%SDKVER%\x64\rc.exe" echo [ok] rc.exe found
 
+rem Force a clean configure: the build dir was copied over from another location,
+rem so a stale CMakeCache.txt would carry the wrong source/build absolute paths and
+rem CMake would refuse to configure (cache source path mismatch).
+if exist build (
+  echo [clean] removing stale build dir ^(copied from old location^)
+  rd /s /q build
+)
+
 cmake -S . -B build -G Ninja ^
   -DCMAKE_BUILD_TYPE=Release ^
+  -DCMAKE_PREFIX_PATH="%QT%" ^
   -DCMAKE_C_COMPILER="%MSVCCL%\cl.exe" ^
   -DCMAKE_CXX_COMPILER="%MSVCCL%\cl.exe" || exit /b 1
 
-cmake --build build --config Release
+rem Parallelism: this box has only ~14GB RAM. Ninja's default (one job per core)
+rem makes several big qmlcache .cpp compile at once and cl.exe dies with
+rem C1060 (compiler heap exhausted) -- a misleading error that costs rounds.
+rem Cap at 2 by default; override with JOBS=<n>.
+if "%JOBS%"=="" set JOBS=2
+
+cmake --build build --config Release -j %JOBS%
 echo [exit] %errorlevel%
 exit /b %errorlevel%

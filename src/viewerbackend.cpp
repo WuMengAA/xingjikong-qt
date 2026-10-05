@@ -4,13 +4,20 @@
 
 #include <QAbstractSocket>
 #include <QDateTime>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QImage>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QTimer>
 #include <QUrl>
 #include <QWebSocket>
+#include <QWebEngineView>
+#include <QWebChannel>
+#include <QWebEngineProfile>
+#include <QWebEnginePage>
+#include <QWebEngineSettings>
 
 namespace {
 
@@ -23,7 +30,8 @@ namespace {
  */
 constexpr qint64 kFileChunkBytes = 64 * 1024;
 
-/* 协议 v1 信封：{"v":1,"type":...,"id":...,"ts":...,"payload":{...}}
+/**
+ * 协议 v1 信封：{"v":1,"type":...,"id":...,"ts":...,"payload":{...}}
  * 文本消息统一走它；二进制帧（画面）另走 [1B 版本][2B 大端 headerLen][header][JPEG]。 */
 QString makeEnvelope(const QString &type, const QJsonObject &payload)
 {
@@ -65,6 +73,26 @@ quint64 frameFingerprint(const QImage &img)
         h = h * 131 + p[(qsizetype)k * stride % total];
     }
     return h;
+}
+
+/**
+ * 把 QString 转成 **带双引号的合法 JSON 字符串字面量**（即 "\"...\""，含外层引号）。
+ *
+ * 为什么不用手写转义：SDP 里全是 / 换行 引号，ICE candidate 是嵌套 JSON，
+ * 自己拼一定会在某个特殊字符上炸，而且炸出来的是 JS 语法错、报在 runJavaScript 的字符串里，
+ * 很难定位。这里借 Qt 自己的 QJsonObject/QJsonDocument 去转义 —— 转义规则只认一处，不会漂。
+ *
+ * 顺带把坑记下：QString 没有 toJsonEscapedString()，QJsonDocument 也没有接受 QJsonValue 的
+ * 构造函数（QJsonDocument(QJsonValue) 编译不过），别再往那个方向试。
+ */
+QString jsonStringLiteral(const QString &s)
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("_"), s);
+    const QByteArray full = QJsonDocument(o).toJson(QJsonDocument::Compact);  // {"_":"..."}
+    // lastIndexOf(':') 取的是最后一个冒号，即我们那个 "_" 对应的值起点；
+    // mid 之后正好是带双引号的字面量本体
+    return QString::fromUtf8(full.mid(full.lastIndexOf(':') + 1));
 }
 
 } // namespace
@@ -137,6 +165,16 @@ ViewerBackend::ViewerBackend(QObject *parent)
                      });
 }
 
+// QWebEngineView 必须在 event loop 停止**之后**销毁：主线程一停转，Chromium 就要求 view
+// 已被释放，否则是 use-after-free 直接崩。这里用 deferDelete 把销毁推到事件循环之后。
+ViewerBackend::~ViewerBackend()
+{
+    if (m_rtcView) {
+        m_rtcView->deleteLater();
+        m_rtcView = nullptr;
+    }
+}
+
 void ViewerBackend::start()
 {
     m_url = qEnvironmentVariable("STE_VIEWER_URL", QStringLiteral("ws://127.0.0.1:8788/ws/viewer")).trimmed();
@@ -172,6 +210,477 @@ void ViewerBackend::start()
     connectToCloud();
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// WebRTC 收流（T-3，2026-10-04）
+//
+// 管理端是 **answer 侧**：
+//   被控端 captureStream → createOffer →（云端中继 rtc-offer）→ 这里 setRemoteDescription
+//   → createAnswer → rtc-answer 回云端 → ontrack 拿到 video track 塞进 <video>
+//   → 定时器 drawImage 到 canvas → toDataURL 抽 JPEG → setRtcFrame 走现有 frame 通道。
+//
+// 为什么用离屏 QWebEngineView 而不是纯 C++ WebRTC 库：被控端（control-qt）已经用同样的
+// canvas.captureStream 跑通了推流，这里用同套 Chromium 栈做 answer 侧是最短路径，
+// 省掉整套 native WebRTC 依赖，而且 ontrack/ICE/codec 协商交给浏览器实现，不自己造。
+//
+// 为什么只收不发：被控端已经建了 RTCPeerConnection 并持有 track，管理端只需要接收；
+// 双向视频（远控回环）不在这一批范围内。
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 取 WebRTC 信令里的字段（sdp / candidate），**两层都找**。
+ *
+ * 为什么必须往里再剥一层：被控端（control-qt 的 rtcSendSignal）发信封时把信令又包了一层 ——
+ *   信封.payload = { payload: { kind, sdp, candidate }, from: "agent" }
+ * 云端原样把这个 payload 转给管理端（registry.rtcRelayToViewers），所以到管理端手上就变成
+ *   顶层 { payload: { kind, sdp, candidate }, from, uid }
+ * 只看顶层 pay.value("sdp") 必然是空 → 日志上就一句"收到 rtc-offer 但没有 sdp 字段"，
+ * 看不出真正的问题是协议包了两层。这里先取顶层、取不到再取内层，两种写法都吃。
+ */
+static QString rtcField(const QJsonObject &pay, const QLatin1String &key)
+{
+    QJsonValue v = pay.value(key);
+    if (v.isUndefined() || v.isNull()) v = pay.value(QStringLiteral("payload")).toObject().value(key);
+    return v.toString();
+}
+
+/** 离屏渲染页：一个 <video>（远端视频轨）+ 一个 <canvas>（抽帧用），全黑底、无边框。 */
+static const char *kRtcViewerHtml = R"HTML(<!doctype html>
+<html><head><meta charset="utf-8"><title>rtc</title>
+<style>html,body{margin:0;background:#000;overflow:hidden;width:1280px;height:720px}</style>
+</head><body>
+<video id="v" autoplay muted playsinline style="width:1280px;height:720px;object-fit:contain"></video>
+<canvas id="c" width="1280" height="720"></canvas>
+<script>
+// 页面内部报错必须能看见。QWebEnginePage 没给"接管 console"的公开入口
+// （javaScriptConsoleMessage 在 6.8 是 protected，setConsoleMessageCallback 根本不存在），
+// 所以在这儿自己把 console 兜住：QWebChannel 建不起来时它只往 console 打一行 error，
+// 不拦下来的话 C++ 侧永远收不到，"为什么没画面"就彻底没线索。
+window.__logs = [];
+(function () {
+  var push = function (k, a) {
+    window.__logs.push(k + ': ' + Array.prototype.join.call(a, ' '));
+    if (window.__logs.length > 30) window.__logs.shift();
+  };
+  ['error', 'warn', 'log'].forEach(function (k) {
+    var orig = console[k] ? console[k].bind(console) : function () {};
+    console[k] = function () { push(k, arguments); orig.apply(null, arguments); };
+  });
+})();
+</script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+// ⚠️ 这里**绝对不能**把变量/函数起名叫 qt：
+// 上面那句 new QWebChannel(...) 要用的是 Qt 注入的全局 qt（它身上挂着 webChannelTransport）。
+// 而 var 声明会被提升（hoisting）：脚本一进执行上下文 qt 就已被覆盖成 undefined，
+// new QWebChannel(qt.webChannelTransport) 直接拿到 undefined → QWebChannel 构造函数里面
+// 一句 console.error('QWebChannel: invalid transport argument, ignored.') 就 return 了，
+// 回调永远不触发 → window.__qt 永远是 undefined → 后面所有 qt().xxx 全报
+// "Cannot read properties of undefined"。这个坑只出现在控制台一行 error，C++ 侧一点线索都没有。
+var ch = new QWebChannel(qt.webChannelTransport, function () {
+  window.__qt = ch.objects.qt;
+  window.__qtOk = true;
+});
+var v = document.getElementById('v');
+var c = document.getElementById('c');
+var x = c.getContext('2d');
+var pc = null;
+var tracks = [];
+
+// 注意：这里的 window.__qt.<name> 必须和 C++ 侧 Q_INVOKABLE 的**方法名逐字一致**
+// （QWebChannel 按名字映射，名字对不上是静默失效，最难查的一种失败）
+var qtc = function () { return window.__qt; };
+
+function log(m) { try { if (qtc()) qtc().rtcDiag(String(m)); } catch (e) {} }
+
+window.addEventListener('unhandledrejection', function (e) {
+  log('REJECT ' + (e.reason && (e.reason.name + ' ' + e.reason.message) || e.reason));
+});
+
+// 建连：被控端的 offer 先到 → setRemoteDescription → createAnswer 回云端
+window.__setOffer = function (b64) {
+  if (!qtc()) { console.error('no qtc jobject'); return; }
+  var sdpStr = atob(b64);
+  log('setOffer len=' + sdpStr.length);
+  if (!pc) {
+    pc = new RTCPeerConnection();
+    pc.onicecandidate = function (e) {
+      if (!e.candidate) return;
+      try { qtc().rtcGotIce(JSON.stringify(e.candidate)); } catch (err) { log('ice-send-fail ' + err); }
+    };
+    pc.ontrack = function (e) {
+      var t = e.track;
+      tracks.push(t);
+      // 必须显式 muted + play()：Chromium 的自动播放策略对"带音轨的媒体"不放行，
+      // 只写 autoplay 属性不够 —— 结果就是 ontrack 明明拿到了 live 的 video 轨，
+      // video 元素 readyState 永远是 0、videoWidth/Height 是 0，抽帧全抓到空，
+      // 日志上还看不出任何报错（这正是之前"tracks 有 live 但画面全黑"的来源）。
+      v.muted = true;
+      v.autoplay = true;
+      try { v.srcObject = e.streams[0]; } catch (err) { log('src-fail ' + err); }
+      try {
+        var pr = v.play();
+        if (pr && pr.catch) pr.catch(function (er) { log('play-fail ' + er.message); });
+      } catch (err) { log('play-FAIL ' + err); }
+      log('ontrack kind=' + t.kind + ' ready=' + t.readyState);
+      try { qtc().rtcGotTrack(); } catch (err) { log('track-cb-fail ' + err); }
+    };
+    pc.onconnectionstatechange = function () { log('conn=' + pc.connectionState); };
+  }
+  pc.setRemoteDescription({ type: 'offer', sdp: sdpStr }).then(function () {
+    return pc.createAnswer();
+  }).then(function (ans) {
+    return pc.setLocalDescription(ans);
+  }).then(function () {
+    log('answer len=' + pc.localDescription.sdp.length);
+    qtc().rtcGotAnswer(pc.localDescription.sdp);
+  }).catch(function (e) {
+    log('setOffer-FAIL ' + e.name + ' ' + e.message);
+    qtc().rtcDiag('setOffer failed: ' + (e.name + ' ' + e.message));
+  });
+};
+
+window.__addIce = function (b64) {
+  var candStr = atob(b64);
+  if (!pc) { log('ice-before-pc ' + candStr.slice(0, 60)); return; }
+  pc.addIceCandidate(JSON.parse(candStr)).then(function () {
+    log('ice-added');
+  }).catch(function (e) { log('ice-FAIL ' + e.name + ' ' + e.message); });
+};
+
+// 拆掉旧 pc，为一次**全新**的协商腾地方。
+//
+// 为什么必须有：被控端每次 rtc-start 都 new 一个全新的 RTCPeerConnection（见它的 __startStream），
+// 每个 offer 背后都是一个新 peer。而我们这边原来只在 pc 为空时才建，于是第二台机器（或重连）
+// 的 offer 是被 setRemoteDescription 塞进**上一个 pc** 的 —— 那个 pc 已经处在
+// connected / have-local-offer，Chromium 直接抛 "called in wrong state"，
+// 结果就是：第一台机器有画面，切到第二台永远黑屏，而且日志里只有一句 JS 异常。
+// 对称地看，被控端自己也有 __reset 干同一件事。
+window.__resetPc = function () {
+  try { if (pc) pc.close(); } catch (e) {}
+  pc = null;
+  tracks = [];
+  try { v.srcObject = null; } catch (e) {}
+  log('pc-reset');
+};
+
+// 抽帧：远端 video 解码出的帧画到 canvas，转 JPEG 交回 C++（复用现有 frame 通道）
+window.__grab = function () {
+  try {
+    if (!qtc()) return;                      // 桥还没建好，别刷屏 TypeError
+    if (v.readyState < 2) { qtc().setRtcFrame('EMPTY'); return; }
+    x.drawImage(v, 0, 0, 1280, 720);
+    var s = c.toDataURL('image/jpeg', 0.72);
+    qtc().setRtcFrame(s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : s);
+  } catch (e) {
+    qtc().setRtcFrame('EMPTY');
+    log('grab-FAIL ' + e.name + ' ' + e.message);
+  }
+};
+
+// 自检/诊断出口：被控端那边也留了一个 __diag，这里对称放一个
+window.__diag = function () {
+  return JSON.stringify({
+    hasPc: !!pc,
+    state: pc ? pc.connectionState : 'none',
+    tracks: tracks.map(function (t) { return t.kind + ':' + t.readyState; }),
+    ready: v.readyState,
+    w: v.videoWidth,
+    h: v.videoHeight
+  });
+};
+</script>
+</body></html>)HTML";
+
+void ViewerBackend::setRtcState(const QString &s)
+{
+    if (m_rtcState == s) return;
+    m_rtcState = s;
+    m_rtcReady = (s == QStringLiteral("track"));   // 拿到远端视频轨才算真出画面
+    emit rtcStateChanged();
+}
+
+void ViewerBackend::initRtcView()
+{
+    if (m_rtcView) return;
+    cancelRtcViewReap();   // 上一轮倒计时还没到，别把刚要复用的页面收掉
+
+    // WebEngine 是 Chromium：默认沙箱在没配 seccomp 的环境下会拒跑 RTCPeerConnection 的
+    // ICE 传输（被控端已经踩过同一个坑，同样用 qputenv 关掉）。必须在创建 view 之前设。
+    qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
+            "-no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage");
+
+    // QWebEngineView 是 QWidget 子类、不是 QObject，没有 (QObject*) 构造 ——
+    // 只能先不带 parent 建，再 setParent 挂到 backend 上（挂不上就直接泄漏在堆上）
+    m_rtcView = new QWebEngineView();
+    // 渲染层不参与界面布局：只负责跑 RTCPeerConnection，画完抽帧交回 C++。
+    // 用 move 挪出屏幕而不是 hide —— hide 后 Chromium 会暂停媒体管线，ontrack 也拿不到帧。
+    m_rtcView->setGeometry(-2000, -2000, 1280, 720);
+
+    // 关键：页面必须以 **file://** origin 加载，才能访问 Qt 内建的
+    // qrc:///qtwebchannel/qwebchannel.js。用 data: URL 加载会让 origin 变成 null，
+    // 那个 <script src> 直接被同源策略拦掉，QWebChannel 建不起来 → JS 侧 __qt 是 undefined。
+    // 文件写在临时目录、退出时清理；不放在工程目录里免得污染版本树。
+    const QString htmlPath = QDir::tempPath() + QStringLiteral("/stelarith-viewer-rtc.html");
+    {
+        QFile f(htmlPath);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            logf("[viewer] FAIL 收流页写不进临时文件 %s（%s）",
+                 htmlPath.toUtf8().constData(), f.errorString().toUtf8().constData());
+            setRtcState(QStringLiteral("failed"));
+            return;
+        }
+        f.write(kRtcViewerHtml);
+        f.close();
+    }
+
+    auto *page = new QWebEnginePage(m_rtcView);
+    m_rtcView->setPage(page);
+    // 刻意**不给 parent**：QWebEngineView 是 QWidget，只能挂 QWidget 做 parent，
+    // 而 backend 是 QObject（挂不上）；再包一层 QWidget 纯属多余。
+    // 生命周期统一由析构里的 deleteLater() 收口（见 ~ViewerBackend）。
+    m_rtcView->setContextMenuPolicy(Qt::NoContextMenu);
+    m_rtcView->settings()->setAttribute(QWebEngineSettings::ShowScrollBars, false);
+    // 这是纯渲染层，不该有 JS 弹新窗 / 下载的能力（被控端那边也没这需求）
+    m_rtcView->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
+
+    // QWebChannel：JS ↔ C++ 的桥。构造函数只收 (QObject *parent)，页面侧的 transport
+    // 由 page->setWebChannel(channel) 接管，不用自己传（QWebChannel(QWebChannelPrivate&,QObject*)
+    // 那个是私有的，别去碰）
+    auto *channel = new QWebChannel(this);
+    channel->registerObject(QStringLiteral("qt"), this);
+    page->setWebChannel(channel);
+
+    // 收流页的 console 必须接到日志里。以前页面内部报什么错完全看不见
+    // （QWebChannel 建不起来时 JS 只往 console 打一行 error，C++ 侧什么都收不到），
+    // 于是"为什么没出画面"只能靠猜，这一猜就是几个小时。
+    // Qt6 移除了 signal 关键字，不能用 page->loadFinished.connect(...) 这种风格访问信号。
+    QObject::connect(page, &QWebEnginePage::loadFinished, this, [this](bool ok) {
+        if (!ok) {
+            logf("[viewer] FAIL 收流页加载失败");
+            setRtcState(QStringLiteral("failed"));
+            return;
+        }
+        logf("[viewer] 收流页就绪（离屏 1280x720）");
+        setRtcState(QStringLiteral("waiting"));
+
+        // 桥到底建没建起来，必须当场问清楚：typeof window.qt / transport 是关键，
+        // "hasPc=false 且毫无报错"只说明 JS 提前 return 了，看不出原因
+        m_rtcView->page()->runJavaScript(
+            QStringLiteral("(typeof __qtOk) + '/' + (typeof window.qt) + '/' + (window.qt ? typeof window.qt.webChannelTransport : 'none') + '/logs=' + JSON.stringify(window.__logs.slice(0, 6))"),
+            [](const QVariant &v) {
+                logf("[viewer] 收流页桥状态 __qtOk/qt/transport = %s", qPrintable(v.toString()));
+            });
+        // 页面还没 load 完时 runJavaScript 是对着 about:blank 执行的，window.__setOffer 不存在，
+        // 调用会**静默失败**（C++ 侧连个错都收不到）→ 表现为"收到 offer 了但毫无反应"。
+        // ⚠️ 顺序陷阱（2026-10-05 修）：m_rtcPageReady 必须在 offer 补灌**之前**置位。
+        // deliverOffer() 内部拿这个标志决定"直接灌 JS"还是"再存回 m_pendingOffer 等下一轮"，
+        // 原先这行写在 offer 补灌之后 → 补灌那一下永远判成"页面没就绪" → offer 被原样塞回队列，
+        // pc 从头到尾建不起来，后面攒的候选只能喂给 null pc，日志里只留两行 ice-before-pc。
+        m_rtcPageReady = true;
+
+        // 远端候选补灌必须排在 offer 之后：页面里的 pc 是 __setOffer 里同步 new 出来的，
+        // 顺序反了 addIceCandidate 就会撞上 "pc 还不存在"，JS 侧只记一行 ice-before-pc 然后丢掉，
+        // 候选就这么无声无息少了一批，ICE 死活连不上还查不出原因。
+        if (!m_pendingOffer.isEmpty()) {
+            const QString sdp = m_pendingOffer;
+            m_pendingOffer.clear();
+            deliverOffer(sdp);
+        }
+
+        if (!m_pendingIce.isEmpty()) {
+            const QStringList queued = m_pendingIce;
+            m_pendingIce.clear();
+            for (const QString &c : queued)
+                addRemoteIce(c);
+            logf("[viewer] RTC 收流页就绪后补灌远端 ICE 候选 %d 个", queued.size());
+        }
+
+        // 抽帧节拍：25fps 上限，但真帧率受被控端推流 fps 限制
+        auto *timer = new QTimer(this);
+        QObject::connect(timer, &QTimer::timeout, this, [this] {
+            if (m_rtcView) m_rtcView->page()->runJavaScript(QStringLiteral("window.__grab()"));
+        });
+        timer->start(40);
+        // 每 2 秒捞一次收流页内部状态：pc 建没建、ICE 走到哪、视频轨有没有、解码出多大画面。
+        // 没有这个，画面不出来时你只能看到"没日志"，看不出卡在 offer/answer/ice 哪一步。
+        auto *diag = new QTimer(this);
+        QObject::connect(diag, &QTimer::timeout, this, [this] {
+            if (!m_rtcView) return;
+            m_rtcView->page()->runJavaScript(QStringLiteral("window.__diag()"),
+                                             [](const QVariant &v) {
+                                                 const QString s = v.toString();
+                                                 if (!s.isEmpty() && s != QStringLiteral("undefined"))
+                                                     logf("[viewer] 收流页状态 %s", qPrintable(s));
+                                             });
+        });
+        diag->start(2000);
+    });
+
+    page->load(QUrl::fromLocalFile(htmlPath));
+}
+
+/** 诊断/日志（JS → C++）。 */
+void ViewerBackend::rtcDiag(const QString &s)
+{
+    logf("[viewer] RTC %s", s.toUtf8().constData());
+    if (m_rtcState == QStringLiteral("waiting") &&
+        !s.contains(QStringLiteral("REJECT")) && !s.contains(QStringLiteral("FAIL"))) {
+        // 进入协商期
+        setRtcState(QStringLiteral("negotiating"));
+    }
+}
+
+/**
+ * JS 侧 createAnswer 产出的 answer → **回云端给被控端**。
+ *
+ * 这里原本只有一行 "收到意外的 rtc-answer（管理端不产出 answer）" —— 那是照着"管理端是答案产出方"
+ * 倒推的错判：真正的分工是**被控端 offer 侧、管理端 answer 侧**，被控端在等我们这份 answer 才能
+ * 走完 setRemoteDescription → 触发 ontrack。answer 不回云端 = 协商永远停在 have-local-offer，
+ * 被控端那边静默重连、管理端这边一眼看不出问题（只有"一直黑屏"）。
+ */
+void ViewerBackend::rtcGotAnswer(const QString &sdp)
+{
+    if (sdp.isEmpty()) {
+        logf("[viewer] FAIL RTC answer 是空的（createAnswer 没产出 sdp），不回云端");
+        return;
+    }
+    QJsonObject p;
+    p.insert(QStringLiteral("uid"), m_currentUid);
+    p.insert(QStringLiteral("kind"), QStringLiteral("answer"));
+    p.insert(QStringLiteral("sdp"), sdp);
+    p.insert(QStringLiteral("from"), QStringLiteral("viewer"));
+    sendEnvelope(QStringLiteral("rtc-answer"), p);
+    logf("[viewer] RTC answer 已回云端（sdp %d 字符 → %s）", sdp.size(),
+         m_currentUid.toUtf8().constData());
+}
+
+/**
+ * JS 侧**本端** ICE candidate 过来：回云端给被控端。
+ *
+ * 少发这一半是致命的：被控端只收到自己的候选，两端候选对不上，ICE 永远完不成，
+ * ontrack 不来 → 画面全黑，而两端日志看起来都挺正常（offer 收了、answer 回了）。
+ *
+ * ⚠️ 这里**只发云端，不回灌自己的 pc**。以前这两件事挤在同一个函数里，于是：
+ *   - 本端候选被 addIceCandidate 加给自己 → Chromium 静默 ice-FAIL；
+ *   - 云端来的远端候选也被同一个函数处理 → 被原样 sendEnvelope 回发给被控端，
+ *     被控端收到自己刚发出去的候选，形成回环放大。
+ * 两个方向现在彻底分开：本端走这里，远端走 addRemoteIce()。
+ */
+void ViewerBackend::rtcGotIce(const QString &candJson)
+{
+    QJsonObject p;
+    p.insert(QStringLiteral("uid"), m_currentUid);
+    p.insert(QStringLiteral("kind"), QStringLiteral("ice"));
+    p.insert(QStringLiteral("candidate"), candJson);
+    p.insert(QStringLiteral("from"), QStringLiteral("viewer"));
+    sendEnvelope(QStringLiteral("rtc-ice"), p);
+}
+
+void ViewerBackend::addRemoteIce(const QString &candJson)
+{
+    // 判断"页面能不能灌"必须看 m_rtcPageReady，不能看 m_rtcView 是否非空 ——
+    // view 对象一 new 出来就非空，但 page->load() 是异步的，那段时间 runJavaScript
+    // 对着 about:blank 执行，window.__addIce 不存在，调用**静默失败**，
+    // 这就是 "window.__addIce is not a function" 的来源。
+    if (!m_rtcView || !m_rtcPageReady) {
+        if (m_pendingIce.size() >= kMaxPendingIce) {
+            logf("[viewer] WARN 远端 ICE 队列已满（%d 个），丢弃后来的候选 —— 对端可能在反复重连",
+                 m_pendingIce.size());
+            return;
+        }
+        m_pendingIce.append(candJson);
+        return;
+    }
+    const QByteArray b64 = candJson.toUtf8().toBase64();   // 同 __setOffer：base64 注入，杜绝字面量语法错
+    m_rtcView->page()->runJavaScript(QStringLiteral("window.__addIce('%1');")
+                                     .arg(QString::fromLatin1(b64)));
+}
+
+void ViewerBackend::deliverOffer(const QString &sdp)
+{
+    if (!m_rtcView || !m_rtcPageReady) {
+        m_pendingOffer = sdp;   // 页面还没就绪，等 loadFinished 补灌
+        return;
+    }
+    // 先拆旧 pc：被控端每个 offer 都是一个全新 peer（见 JS 里 __resetPc 的说明）。
+    // 两条 runJavaScript 按调用顺序在页面里排队执行，所以 reset 一定先于 setOffer。
+    m_rtcView->page()->runJavaScript(QStringLiteral("window.__resetPc()"));
+    // 走 base64 而不是 JSON 字符串字面量：SDP 里全是 CRLF，任何手写/库转义出的
+    // 字面量都可能被 Chromium 判成非法 token，一旦炸就是 "Uncaught SyntaxError"，
+    // 而且报在 runJavaScript 的注入串上、页面里一点痕迹都没有（logs 全空）。
+    // base64 只含 [A-Za-z0-9+/=]，物理上不可能产生语法错。
+    const QByteArray b64 = sdp.toUtf8().toBase64();
+    m_rtcView->page()->runJavaScript(
+        QStringLiteral("window.__setOffer('%1');").arg(QString::fromLatin1(b64)));
+    logf("[viewer] RTC offer 已灌进收流页（sdp %d 字符 → base64 %d）", sdp.size(), b64.size());
+}
+
+/**
+ * 真删离屏收流页。
+ * deleteLater 而不是 delete：page 上还排着 runJavaScript 回调（补灌候选、抽帧都走它），
+ * 当场删会打在半路。析构里统一收口（见 ~ViewerBackend）。
+ */
+void ViewerBackend::releaseRtcView()
+{
+    if (!m_rtcView) return;
+    m_rtcView->close();          // 不给 close 的话 Chromium 的渲染进程不退出
+    m_rtcView->deleteLater();
+    m_rtcView = nullptr;
+    m_rtcPageReady = false;      // 必须一起清：下次靠它判"这页能不能灌 JS"
+    m_pendingOffer.clear();
+    m_pendingIce.clear();
+    setRtcState(QStringLiteral("idle"));
+    logf("[viewer] 收流页已回收（Chromium 渲染进程随之退出）");
+}
+
+void ViewerBackend::cancelRtcViewReap()
+{
+    if (m_rtcReap && m_rtcReap->isActive()) m_rtcReap->stop();
+}
+
+// 延迟回收：给"刚断又马上重连"留窗口，避免断线抖动时反复重建 Chromium（重建一次几百毫秒）。
+// 真正等多久由 STE_RTC_IDLE_MS（默认 20 秒）决定，从"跟云端断开"那一刻开始算。
+void ViewerBackend::scheduleRtcViewReap()
+{
+    if (!m_rtcReap) {
+        m_rtcReap = new QTimer(this);
+        m_rtcReap->setSingleShot(true);
+        m_rtcReap->setInterval(5000);
+        QObject::connect(m_rtcReap, &QTimer::timeout, this, [this]() { releaseRtcView(); });
+    }
+    m_rtcReap->stop();
+    if (!m_offlineSince) return;          // 还在线上，没什么可收的
+    // 空 = 默认 20 秒；显式写 0 = 关掉（别让默认值把开关吃掉）
+    const QByteArray envIdle = qgetenv("STE_RTC_IDLE_MS");
+    const qint64 limit = envIdle.isEmpty() ? 20000 : QString::fromLocal8Bit(envIdle).toLongLong();
+    const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_offlineSince;
+    if (limit <= 0) return;
+    if (elapsed >= limit) { releaseRtcView(); return; }   // 早就算超了，立刻收
+    m_rtcReap->setInterval((int)(limit - elapsed));
+    m_rtcReap->start();
+}
+
+/** JS 侧 ontrack 触发：真正拿到远端视频轨。 */
+void ViewerBackend::rtcGotTrack()
+{
+    logf("[viewer] ✅ RTC ontrack：拿到远端视频轨");
+    setRtcState(QStringLiteral("track"));
+}
+
+/**
+ * JS → C++：抽到一帧 JPEG（base64，可能带 data: 前缀）。
+ * 复用现有 frame 通道（走 applyFrameBytes → frameChanged），所以 QML 那边一行都不用改。
+ */
+void ViewerBackend::setRtcFrame(const QString &b64)
+{
+    if (b64 == QStringLiteral("EMPTY") || b64.isEmpty()) return;
+    const QByteArray raw = QByteArray::fromBase64(
+        b64.startsWith(QStringLiteral("data:")) ? b64.mid(b64.indexOf(QLatin1Char(',') ) + 1).toUtf8()
+                                                 : b64.toUtf8());
+    if (raw.isEmpty()) return;
+    applyFrameBytes(raw, QJsonObject(), RtcGrab);
+}
+
 void ViewerBackend::setStatus(const QString &s, bool warn)
 {
     if (m_statusText == s && m_statusWarn == warn) return;
@@ -197,6 +706,8 @@ void ViewerBackend::sendEnvelope(const QString &type, const QJsonObject &payload
 void ViewerBackend::onConnected()
 {
     m_connected = true;
+    m_offlineSince = 0;      // 离线看门狗解除（配合 onDisconnected 里的回收）
+    if (m_rtcReap && m_rtcReap->isActive()) cancelRtcViewReap();
     emit connectedChanged();
     logf("[viewer] 已连上云端 %s，正在鉴权…", m_url.toUtf8().constData());
     setStatus(QStringLiteral("已连上云端，正在鉴权…"), false);
@@ -211,6 +722,14 @@ void ViewerBackend::onConnected()
 void ViewerBackend::onDisconnected()
 {
     m_connected = false;
+    // 离线看门狗：跟云端断了这么久还没连回来，收流页里那个 Chromium 渲染进程（~137MB）
+    // 已经送不出任何画面，留着纯占内存。判据用"跟云端断多久"而不是"多久没收到信令"——
+    // 画面稳定后对端本来就不发东西，按后者数会误杀正在看的画面。
+    // 阈值可用 STE_RTC_IDLE_MS 覆盖（毫秒，默认 20000），排障时调小值能快验。
+    // 只认**第一次**断连：下面每次重连失败都会再走到 onDisconnected，
+    // 起点刷新一次倒计时就往后推一次，看门狗永远走不到头（实测断线 26 秒、重连失败 3 次没触发）。
+    if (!m_offlineSince) m_offlineSince = QDateTime::currentMSecsSinceEpoch();
+    scheduleRtcViewReap();
     emit connectedChanged();
     if (m_authFailed) {
         // 鉴权失败再重连只会一遍遍失败：把原因留在屏幕上，别循环
@@ -227,6 +746,41 @@ void ViewerBackend::onDisconnected()
 void ViewerBackend::requestDevices()
 {
     sendEnvelope(QStringLiteral("devices"), QJsonObject());
+}
+
+/**
+ * 自检用：订 → 退 → 再订，逼被控端重建连接重新 offer。
+ *
+ * 顺序不能省也不能乱：退订必须先发生在"已经订上了"之后，否则云端那条 rtc-stop
+ * 落到"本来就没订阅"上直接空转，被控端的 g_rtcOn 一直是 true，
+ * 后面再收到 rtc-start 时 rtcStart() 一句 `if (g_rtcOn && g_rtcView) return` 就原地返回，
+ * 一个 offer 都不发 —— 表现还是"订阅成功但永远不来画面"。
+ * 退订让云端发 rtc-stop（被控端 g_rtcOn=false 且页面 __reset），
+ * 再订让云端发 rtc-start（被控端重建 RTCPeerConnection → 新 offer）。
+ */
+void ViewerBackend::rtcRenegotiate(const QString &uid)
+{
+    QJsonObject sp;
+    sp.insert(QStringLiteral("uid"), uid);
+    logf("[viewer] 自检：订 %s →（1.5s 后）退订 →（0.8s 后）重订，逼它重新 offer",
+         uid.toUtf8().constData());
+    // 必须走 setCurrentUid 而不是直接发 subscribe：它同时会把 m_currentUid 改掉，
+    // 之后 answer / 本端 ICE 回云端时才知道该投给谁（直接发信封的话会投到上一台设备上）
+    m_currentUid = uid;
+    emit currentUidChanged();
+    sendEnvelope(QStringLiteral("subscribe"), sp);
+    QTimer::singleShot(1500, this, [this, uid] {
+        QJsonObject s;
+        s.insert(QStringLiteral("uid"), uid);
+        sendEnvelope(QStringLiteral("unsubscribe"), s);
+        logf("[viewer] 自检：退订 %s（云端应下发 rtc-stop）", uid.toUtf8().constData());
+    });
+    QTimer::singleShot(2300, this, [this, uid] {
+        QJsonObject s;
+        s.insert(QStringLiteral("uid"), uid);
+        sendEnvelope(QStringLiteral("subscribe"), s);
+        logf("[viewer] 自检：重订 %s（云端应下发 rtc-start）", uid.toUtf8().constData());
+    });
 }
 
 void ViewerBackend::setCurrentUid(const QString &uid)
@@ -252,6 +806,17 @@ void ViewerBackend::onTextMessage(const QString &text)
     const bool isV1 = o.contains(QStringLiteral("v"));
     const QJsonObject pay = isV1 ? o.value(QStringLiteral("payload")).toObject() : o;
     const QString type = o.value(QStringLiteral("type")).toString();
+
+    // RTC 报文级流水：offer 到没到、ice 到没到、answer 回没回，靠的就是这几行。
+    // 以前只有"成功/失败"两种日志，缺中间态，排障只能靠猜。
+    if (type.startsWith(QStringLiteral("rtc-"))) {
+        logf("[viewer] 云端 RTC 报文到了 type=%s len=%d uid=%s sdp=%d cand=%d payload=%d",
+             type.toUtf8().constData(), text.size(),
+             pay.value(QStringLiteral("uid")).toString().toUtf8().constData(),
+             pay.value(QStringLiteral("sdp")).toString().size(),
+             pay.value(QStringLiteral("candidate")).toString().size(),
+             pay.value(QStringLiteral("payload")).toObject().size());
+    }
 
     if (type == QStringLiteral("authed") || type == QStringLiteral("auth-ok")) {
         m_authed = true;
@@ -280,6 +845,83 @@ void ViewerBackend::onTextMessage(const QString &text)
         refreshDevices(pay.value(QStringLiteral("devices")).toArray());
     } else if (type == QStringLiteral("subscribed")) {
         logf("[viewer] 云端确认订阅 %s", pay.value(QStringLiteral("uid")).toString().toUtf8().constData());
+    } else if (type == QStringLiteral("rtc-offer")) {
+        // 被控端发起了建连：把它带过来的 offer 灌进离屏 QWebEngineView，
+        // setRemoteDescription 之后 createAnswer 回云端（__setOffer 里做完了全流程）
+        //
+        // ⚠️ 必须先把 offer 里的 uid 同步到 m_currentUid（2026-10-05 修）。
+        // offer 携带的 uid 是"这条协商属于哪台机器"的**权威来源**，比本地的设备表可靠：
+        // rtcGotAnswer() / rtcGotIce() 回云端时都只认 m_currentUid，而它可能被
+        // refreshDevices() 在"设备表短暂为空"（云端重启/被控端掉线重连）时清空，
+        // 或者 viewer 刚起来设备表还没到就是空的。那样 answer 会带着空 uid 回去，
+        // 云端 devices.get("") 找不到设备 → answer 静默丢在云端，
+        // 被控端 offeredAt 一直不变、answeredAt 永远是 0，卡在 pc-failed 无限重发 offer。
+        // 现象是"两端都连上了、JPEG 兜底画面在动，就是 RTC 永远建不起来"。
+        const QString offerUid = rtcField(pay, QLatin1String("uid"));
+        if (!offerUid.isEmpty() && offerUid != m_currentUid) {
+            logf("[viewer] RTC offer 带的 uid=%s 与本地当前 uid=%s 不一致，以 offer 为准修正",
+                 offerUid.toUtf8().constData(), m_currentUid.toUtf8().constData());
+            m_currentUid = offerUid;
+            emit currentUidChanged();
+        }
+        initRtcView();
+        const QString sdp = rtcField(pay, QLatin1String("sdp"));
+        if (sdp.isEmpty()) {
+            // 失败也要把来路摊开：哪台机器、整条消息长啥样（截断），否则"没有 sdp"就没法往下查
+            logf("[viewer] FAIL 收到 rtc-offer 但没有 sdp 字段（uid=%s 原始=%s）",
+                 pay.value(QStringLiteral("uid")).toString().toUtf8().constData(),
+                 text.left(220).toUtf8().constData());
+            setRtcState(QStringLiteral("failed"));
+        } else {
+            // 新 offer = 新的一轮协商，上一轮攒下的候选已经作废，先清干净再灌。
+            // 不清的话，上次那台机器的候选会被喂给新建的 pc，ICE 往一个不存在的对端上撞。
+            if (!m_pendingIce.isEmpty()) {
+                logf("[viewer] RTC 收到新 offer，丢弃上一轮残留的 %d 个候选", m_pendingIce.size());
+                m_pendingIce.clear();
+            }
+            deliverOffer(sdp);   // 页面就绪就直接灌，没就绪就暂存等补灌
+        }
+    } else if (type == QStringLiteral("rtc-ice")) {
+        // 被控端的 ICE candidate → 转给离屏 view 里的 RTCPeerConnection
+        //
+        // 同样以报文里的 uid 为准（见上面 rtc-offer 分支的长注释）：ICE 可能**先于 offer** 到达，
+        // 那一刻 m_currentUid 很可能还是空的，不补的话本端候选回给云端时 uid 也是空 → 丢。
+        const QString iceUid = rtcField(pay, QLatin1String("uid"));
+        if (!iceUid.isEmpty() && iceUid != m_currentUid) {
+            m_currentUid = iceUid;
+            emit currentUidChanged();
+        }
+        const QString cand = rtcField(pay, QLatin1String("candidate"));
+        if (cand.isEmpty()) {
+            // 同样把原始报文摊开：candidate 空有三种来路（被控端发了空串、包了两层没剥到、
+            // 云端转发时被砍了），只一句"是空的"分不清是哪一种
+            logf("[viewer] WARN 收到 rtc-ice 但 candidate 是空的（原始=%s）",
+                 text.left(200).toUtf8().constData());
+        } else {
+            // 和 offer 一样懒建：云端转发顺序不保证 offer 一定先到，ICE 抢先是可能的。
+            // 以前这种情况直接丢弃 → "候选平白少一半、ICE 怎么都连不上"，现在建页并排队。
+            if (!m_rtcView) {
+                logf("[viewer] RTC 收到 ice 但收流页还没建（offer 未先到），先建页再排队");
+                initRtcView();
+            }
+            addRemoteIce(cand);
+        }
+    } else if (type == QStringLiteral("rtc-answer")) {
+        logf("[viewer] 收到意外的 rtc-answer（管理端是 answer 侧，不该收到）");
+    } else if (type == QStringLiteral("rtc-start") || type == QStringLiteral("rtc-stop")) {
+        // rtc-stop 就是"没人看了"的确切信号：收流页留 5 秒没人来就回收（省那 137MB）。
+        // rtc-start 不用管回收 —— 下一份 offer 到达时 initRtcView() 自己会建回来。
+        if (type == QStringLiteral("rtc-stop")) scheduleRtcViewReap();
+        logf("[viewer] 云端广播 %s（推流开关，管理端据此%s收流页）",
+             type.toUtf8().constData(),
+             type == QStringLiteral("rtc-stop") ? "回收" : "保持");
+    } else if (type == QStringLiteral("rtc-relayed")) {
+        // 云端回给我们自己的信令投递结果——排查"发出去到底到没到"就靠这条
+        logf("[viewer] RTC 信令已中继 type=%s ok=%s to=%s %s",
+             pay.value(QStringLiteral("type")).toString().toUtf8().constData(),
+             (pay.value(QStringLiteral("ok")).toBool() ? "true" : "false"),
+             pay.value(QStringLiteral("to")).toString().toUtf8().constData(),
+             pay.value(QStringLiteral("detail")).toString().toUtf8().constData());
     } else if (type == QStringLiteral("frame")) {
         // 兼容旧文本 frame（base64）；v1 客户端走的是二进制帧分支
         const QByteArray b64 = QByteArray::fromBase64(pay.value(QStringLiteral("data")).toString().toUtf8());
@@ -347,12 +989,37 @@ void ViewerBackend::refreshDevices(const QJsonArray &arr)
     }
 }
 
-void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header)
+void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,
+                                    FrameSource src)
 {
     if (jpeg.isEmpty()) {
         logf("[viewer] FAIL 收到一帧但内容是空的");
         return;
     }
+
+    // ── 两路取其一：RTC 活着的时候，JPEG 轮询帧一律不上屏 ──
+    // 被控端现在**同时**在推旧 JPEG 通道和 WebRTC 流（迁移期的现实状况），
+    // 两边都往同一个 m_frame 写，画面就在两张不同毫秒级的截图之间来回跳、
+    // fps 和字节数虚高一倍，用户看到的是"画面有点飘"，日志却一切正常。
+    // 这里定死优先级：RTC 优先；RTC 断流超过 kRtcStaleMs 自动降级回 JPEG
+    // （教室网络抖一下就黑屏是不可接受的，宁可降画质也不能没画面）。
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (src == RtcGrab) {
+        m_rtcLastFrameMs = now;
+    } else if (m_rtcLastFrameMs > 0 && now - m_rtcLastFrameMs < kRtcStaleMs) {
+        static int swallow = 0;
+        if (++swallow == 1 || swallow % 100 == 0) {
+            logf("[viewer] RTC 正在出帧，旧 JPEG 通道的帧不上屏（已让行 %d 帧）", swallow);
+        }
+        return;
+    }
+
+    const QString wantSource = (src == RtcGrab) ? QStringLiteral("rtc") : QStringLiteral("jpeg");
+    if (m_frameSource != wantSource) {
+        m_frameSource = wantSource;
+        emit frameSourceChanged();
+    }
+
     m_frameCount++;
     m_framesSinceCheck++;
     m_lastFrameBytes = jpeg.size();
@@ -376,11 +1043,14 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
     if (!m_screenStatic) emit frameChanged();
 
     if (m_frameCount % 30 == 1) {   // 每 30 帧报一次，别把日志刷爆
+        // header 空 = 旧帧（无 v1 帧头）；现在 RTC 帧不再混在这条路里，
+        // 所以 "(旧帧)" 这三个字不会再误导人以为 RTC 帧走了裸帧通道
         const QString seq = header.isEmpty()
                                 ? QStringLiteral("(旧帧)")
                                 : QString::number(header.value(QStringLiteral("seq")).toInt());
-        logf("[viewer] 画面在动：第 %d 帧（seq=%s，%d 字节，%.1f fps）",
-             m_frameCount, seq.toUtf8().constData(), m_lastFrameBytes, m_fps);
+        logf("[viewer] 画面在动[%s]：第 %d 帧（seq=%s，%d 字节，%.1f fps）",
+             (src == RtcGrab ? "RTC" : "JPEG"), m_frameCount, seq.toUtf8().constData(),
+             m_lastFrameBytes, m_fps);
     }
     emit statsChanged();
 }
@@ -398,12 +1068,16 @@ void ViewerBackend::tickFps()
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const double secs = (now - m_lastFpsCheckMs) / 1000.0;
-    if (secs >= 1.0 && m_framesSinceCheck > 0) {
-        m_fps = m_framesSinceCheck / secs;
-        m_framesSinceCheck = 0;
-        m_lastFpsCheckMs = now;
-        emit statsChanged();
-    }
+    if (secs < 1.0) return;
+
+    // 基准时间戳**必须无条件推进**。原来的写法把它写在 if (有帧) 里面：
+    // 一旦有某个 1 秒窗口里一帧都没有（切设备、RTC 建连、被控端 momentarily 断流），
+    // 基准就冻在那儿不动，下一次算出 secs = 好几秒，真实帧率被除以这段空窗 →
+    // 明明 21.5fps 的流显示成 "1.0 fps"。窗口空着就报 0，别拿旧分母糊。
+    m_fps = (m_framesSinceCheck > 0) ? m_framesSinceCheck / secs : 0.0;
+    m_framesSinceCheck = 0;
+    m_lastFpsCheckMs = now;
+    emit statsChanged();
 }
 
 void ViewerBackend::sendAction(const QString &action, const QJsonObject &params)

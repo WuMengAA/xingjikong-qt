@@ -106,7 +106,7 @@ Popup {
                         width: 30
                         text: modelData.kind === "app" ? "程序" : (modelData.kind === "dir" ? "目录" : "文件")
                         color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
-                        font.pixelSize: 10
+                        font.pixelSize: 11
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
@@ -266,7 +266,7 @@ Popup {
                 height: 34
                 radius: dlg.theme ? dlg.theme.rCtrl : 8
                 color: listView.picked >= 0 ? (dlg.theme ? dlg.theme.inv : "#F0F0F0")
-                                            : (dlg.theme ? dlg.theme.cream : "#171717")
+                                            : (dlg.theme ? dlg.theme.cream : "#141414")
 
                 Text {
                     anchors.centerIn: parent

@@ -104,7 +104,7 @@ Popup {
                     anchors.verticalCenter: parent.verticalCenter
                     x: 12
                     text: modelData.name
-                    color: dlg.theme ? dlg.theme.op : "#EDEDED"
+                    color: dlg.theme ? dlg.theme.op : "#C8C8C8"
                     font.pixelSize: 12
                     elide: Text.ElideMiddle
                 }
