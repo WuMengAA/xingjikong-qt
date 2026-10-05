@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import { appendFile } from 'node:fs/promises';
 import { EV_LIMIT, KEEP_LAST_FRAME, EVENTS_FILE, HEARTBEAT_TIMEOUT_MS } from './config.js';
 import { wrapOutgoing, makeFrame } from './protocol.js';
+import { enqueueDispatch, dropDispatch, settle as settleQueue, pendingFor, listPendingAll, paramsOf } from './store.js';
 
 /** 出向统一走协议层：对端是 v1 就发信封，是旧客户端就发旧扁平格式（过渡期不断链）。 */
 function sendTo(ws, type, payload, id = '') {
@@ -17,8 +18,9 @@ function sendTo(ws, type, payload, id = '') {
 /** uid -> { uid, version, ws, connectedAt, lastSeen, framesIn, bytesIn, lastError, recentFrame } */
 const devices = new Map();
 
-/** uid -> [{ id, action, params, at, state }]  仅设备在线期间保留的下发表 */
-const pending = new Map();
+/* 说明：指令队列已改为**落盘**（见 store.js）。
+ * 原先这里有个内存态 `pending` Map，但云端一重启就没了、设备重连也不回放——那正是本功能要修的洞。
+ * 现在"已下发未回执"的指令一律进 SQLite，重启不丢、设备重连按原顺序补发。 */
 
 /**
  * viewer ws -> { subs:Set<uid>, auto:boolean }
@@ -202,6 +204,8 @@ export function autoSubscribeViewers(uid) {
     n++;
     try { sendTo(ws, 'subscribed', { uid: key, auto: true }); }
     catch (e) { pushEvent('error', '给管理端补订阅通知失败', { uid: key, error: e.message }); viewers.delete(ws); }
+    // 设备上线后第一次有人看 -> 让设备把 WebRTC 推流起起来（没人看就不推，不空耗 CPU）
+    rtcSignalToAgent(key, 'rtc-start', { uid: key, auto: true });
   }
   return n;
 }
@@ -270,10 +274,22 @@ export function recordResult(id, uid, action, result, error, data) {
     data: (data && typeof data === 'object') ? data : null,
     at: new Date().toISOString(),
   };
+  // 2026-10-04：把下发时携带的 notice_id 带进回执，站点广播才能把"已执行"对账回通知表。
+  // paramsOf 查这条指令的原始 params（云端表完整保留），无则留空。
+  try {
+    const src = paramsOf(id);
+    if (src && src.params && typeof src.params === 'object') {
+      const nid = src.params.notice_id ?? src.params.params?.notice_id;
+      if (nid !== undefined && nid !== null) rec.notice_id = nid;
+    }
+  } catch { /* 查不到就不带，不影响回执本身 */ }
   results.set(id, rec);
+  // 回执到达 → 队列里这条"已下发未回执"标完成，之后重连不再补发。
+  // 不在队列（已过期、或落盘降级）也不报错：回执本身仍如实转给管理端。
+  settleQueue(id, rec.result, rec.error);
   pushEvent(rec.result === 'done' ? 'info' : 'error',
     `设备真实执行回执 action=${action} result=${rec.result}`,
-    { uid, id, error: rec.error || undefined });
+    { uid, id, error: rec.error || undefined, ...(rec.notice_id !== undefined ? { notice_id: rec.notice_id } : {}) });
   return rec;
 }
 
@@ -282,30 +298,111 @@ export function getResult(id) {
 }
 
 /**
- * 下发指令。在线 → 真的写进 socket，返回 sent；不在线 → 返回 offline（绝不谎报 sent）。
- * @returns {{state:'sent'|'offline', detail?:string}}
+ * 下发指令。在线 → 先落盘拿到稳定 id，再真的写进 socket，返回 sent；
+ * 不在线 → 返回 offline（绝不谎报 sent，**也不入补发队列**——离线不能当收下）。
+ * @returns {{state:'sent'|'offline', id?:number, detail?:string}}
  */
 export function sendInstruction(uid, action, params) {
   const d = devices.get(uid);
   if (!d || d.ws?.readyState !== 1) {
-    const list = pending.get(uid) || [];
-    list.push({ id: ++seq, action, params, at: new Date().toISOString(), state: 'offline' });
-    pending.set(uid, list);
-    return { state: 'offline', detail: '设备不在线，指令未下发（也没写死队列，避免假绿）' };
+    // 关键：离线只报离线。若把离线指令也塞进队列，重连时就会补发出去 = 变相把"离线"当成了"收下"。
+    return { state: 'offline', detail: '设备不在线，指令未下发（也不入补发队列，避免假绿）' };
   }
+  // 先落盘再发：要拿到重启后仍单调不重号的 id（回执按它配对、重连按它排序补发）。
+  // 落盘失败（降级为 null）时退回进程内自增 id，照常下发，只是这条没有"重启不丢"的兜底。
+  const id = enqueueDispatch(uid, action, params);
+  const msgId = id ?? ++seq;
   // 出向走协议层：v1 对端收信封（ts 在信封上），旧对端保持原有扁平格式（含 at 字段，透传不改）
-  const msgId = ++seq;   // 必须先自增：id 要参与回执配对（receipt 带回同一个 id）
   const text = (d.ws.__v1 === true)
     ? wrapOutgoing(true, 'instruction', { action, params }, String(msgId))
     : JSON.stringify({ type: 'instruction', action, params, id: msgId, at: new Date().toISOString() });
   try {
     d.ws.send(text);
-    pushEvent('info', '已下发指令', { uid, action });
-    return { state: 'sent' };
+    pushEvent('info', '已下发指令', { uid, action, id: msgId });
+    return { state: 'sent', id: msgId };
   } catch (e) {
-    // 写 socket 失败 = 没发出去，必须报 error，不能当 sent
+    // 写 socket 失败 = 没发出去：把刚落的那条记录撤掉（别留成"等回执"），并报 error，不能当 sent
+    dropDispatch(id);
     pushEvent('error', '下发失败：写 socket 出错', { uid, action, error: e.message });
     return { state: 'offline', detail: `写 socket 失败：${e.message}` };
+  }
+}
+
+/* ---------- WebRTC 信令中继（P1-A 实时画面）----------
+ * 三进程链路：被控端(agent) -> 云端按 uid 转发 -> 管理端(viewer)，反之亦然。
+ * 云端**只转不发**：不解析 sdp / candidate 内容，媒体流（RTP）不经过云端 —— 云端一旦挂，画面立刻断，
+ *   这是刻意的：云端只当信令中间人，媒体走点对点，教室机出公网也不必让云端扛带宽。
+ * 三条纪律（沿用本文件开头那三条）：
+ *   ① 转不出去必须报出来（不许静默）；② 转了 0 个对端必须报出来（"发出去了" != "有人收"）；
+ *   ③ 只投给订阅了这个 uid 的那一端，不群发。
+ * 谁建 offer：被控端建 —— 它一直抓着屏，教室机无人值守，不能等有人去点按钮。
+ */
+
+/** 云端 -> 设备的 WebRTC 开关信号（订阅开始/停止），与管理端 subscribe/unsubscribe 一一对应。
+ *  有人在看了设备才起推流，没人看就停：免得在没人看的机器上空耗 CPU。
+ *  @returns {{ok:boolean, to:number, detail?:string}} */
+export function rtcSignalToAgent(uid, type, payload = {}) {
+  const key = String(uid || '').trim();
+  const d = devices.get(key);
+  if (!d || !d.ws || d.ws.readyState !== 1) {
+    // 这条很常见（管理端先订阅、设备后上线）：不判成错误，但必须记一笔，不许假装发过了
+    pushEvent('warn', 'WebRTC 开关信号没送到设备（这台此刻不在线）', { uid: key, type });
+    return { ok: false, to: 0, detail: '设备不在线' };
+  }
+  try {
+    sendTo(d.ws, type, { ...payload, uid: key, from: 'cloud' });
+    return { ok: true, to: 1 };
+  } catch (e) {
+    pushEvent('error', 'WebRTC 开关信号写给设备失败', { uid: key, type, error: e.message });
+    return { ok: false, to: 0, detail: e.message };
+  }
+}
+
+/** 设备 -> 管理端的 WebRTC 信令（offer/answer/ice）转发，只投给订阅了这个 uid 的管理端。
+ *  @returns {{ok:boolean, to:number, detail?:string}} */
+export function rtcRelayToViewers(uid, type, payload = {}) {
+  const key = String(uid || '').trim();
+  // 防回声：发信人就是本端（管理端）自己的消息，不转 —— 否则 offer/answer 会在两端之间无限对传
+  if (payload.from === 'viewer') {
+    pushEvent('warn', '丢弃同源 WebRTC 信令（防回声）', { uid: key, type, from: payload.from });
+    return { ok: false, to: 0, detail: '同源信令，不回传' };
+  }
+  let hits = 0;
+  for (const [ws, v] of viewers) {
+    if (!v.subs.has(key)) continue;
+    if (ws.readyState !== 1) { viewers.delete(ws); continue; }
+    try {
+      // 转发时**补上 uid**：对端有时只带 sdp/candidate 不带 uid，但它必须知道这是哪台机器
+      sendTo(ws, type, { ...payload, uid: key, from: 'agent' });
+      hits++;
+    } catch (e) {
+      pushEvent('error', 'WebRTC 信令写给管理端失败：写 socket 出错', { uid: key, type, error: e.message });
+      viewers.delete(ws);
+    }
+  }
+  if (hits === 0) pushEvent('warn', 'WebRTC 信令发出去了但没人订阅这台设备', { uid: key, type });
+  return { ok: hits > 0, to: hits };
+}
+
+/** 管理端 -> 设备的 WebRTC 信令（offer/answer/ice）转发。 */
+export function rtcRelayToAgent(uid, type, payload = {}) {
+  const key = String(uid || '').trim();
+  // 防回声：发信人就是本端（设备）自己的消息，不转
+  if (payload.from === 'agent') {
+    pushEvent('warn', '丢弃同源 WebRTC 信令（防回声）', { uid: key, type, from: payload.from });
+    return { ok: false, to: 0, detail: '同源信令，不回传' };
+  }
+  const d = devices.get(key);
+  if (!d || !d.ws || d.ws.readyState !== 1) {
+    pushEvent('warn', 'WebRTC 信令发不出去：设备不在线', { uid: key, type });
+    return { ok: false, to: 0, detail: '设备不在线' };
+  }
+  try {
+    sendTo(d.ws, type, { ...payload, uid: key, from: 'viewer' });
+    return { ok: true, to: 1 };
+  } catch (e) {
+    pushEvent('error', 'WebRTC 信令写给设备失败', { uid: key, type, error: e.message });
+    return { ok: false, to: 0, detail: e.message };
   }
 }
 
@@ -313,8 +410,9 @@ export function listEvents(limit = 50) {
   return events.slice(-limit).reverse();
 }
 
+/** 某设备"已下发未回执"的指令（落盘队列），按原下发顺序。无 uid → 全部按 uid 分组。 */
 export function listPending(uid) {
-  return pending.get(uid) || [];
+  return uid ? pendingFor(uid) : listPendingAll();
 }
 
 export function ensureEventsFile() {
