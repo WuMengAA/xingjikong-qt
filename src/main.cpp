@@ -81,6 +81,13 @@ constexpr int kMaxBackoffMs = 15000;
 constexpr int kProtocolVersion = 1;      // 协议 v1（《星集控-协议规范v1-2026-10-03.md》）
 constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust DEFAULT_LIMIT 同量级）
 
+// ⚠️ 应用版本号的**唯一真源**（2026-10-05 统一）：
+//   · register 上报给云端的就是它 → 云端据此判断要不要提示 OTA 升级；
+//   · 装机包 NSIS 的 DisplayVersion 也必须与它一致（installer.nsi 的 VER 常量）。
+//   改版本时**只改这一处** + installer.nsi，别在别处再写一份（历史上就是两处不一致出过岔子：
+//   exe 报 0.4.0-v1、安装器写 0.5.0）。
+constexpr const char *kAppVersion = "0.5.0";
+
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = 1000;
 int g_frameSeq = 0;
@@ -231,7 +238,7 @@ void sendRegister()
     QJsonObject p;
     p.insert(QStringLiteral("uid"), uid);
     p.insert(QStringLiteral("token"), token);
-    p.insert(QStringLiteral("version"), QStringLiteral("0.4.0-v1"));
+    p.insert(QStringLiteral("version"), QString::fromLatin1(kAppVersion));
     p.insert(QStringLiteral("caps"), caps);
 
     const QString hello = makeEnvelope(QStringLiteral("register"), p);
