@@ -42,6 +42,13 @@ pwsh -File build.ps1 -Clean # 全量重建
 3. `cmake --build build` → `build\stelarith-schedule-qt.exe`
 4. `windeployqt` 部署 Qt 运行时 DLL
 
+**⚠️ 部署注意（QML 应用特有）**：
+- 我们的 QML 全部打包在 qrc 资源里（`qt_add_resources` 传统方式），windeployqt 扫描不到 QML import，
+  **不会自动部署 QtQuick/QtQml 模块**。首次运行会报 `module "QtQuick" is not installed`。
+  解决：手动把 `%QTDIR%\qml\QtQuick` 和 `%QTDIR%\qml\QtQml` 拷到 `build\qml\` 下。
+- windeployqt 的 `--compiler-runtime` 可能漏 `msvcp140_2.dll`（Qt6Quick 依赖），
+  缺失时进程秒退且退出码 `0xC0000142`。解决：从 `%MSVC%\bin\Hostx64\x64\` 拷贝 msvcp140*.dll + vcruntime140*.dll。
+
 手动构建（按本机实际路径调整）：
 
 ```bat
@@ -99,26 +106,26 @@ bool matchesWeek(int todayWeek) const {
 
 **✅ 已验证**：
 
-1. **编译通过**：`cmake --build` exit=0，全部编译目标完成，产物 `stelarith-schedule-qt.exe`（约 133 KB）
+1. **编译通过**：`cmake --build` exit=0，全部编译目标完成，产物 `stelarith-schedule-qt.exe`（约 134 KB）
 2. **GUI 子系统正确**：PE subsystem=2（WIN32_EXECUTABLE），运行时无控制台黑窗
-3. **Qt 运行时部署完整**：windeployqt 部署 10 个 Qt DLL + platforms/qwindows.dll + qml 目录
-4. **程序启动正常**：窗口标题 "星集控 · 课表编辑器" 正常显示，进程保持运行不崩溃
-5. **QML 加载无错误**：5 个 QML 文件（Main/ScheduleGrid/TimeAxis/TimeAxisBlock/SubjectManager）全部编译并加载成功
-6. **UI 渲染确认**：截图像素分析显示深色主题 83%、蓝色课表块/导航高亮 0.2%（#0078d4）、白色文字 2.3% —— 课表网格和时间轴确实渲染
-7. **科目管理功能**：列表展示 + 添加 + 改名 + 删除（被课表引用的科目禁止删除，`isReferenced` 已实现）
-8. **调课功能**：`ScheduleModel::setData/swap` 已实现，QML 通过 `setCellSubject/swapCells` 调用
-9. **时间轴拖拽**：TimeAxisBlock 顶部/底部手柄拖拽调整开始/结束时间，松手吸附 5 分钟并写回模型
+3. **Qt 运行时部署完整**：windeployqt 部署 Qt DLL + platforms/qwindows.dll + qml 目录（含手动拷贝的 QtQuick 全套模块 + MSVC 运行时 msvcp140_2）
+4. **程序启动正常**：窗口标题 "星集控 · 课表编辑器"，进程保持运行，退出码 0
+5. **QML 加载零错误**：5 个 QML 文件全部加载，无警告无 ReferenceError
+6. **UI 渲染确认**：截图像素分析深色 78.7%、蓝色块 258px（#0078d4 课表/导航高亮）、白字 3.5%
+7. **科目管理**：列表 + 添加 + 改名 + 删除（被课表引用禁止，isReferenced 已实现）
+8. **调课**：ScheduleModel setData/swap 实现，ScheduleGrid 点击格子弹科目菜单（含清空）
+9. **时间轴拖拽**：TimeAxisBlock 顶部/底部手柄拖拽，松手吸附 5 分钟写回模型
 
 **⚠️ 未验证 / 已知限制（如实记账）**：
 
-1. **调课 UI 未接**：`ScheduleModel::setCellSubject/swapCells` 已实现但 ScheduleGrid 还没做"点击格子弹科目选择器"的交互 UI。
-2. **CSES 导入仅支持 JSON**：未集成 YAML 解析（CSES 官方格式是 YAML）。
-3. **多周轮换未接当前周次**：`ScheduleModel::data()` 里 `matchesWeek(1)` 写死第 1 周。
-4. **撤销/重做未实现**：无 `QUndoStack`。
-5. **课表群切换 UI 未暴露**：QML 层没有课表群选择。
-6. **Excel 导入导出未实现**。
-7. **档案合并冲突**：`mergeClassPlan` 按 GUID 覆盖，未处理科目 ID 冲突。
-8. **保存到磁盘未接 UI**：编辑只改内存中 Profile，未提供"保存"按钮写回文件。
+1. **CSES 导入仅支持 JSON**：未集成 YAML 解析（CSES 官方格式是 YAML）。
+2. **多周轮换未接当前周次**：`ScheduleModel::data()` 里 `matchesWeek(1)` 写死第 1 周。
+3. **撤销/重做未实现**：无 `QUndoStack`。
+4. **课表群切换 UI 未暴露**：QML 层没有课表群选择。
+5. **Excel 导入导出未实现**。
+6. **档案合并冲突**：`mergeClassPlan` 按 GUID 覆盖，未处理科目 ID 冲突。
+7. **保存到磁盘未接 UI**：编辑只改内存中 Profile，未提供"保存"按钮写回文件。
+8. **时间轴拖拽视觉细节**：拖拽中的吸附预览、手柄 hover 反馈等交互细节需要真人操作确认。
 
 ## 已知设计决策
 

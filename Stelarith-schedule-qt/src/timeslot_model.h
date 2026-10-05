@@ -26,6 +26,20 @@ public:
     int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
+    // QML role 名映射
+    QHash<int, QByteArray> roleNames() const override {
+        QHash<int, QByteArray> roles;
+        roles[IdRole] = "id";
+        roles[NameRole] = "name";
+        roles[StartTimeRole] = "startTime";
+        roles[EndTimeRole] = "endTime";
+        roles[DurationMinutesRole] = "durationMinutes";
+        roles[TimeTypeRole] = "timeType";
+        roles[IsActiveRole] = "isActive";
+        roles[StartSecsRole] = "startSecs";
+        roles[EndSecsRole] = "endSecs";
+        return roles;
+    }
 
     // 获取/设置时间点
     TimeSlot getSlot(int row) const;
@@ -40,6 +54,9 @@ public:
     // ---- QML 可调用 ----
     Q_INVOKABLE QString startTimeAt(int row) const {
         return (row >= 0 && row < m_slots.size()) ? m_slots[row].startTime.toString("HH:mm") : QString();
+    }
+    Q_INVOKABLE int timeTypeAt(int row) const {
+        return (row >= 0 && row < m_slots.size()) ? m_slots[row].timeType : 0;
     }
     Q_INVOKABLE QString endTimeAt(int row) const {
         return (row >= 0 && row < m_slots.size()) ? m_slots[row].endTime.toString("HH:mm") : QString();

@@ -5,21 +5,24 @@ import QtQuick.Layouts
 // 时间块：显示时间段，顶部/底部手柄可拖拽调整时长（松手写回模型）
 Rectangle {
     id: block
-    color: model.timeType === 0 ? "#0078d4" : "#555"
+    color: blockType === 0 ? "#0078d4" : "#555"
     radius: 4
 
-    // 模型行号（由 Repeater 提供）
-    required property int index
-    // 父级时间轴引用（提供坐标换算函数）
+    // 由 TimeAxis 传入
+    required property int blockIndex
     required property var timeAxisRef
+    required property string blockName
+    required property int blockStartMin
+    required property int blockEndMin
+    required property int blockType
 
-    // 当前时间段（分钟自午夜）
-    readonly property int curStartMin: timeSlotModel.startMinAt(index)
-    readonly property int curEndMin: timeSlotModel.endMinAt(index)
+    // 当前时间段（分钟自午夜，随模型更新）
+    readonly property int curStartMin: timeSlotModel.startMinAt(blockIndex)
+    readonly property int curEndMin: timeSlotModel.endMinAt(blockIndex)
 
     // 显示用临时值（拖拽中更新）
-    property int dragStartMin: timeSlotModel.startMinAt(index)
-    property int dragEndMin: timeSlotModel.endMinAt(index)
+    property int dragStartMin: blockStartMin
+    property int dragEndMin: blockEndMin
 
     // 时间显示
     Text {
@@ -40,7 +43,7 @@ Rectangle {
         anchors.leftMargin: 12
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 8
-        text: qsTr("%1 (%2分钟)").arg(timeSlotModel.nameAt(index)).arg(Math.round(block.dragEndMin - block.dragStartMin))
+        text: qsTr("%1 (%2分钟)").arg(block.blockName).arg(Math.round(block.dragEndMin - block.dragStartMin))
         color: "#ddd"
         font.pixelSize: 10
     }
@@ -69,14 +72,13 @@ Rectangle {
                 var min = timeAxisRef.yToMinutes(newStartY)
                 if (min >= block.curEndMin - 5) min = block.curEndMin - 5
                 block.dragStartMin = min
-                // 视觉同步：块顶部移到新位置，高度按新跨度
                 block.y = timeAxisRef.timeToY(min)
                 block.height = Math.max(16, (block.curEndMin - min) * timeAxisRef.pixelsPerMinute)
             }
             onReleased: () => {
                 var newStart = timeAxisRef.snapTo5(block.dragStartMin)
                 if (newStart < block.curEndMin - 5) {
-                    timeSlotModel.setSlotByMinutes(block.index, newStart, block.curEndMin)
+                    timeSlotModel.setSlotByMinutes(block.blockIndex, newStart, block.curEndMin)
                 }
                 block.dragStartMin = block.curStartMin
                 block.dragEndMin = block.curEndMin
@@ -113,7 +115,7 @@ Rectangle {
             onReleased: () => {
                 var newEnd = timeAxisRef.snapTo5(block.dragEndMin)
                 if (newEnd > block.curStartMin + 5) {
-                    timeSlotModel.setSlotByMinutes(block.index, block.curStartMin, newEnd)
+                    timeSlotModel.setSlotByMinutes(block.blockIndex, block.curStartMin, newEnd)
                 }
                 block.dragStartMin = block.curStartMin
                 block.dragEndMin = block.curEndMin

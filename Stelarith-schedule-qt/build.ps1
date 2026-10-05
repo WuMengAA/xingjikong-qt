@@ -48,4 +48,22 @@ $exe = Join-Path $Build 'stelarith-schedule-qt.exe'
 Write-Host '=== Deploy Qt runtime ===' -ForegroundColor Cyan
 & "$Qt\bin\windeployqt.exe" --no-translations --no-system-d3d-compiler --no-opengl-sw --compiler-runtime $exe | Out-Null
 
+# Patch 1: QML modules (windeployqt cannot scan qrc imports; copy QtQuick/QtQml manually)
+if (-not (Test-Path (Join-Path $Build 'qml\QtQuick'))) {
+    Write-Host '  copying QtQuick/QtQml QML modules...' -ForegroundColor DarkYellow
+    New-Item -ItemType Directory -Force -Path (Join-Path $Build 'qml') | Out-Null
+    Copy-Item (Join-Path $Qt 'qml\QtQuick') (Join-Path $Build 'qml\QtQuick') -Recurse -Force
+    Copy-Item (Join-Path $Qt 'qml\QtQml')  (Join-Path $Build 'qml\QtQml')  -Recurse -Force
+}
+
+# Patch 2: MSVC runtime (windeployqt may miss msvcp140_2.dll; missing -> exit 0xC0000142)
+$rtSrc = Join-Path $Msvc 'bin\Hostx64\x64'
+foreach ($rt in @('msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll','msvcp140_atomic_wait.dll','vcruntime140.dll','vcruntime140_1.dll')) {
+    $dst = Join-Path $Build $rt
+    if (-not (Test-Path $dst)) {
+        $src = Join-Path $rtSrc $rt
+        if (Test-Path $src) { Copy-Item $src $dst -Force; Write-Host "  + runtime: $rt" -ForegroundColor DarkYellow }
+    }
+}
+
 Write-Host "OK: $exe" -ForegroundColor Green

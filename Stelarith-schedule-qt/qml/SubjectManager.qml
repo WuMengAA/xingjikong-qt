@@ -65,11 +65,6 @@ Rectangle {
         spacing: 4
 
         delegate: Rectangle {
-            required property string id
-            required property string name
-            required property string simplifiedName
-            required property string teacher
-
             width: list.width
             height: 44
             radius: 4
@@ -89,7 +84,10 @@ Rectangle {
                     color: "#0078d4"
                     Text {
                         anchors.centerIn: parent
-                        text: model.simplifiedName !== "" ? model.simplifiedName : "?"
+                        text: {
+                            var s = subjectModel.simplifiedNameAt(index)
+                            return s !== "" ? s : "?"
+                        }
                         color: "#fff"
                         font.pixelSize: 14
                         font.bold: true
@@ -97,7 +95,7 @@ Rectangle {
                 }
 
                 Label {
-                    text: model.name
+                    text: subjectModel.nameAt(index)
                     color: "#fff"
                     font.pixelSize: 14
                     Layout.fillWidth: true
@@ -105,7 +103,10 @@ Rectangle {
                 }
 
                 Label {
-                    text: model.teacher !== "" ? model.teacher : "—"
+                    text: {
+                        var t = subjectModel.teacherAt(index)
+                        return t !== "" ? t : "—"
+                    }
                     color: "#888"
                     font.pixelSize: 12
                 }

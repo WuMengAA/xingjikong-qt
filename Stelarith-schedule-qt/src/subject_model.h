@@ -23,6 +23,16 @@ public:
     int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
+    // QML 需要的 role 名映射（否则 model.name 等为 undefined）
+    QHash<int, QByteArray> roleNames() const override {
+        QHash<int, QByteArray> roles;
+        roles[IdRole] = "id";
+        roles[NameRole] = "name";
+        roles[SimplifiedNameRole] = "simplifiedName";
+        roles[TeacherRole] = "teacher";
+        roles[RoomRole] = "room";
+        return roles;
+    }
 
     // 获取/设置科目
     Subject getSubject(int row) const;
@@ -43,8 +53,17 @@ public:
 
     // ---- QML 可调用 ----
     Q_INVOKABLE int count() const { return m_subjects.size(); }
+    Q_INVOKABLE QString idAt(int row) const {
+        return (row >= 0 && row < m_subjects.size()) ? m_subjects[row].id : QString();
+    }
     Q_INVOKABLE QString nameAt(int row) const {
         return (row >= 0 && row < m_subjects.size()) ? m_subjects[row].name : QString();
+    }
+    Q_INVOKABLE QString simplifiedNameAt(int row) const {
+        return (row >= 0 && row < m_subjects.size()) ? m_subjects[row].simplifiedName : QString();
+    }
+    Q_INVOKABLE QString teacherAt(int row) const {
+        return (row >= 0 && row < m_subjects.size()) ? m_subjects[row].teacher : QString();
     }
     Q_INVOKABLE bool addSubjectQml(const QString& name) {
         Subject s;

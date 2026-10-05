@@ -97,11 +97,17 @@ Rectangle {
         contentHeight: root.contentHeight
 
         Repeater {
-            model: timeSlotModel
+            // 用纯数字 model（timeSlotModel.count），避免 QAbstractListModel role 注入问题
+            model: timeSlotModel.count
             delegate: TimeAxisBlock {
                 width: blockFlick.width - 16
                 x: 8
                 timeAxisRef: root
+                blockIndex: index
+                blockName: timeSlotModel.nameAt(index)
+                blockStartMin: timeSlotModel.startMinAt(index)
+                blockEndMin: timeSlotModel.endMinAt(index)
+                blockType: timeSlotModel.timeTypeAt(index)
                 y: root.timeToY(timeSlotModel.startMinAt(index))
                 height: Math.max(16, (timeSlotModel.endMinAt(index) - timeSlotModel.startMinAt(index)) * root.pixelsPerMinute)
             }
