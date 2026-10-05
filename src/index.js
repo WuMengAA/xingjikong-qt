@@ -10,10 +10,54 @@
 //   指令队列：已下发未回执的落盘（见 store.js）——设备重连按原顺序补发、云端重启不丢
 
 import http from 'node:http';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { exec } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
-  HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS } from './config.js';
+  HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
+  OTA_MANIFEST_FILE } from './config.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ENV_FILE = join(__dirname, '..', '.env');
+const ADMIN_HTML = join(__dirname, 'admin.html');
+
+/* ---------- .env 读写（管理面板用）---------- */
+function readEnvFile() {
+  if (!existsSync(ENV_FILE)) return {};
+  const lines = readFileSync(ENV_FILE, 'utf8').split(/\r?\n/);
+  const out = {};
+  for (const line of lines) {
+    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+function updateEnvFile(updates) {
+  if (!existsSync(ENV_FILE)) return false;
+  let content = readFileSync(ENV_FILE, 'utf8');
+  for (const [key, val] of Object.entries(updates)) {
+    if (val === undefined || val === null) continue;
+    const regex = new RegExp(`^${key}=.*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `${key}=${val}`);
+    } else {
+      content += `\n${key}=${val}`;
+    }
+  }
+  writeFileSync(ENV_FILE, content, 'utf8');
+  return true;
+}
+
+/** 重启 StelarithCloud 计划任务（写完 .env 后调用）。*/
+function restartCloudTask() {
+  // 用 detached 子进程：等 2s（让 HTTP 响应发出去）→ End → 等 1s → Run
+  const cmd = 'cmd /c "timeout /t 2 >nul && schtasks /End /TN StelarithCloud & timeout /t 1 >nul & schtasks /Run /TN StelarithCloud"';
+  exec(cmd, { windowsHide: true, detached: true }, () => {});
+}
 import { verifyViewerTicket } from './ticket.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
 import { latestFor } from './ota.js';
@@ -106,11 +150,12 @@ const server = http.createServer((req, res) => {
   // 可信边界收紧到"持 viewer 令牌"）。/api/frame 是实时画面，最敏感，必须关死。
   // 用 VIEWER_TOKEN（与桌面管理端同一信任级），Bearer 头；缺/错 → 401 fail-closed。
   // ⚠️ 站点广播（broadcast.ts）是唯一合法调用方，已同步带 Bearer 头。
+  const isAdminApi = u.pathname === '/api/admin/config' || u.pathname === '/api/admin/ota';
   const isManageApi =
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
     u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
-    u.pathname === '/api/ota/latest';
+    u.pathname === '/api/ota/latest' || isAdminApi;
   if (isManageApi) {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -175,6 +220,99 @@ const server = http.createServer((req, res) => {
       const r = sendInstruction(uid, String(action), params ?? {});
       if (r.state === 'sent') return send(200, { ok: true, state: 'sent', uid, action });
       return send(409, { ok: false, state: r.state, uid, action, detail: r.detail });
+    });
+    return undefined;
+  }
+
+  /* ---------- 管理面板（2026-10-05：让用户告别命令行）---------- */
+  // GET /admin  → 返回 admin.html（管理面板单页）
+  // GET /api/admin/config  → 读当前 .env 配置（令牌脱敏显示）
+  // POST /api/admin/config  → 改 .env（换令牌/放开0.0.0.0）→ 自动重启
+  // POST /api/admin/ota     → 写 ota.json 发布新版本
+
+  if (req.method === 'GET' && u.pathname === '/admin') {
+    if (!existsSync(ADMIN_HTML)) return send(404, { ok: false, error: 'admin.html 不存在' });
+    const html = readFileSync(ADMIN_HTML, 'utf8');
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': Buffer.byteLength(html) });
+    return res.end(html);
+  }
+
+  if (req.method === 'GET' && u.pathname === '/api/admin/config') {
+    const env = readEnvFile();
+    return send(200, {
+      ok: true,
+      host: env.CLOUD_WS_HOST || '0.0.0.0',
+      port: env.CLOUD_WS_PORT || '8788',
+      wsToken: env.CLOUD_WS_TOKEN || '',
+      viewerToken: env.CLOUD_VIEWER_TOKEN || '',
+      wsTokenIsDefault: (env.CLOUD_WS_TOKEN || 'dev-cloud-token') === 'dev-cloud-token',
+    });
+  }
+
+  if (req.method === 'POST' && u.pathname === '/api/admin/config') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', () => {
+      let payload;
+      try { payload = JSON.parse(body || '{}'); }
+      catch (e) { return send(400, { ok: false, error: 'JSON 解析失败: ' + e.message }); }
+
+      const updates = {};
+      if (payload.host !== undefined) {
+        if (payload.host !== '127.0.0.1' && payload.host !== '0.0.0.0')
+          return send(400, { ok: false, error: 'host 只能是 127.0.0.1 或 0.0.0.0' });
+        updates.CLOUD_WS_HOST = payload.host;
+      }
+      if (payload.wsToken !== undefined) {
+        if (payload.wsToken.length < 16)
+          return send(400, { ok: false, error: '设备令牌太弱（最少16位随机）' });
+        updates.CLOUD_WS_TOKEN = payload.wsToken;
+      }
+      if (payload.viewerToken !== undefined) {
+        if (payload.viewerToken.length < 16)
+          return send(400, { ok: false, error: '管理令牌太弱（最少16位随机）' });
+        updates.CLOUD_VIEWER_TOKEN = payload.viewerToken;
+      }
+
+      const ok = updateEnvFile(updates);
+      if (!ok) return send(500, { ok: false, error: '.env 文件不存在或写入失败' });
+
+      pushEvent('info', '管理面板修改了配置', { keys: Object.keys(updates) });
+      // 写完 .env → 重启云端（让响应先发出去）
+      restartCloudTask();
+      return send(200, { ok: true, updated: Object.keys(updates), note: '云端即将自动重启以加载新配置' });
+    });
+    return undefined;
+  }
+
+  if (req.method === 'POST' && u.pathname === '/api/admin/ota') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', () => {
+      let payload;
+      try { payload = JSON.parse(body || '{}'); }
+      catch (e) { return send(400, { ok: false, error: 'JSON 解析失败: ' + e.message }); }
+      const { product = 'agent', version, url, sha256, size, notes, mandatory } = payload;
+      if (!version || !url) return send(400, { ok: false, error: '缺 version 或 url' });
+
+      // 读取现有清单（有则改，无则建）
+      let manifest = { products: {} };
+      if (existsSync(OTA_MANIFEST_FILE)) {
+        try { manifest = JSON.parse(readFileSync(OTA_MANIFEST_FILE, 'utf8')); }
+        catch { manifest = { products: {} }; }
+      }
+      if (!manifest.products) manifest.products = {};
+      manifest.products[product] = {
+        version, url, sha256: sha256 || '', size: Number(size) || 0,
+        notes: notes || '', mandatory: !!mandatory,
+      };
+      try {
+        writeFileSync(OTA_MANIFEST_FILE, JSON.stringify(manifest, null, 2), 'utf8');
+        pushEvent('info', '管理面板发布了 OTA', { product, version });
+        return send(200, { ok: true, product, version, note: 'OTA 清单已写入，立即生效' });
+      } catch (e) {
+        return send(500, { ok: false, error: '写入 ota.json 失败: ' + e.message });
+      }
     });
     return undefined;
   }

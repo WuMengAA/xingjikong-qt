@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>星集控 · 云端管理台</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e0e0e8;
+    --text-dim: #8888a0;
+    --accent: #6c7cff;
+    --accent-hover: #5a68f0;
+    --green: #4caf50;
+    --red: #f44336;
+    --orange: #ff9800;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .status { display: flex; gap: 12px; align-items: center; font-size: 13px; color: var(--text-dim); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.online { background: var(--green); }
+  .dot.offline { background: var(--red); }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+  .row:last-child { margin-bottom: 0; }
+  label { font-size: 13px; color: var(--text-dim); min-width: 100px; }
+  input, select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 14px;
+    flex: 1;
+    outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  input[type="checkbox"] { width: auto; flex: none; }
+  .btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn:hover { background: var(--accent-hover); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.danger { background: var(--red); }
+  .btn.danger:hover { background: #d32f2f; }
+  .btn.green { background: var(--green); }
+  .btn.green:hover { background: #388e3c; }
+  .btn.outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn.outline:hover { border-color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--text-dim); font-weight: 600; }
+  .tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .tag.online { background: rgba(76,175,80,0.15); color: var(--green); }
+  .tag.offline { background: rgba(244,67,54,0.15); color: var(--red); }
+  .tag.warn { background: rgba(255,152,0,0.15); color: var(--orange); }
+  .events { max-height: 400px; overflow-y: auto; }
+  .event { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .event .time { color: var(--text-dim); margin-right: 8px; }
+  .event .level-info { color: var(--text-dim); }
+  .event .level-warn { color: var(--orange); }
+  .event .level-error { color: var(--red); }
+  .event .msg { color: var(--text); }
+  .login-wrap { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  .login-box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 40px; width: 360px; }
+  .login-box h1 { text-align: center; margin-bottom: 24px; font-size: 20px; }
+  .login-box .hint { font-size: 12px; color: var(--text-dim); text-align: center; margin-top: 16px; }
+  .toast {
+    position: fixed;
+    top: 80px;
+    right: 24px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 20px;
+    font-size: 14px;
+    z-index: 200;
+    transition: opacity 0.3s;
+  }
+  .toast.ok { border-color: var(--green); }
+  .toast.err { border-color: var(--red); }
+  .hidden { display: none; }
+  .full { grid-column: 1 / -1; }
+  .actions-cell { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions-cell .btn { padding: 4px 12px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<!-- 登录页 -->
+<div id="loginPage" class="login-wrap">
+  <div class="login-box">
+    <h1>星集控 · 云端管理台</h1>
+    <div class="row">
+      <input type="password" id="loginToken" placeholder="输入管理令牌 (CLOUD_VIEWER_TOKEN)" style="flex:1">
+    </div>
+    <button class="btn" style="width:100%; margin-top:8px;" onclick="doLogin()">登录</button>
+    <div class="hint">令牌存在云端 .env 的 CLOUD_VIEWER_TOKEN 里</div>
+  </div>
+</div>
+
+<!-- 管理面板 -->
+<div id="mainPage" class="hidden">
+  <div class="header">
+    <h1>星集控 · 云端管理台</h1>
+    <div class="status">
+      <span><span id="hostDot" class="dot offline"></span> <span id="hostStatus">未连接</span></span>
+      <span>设备 <strong id="devCount">0</strong></span>
+      <button class="btn outline" onclick="refreshAll()">刷新</button>
+      <button class="btn outline" onclick="logout()">退出</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- 安全配置 -->
+    <div class="grid">
+      <div class="card">
+        <h2>安全配置</h2>
+        <div class="row">
+          <label>监听地址</label>
+          <select id="hostSelect">
+            <option value="127.0.0.1">127.0.0.1（锁回环）</option>
+            <option value="0.0.0.0">0.0.0.0（放开公网）</option>
+          </select>
+          <button class="btn" onclick="applyHost()">应用</button>
+        </div>
+        <div class="row">
+          <label>设备令牌</label>
+          <input type="text" id="wsToken" placeholder="CLOUD_WS_TOKEN">
+          <button class="btn outline" onclick="genToken('wsToken')">生成</button>
+        </div>
+        <div class="row">
+          <label>管理令牌</label>
+          <input type="text" id="viewerToken" placeholder="CLOUD_VIEWER_TOKEN">
+          <button class="btn outline" onclick="genToken('viewerToken')">生成</button>
+        </div>
+        <div class="row">
+          <button class="btn green" onclick="saveTokens()">保存令牌并重启</button>
+        </div>
+        <div style="margin-top:8px; font-size:12px; color:var(--text-dim);">
+          ⚠ 换令牌后所有在线设备需用新令牌重连。放开 0.0.0.0 前务必先换强随机令牌。
+        </div>
+      </div>
+
+      <!-- OTA 管理 -->
+      <div class="card">
+        <h2>OTA 版本管理</h2>
+        <div class="row">
+          <label>当前版本</label>
+          <input type="text" id="otaVersion" placeholder="0.5.0">
+        </div>
+        <div class="row">
+          <label>下载 URL</label>
+          <input type="text" id="otaUrl" placeholder="https://...">
+        </div>
+        <div class="row">
+          <label>SHA256</label>
+          <input type="text" id="otaSha256" placeholder="64位十六进制">
+          <button class="btn outline" onclick="calcSha256()">算</button>
+        </div>
+        <div class="row">
+          <label>文件大小</label>
+          <input type="number" id="otaSize" placeholder="字节">
+        </div>
+        <div class="row">
+          <label>更新说明</label>
+          <input type="text" id="otaNotes" placeholder="修复了…">
+        </div>
+        <div class="row">
+          <label>强制升级</label>
+          <input type="checkbox" id="otaMandatory">
+          <button class="btn" onclick="publishOta()">发布</button>
+          <button class="btn outline" onclick="loadOta()">读取当前</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 设备列表 -->
+    <div class="card" style="margin-bottom:16px;">
+      <h2>设备列表</h2>
+      <table>
+        <thead>
+          <tr><th>UID</th><th>版本</th><th>状态</th><th>在线时长</th><th>帧数</th><th>操作</th></tr>
+        </thead>
+        <tbody id="deviceTable">
+          <tr><td colspan="6" style="color:var(--text-dim);">暂无设备</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid">
+      <!-- 指令下发 -->
+      <div class="card">
+        <h2>下发指令</h2>
+        <div class="row">
+          <label>目标设备</label>
+          <select id="insTarget"></select>
+        </div>
+        <div class="row">
+          <label>动作</label>
+          <select id="insAction">
+            <option value="screenshot">screenshot（截图）</option>
+            <option value="volume">volume（调音量）</option>
+            <option value="lock">lock（锁屏）</option>
+            <option value="shutdown">shutdown（关机）</option>
+            <option value="restart">restart（重启）</option>
+            <option value="kill_process">kill_process（结束进程）</option>
+            <option value="list_process">list_process（进程列表）</option>
+            <option value="open_url">open_url（打开网页）</option>
+            <option value="message">message（弹消息）</option>
+            <option value="upgrade">upgrade（OTA升级）</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>参数(JSON)</label>
+          <input type="text" id="insParams" placeholder='{"level":50}' value="{}">
+        </div>
+        <div class="row">
+          <button class="btn" onclick="sendInstruction()">发送</button>
+          <span id="insResult" style="font-size:13px; color:var(--text-dim);"></span>
+        </div>
+      </div>
+
+      <!-- 事件流水 -->
+      <div class="card">
+        <h2>事件流水（最近 50 条）</h2>
+        <div class="events" id="eventList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+let token = localStorage.getItem('admin_token') || '';
+let pollTimer = null;
+
+// ---- 登录 ----
+function doLogin() {
+  const t = document.getElementById('loginToken').value.trim();
+  if (!t) return toast('请输入令牌', 'err');
+  token = t;
+  testLogin();
+}
+
+async function testLogin() {
+  try {
+    const r = await api('/api/devices');
+    if (r.ok) {
+      localStorage.setItem('admin_token', token);
+      showMain();
+    } else {
+      toast('令牌错误', 'err');
+      token = '';
+    }
+  } catch(e) {
+    toast('连接失败: ' + e.message, 'err');
+  }
+}
+
+function logout() {
+  token = '';
+  localStorage.removeItem('admin_token');
+  location.reload();
+}
+
+// ---- API ----
+async function api(path, method='GET', body=null) {
+  const opts = { method, headers: { 'Authorization': 'Bearer ' + token } };
+  if (body) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  const data = await res.json();
+  data._status = res.status;
+  return data;
+}
+
+// ---- 主面板 ----
+function showMain() {
+  document.getElementById('loginPage').classList.add('hidden');
+  document.getElementById('mainPage').classList.remove('hidden');
+  document.getElementById('hostStatus').textContent = '已连接';
+  document.getElementById('hostDot').className = 'dot online';
+  refreshAll();
+  startPolling();
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(refreshDevices, 5000);
+}
+
+// ---- 刷新 ----
+async function refreshAll() {
+  await Promise.all([refreshDevices(), refreshEvents(), loadConfig(), loadOta()]);
+}
+
+async function refreshDevices() {
+  try {
+    const r = await api('/api/devices');
+    const tbody = document.getElementById('deviceTable');
+    const select = document.getElementById('insTarget');
+    if (!r.ok || !r.devices || r.devices.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);">暂无设备</td></tr>';
+      select.innerHTML = '<option value="">无在线设备</option>';
+      document.getElementById('devCount').textContent = '0';
+      return;
+    }
+    document.getElementById('devCount').textContent = r.count;
+    tbody.innerHTML = r.devices.map(d => {
+      const dur = d.connectedAt ? Math.round((Date.now()-new Date(d.connectedAt).getTime())/1000) + 's' : '-';
+      return `<tr>
+        <td>${esc(d.uid)}</td>
+        <td>${esc(d.version||'-')}</td>
+        <td><span class="tag ${d.online?'online':'offline'}">${d.online?'在线':'离线'}</span></td>
+        <td>${dur}</td>
+        <td>${d.framesIn||0}</td>
+        <td class="actions-cell">
+          <button class="btn outline" onclick="quickSend('${esc(d.uid)}','screenshot')">截图</button>
+          <button class="btn outline" onclick="quickSend('${esc(d.uid)}','lock')">锁屏</button>
+          <button class="btn outline" onclick="quickSend('${esc(d.uid)}','restart')">重启</button>
+        </td>
+      </tr>`;
+    }).join('');
+    select.innerHTML = r.devices.map(d => `<option value="${esc(d.uid)}">${esc(d.uid)}</option>`).join('');
+  } catch(e) { toast('刷新设备失败: '+e.message, 'err'); }
+}
+
+async function refreshEvents() {
+  try {
+    const r = await api('/api/events?limit=50');
+    const el = document.getElementById('eventList');
+    if (!r.ok || !r.events) { el.innerHTML = ''; return; }
+    el.innerHTML = r.events.slice(0,50).map(ev => {
+      const t = ev.at ? new Date(ev.at).toLocaleTimeString('zh-CN') : '';
+      return `<div class="event"><span class="time">${t}</span><span class="level-${ev.level}">[${ev.level}]</span> <span class="msg">${esc(ev.msg)}</span></div>`;
+    }).join('');
+  } catch(e) {}
+}
+
+// ---- 安全配置 ----
+async function loadConfig() {
+  try {
+    const r = await api('/api/admin/config');
+    if (!r.ok) return;
+    document.getElementById('hostSelect').value = r.host || '127.0.0.1';
+    document.getElementById('wsToken').value = r.wsToken || '';
+    document.getElementById('viewerToken').value = r.viewerToken || '';
+  } catch(e) {}
+}
+
+async function applyHost() {
+  const host = document.getElementById('hostSelect').value;
+  const r = await api('/api/admin/config', 'POST', { host });
+  r.ok ? toast('监听地址已改为 '+host+'，需手动重启云端生效', 'ok') : toast(r.error||'失败', 'err');
+}
+
+async function saveTokens() {
+  const wsToken = document.getElementById('wsToken').value.trim();
+  const viewerToken = document.getElementById('viewerToken').value.trim();
+  if (!wsToken || !viewerToken) return toast('令牌不能为空', 'err');
+  if (wsToken === 'dev-cloud-token' || wsToken.length < 16) return toast('设备令牌太弱（最少16位随机），不能保存', 'err');
+  const r = await api('/api/admin/config', 'POST', { wsToken, viewerToken });
+  if (r.ok) {
+    toast('令牌已保存到 .env，云端即将重启', 'ok');
+    token = viewerToken; // 管理令牌可能换了
+    localStorage.setItem('admin_token', token);
+    setTimeout(() => location.reload(), 3000);
+  } else {
+    toast(r.error || '保存失败', 'err');
+  }
+}
+
+function genToken(id) {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  document.getElementById(id).value = Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// ---- OTA ----
+async function loadOta() {
+  try {
+    const r = await api('/api/ota/latest?product=agent');
+    if (r.ok && r.latest) {
+      document.getElementById('otaVersion').value = r.latest.version || '';
+      document.getElementById('otaUrl').value = r.latest.url || '';
+      document.getElementById('otaSha256').value = r.latest.sha256 || '';
+      document.getElementById('otaSize').value = r.latest.size || '';
+      document.getElementById('otaNotes').value = r.latest.notes || '';
+      document.getElementById('otaMandatory').checked = r.latest.mandatory || false;
+    }
+  } catch(e) {}
+}
+
+async function publishOta() {
+  const body = {
+    product: 'agent',
+    version: document.getElementById('otaVersion').value.trim(),
+    url: document.getElementById('otaUrl').value.trim(),
+    sha256: document.getElementById('otaSha256').value.trim(),
+    size: Number(document.getElementById('otaSize').value) || 0,
+    notes: document.getElementById('otaNotes').value.trim(),
+    mandatory: document.getElementById('otaMandatory').checked,
+  };
+  if (!body.version || !body.url) return toast('版本号和URL必填', 'err');
+  const r = await api('/api/admin/ota', 'POST', body);
+  r.ok ? toast('OTA 已发布: '+body.version, 'ok') : toast(r.error||'发布失败', 'err');
+}
+
+async function calcSha256() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', buf);
+    const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+    document.getElementById('otaSha256').value = hex;
+    document.getElementById('otaSize').value = file.size;
+    toast('SHA256 已计算', 'ok');
+  };
+  input.click();
+}
+
+// ---- 指令 ----
+async function sendInstruction() {
+  const uid = document.getElementById('insTarget').value;
+  const action = document.getElementById('insAction').value;
+  let params = {};
+  try { params = JSON.parse(document.getElementById('insParams').value || '{}'); }
+  catch(e) { return toast('参数不是合法JSON', 'err'); }
+  if (!uid) return toast('请选设备', 'err');
+  const r = await api('/api/instructions', 'POST', { uid, action, params });
+  const span = document.getElementById('insResult');
+  if (r.ok) { span.textContent = '✓ 已发送'; span.style.color = 'var(--green)'; toast('指令已发送', 'ok'); }
+  else { span.textContent = '✗ ' + (r.detail || r.error || '失败'); span.style.color = 'var(--red)'; toast('发送失败', 'err'); }
+}
+
+async function quickSend(uid, action) {
+  const r = await api('/api/instructions', 'POST', { uid, action, params: {} });
+  r.ok ? toast(`${uid} ← ${action} ✓`, 'ok') : toast(`${uid} ← ${action} ✗ ${r.detail||r.error||''}`, 'err');
+}
+
+// ---- 工具 ----
+function esc(s) { return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
+function toast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type;
+  setTimeout(() => t.classList.add('hidden'), 3000);
+}
+
+// ---- 启动 ----
+if (token) testLogin();
+</script>
+</body>
+</html>
