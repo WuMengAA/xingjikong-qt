@@ -4,7 +4,7 @@
 //       ↑ -arch x64 必须带！不带的整包是 32 位，ProgramFiles64Folder 会被重定向到 (x86)。
 // （deploy/ 里几十个 DLL + 嵌套子目录，手写 wxs 不可维护）
 
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -25,6 +25,19 @@ function walk(dir) {
     }
   }
   return out;
+}
+
+// 版本号单一真源（2026-10-05）：从 installer.nsi 的 `!define VER "x.y.z"` 读，
+// 保证 NSIS 包与 MSI 包**不可能**各写一个版本号而分叉（历史上 exe 报 0.4.0-v1、
+// 安装器写 0.5.0 就是这样出的岔子）。改版本只改 installer.nsi，MSI 自动跟随。
+const NSI = join(__dirname, '..', 'installer.nsi');
+let APP_VER = '0.0.0';
+try {
+  const m = readFileSync(NSI, 'utf8').match(/!define\s+VER\s+"([^"]+)"/);
+  if (m) APP_VER = m[1];
+  else console.error('[gen-wxs] WARN 未在 installer.nsi 找到 !define VER，回落到 0.0.0');
+} catch (e) {
+  console.error(`[gen-wxs] WARN 读不到 installer.nsi（${e.message}），回落到 0.0.0`);
 }
 
 // 目录树：rel 路径 -> 目录 id（INSTALLFOLDER 为根）
@@ -69,7 +82,7 @@ let wxs = `<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
       Name="星集控被控端"
       Manufacturer="Stelarith"
-      Version="0.5.0"
+      Version="${APP_VER}"
       UpgradeCode="2F6C4F0E-6C21-4E24-9F79-8E5ED49A5C31"
       Scope="perMachine"
       Language="2052">
