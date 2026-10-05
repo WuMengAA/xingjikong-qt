@@ -33,8 +33,18 @@ Rectangle {
                 Layout.fillWidth: true
             }
 
+            // 课表群切换
             ComboBox {
                 Layout.preferredWidth: 140
+                model: scheduleModel.groupNames()
+                currentIndex: Math.max(0, scheduleModel.currentGroupIndex())
+                onActivated: (i) => scheduleModel.selectGroup(i)
+                visible: scheduleModel.groupNames().length > 1
+            }
+
+            // 周次切换
+            ComboBox {
+                Layout.preferredWidth: 120
                 model: [
                     qsTr("第 1 周"),
                     qsTr("第 2 周"),
@@ -140,7 +150,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     onClicked: {
-                        scheduleModel.setCellSubject(root.editRow, root.editCol, "")
+                        undoManager.setCell(root.editRow, root.editCol, "")
                         menuPopup.close()
                     }
                 }
@@ -164,7 +174,7 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            scheduleModel.setCellSubject(root.editRow, root.editCol, modelData.id)
+                            undoManager.setCell(root.editRow, root.editCol, modelData.id)
                             menuPopup.close()
                         }
                     }

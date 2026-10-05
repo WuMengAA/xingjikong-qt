@@ -14,6 +14,7 @@
 #include "timeslot_model.h"
 #include "subject_model.h"
 #include "cses_importer.h"
+#include "undo_manager.h"
 
 // 从命令行参数读取档案路径
 static QString getProfilePathFromArgs(const QStringList& args) {
@@ -108,6 +109,40 @@ static Profile createSampleProfile() {
     p.classPlanGroups[grp.id] = grp;
     p.selectedClassPlanGroupId = grp.id;
 
+    // 第二套课表群：模拟双周轮换（周一到周三用另一组课表）
+    ClassPlanGroup grp2;
+    grp2.id = QUuid::createUuid().toString();
+    grp2.name = QStringLiteral("双周轮换");
+    grp2.isActive = true;
+
+    ClassPlan cp3;
+    cp3.id = QUuid::createUuid().toString();
+    cp3.name = QStringLiteral("周一·双周");
+    cp3.weekDay = 1;
+    cp3.weekCountDiv = 2;
+    cp3.weekCountDivTotal = 2;
+    cp3.isActive = true;
+    cp3.lessons.append(Lesson{sub3.id, 1, 0, 2, 2, true});  // 英语
+    cp3.lessons.append(Lesson{sub1.id, 1, 1, 2, 2, true});  // 语文
+    cp3.lessons.append(Lesson{sub2.id, 1, 2, 2, 2, true});  // 数学
+    p.classPlans[cp3.id] = cp3;
+    grp2.classPlanIds.append(cp3.id);
+
+    ClassPlan cp4;
+    cp4.id = QUuid::createUuid().toString();
+    cp4.name = QStringLiteral("周二·双周");
+    cp4.weekDay = 2;
+    cp4.weekCountDiv = 2;
+    cp4.weekCountDivTotal = 2;
+    cp4.isActive = true;
+    cp4.lessons.append(Lesson{sub1.id, 2, 0, 2, 2, true});
+    cp4.lessons.append(Lesson{sub2.id, 2, 1, 2, 2, true});
+    cp4.lessons.append(Lesson{sub3.id, 2, 2, 2, 2, true});
+    p.classPlans[cp4.id] = cp4;
+    grp2.classPlanIds.append(cp4.id);
+
+    p.classPlanGroups[grp2.id] = grp2;
+
     return p;
 }
 
@@ -149,11 +184,15 @@ int main(int argc, char* argv[]) {
     SubjectModel subjectModel(profile.subjects);
     subjectModel.setProfileRef(&profile);
 
+    // 撤销/重做
+    UndoManager undoManager(&scheduleModel);
+
     // QML 上下文（直接传指针，QML 通过 context property 访问）
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("scheduleModel"), &scheduleModel);
     engine.rootContext()->setContextProperty(QStringLiteral("timeSlotModel"), &timeSlotModel);
     engine.rootContext()->setContextProperty(QStringLiteral("subjectModel"), &subjectModel);
+    engine.rootContext()->setContextProperty(QStringLiteral("undoManager"), &undoManager);
     engine.rootContext()->setContextProperty(QStringLiteral("profileName"), profile.name);
     engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), profilePath.isEmpty() ? repo.defaultProfilePath() : profilePath);
 

@@ -40,7 +40,7 @@ public:
         if (week == m_currentWeek) return;
         m_currentWeek = week;
         emit currentWeekChanged();
-        emit dataChanged(index(0,0), index(rowCount()-1, columnCount()-1));
+        emit fullDataChanged();
     }
     // 按日期算当前周次（学期第一周 = 1）
     static int weekFromDate(const QDate& date) {
@@ -48,6 +48,32 @@ public:
         QDate start(date.year(), 9, 1);
         int days = start.daysTo(date);
         return (days >= 0) ? (days / 7) + 1 : 1;
+    }
+
+    // ---- 课表群 ----
+    // 课表群名列表（QML 下拉用）
+    Q_INVOKABLE QStringList groupNames() const {
+        QStringList names;
+        const auto keys = m_profile.classPlanGroups.keys();
+        for (const QString& k : keys) {
+            names.append(m_profile.classPlanGroups.value(k).name);
+        }
+        return names;
+    }
+    // 当前课表群索引（-1 无群）
+    Q_INVOKABLE int currentGroupIndex() const {
+        const auto keys = m_profile.classPlanGroups.keys();
+        return keys.indexOf(m_profile.selectedClassPlanGroupId);
+    }
+    // 切换课表群
+    Q_INVOKABLE bool selectGroup(int index) {
+        const auto keys = m_profile.classPlanGroups.keys();
+        if (index < 0 || index >= keys.size()) return false;
+        const QString id = keys.at(index);
+        if (id == m_profile.selectedClassPlanGroupId) return false;
+        m_profile.selectedClassPlanGroupId = id;
+        emit fullDataChanged();
+        return true;
     }
 
     // 获取某格子的课表条目
@@ -76,6 +102,10 @@ public:
     // 单元格科目名（col: 0=周一列）
     Q_INVOKABLE QString cellText(int row, int col) const {
         return data(index(row, col), SubjectNameRole).toString();
+    }
+    // 单元格科目 ID（供撤销记录）
+    Q_INVOKABLE QString cellSubjectId(int row, int col) const {
+        return data(index(row, col), SubjectIdRole).toString();
     }
     // 行头（时间）
     Q_INVOKABLE QString rowHeader(int row) const {
@@ -109,6 +139,12 @@ signals:
     void currentWeekChanged();
 
 private:
+    // 整表刷新（周次/课表群切换后调用）
+    void fullDataChanged() {
+        beginResetModel();
+        endResetModel();
+    }
+
     Profile& m_profile;
     QList<TimeSlot> m_timeSlots;              // 排序后的时间点列表
     QMap<QString, QString> m_subjectNames;    // SubjectId -> SubjectName

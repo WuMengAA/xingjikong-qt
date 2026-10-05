@@ -20,6 +20,7 @@ add_executable(stelarith-schedule-qt
     src/timeslot_model.cpp
     src/subject_model.cpp
     src/cses_importer.cpp
+    src/undo_manager.cpp
 )
 
 target_link_libraries(stelarith-schedule-qt PRIVATE
@@ -27,6 +28,7 @@ target_link_libraries(stelarith-schedule-qt PRIVATE
     Qt6::Qml
     Qt6::QmlWorkerScript
     Qt6::Quick
+    Qt6::Gui
 )
 
 # qrc 资源（传统方式：打包进主 exe，qrc:/qml/ 可直接加载）

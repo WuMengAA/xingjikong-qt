@@ -41,6 +41,16 @@ ApplicationWindow {
                 font.pixelSize: 11
             }
             Button {
+                text: qsTr("撤销")
+                enabled: undoManager.canUndo
+                onClicked: undoManager.undo()
+            }
+            Button {
+                text: qsTr("重做")
+                enabled: undoManager.canRedo
+                onClicked: undoManager.redo()
+            }
+            Button {
                 text: qsTr("保存")
                 onClicked: {
                     if (scheduleModel.saveTo(profilePath)) {
