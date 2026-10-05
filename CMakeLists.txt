@@ -16,7 +16,11 @@ endif()
 #     src/main.cpp 的 ensureWebEngine 注释），只要不在 main 里提前 new QWebEngineView 即可。
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebSockets WebEngineWidgets Network)
 
-add_executable(stelarith-agent-qt src/main.cpp)
+add_executable(stelarith-agent-qt
+  src/main.cpp
+  src/singleinstance.cpp
+  src/singleinstance.h
+)
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::WebEngineWidgets Qt6::Network)
 
 # GUI 子系统：常驻托盘程序不该挂着控制台黑窗（日志已落盘到 agent-qt.log，不靠 stdout）

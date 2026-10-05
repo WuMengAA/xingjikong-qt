@@ -19,6 +19,8 @@
 //   · 画面帧走二进制帧 [1B 版本][2B 大端 headerLen][header JSON][JPEG]，带 seq/ts/mime；
 //   · 云端拒绝时回的是统一 error 通道（code + 人话原因），这里必须打出来，不许静默。
 
+#include "singleinstance.h"   // 单实例守卫（与管理端 viewer 同一份实现）
+
 #include <QApplication>
 #include <QSystemTrayIcon>
 #include <QMenu>
@@ -76,6 +78,9 @@
 #include <QNetworkReply>
 #include <QUrlQuery>
 #include <QMouseEvent>   // 2026-10-05：紧急通知点击关闭
+#include <QPaintEvent>   // 2026-10-05：全屏通知背景色（setStyleSheet 对顶层 QWidget 无效）
+#include <QPainter>
+#include <QPainterPath>
 #include <windows.h>
 #include <tlhelp32.h>   // 进程快照（process_list / process_stop）
 #include <psapi.h>      // 进程工作集内存
@@ -105,7 +110,9 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //   · 装机包 NSIS 的 DisplayVersion 也必须与它一致（installer.nsi 的 VER 常量）。
 //   改版本时**只改这一处** + installer.nsi，别在别处再写一份（历史上就是两处不一致出过岔子：
 //   exe 报 0.4.0-v1、安装器写 0.5.0）。
-constexpr const char *kAppVersion = "0.5.0";
+//   ⚠️ 2026-10-06 收敛到 0.6.0：此前这里写 0.5.0、installer.nsi 写 0.5.1，本文件自己的注释
+//      还写着"两者必须一致"却没做到 —— 不一致的代价是云端按 0.5.0 判断 OTA，装出来却是 0.5.1。
+constexpr const char *kAppVersion = "0.6.0";
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = 1000;
@@ -1117,8 +1124,21 @@ private:
         // 紧急通知的差异化靠"不自动关闭 + 点击才关"表达，不靠更强的置顶强度。
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
         setAttribute(Qt::WA_DeleteOnClose);
-        // 真透明背景：圆角外透出桌面，而不是一块黑底（2026-10-04 用户要求"圆角+透明背景"）
-        setAttribute(Qt::WA_TranslucentBackground);
+        if (kind == Fullscreen) {
+            // 全屏遮罩：palette 画纯色背景（WA_TranslucentBackground + paintEvent 在 Qt 6 不稳定）
+            QColor c;
+            if (severity == QLatin1String("urgent"))      c = QColor(180, 20, 20);
+            else if (severity == QLatin1String("inform")) c = QColor(200, 140, 10);
+            else if (severity == QLatin1String("remind")) c = QColor(20, 140, 60);
+            else                                            c = QColor(0, 0, 0);
+            setAutoFillBackground(true);
+            QPalette pal = palette();
+            pal.setColor(QPalette::Window, c);
+            setPalette(pal);
+        } else {
+            // 灵动岛/弹窗：圆角+透明背景
+            setAttribute(Qt::WA_TranslucentBackground);
+        }
 
         // 长度限制：标题/正文各限长，超长截断加省略号——防止长广播把固定高度的窗撑爆
         // （2026-10-04 用户要求"长度限制"；显示与 TTS 都读同一份截断文本，口径一致）
@@ -1143,6 +1163,27 @@ private:
             "font-size:%1px;").arg(fontSizeFor(m_combined.length())));
         lay->addWidget(m_label);
 
+        // 紧急通知：底部"确认"按钮（2026-10-05：需求文档要求确认按钮）
+        if (m_emergency) {
+            lay->addSpacing(16);
+            auto *btnLay = new QHBoxLayout();
+            btnLay->addStretch();
+            m_confirmBtn = new QPushButton(QStringLiteral("\u2713 \u786e\u8ba4"), this);
+            m_confirmBtn->setMinimumSize(220, 56);
+            m_confirmBtn->setStyleSheet(QStringLiteral(
+                "QPushButton {"
+                " font-size:22px; font-weight:700; color:#ffffff;"
+                " background:rgba(255,255,255,80); border:2px solid rgba(255,255,255,180);"
+                " border-radius:28px; padding:0 48px;}"
+                "QPushButton:hover { background:rgba(255,255,255,140);}"
+                "QPushButton:pressed { background:rgba(255,255,255,180);}"
+            ));
+            btnLay->addWidget(m_confirmBtn);
+            btnLay->addStretch();
+            lay->addLayout(btnLay);
+            QObject::connect(m_confirmBtn, &QPushButton::clicked, this, &QWidget::close);
+        }
+
         // 淡入：先透明再渐显（Qt 无内置透明度动画，用 QPropertyAnimation 要引动画模块——省了，
         // 直接 opacity 立即显示即可，教室大屏场景不需要过度动画）
     }
@@ -1160,8 +1201,8 @@ private:
             // 全屏遮罩 + 居中大字。严重度配色（2026-10-05 补）：
             //   remind  绿 —— 提醒；inform  琥珀 —— 通知；urgent 红 —— 紧急；
             //   未知/缺省回黑底（安全默认，避免把任意串直接插进 QSS）。
-            const QString bg = fullscreenBackground(m_severity);
-            setStyleSheet(QStringLiteral("background:%1; border:none;").arg(bg));
+            // 全屏背景由构造函数 palette 处理
+            setStyleSheet(QStringLiteral("border:none;"));
         } else if (m_kind == Island) {
             // 灵动岛：顶部居中细长胶囊（≈ 高度 64px、宽度随内容 60% 屏宽）
             const int w = qMin(geo.width() * 6 / 10, 720);
@@ -1223,9 +1264,29 @@ private:
     QString m_severity;   // remind / inform / urgent（仅 fullscreen 生效）
     bool m_emergency;     // 紧急：不自动关 + 强制置顶 + 点击关闭
     QLabel *m_label = nullptr;
+    QPushButton *m_confirmBtn = nullptr;  // 紧急通知确认按钮
     static NotifyWindow *g_notify;
 
 protected:
+
+    // paintEvent: stylesheet background is ineffective on top-level QWidget (Qt 6)
+    void paintEvent(QPaintEvent *) override
+    {
+        if (m_kind == Fullscreen) { QWidget::paintEvent(nullptr); return; }
+        QPainter p(this);
+        if (m_kind == Island) {
+            QPainterPath path;
+            path.addRoundedRect(rect().toRectF(), 32, 32);
+            p.fillPath(path, QColor(20, 20, 20, 215));
+        } else {
+            QPainterPath path;
+            path.addRoundedRect(rect().toRectF(), 16, 16);
+            p.fillPath(path, QColor(30, 30, 30, 215));
+            p.setPen(QColor(0x66, 0x66, 0x66));
+            p.drawRoundedRect(rect().adjusted(1, 1, -1, -1).toRectF(), 16, 16);
+        }
+    }
+
     // 紧急通知：必须人工确认 —— 点击任意处手动关闭（不自动消失）。
     void mousePressEvent(QMouseEvent *ev) override
     {
@@ -3103,21 +3164,23 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);   // 要托盘 → QApplication（托盘在 QtWidgets 里）
 
-    // ── 单例锁（2026-10-05 · 用户要求"防多进程启动"）────────────────────────
-    // 场景：计划任务开机自启 + 装机引导 + 老师手点 start-agent.bat，多个入口叠加，
+    // ── 单例锁（2026-10-05 · 用户要求"防多进程启动"，同日修好失效 bug）──────
+    // 场景：登录自启计划任务 + 装机引导 + 老师手点 start-agent.bat，多个入口叠加，
     // 实测出现过 2 个实例在跑 —— 重复连云端抢连接、日志互相覆盖。
-    // 用命名互斥体：第二个实例启动即退出，并给个可见提示。
-    // ⚠️ 用 Local\（不用 Global\）：Global 需 SeCreateGlobalPrivilege，普通用户/受限
-    //    上下文下 CreateMutexW 可能返回 NULL（拿不到锁）→ 单例形同虚设。Local\ 同
-    //    会话内足够（计划任务与手动启动同属交互会话）。
-    static HANDLE g_singletonMutex = nullptr;
-    g_singletonMutex = CreateMutexW(nullptr, TRUE, L"Local\\StelarithAgentQt_Singleton");
-    if (!g_singletonMutex || GetLastError() == ERROR_ALREADY_EXISTS) {
-        // 拿不到锁（极端环境）或已存在实例 → 提示 + 退出（不留进程、不连云端）
+    // ⚠️ 老实现只用了 `Local\StelarithAgentQt_Singleton`，**已经失效**（2026-10-05 实测报回）：
+    //    Local\ 是会话内命名空间，计划任务跑在 Session 0、手动启动在交互会话，各认各的 → 双开照跑。
+    //    现在 Global\ 优先（跨会话）+ Local\ 回退 + 文件锁兜底，实现见 src/singleinstance.h/.cpp
+    //    （与管理端 viewer 同一份，改的时候两端一起改）。
+    // guard 必须活到 main 结束：析构才放手。
+    SingleInstanceGuard g_single;
+    QString g_singleWhy;
+    if (!g_single.acquire(L"StelarithAgentQt_Singleton", L"agent.lock", &g_singleWhy)) {
+        // 拿不到 → 提示 + 退出（不留进程、不连云端）。提示留着：老师机上是有人看到的。
         QMessageBox::information(nullptr,
             QStringLiteral("星集控 · 被控端"),
-            QStringLiteral("被控端已在运行（另一个实例正在工作）。\n本次启动自动退出，请勿重复启动。"));
-        if (g_singletonMutex) CloseHandle(g_singletonMutex);
+            QStringLiteral("被控端已在运行（另一个实例正在工作）。\n本次启动自动退出，请勿重复启动。\n（%1）")
+                .arg(g_singleWhy));
+        appendLogFile(QStringLiteral("[agent-qt] 已有另一个被控端在跑（%1）→ 本次启动退出").arg(g_singleWhy));
         return 0;
     }
 
@@ -3313,7 +3376,8 @@ int main(int argc, char *argv[])
     }
 
     const int rc = app.exec();
-    // 释放单例锁（2026-10-05）：正常退出才放，进程结束前交给系统清理兜底
-    if (g_singletonMutex) { CloseHandle(g_singletonMutex); g_singletonMutex = nullptr; }
+    // 释放单例锁（2026-10-05）：正常退出才放，进程结束前交给系统/OS 清理兜底。
+    // 老实现这行 CloseHandle(g_singletonMutex) 引用的变量早删了，改成守卫自己的 release()。
+    g_single.release();
     return rc;
 }
