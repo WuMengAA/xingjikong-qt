@@ -1,21 +1,31 @@
 {
   "_comment": "复制为 ota.json 并按实际发布内容填写。云端每次请求现读，改完即生效，不必重启。",
   "_howto": "sha256 用 `certutil -hashfile <安装包> SHA256` 或 `sha256sum <安装包>` 生成（小写十六进制）。url 必须是教室机能访问到的公网地址。",
+  "_consumers": [
+    "① 被控端：注册回执（registered）里会带上 agent 的最新版本，被控端据此在托盘提示「发现新版本…」；点升级后走 self_update：下载 → 核对 sha256 → 静默安装。",
+    "② 官网下载中心：GET /api/public/ota?product=agent|viewer（公开、无鉴权，只回 version/url/size/sha256/notes/mandatory 这几个已公开字段），页面上的版本号与校验值实时读它。",
+    "结论：发版只改这一处，被控端提示与官网下载页会同时跟着变 —— 不要另抄一份清单到别处。"
+  ],
+  "_notes": [
+    "sha256 缺失或不是 64 位小写十六进制时，被控端会**拒绝**这次更新（不做无校验更新），并在日志里写明原因。",
+    "mandatory=true 时被控端按强制升级处理；改完 ota.json 无需重启云端。",
+    "写文件务必用 UTF-8 **不带 BOM**：带 BOM 会被 JSON.parse 拒绝，表现为接口 fallback 成「未发布」。"
+  ],
   "products": {
     "agent": {
-      "version": "0.5.0",
-      "url": "https://<你的域名>/ota/stelarith-agent-setup-0.5.0.exe",
+      "version": "0.6.0",
+      "url": "https://<你的域名>/assets/pkg/stelarith-agent-setup-0.6.0.exe",
       "sha256": "<64位小写十六进制>",
       "size": 0,
-      "notes": "被控端 0.5.0：RTC 推流自愈 + 无人看时按需回收 WebEngine（省内存）。",
+      "notes": "被控端 0.6.0：单实例守卫 / OTA 自更新 / 全屏通知三改 / 托盘升级提示 + 设置与信息面板。",
       "mandatory": false
     },
     "viewer": {
-      "version": "0.5.0",
-      "url": "https://<你的域名>/ota/stelarith-viewer-msi-0.5.0.msi",
+      "version": "0.6.0",
+      "url": "https://<你的域名>/assets/pkg/stelarith-viewer-portable-0.6.0.zip",
       "sha256": "<64位小写十六进制>",
       "size": 0,
-      "notes": "管理端 0.5.0。",
+      "notes": "管理端 0.6.0 绿色版（含 Qt WebEngine，远程画面/收流可用）。",
       "mandatory": false
     }
   }

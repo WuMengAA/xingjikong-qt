@@ -204,6 +204,32 @@ const server = http.createServer((req, res) => {
     return createReadStream(file).pipe(res);
   }
 
+  // ── 公开只读：发布版本信息（2026-10-06 加）──────────────────────────────
+  // 给**官网下载中心**用：站点服务端来取，渲染"当前版本 / 下载地址 / sha256"。
+  // 为什么单独开一个**不带鉴权**的端点：官网是公网站点，不该持有管理端令牌；
+  // 而 /api/ota/latest 归管理面鉴权。这里只回"已经公开"的信息（版本号、公开下载 URL、
+  // 大小、sha256、说明），**不含任何令牌**，暴露了也没有额外风险。
+  // 与 ota.json 同源 → 发版时只改一处，官网自动跟着变，不需要两处各写一套。
+  if (req.method === 'GET' && u.pathname === '/api/public/ota') {
+    const product = (u.searchParams.get('product') || 'agent').trim();
+    const ota = latestFor(product);
+    // 没发布过就如实回 published:false —— 官网据此显示"暂未发布"，不假装有内容。
+    if (!ota || !ota.version) return send(200, { ok: true, product, published: false, latest: null });
+    return send(200, {
+      ok: true,
+      product,
+      published: true,
+      latest: {
+        version: ota.version,
+        url: ota.url,
+        size: ota.size,
+        sha256: ota.sha256,
+        notes: ota.notes,
+        mandatory: ota.mandatory,
+      },
+    });
+  }
+
   // HTTP 管理面鉴权（2026-10-04 · 乙阶段收尾 + 补洞）：
   // /api/instructions / /api/devices / /api/events / /api/frame / /api/instructions/pending
   // 是"发指令/读设备表/读画面/读事件"的管理操作，此前完全无鉴权 ——

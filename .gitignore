@@ -13,6 +13,11 @@ node_modules/
 # 🚨 含令牌（CLOUD_WS_TOKEN / CLOUD_VIEWER_TOKEN），绝不能进版本库
 .env
 .env.local
+# 换 .env 时顺手留下的备份（同样是含令牌的明文），一并挡掉
+# 事由：2026-10-06 现场有 .env.dev-placeholder-备份 逃过上面两条 → status 里能看见、`git add -A` 就会进去
+.env.*备份
+.env.*.bak
+.env.*~
 
 # 运行时状态
 .pids/
