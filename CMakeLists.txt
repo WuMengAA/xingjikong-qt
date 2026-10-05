@@ -12,6 +12,8 @@ endif()
 
 # D1: Core+Gui（抓屏/JPEG）｜D2: +WebSockets（连云端发帧）｜D5: +Widgets（托盘常驻，见下）
 # 2026-10-04 +Network：OOBE 绑定界面要 POST 站点消费班级接入码（/api/device/activate）
+# 注：WebEngine 的按需加载不需要额外组件 —— 不加 WebEngineQuick（它在动态构建下会死锁，见
+#     src/main.cpp 的 ensureWebEngine 注释），只要不在 main 里提前 new QWebEngineView 即可。
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebSockets WebEngineWidgets Network)
 
 add_executable(stelarith-agent-qt src/main.cpp)
