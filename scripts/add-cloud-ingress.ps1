@@ -11,6 +11,9 @@
     [string]$CloudHost = "control",
     [int]   $CloudPort = 8788,
 
+    # 要删除的既有 hostname（可多个）。例：-DropHostname '*.245959623.xyz'
+    [string[]]$DropHostname = @(),
+
     [switch]$SkipDns,
     [switch]$WhatIfOnly
 )
@@ -84,6 +87,7 @@ foreach ($r in $existing) {
         continue
     }
     if ($h -eq $cloudFqdn) { Warn "丢弃旧的 $h 规则（下面按正确顺序重建）"; continue }
+    if ($DropHostname -contains $h) { Warn "按 -DropHostname 删除规则：$h -> $($r.service)"; continue }
     if ($h -like '*`**') { $seenWild = $true }
     if ($seenWild) { [void]$after.Add($r) } else { [void]$before.Add($r) }
 }
