@@ -11,13 +11,25 @@
 //    配置 viewer.env 已作为普通文件打进包里，不需要脚本生成。
 // （deploy/ 下 1289 个文件含 qml 插件树，手写 wxs 不可维护，必须生成）
 
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEPLOY = join(__dirname, '..', 'deploy');
+
+// 版本号单一真源（2026-10-05）：从 src/main.cpp 的 kViewerVersion 读，
+// 保证 MSI 版本与应用内版本一致（不必再手改这里）。
+let APP_VER = '0.0.0';
+try {
+  const m = readFileSync(join(__dirname, '..', 'src', 'main.cpp'), 'utf8')
+    .match(/kViewerVersion\s*=\s*"([^"]+)"/);
+  if (m) APP_VER = m[1];
+  else console.error('[gen-wxs-viewer] WARN 未找到 kViewerVersion，回落到 0.0.0');
+} catch (e) {
+  console.error(`[gen-wxs-viewer] WARN 读不到 src/main.cpp（${e.message}），回落到 0.0.0`);
+}
 
 function walk(dir) {
   const out = [];
@@ -82,7 +94,7 @@ let wxs = `<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
       Name="星集控管理端"
       Manufacturer="Stelarith"
-      Version="0.5.0"
+      Version="${APP_VER}"
       UpgradeCode="7A3E9D21-5B84-4F6C-8D10-2E9C4A7B1F53"
       Scope="perMachine"
       Language="2052">
