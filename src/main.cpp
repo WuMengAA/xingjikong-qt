@@ -71,6 +71,11 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QUrlQuery>
+// 2026-10-05：紧急通知（点击关闭）+ 全屏通知背景色（setStyleSheet 背景对顶层 QWidget 无效）
+#include <QMouseEvent>
+#include <QPaintEvent>
+#include <QPainter>
+#include <QPainterPath>
 #include <windows.h>
 #include <tlhelp32.h>   // 进程快照（process_list / process_stop）
 #include <psapi.h>      // 进程工作集内存
@@ -1081,25 +1086,45 @@ class NotifyWindow : public QWidget
 public:
     enum Kind { Popup, Island, Fullscreen };
 
-    static void showNotice(Kind kind, const QString &title, const QString &content, int seconds, bool tts)
+    // severity：remind(绿) / inform(黄) / urgent(红)；仅对 fullscreen 生效（其它形态背景本就是深色半透明）。
+    // emergency：紧急通知 —— 不自动关闭、强制置顶（WindowStaysOnTopAlways），点击任意处手动关闭。
+    static void showNotice(Kind kind, const QString &title, const QString &content, int seconds, bool tts,
+                           const QString &severity = QString(), bool emergency = false)
     {
         // 单例：先关掉旧的（同一时间只一个通知窗口）
         if (g_notify) {
             g_notify->hide();
             g_notify->deleteLater();
         }
-        g_notify = new NotifyWindow(kind, title, content, seconds, tts);
+        g_notify = new NotifyWindow(kind, title, content, seconds, tts, severity, emergency);
         g_notify->showWindow();
     }
 
 private:
-    explicit NotifyWindow(Kind kind, const QString &title, const QString &content, int seconds, bool tts)
-        : m_kind(kind), m_title(title), m_content(content), m_seconds(seconds), m_tts(tts)
+    explicit NotifyWindow(Kind kind, const QString &title, const QString &content, int seconds, bool tts,
+                          const QString &severity, bool emergency)
+        : m_kind(kind), m_title(title), m_content(content), m_seconds(seconds), m_tts(tts),
+          m_severity(severity), m_emergency(emergency)
     {
+        // 所有通知统一置顶（Qt6 只有 WindowStaysOnTopHint 一种置顶标志，没有 Always 变体）。
+        // 紧急通知的差异化靠"不自动关闭 + 点击才关"表达，不靠更强的置顶强度。
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
         setAttribute(Qt::WA_DeleteOnClose);
-        // 真透明背景：圆角外透出桌面，而不是一块黑底（2026-10-04 用户要求"圆角+透明背景"）
-        setAttribute(Qt::WA_TranslucentBackground);
+        if (kind == Fullscreen) {
+            // 全屏遮罩：palette 画纯色背景（WA_TranslucentBackground + paintEvent 在 Qt 6 不稳定）
+            QColor c;
+            if (severity == QLatin1String("urgent"))      c = QColor(180, 20, 20);
+            else if (severity == QLatin1String("inform")) c = QColor(200, 140, 10);
+            else if (severity == QLatin1String("remind")) c = QColor(20, 140, 60);
+            else                                            c = QColor(0, 0, 0);
+            setAutoFillBackground(true);
+            QPalette pal = palette();
+            pal.setColor(QPalette::Window, c);
+            setPalette(pal);
+        } else {
+            // 灵动岛/弹窗：圆角+透明背景
+            setAttribute(Qt::WA_TranslucentBackground);
+        }
 
         // 长度限制：标题/正文各限长，超长截断加省略号——防止长广播把固定高度的窗撑爆
         // （2026-10-04 用户要求"长度限制"；显示与 TTS 都读同一份截断文本，口径一致）
@@ -1124,6 +1149,27 @@ private:
             "font-size:%1px;").arg(fontSizeFor(m_combined.length())));
         lay->addWidget(m_label);
 
+        // 紧急通知：底部"确认"按钮（2026-10-05：需求文档要求确认按钮）
+        if (m_emergency) {
+            lay->addSpacing(16);
+            auto *btnLay = new QHBoxLayout();
+            btnLay->addStretch();
+            m_confirmBtn = new QPushButton(QStringLiteral("✓ 确认"), this);
+            m_confirmBtn->setMinimumSize(220, 56);
+            m_confirmBtn->setStyleSheet(QStringLiteral(
+                "QPushButton {"
+                " font-size:22px; font-weight:700; color:#ffffff;"
+                " background:rgba(255,255,255,80); border:2px solid rgba(255,255,255,180);"
+                " border-radius:28px; padding:0 48px;}"
+                "QPushButton:hover { background:rgba(255,255,255,140);}"
+                "QPushButton:pressed { background:rgba(255,255,255,180);}"
+            ));
+            btnLay->addWidget(m_confirmBtn);
+            btnLay->addStretch();
+            lay->addLayout(btnLay);
+            QObject::connect(m_confirmBtn, &QPushButton::clicked, this, &QWidget::close);
+        }
+
         // 淡入：先透明再渐显（Qt 无内置透明度动画，用 QPropertyAnimation 要引动画模块——省了，
         // 直接 opacity 立即显示即可，教室大屏场景不需要过度动画）
     }
@@ -1138,8 +1184,11 @@ private:
 
         if (m_kind == Fullscreen) {
             setGeometry(geo);
-            // 全屏遮罩：半透明黑底 + 居中大字（紧急感）
-            setStyleSheet(QStringLiteral("background:rgba(0,0,0,200); border:none;"));
+            // 全屏遮罩 + 居中大字。严重度配色（2026-10-05 补）：
+            //   remind  绿 —— 提醒；inform  琥珀 —— 通知；urgent 红 —— 紧急；
+            //   未知/缺省回黑底（安全默认，避免把任意串直接插进 QSS）。
+            // 全屏背景由构造函数 palette 处理
+            setStyleSheet(QStringLiteral("border:none;"));
         } else if (m_kind == Island) {
             // 灵动岛：顶部居中细长胶囊（≈ 高度 64px、宽度随内容 60% 屏宽）
             const int w = qMin(geo.width() * 6 / 10, 720);
@@ -1168,7 +1217,18 @@ private:
         const int durMs = m_seconds > 0
                               ? qMin(m_seconds, 3600) * 1000
                               : qMax(5000.0, 2500.0 + m_combined.length() * 120.0);
+        if (m_emergency) return;   // 紧急通知不自动消失，点击才关（见 mousePressEvent）
         QTimer::singleShot(durMs, this, &QWidget::close);
+    }
+
+    // fullscreen 遮罩底色：按严重度映射（仅这三档白名单 + 黑底回落）。
+    // 用 rgba(0,0,0,200) 风格保持与旧版一致的半透明密度，只换色相。
+    static QString fullscreenBackground(const QString &severity)
+    {
+        if (severity == QLatin1String("urgent")) return QStringLiteral("rgba(180,20,20,210)");
+        if (severity == QLatin1String("inform")) return QStringLiteral("rgba(200,140,10,205)");
+        if (severity == QLatin1String("remind")) return QStringLiteral("rgba(20,140,60,205)");
+        return QStringLiteral("rgba(0,0,0,200)");   // 缺省/未知 → 黑底（与旧版一致）
     }
 
     static int fontSizeFor(int len)
@@ -1187,8 +1247,38 @@ private:
     QString m_combined;
     int m_seconds;
     bool m_tts;
+    QString m_severity;   // remind / inform / urgent（仅 fullscreen 生效）
+    bool m_emergency;     // 紧急：不自动关 + 强制置顶 + 点击关闭
     QLabel *m_label = nullptr;
+    QPushButton *m_confirmBtn = nullptr;  // 紧急通知确认按钮
     static NotifyWindow *g_notify;
+
+protected:
+
+    // paintEvent: stylesheet background is ineffective on top-level QWidget (Qt 6)
+    void paintEvent(QPaintEvent *) override
+    {
+        if (m_kind == Fullscreen) { QWidget::paintEvent(nullptr); return; }
+        QPainter p(this);
+        if (m_kind == Island) {
+            QPainterPath path;
+            path.addRoundedRect(rect().toRectF(), 32, 32);
+            p.fillPath(path, QColor(20, 20, 20, 215));
+        } else {
+            QPainterPath path;
+            path.addRoundedRect(rect().toRectF(), 16, 16);
+            p.fillPath(path, QColor(30, 30, 30, 215));
+            p.setPen(QColor(0x66, 0x66, 0x66));
+            p.drawRoundedRect(rect().adjusted(1, 1, -1, -1).toRectF(), 16, 16);
+        }
+    }
+
+    // 紧急通知：必须人工确认 —— 点击任意处手动关闭（不自动消失）。
+    void mousePressEvent(QMouseEvent *ev) override
+    {
+        if (m_emergency) { ev->accept(); close(); return; }
+        QWidget::mousePressEvent(ev);
+    }
 };
 
 NotifyWindow *NotifyWindow::g_notify = nullptr;
@@ -1206,14 +1296,22 @@ static QString notifyFromParams(const QJsonObject &params)
     // flags.speech → TTS 朗读（缺省不读，避免每教室都响）
     const QJsonObject flags = params.value(QStringLiteral("flags")).toObject();
     const bool tts = flags.value(QStringLiteral("speech")).toBool(false)
-                     || flags.value(QStringLiteral("speech_enabled")).toBool(false);
+                           || flags.value(QStringLiteral("speech_enabled")).toBool(false);
+    // flags.severity → 全屏配色（2026-10-05 补）：站点已发对字段，被控端此前不读。
+    // 站点白名单已收敛为 remind/inform/urgent 三档；未知值一律回落 remind（不做任意串插进样式）。
+    const QString severity = flags.value(QStringLiteral("severity")).toString().trimmed().toLower();
+    // flags.emergency_confirm → 紧急锁定：不自动关 + 强制置顶（2026-10-05 补）
+    // 站点此前在 params 顶层也发过 emergency_confirm（broadcast.ts 的注入分支），此处一并兜底。
+    const bool emergency = flags.value(QStringLiteral("emergency_confirm")).toBool(false)
+                           || flags.value(QStringLiteral("topmost")).toBool(false)
+                           || params.value(QStringLiteral("emergency_confirm")).toBool(false);
 
     NotifyWindow::Kind k = NotifyWindow::Popup;
     if (kind == QStringLiteral("island")) k = NotifyWindow::Island;
     else if (kind == QStringLiteral("fullscreen")) k = NotifyWindow::Fullscreen;
     else k = NotifyWindow::Popup;   // popup 及未知值一律居中弹窗（安全默认）
 
-    NotifyWindow::showNotice(k, title, content, seconds, tts);
+    NotifyWindow::showNotice(k, title, content, seconds, tts, severity, emergency);
 
     // popup 额外进 Windows 通知中心（静默通知列表留存）——托盘存在时才发得出来
     if (k == NotifyWindow::Popup && g_tray) {
