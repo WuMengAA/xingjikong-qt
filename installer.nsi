@@ -18,7 +18,7 @@ Unicode true
 
 !define APPNAME "星集控被控端"
 !define APPID   "StelarithAgentQt"
-!define VER     "0.5.0"
+!define VER     "0.5.1"
 
 Name "${APPNAME}"
 OutFile "dist\stelarith-agent-setup.exe"
