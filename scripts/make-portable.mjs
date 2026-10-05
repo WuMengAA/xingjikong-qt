@@ -47,12 +47,17 @@ const REQUIRED = [
 	"QtWebEngineProcess.exe",
 	"resources/icudtl.dat",
 	"platforms/qwindows.dll",
-	"tls/qschannelbackend.dll" // 连云端的 WSS/TLS 靠它（schannel 是 Windows 自带证书链）
+	"tls/qschannelbackend.dll", // 连云端的 WSS/TLS 靠它（schannel 是 Windows 自带证书链）
+	// 2026-10-06：QML 改从磁盘加载，这份源码链路就是"界面本体"。
+	// 漏了它 = 装出来的管理端双击没反应（QML 加载失败只有一行日志，然后直接退出），
+	// 归到必需件里，让「漏带界面」在出包这一步就炸，而不是等装机现场才发现。
+	"qml/Stelarith/Main.qml"
 ];
 
 /** 要一并搬进包里的目录（windeployqt / QtWebEngine 产出的运行时目录）。 */
 const INCLUDE_DIRS = [
-	"Stelarith", // 我们自己 QML 模块的"磁盘副本"（运行期其实读的是编进 exe 的资源，见下）
+	// 2026-10-06：我们自己的 QML 源码在 qml/Stelarith/（qml/ 根是 windeployqt 的 Qt 插件），
+	// 整目录都会被拷进包，这里不用单独列 —— 但 REQUIRED 里点名了 qml/Stelarith/Main.qml。
 	"generic",
 	"iconengines",
 	"imageformats",

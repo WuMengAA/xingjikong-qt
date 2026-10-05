@@ -28,12 +28,15 @@ qt_add_executable(viewer-qt
   src/singleinstance.cpp
   src/singleinstance.h
 )
-# 界面资源：QML 模块 URI = Stelarith（main.cpp 里 loadFromModule("Stelarith","Main")）
+# 界面资源：QML 模块 URI = Stelarith。
+# 2026-10-06：Main.qml 不再列进 QML_FILES —— 它原先是跟 exe 一起烧进二进制的，
+# 于是改一个按钮文案都要重出整包。现在界面层整体走磁盘（见 main.cpp 的加载路径），
+# 这是「管理端界面能单独打补丁」的前提；Dialog 等其余文件仍列在这里，它们的类型注册
+# 与「同模块裸类型名自解析」依赖这条 qt_add_qml_module（实测从磁盘加载时依然成立）。
 qt_add_qml_module(viewer-qt
   URI Stelarith
   VERSION 1.0
   QML_FILES
-    qml/Main.qml
     qml/SoftwareDialog.qml
     qml/LogDialog.qml
     qml/MediaDialog.qml
@@ -42,6 +45,16 @@ qt_add_qml_module(viewer-qt
     qml/NotifyDialog.qml
     qml/NotifyParams.js
 )
+
+# 2026-10-06：QML 不再编进 exe（见上面对 QML_FILES 的改动），改为构建后拷到
+# exe 同目录的 qml/Stelarith/，运行期由 main.cpp 从磁盘加载。
+# 放子目录而不是 qml/ 根：那里是 windeployqt 的 Qt 插件地盘（QtQuick.2/、QtQml/…），
+# 我们自己的 .qml 混进去会跟它们的 qmldir 抢根目录。
+# ⚠️ 少了这一步，装出来的管理端会「双击没反应」：QML 加载失败 → 只有一行日志 → 直接 return 1。
+add_custom_command(TARGET viewer-qt POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E copy_directory
+          "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith"
+  VERBATIM)
 
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::WebSockets Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel)
 set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE OFF)

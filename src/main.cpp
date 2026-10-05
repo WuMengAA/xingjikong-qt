@@ -19,6 +19,7 @@
 #include <QQmlContext>
 #include <QQuickImageProvider>
 #include <QTimer>
+#include <QDir>          // 2026-10-06 SPIKE：从磁盘加载 QML 需要定位 qml 目录
 #include <QFile>
 #include <QFileInfo>
 #include <QString>
@@ -229,7 +230,16 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
-    engine.loadFromModule(QStringLiteral("Stelarith"), QStringLiteral("Main"));
+    // 2026-10-06：QML 从**磁盘**加载，不再从 exe 里的资源读。
+    // 为什么改：QML 编进 exe（qt_add_qml_module 的 QML_FILES）意味着改一个按钮文案都要重出整包，
+    // 对教室里的管理端基本等于「改不了」。改成读磁盘后，界面层可作为补丁包单独下发（热更）。
+    // 实测（2026-10-06 spike）：裸类型名（SoftwareDialog / LogDialog …）在磁盘模式下照样能解析 ——
+    // 只要 addImportPath 指向同目录，Qt 就按文件名把 .qml 当类型用；同模块自解析这条没受影响。
+    // ⚠️ qml/Stelarith/ 是子目录（qml/ 根留给 windeployqt 的 Qt 插件），构建时由 CMake 拷过去。
+    const QString qmlDir = QDir(QCoreApplication::applicationDirPath())
+        .absoluteFilePath(QStringLiteral("qml/Stelarith"));
+    engine.addImportPath(qmlDir);
+    engine.load(QUrl::fromLocalFile(qmlDir + QStringLiteral("/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
         logf("[viewer] FAIL QML 没能加载（qml/Main.qml 有问题？）—— 退出");
