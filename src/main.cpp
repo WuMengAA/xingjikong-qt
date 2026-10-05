@@ -19,6 +19,8 @@
 //   · 画面帧走二进制帧 [1B 版本][2B 大端 headerLen][header JSON][JPEG]，带 seq/ts/mime；
 //   · 云端拒绝时回的是统一 error 通道（code + 人话原因），这里必须打出来，不许静默。
 
+#include "singleinstance.h"   // 单实例守卫（与管理端 viewer 同一份实现）
+
 #include <QApplication>
 #include <QSystemTrayIcon>
 #include <QMenu>
@@ -2843,21 +2845,23 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);   // 要托盘 → QApplication（托盘在 QtWidgets 里）
 
-    // ── 单例锁（2026-10-05 · 用户要求"防多进程启动"）────────────────────────
-    // 场景：计划任务开机自启 + 装机引导 + 老师手点 start-agent.bat，多个入口叠加，
+    // ── 单例锁（2026-10-05 · 用户要求"防多进程启动"，同日修好失效 bug）────────
+    // 场景：登录自启计划任务 + 装机引导 + 老师手点 start-agent.bat，多个入口叠加，
     // 实测出现过 2 个实例在跑 —— 重复连云端抢连接、日志互相覆盖。
-    // 用命名互斥体：第二个实例启动即退出，并给个可见提示。
-    // ⚠️ 用 Local\（不用 Global\）：Global 需 SeCreateGlobalPrivilege，普通用户/受限
-    //    上下文下 CreateMutexW 可能返回 NULL（拿不到锁）→ 单例形同虚设。Local\ 同
-    //    会话内足够（计划任务与手动启动同属交互会话）。
-    static HANDLE g_singletonMutex = nullptr;
-    g_singletonMutex = CreateMutexW(nullptr, TRUE, L"Local\\StelarithAgentQt_Singleton");
-    if (!g_singletonMutex || GetLastError() == ERROR_ALREADY_EXISTS) {
-        // 拿不到锁（极端环境）或已存在实例 → 提示 + 退出（不留进程、不连云端）
+    // ⚠️ 老实现只用了 `Local\StelarithAgentQt_Singleton`，**已经失效**（2026-10-05 实测报回）：
+    //    Local\ 是会话内命名空间，计划任务跑在 Session 0、手动启动在交互会话，各认各的 → 双开照跑。
+    //    现在 Global\ 优先（跨会话）+ Local\ 回退 + 文件锁兜底，实现见 src/singleinstance.h/.cpp
+    //    （与管理端 viewer 同一份，改的时候两端一起改）。
+    // guard 必须活到 main 结束：析构才放手。
+    SingleInstanceGuard g_single;
+    QString g_singleWhy;
+    if (!g_single.acquire(L"StelarithAgentQt_Singleton", L"agent.lock", &g_singleWhy)) {
+        // 拿不到 → 提示 + 退出（不留进程、不连云端）。提示留着：老师机上是有人看到的。
         QMessageBox::information(nullptr,
             QStringLiteral("星集控 · 被控端"),
-            QStringLiteral("被控端已在运行（另一个实例正在工作）。\n本次启动自动退出，请勿重复启动。"));
-        if (g_singletonMutex) CloseHandle(g_singletonMutex);
+            QStringLiteral("被控端已在运行（另一个实例正在工作）。\n本次启动自动退出，请勿重复启动。\n（%1）")
+                .arg(g_singleWhy));
+        appendLogFile(QStringLiteral("[agent-qt] 已有另一个被控端在跑（%1）→ 本次启动退出").arg(g_singleWhy));
         return 0;
     }
 
@@ -3053,7 +3057,8 @@ int main(int argc, char *argv[])
     }
 
     const int rc = app.exec();
-    // 释放单例锁（2026-10-05）：正常退出才放，进程结束前交给系统清理兜底
-    if (g_singletonMutex) { CloseHandle(g_singletonMutex); g_singletonMutex = nullptr; }
+    // 释放单例锁（2026-10-05）：正常退出才放，进程结束前交给系统/OS 清理兜底。
+    // 老实现这行 CloseHandle(g_singletonMutex) 引用的变量早删了，改成守卫自己的 release()。
+    g_single.release();
     return rc;
 }
