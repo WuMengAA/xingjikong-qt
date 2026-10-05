@@ -1,6 +1,51 @@
 # Stelarith-xingjikong-qt · 长期项目笔记
 
-## ⚠️ 被控端 control-qt 有两份副本，已经分叉（2026-10-05 发现）
+## 🔒 单一工作树（2026-10-06 定，不要再开第二棵树）
+
+**日常工作树 = 工作区 `Stelarith-xingjikong-qt` 下面那三份**（用户工作区就是它，改代码只在这三份里改）：
+
+| 项目 | ✅ 日常工作树 | 只读归档（**不删**） |
+|---|---|---|
+| 云端 | `Stelarith-xingjikong-qt\Stelarith-cloud-ws` | `D:\Stelarith\Stelarith-cloud-ws` |
+| 被控端 | `Stelarith-xingjikong-qt\Stelarith-control-qt` | `D:\Stelarith\Stelarith-control-qt` |
+| 管理端 | `Stelarith-xingjikong-qt\Stelarith-viewer-qt` | `D:\Stelarith\Stelarith-viewer-qt` |
+
+- ⚠️ **不删任何东西**（2026-10-06 用户明确）。两边 git 历史已经同一份（外部→工作区 快进/合并完成），
+  各自都配了 remote：工作区三份有 `outer` 指向外部，外部三份有 `inner` 指向工作区。
+- ⚠️ **生产仍跑外部那份云端**（计划任务 `StelarithCloud` → `D:\Stelarith\Stelarith-cloud-ws\run-cloud.cmd`，
+  那边才有 `node_modules` / `.env` / `assets/pkg`）。要切到工作区跑，必须先补齐这三样并改计划任务。
+- 合并历史（两边现在都有）：云端 `6592610`、被控端 `474cdd5`+`8d2594f`（工作区侧合并）、管理端 `83c9daf`。
+
+### ⚠️ 我在这上面栽过的跟头（必须记住）
+
+1. **别把分叉说成"权威副本 / WIP 副本"含糊过去** —— 真相是两边各有对方没有的真实提交，只能合并，不能挑一边覆盖。
+2. **别自顾自推进**：用户明确说了重点（"别用外部那三个""WebRTC 暂时不做"）之后，我还在外部路径上操作、
+   还继续做被叫停的功能 → 用户会很受挫。**先复述确认重点，再动手；被叫停就真停。**
+3. 删除/回滚前先说清代价；永远不用 `--force` 推送。
+
+---
+
+## （历史记录，2026-10-06 前半段的旧结论，已被上面取代）
+
+三对副本曾经按"外部为真源"合并过一遍（内部三份打过 `DEPRECATED-勿再修改-2026-10-06.md` 标记，
+文件内容已于同日改为"这里就是日常工作树"）：
+
+| 项目 | ✅ 唯一真源（改这里） | ⛔ 已停用副本（只读历史） | 合并提交 |
+|---|---|---|---|
+| 云端 | `D:\Stelarith\Stelarith-cloud-ws` | `xingjikong-qt\Stelarith-cloud-ws` | `6592610` |
+| 被控端 | `D:\Stelarith\Stelarith-control-qt` | `xingjikong-qt\Stelarith-control-qt` | `474cdd5` |
+| 管理端 | `D:\Stelarith\Stelarith-viewer-qt` | `xingjikong-qt\Stelarith-viewer-qt` | `83c9daf` |
+
+- 三个真源里都配好了名为 **`inner` 的 remote**（指向停用副本），需要老提交就
+  `git fetch inner && git log inner/master`，**不要**再复制目录。
+- 分叉来历：2026-09-12 整盘 `D:\Stellara`→`D:\Stelarith` 改名 + 后来"并入旧位置成果"的合并操作，
+  两棵树都被留下，之后各自又都提交了 → 分叉。**是事故，不是设计**。
+- ⚠️ 教训（我自己犯的）：不要把分叉说成"权威副本 / WIP 副本"来含糊过去 ——
+  真相是两边各有对方没有的真实提交，只能**合并**，不能挑一边覆盖。
+
+---
+
+## ⚠️ 被控端 control-qt 有两份副本，已经分叉（2026-10-05 发现；2026-10-06 已合并，见上表）
 
 | 路径 | git | 内容 | 现状 |
 |---|---|---|---|
