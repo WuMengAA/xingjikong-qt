@@ -3164,6 +3164,21 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);   // 要托盘 → QApplication（托盘在 QtWidgets 里）
 
+    // ── 日志 / 数据目录（2026-10-06 提到 main 最前面）──────────────────────
+    // ⚠️ 必须**早于单例守卫**（守卫就在下面几行）：守卫拦下第二个实例时会调
+    //    appendLogFile() 记录"为什么被拦"，而 appendLogFile 在 g_logPath 为空时
+    //    **直接 return 丢弃**（见其实现）。原先这段排在守卫之后，后果是
+    //    "确实被拦了，但日志里一行都没有" —— 老师机上只看到一个弹窗，事后查不到原因，
+    //    跟"程序没起来"完全同一副样子。这是 fail-silent，红线。
+    //    现在提到最前面：任何一次启动（哪怕立刻退出）都能留证。
+    // 数据目录放 %LOCALAPPDATA%\xingjikong\（与既有约定一致，覆盖升级天然保留历史）。
+    // 截图目录默认**不再**落在当前工作目录 —— 装机后 cwd 是哪全看启动器，落在那儿等于丢了。
+    const QString dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
+    QDir().mkpath(dataDir);
+    g_shotDir = qEnvironmentVariable("STE_QT_SHOT_DIR", dataDir + QStringLiteral("/shots"));
+    if (!g_shotDir.isEmpty()) QDir().mkpath(g_shotDir);
+    g_logPath = qEnvironmentVariable("STE_QT_LOG", dataDir + QStringLiteral("/agent-qt.log"));
+
     // ── 单例锁（2026-10-05 · 用户要求"防多进程启动"，同日修好失效 bug）──────
     // 场景：登录自启计划任务 + 装机引导 + 老师手点 start-agent.bat，多个入口叠加，
     // 实测出现过 2 个实例在跑 —— 重复连云端抢连接、日志互相覆盖。
@@ -3176,11 +3191,15 @@ int main(int argc, char *argv[])
     QString g_singleWhy;
     if (!g_single.acquire(L"StelarithAgentQt_Singleton", L"agent.lock", &g_singleWhy)) {
         // 拿不到 → 提示 + 退出（不留进程、不连云端）。提示留着：老师机上是有人看到的。
+        // ⚠️ 顺序不能反：QMessageBox::information 是**模态阻塞**的，要一直等到有人点确定；
+        //    原来把 appendLogFile 写在弹窗之后，结果是"弹窗没人点 → 日志一行都没有"，
+        //    事后只能看到"进程起来过又没了"，查不到为什么（2026-10-06 排这一趟才看清）。
+        //    **必须先落盘再弹窗**：哪怕老师一直不点，原因也已经留在日志里了。
+        appendLogFile(QStringLiteral("[agent-qt] 已有另一个被控端在跑（%1）→ 本次启动退出").arg(g_singleWhy));
         QMessageBox::information(nullptr,
             QStringLiteral("星集控 · 被控端"),
             QStringLiteral("被控端已在运行（另一个实例正在工作）。\n本次启动自动退出，请勿重复启动。\n（%1）")
                 .arg(g_singleWhy));
-        appendLogFile(QStringLiteral("[agent-qt] 已有另一个被控端在跑（%1）→ 本次启动退出").arg(g_singleWhy));
         return 0;
     }
 
@@ -3207,15 +3226,8 @@ int main(int argc, char *argv[])
             abort();
     });
 
-    // 数据目录放 %LOCALAPPDATA%\xingjikong\（与既有约定一致，覆盖升级天然保留历史）。
-    // 截图目录默认**不再**落在当前工作目录 —— 装机后 cwd 是哪全看启动器，落在那儿等于丢了。
-    // ⚠️ 这段必须**早于任何日志**：appendLogFile 在 g_logPath 为空时直接丢日志，
-    //    而下面读 agent.env 之后的"未配置"告警要靠它落盘留证（否则用户/运维都看不到）。
-    const QString dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
-    QDir().mkpath(dataDir);
-    g_shotDir = qEnvironmentVariable("STE_QT_SHOT_DIR", dataDir + QStringLiteral("/shots"));
-    if (!g_shotDir.isEmpty()) QDir().mkpath(g_shotDir);
-    g_logPath = qEnvironmentVariable("STE_QT_LOG", dataDir + QStringLiteral("/agent-qt.log"));
+    // （dataDir / g_shotDir / g_logPath 的初始化**已移到 main() 最前面** —— 必须早于单例守卫，
+    //   否则守卫拦下第二次启动时那行"为什么被拦"的日志会被 appendLogFile 静默丢弃。见上面那段。）
 
     // 自启时计划任务**直接拉 exe**（不再经 bat）→ 配置得由自己从同目录的 agent.env 读。
     // 2026-10-03 实测：计划任务里套一层 `cmd /c start-agent.bat` 会**卡住不退出**，
