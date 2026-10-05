@@ -58,7 +58,7 @@ Write-Host ""
 
 if ($WhatIfOnly) { Warn "-WhatIfOnly：未执行任何改动。"; exit 0 }
 
-# ---- 1) 停掉正在跑的旧实例（含旧的 ClassIsland 被控端残留）----
+# ---- 1) 停掉正在跑的旧实例 ----
 Info "停止旧的被控端进程（若有）..."
 Get-Process -Name 'stelarith-agent-qt','stelarith-guard','stelarith-agent' -ErrorAction SilentlyContinue |
     ForEach-Object { try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue; Ok "已停 PID $($_.Id) ($($_.ProcessName))" } catch {} }
