@@ -62,6 +62,32 @@ ApplicationWindow {
                     }
                 }
             }
+            Button {
+                text: qsTr("导出CSES")
+                onClicked: {
+                    const p = profilePath + ".cses.json"
+                    if (scheduleModel.exportCses(p)) {
+                        saveStatus.text = qsTr("已导出 → %1").arg(p)
+                        saveStatus.color = "#6ecb63"
+                    } else {
+                        saveStatus.text = qsTr("导出失败")
+                        saveStatus.color = "#e06c6c"
+                    }
+                }
+            }
+            Button {
+                text: qsTr("导入CSES")
+                onClicked: {
+                    const p = profilePath + ".cses.json"
+                    if (scheduleModel.importCses(p)) {
+                        saveStatus.text = qsTr("已导入 %1").arg(p)
+                        saveStatus.color = "#6ecb63"
+                    } else {
+                        saveStatus.text = qsTr("导入失败（先导出再导入）")
+                        saveStatus.color = "#e06c6c"
+                    }
+                }
+            }
         }
     }
 
