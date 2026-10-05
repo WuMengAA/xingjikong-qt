@@ -52,10 +52,36 @@
 
 - 远端：`https://github.com/WuMengAA/xingjikong-qt.git`（公开仓；默认分支 `main` 是仓库原有内容，**不要强推**）。
 - 一个远端装四份历史，各占一条分支：`agent` / `viewer` / `cloud` / `workspace`。
-- 推送命令（token 当用户名，本机验证可用）：
-  `git push https://<PAT>@github.com/WuMengAA/xingjikong-qt.git HEAD:refs/heads/<分支>`
+  **工作区仓自己那条叫 `workspace`**（含三份子工程的 gitlink），所以它有 5 条分支要维护。
+- ⚠️ **push 走 HTTPS，不要走 SSH**（2026-10-06 实测）：`~/.ssh/config` 把 `github.com` 指到
+  `ssh.github.com:443`，本次 push 报 `Could not resolve hostname ssh.github.com`；
+  而同一会话 `git fetch origin` 却能成功 —— SSH 通道时通时不通。
+  稳妥命令：`git -c credential.helper= push "https://<token>@github.com/<owner>/<repo>.git" HEAD:refs/heads/<分支>`
+  （`-c credential.helper=` 是**故意**的：确保 token 不被写进 `~/.git-credentials`）。
+- **推完必须用 GitHub API 独立校验**，不要拿本地 git 自证：
+  `list_branches` 读回远端分支 SHA，与本地 `git rev-parse HEAD` 比对 ——
+  **提交哈希覆盖整棵树，"分支 SHA 相等"就等于逐字节证明内容一致**，不必逐文件比对。
+- ⚠️ **GitHub API（`push_files`）推不全，别指望它**：它只接受字符串内容，
+  ①推不了二进制（`agent` 分支有 67.37 MB 的 `dist/stelarith-agent-setup.exe`）；
+  ②造不出 **gitlink**（mode 160000，`workspace` 分支有 3 个）。
+  ⇒ 忠实推送只能走 git；**API 的强项是推送后的校验与推送前的状态侦察**。
+- ⚠️ `agent` 分支跟踪了 67 MB 安装包（GitHub 建议上限 50MB、硬上限 100MB）——
+  宜改 Release 附件或 LFS。**未处理，等用户点单。**
 - ⚠️ 本机 `credential.helper=store`（`~/.git-credentials` 明文）：**别把 PAT 塞进凭据存档**；
   PAT 用过就让用户去 GitHub revoke（聊天里出现过 = 已泄露）。
+
+### 官网远端 = `WuMengAA/CIMS-Next`（**独立仓库**，与 xingjikong-qt 不同）
+
+- 官网 `D:\Stelarith\Stelarith-website\stelarith` 的 `origin` 是
+  `git@github.com:WuMengAA/CIMS-Next.git`（**公开仓**；`xingjikong-qt` 里没有官网的历史）。
+- ⚠️ **申报远端差距前必须先 `git fetch`**：本地 `origin/main` 引用可能停得很早
+  （2026-10-06 那次停在 09-26，快十天没 fetch），只看本地会误判成"领先 23 条"，
+  真相是**分叉**（远端独有 9 / 本地独有 23）。
+- ⚠️ **官网 `main` 与远端已分叉且尚未合并**（2026-10-06 发现）：
+  两边改动**零文件重叠**（合并理论无冲突），远端那 9 条是 09-24～09-26 的另一批工作。
+  **没有擅自合并、没有推 `main`、没有强推**；只新建 `wip/site-download-center-20261006` 做备份。
+  按用户原则这类分叉应当**合并**（不是挑一边），但**要用户点单**才动。
+- 公开仓 ⇒ 推之前先扫一遍新增行有没有凭据（`.env`/`stelarith.db`/`users.json` 都已 gitignore）。
 
 ### ⚠️ 我在这上面栽过的跟头（必须记住）
 
