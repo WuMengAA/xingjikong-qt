@@ -110,7 +110,9 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //   · 装机包 NSIS 的 DisplayVersion 也必须与它一致（installer.nsi 的 VER 常量）。
 //   改版本时**只改这一处** + installer.nsi，别在别处再写一份（历史上就是两处不一致出过岔子：
 //   exe 报 0.4.0-v1、安装器写 0.5.0）。
-constexpr const char *kAppVersion = "0.5.0";
+//   ⚠️ 2026-10-06 收敛到 0.6.0：此前这里写 0.5.0、installer.nsi 写 0.5.1，本文件自己的注释
+//      还写着"两者必须一致"却没做到 —— 不一致的代价是云端按 0.5.0 判断 OTA，装出来却是 0.5.1。
+constexpr const char *kAppVersion = "0.6.0";
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = 1000;
