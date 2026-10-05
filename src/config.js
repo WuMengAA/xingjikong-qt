@@ -81,3 +81,8 @@ export const SETTLED_RETENTION_MS = Number(process.env.CLOUD_SETTLED_RETENTION_M
 
 // 队列清扫周期：定期把"过期未回执 / 超上限 / 已回执超保留期"的行处理掉。
 export const QUEUE_SWEEP_INTERVAL_MS = Number(process.env.CLOUD_QUEUE_SWEEP_INTERVAL_MS || 5 * 60 * 1000);
+
+/* ---------- OTA 版本清单（2026-10-05 · OTA 本期落地）----------
+ * 云端按此文件声明"各产品最新版本 + 安装包 URL + sha256"；每次请求现读，改完即生效。
+ * 文件缺失即"尚未发布过任何版本"（latestFor 返回 null，接口如实回 null，不谎报最新）。 */
+export const OTA_MANIFEST_FILE = process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.json';

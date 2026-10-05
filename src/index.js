@@ -6,6 +6,7 @@
 //   GET  /api/events          事件流水（最近 50 条）
 //   GET  /api/frame?uid=...   最近一帧（管理端 D4 用；内存里，不落盘）
 //   GET  /api/instructions/notice?notice_id=...  按通知查回执（站点广播对账，2026-10-04）
+//   GET  /api/ota/latest?product=agent           该产品最新版本（OTA 清单，2026-10-05）
 //   指令队列：已下发未回执的落盘（见 store.js）——设备重连按原顺序补发、云端重启不丢
 
 import http from 'node:http';
@@ -15,6 +16,7 @@ import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEE
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS } from './config.js';
 import { verifyViewerTicket } from './ticket.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
+import { latestFor } from './ota.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 
 /** 发一条协议消息（自动按对端版本选格式），失败不静默。 */
@@ -107,7 +109,8 @@ const server = http.createServer((req, res) => {
   const isManageApi =
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
-    u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice';
+    u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
+    u.pathname === '/api/ota/latest';
   if (isManageApi) {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -136,6 +139,14 @@ const server = http.createServer((req, res) => {
     const noticeId = Number(u.searchParams.get('notice_id') || 0);
     if (!noticeId) return send(400, { ok: false, error: '缺 notice_id' });
     return send(200, { ok: true, noticeId, receipts: receiptsByNotice(noticeId) });
+  }
+
+  if (req.method === 'GET' && u.pathname === '/api/ota/latest') {
+    // OTA：声明某产品的最新版本（供管理端/站点比对在线设备版本，决定是否下发升级）。
+    // 未发布过（无 ota.json）→ latest:null，如实相告，不假装"已是最新"。
+    const product = (u.searchParams.get('product') || 'agent').trim();
+    const latest = latestFor(product);
+    return send(200, { ok: true, product, latest });
   }
 
   if (req.method === 'GET' && u.pathname === '/api/frame') {

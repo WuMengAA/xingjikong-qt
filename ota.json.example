@@ -1,0 +1,22 @@
+{
+  "_comment": "复制为 ota.json 并按实际发布内容填写。云端每次请求现读，改完即生效，不必重启。",
+  "_howto": "sha256 用 `certutil -hashfile <安装包> SHA256` 或 `sha256sum <安装包>` 生成（小写十六进制）。url 必须是教室机能访问到的公网地址。",
+  "products": {
+    "agent": {
+      "version": "0.5.0",
+      "url": "https://<你的域名>/ota/stelarith-agent-setup-0.5.0.exe",
+      "sha256": "<64位小写十六进制>",
+      "size": 0,
+      "notes": "被控端 0.5.0：RTC 推流自愈 + 无人看时按需回收 WebEngine（省内存）。",
+      "mandatory": false
+    },
+    "viewer": {
+      "version": "0.5.0",
+      "url": "https://<你的域名>/ota/stelarith-viewer-msi-0.5.0.msi",
+      "sha256": "<64位小写十六进制>",
+      "size": 0,
+      "notes": "管理端 0.5.0。",
+      "mandatory": false
+    }
+  }
+}

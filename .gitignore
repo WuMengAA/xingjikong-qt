@@ -19,3 +19,6 @@ node_modules/
 
 # 本地归档：调试日志 / 一次性探针脚本（含运行痕迹），不进版本库
 _archive/
+
+# OTA 清单是每次发布生成的部署产物（含域名/URL/sha256），不进版本库；只留 .example
+ota.json
