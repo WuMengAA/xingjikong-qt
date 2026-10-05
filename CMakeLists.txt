@@ -19,6 +19,8 @@ qt_add_executable(viewer-qt
   src/main.cpp
   src/viewerbackend.cpp
   src/viewerbackend.h
+  src/singleinstance.cpp
+  src/singleinstance.h
 )
 # 界面资源：QML 模块 URI = Stelarith（main.cpp 里 loadFromModule("Stelarith","Main")）
 qt_add_qml_module(viewer-qt

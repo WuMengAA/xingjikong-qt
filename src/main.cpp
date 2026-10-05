@@ -6,10 +6,12 @@
 //   2) 把 backend 挂给 QML（context property，QML 里直接用 `backend`）
 //   3) 提供画面帧给 QML 的 Image（image://frames/...）
 
+#include "singleinstance.h"
 #include "viewerbackend.h"
 
 #include <QGuiApplication>
 #include <QImage>
+#include <QMessageBox>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickImageProvider>
@@ -158,6 +160,20 @@ int main(int argc, char *argv[])
 {
     installMessageHandler();
     QGuiApplication app(argc, argv);
+
+    // ── 单机只允许一个管理端（2026-10-05 与被控端同款新增）──────────────────
+    // 场景：桌面快捷方式 + 登录自启 + 老师又手点一次 → 两个实例抢同一台老师的屏幕，
+    // 画面/日志互相覆盖。命名互斥体用 Global\ 优先（跨会话，兼容计划任务 Session 0），
+    // 外加一层 %LOCALAPPDATA% 文件锁兜底 —— 只写 Local\ 会失效（见 singleinstance.h）。
+    // guard 必须活到 main 结束：析构才放手。
+    SingleInstanceGuard guard;
+    QString guardWhy;
+    if (!guard.acquire(L"StelarithViewerQt_Singleton", L"viewer.lock", &guardWhy)) {
+        logf("[viewer] 已有另一个管理端在跑（%s）→ 本次启动退出", guardWhy.toUtf8().constData());
+        QMessageBox::information(nullptr, QStringLiteral("星集控 · 管理端"),
+                                 QStringLiteral("管理端已经在运行了。\n本次启动自动退出：%1").arg(guardWhy));
+        return 0;
+    }
 
     // 双击即用：配置（云端地址/令牌）从 exe 同目录的 viewer.env 读 —— 不要求先设环境变量。
     // 必须在 backend.start() 之前读完：start() 里立刻取 STE_VIEWER_URL / STE_VIEWER_TOKEN。
