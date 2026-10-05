@@ -40,13 +40,66 @@
 **版本号只维护一处 = 云端 `ota.json`**，有两个消费方，都别再抄一份：
 1. 被控端：`registered` 回执带最新版本 → 托盘提示「发现新版本…」→ `self_update` 下载+校验 sha256+静默装。
 2. 官网下载中心 `/download`：读**公开只读**端点 `GET /api/public/ota?product=agent|viewer` → 站点不自存版本号。
+   ⇒ 发版后**站点无需重新构建**，刷新即可看到新版本（2026-10-06 实测 0.6.1 即如此）。
 
-- 发版用 `Stelarith-cloud-ws/scripts/publish-release.mjs`：`publish`（算 sha256→**复制**到 assets/pkg→
-  只改该产品→显式 Buffer 写 UTF-8 **无 BOM**→回读解析）/ `check`（清单 vs 磁盘逐条核对）/ `show`。
-  护栏：带 BOM 拒收；清单与文件不一致逐条点出并给修法；**版本倒退默认拒绝**（`--allow-downgrade` 才放行）。
+#### 发布：`Stelarith-cloud-ws/scripts/publish-release.mjs`（2026-10-06 加）
+
+```
+node scripts/publish-release.mjs check        # 体检：清单 vs 磁盘文件（存在性/大小/sha256）
+node scripts/publish-release.mjs show
+node scripts/publish-release.mjs publish --product agent|viewer --version x.y.z --file <包> [--notes "..."]
+```
+- 算 sha256 → **复制**（不是移动）到 `assets/pkg/` → 复制后回读再校验 → **只改该产品条目**
+  → 显式 Buffer 写 UTF-8 **无 BOM** → 写完立刻 parse 回读。
+- 主机名与目录前缀默认**沿用上一版 URL**（连发多版不必手写域名）；首次用 `--base-url`。
+- 三道护栏：清单带 BOM 拒收 / 清单与文件不一致逐条点出并给修法 / **版本倒退默认拒绝**
+  （发布对象是全校教室机，误操作＝集体降级；回滚才加 `--allow-downgrade`）。
 - ⚠️ `ota.json` **必须 UTF-8 无 BOM**（PS 5.1 `Set-Content -Encoding UTF8` 会加 BOM）：
-  带 BOM → `JSON.parse` 抛错 → 接口静默变 `latest:null`（"被控端说没有新版"和"清单坏了"现象一模一样）。
+  带 BOM → `JSON.parse` 抛错 → 接口静默变 `latest:null`
+  （"被控端说没有新版"和"清单坏了"现象一模一样，靠人盯不住）。
 - `ota.json` / `assets/pkg/` 都被 gitignore（部署产物，不入库），只留 `ota.json.example`。
+
+#### 出包：`Stelarith-viewer-qt/scripts/make-portable.mjs`（2026-10-06 加）
+
+```
+node scripts/make-portable.mjs              # 从 build/ 组装 dist/pkg-<版本>/ 并压成 zip
+node scripts/make-portable.mjs --check <zip>  # 只检查一个已存在的包，不改任何东西
+```
+- 版本号读自 `src/main.cpp` 的 `kViewerVersion`（**不另设一份**）。
+- **"包里必须有什么"是脚本里的 15 项必需件清单**，缺了当场失败。其中
+  `resources/icudtl.dat` / `Qt6WebEngine*.dll` / `QtWebEngineProcess.exe` 是 WebEngine（远程画面）必需品。
+- 还断言：不许有 `dist/` 嵌套旧副本；不许有自检用的 `platforms/qoffscreen.dll`；
+  `Stelarith/qml/*` 磁盘副本必须与 `qml/*` 源码一致。
+- ⚠️ **0.6.0 的管理端绿色包根层缺整个 QtWebEngine**（只有嵌套的 `dist\pkg-0.6.0\` 里才有）
+  ⇒ 那份绿色版**做不了远程画面**，而它照常启动、只在要看画面时才炸（WebEngine 视图延迟创建）。
+  0.6.1 起根层就是完整应用。**手工拼包就会这样** —— 所以出包一律走这个脚本。
+- ⚠️ `dist/` 已 gitignore（一跑 400M）。**被控端仓库已把 `dist/stelarith-agent-setup.exe`
+  （67MB）提交进库**，别在那边重演。
+
+#### 看 GUI 有没有真加载成功（沙箱里也能做）
+
+`build/platforms/` 里补上 `qoffscreen.dll`（windeployqt 默认只给 `qwindows.dll`，
+**这就是以前"离屏自检起不来"的原因**），然后
+`viewer-qt.exe -platform offscreen`：日志里**没有** `FAIL QML 没能加载` 即通过。
+⚠️ 离屏只能证明"能加载/类型能解析"，**看不出排版好看与否**。
+
+#### 管理端通知契约（2026-10-06，照被控端 `notifyFromParams()` 对齐）
+
+`qml/NotifyParams.js`（纯函数，唯一一份拼装逻辑）+ `scripts/test-notify-params.mjs`（16 条断言）：
+- `{kind:"popup"|"island"|"fullscreen", title(必填), content, seconds?（>0 才带，夹 3600）, flags:{speech 永远显式, severity 仅 fullscreen, emergency_confirm?}}`
+- 标题超 **24** 字、正文超 **64** 字由**被控端**截断（管理端只做计数，不截断）。
+- **不发 `notice_id`**（站点侧对账专用，管理端没有 `notice_kinds` 表）。
+- 真机实测：被控端日志 `📥 收到指令 action=notify（D5 真执行）` / `📤 回执 result=done`。
+
+#### 已知未修（等点单）
+
+- `qml/Main.qml:264` 的 `Row` 里有 `anchors.right` → Qt 每次启动报两条
+  `Row will not function`（截图上看是对的，靠锚点歪打正着）。修法：换成 `Item{width:parent.width}` + 两个内联 Text。
+- 右栏动作区是固定高的一列，空间不够**不压缩只溢出**；`minimumHeight` 已抬到 680，
+  **下次再加按钮要先改成 Flickable**。
+- `msi/viewer-qt.wxs` 的 `Version` 还是 0.5.0（MSI 那条路当前不用于发布）。
+- 被控端仓库里 67MB 的 `dist/stelarith-agent-setup.exe` 仍在版本库里。
+
 
 ### 远端备份（2026-10-06）
 
