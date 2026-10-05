@@ -115,17 +115,18 @@ bool matchesWeek(int todayWeek) const {
 7. **科目管理**：列表 + 添加 + 改名 + 删除（被课表引用禁止，isReferenced 已实现）
 8. **调课**：ScheduleModel setData/swap 实现，ScheduleGrid 点击格子弹科目菜单（含清空）
 9. **时间轴拖拽**：TimeAxisBlock 顶部/底部手柄拖拽，松手吸附 5 分钟写回模型
+10. **保存到磁盘**：工具栏"保存"按钮，写回 profilePath 指定文件（自动建目录）
+11. **多周轮换**：ScheduleModel 有 currentWeek 属性（默认按日期算，QML 周次下拉可切换），data() 按当前周过滤
 
 **⚠️ 未验证 / 已知限制（如实记账）**：
 
 1. **CSES 导入仅支持 JSON**：未集成 YAML 解析（CSES 官方格式是 YAML）。
-2. **多周轮换未接当前周次**：`ScheduleModel::data()` 里 `matchesWeek(1)` 写死第 1 周。
-3. **撤销/重做未实现**：无 `QUndoStack`。
-4. **课表群切换 UI 未暴露**：QML 层没有课表群选择。
-5. **Excel 导入导出未实现**。
-6. **档案合并冲突**：`mergeClassPlan` 按 GUID 覆盖，未处理科目 ID 冲突。
-7. **保存到磁盘未接 UI**：编辑只改内存中 Profile，未提供"保存"按钮写回文件。
-8. **时间轴拖拽视觉细节**：拖拽中的吸附预览、手柄 hover 反馈等交互细节需要真人操作确认。
+2. **撤销/重做未实现**：无 `QUndoStack`。
+3. **课表群切换 UI 未暴露**：QML 层没有课表群选择。
+4. **Excel 导入导出未实现**。
+5. **档案合并冲突**：`mergeClassPlan` 按 GUID 覆盖，未处理科目 ID 冲突。
+6. **时间轴拖拽视觉细节**：拖拽中的吸附预览、手柄 hover 反馈等交互细节需要真人操作确认。
+7. **周次计算简化**：`weekFromDate` 以 9 月 1 日为学期起点，实际学校学期起点需配置。
 
 ## 已知设计决策
 

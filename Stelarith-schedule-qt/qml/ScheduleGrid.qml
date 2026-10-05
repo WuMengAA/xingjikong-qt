@@ -36,12 +36,13 @@ Rectangle {
             ComboBox {
                 Layout.preferredWidth: 140
                 model: [
-                    qsTr("全部周次"),
                     qsTr("第 1 周"),
                     qsTr("第 2 周"),
-                    qsTr("双周轮换")
+                    qsTr("第 3 周"),
+                    qsTr("第 4 周")
                 ]
-                currentIndex: 0
+                currentIndex: Math.max(0, scheduleModel.currentWeek - 1)
+                onActivated: (i) => scheduleModel.setCurrentWeek(i + 1)
             }
         }
     }

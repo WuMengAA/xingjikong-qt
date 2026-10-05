@@ -35,9 +35,22 @@ ApplicationWindow {
             }
             Item { Layout.fillWidth: true }
             Label {
+                id: saveStatus
                 text: qsTr("示例档案")
                 color: "#666"
                 font.pixelSize: 11
+            }
+            Button {
+                text: qsTr("保存")
+                onClicked: {
+                    if (scheduleModel.saveTo(profilePath)) {
+                        saveStatus.text = qsTr("已保存 → %1").arg(profilePath)
+                        saveStatus.color = "#6ecb63"
+                    } else {
+                        saveStatus.text = qsTr("保存失败：%1").arg(profilePath)
+                        saveStatus.color = "#e06c6c"
+                    }
+                }
             }
         }
     }

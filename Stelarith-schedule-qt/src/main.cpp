@@ -137,6 +137,7 @@ int main(int argc, char* argv[]) {
 
     // 创建 Models（QObject 子类，可直接注册到 QML）
     ScheduleModel scheduleModel(profile);
+    scheduleModel.setCurrentWeek(ScheduleModel::weekFromDate(QDate::currentDate()));
     TimeSlotModel timeSlotModel;
     {
         QList<TimeSlot> active;

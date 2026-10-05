@@ -51,7 +51,7 @@ QVariant ScheduleModel::data(const QModelIndex& index, int role) const {
     // 遍历当前激活课表群的 ClassPlans
     const auto activePlans = m_profile.activeClassPlans();
     for (const auto& cp : activePlans) {
-        if (cp.weekDay != weekDay || !cp.matchesWeek(1)) continue;
+        if (cp.weekDay != weekDay || !cp.matchesWeek(m_currentWeek)) continue;
         for (const auto& lesson : cp.lessons) {
             if (lesson.slotIndex == row && lesson.isActive) {
                 switch (role) {
@@ -99,7 +99,7 @@ bool ScheduleModel::findLessonRef(int row, int col, ClassPlan** outPlan, Lesson*
         auto it = m_profile.classPlans.find(cpId);
         if (it == m_profile.classPlans.end()) continue;
         ClassPlan& cp = it.value();
-        if (cp.weekDay != weekDay || !cp.matchesWeek(1)) continue;
+        if (cp.weekDay != weekDay || !cp.matchesWeek(m_currentWeek)) continue;
         for (Lesson& lesson : cp.lessons) {
             if (lesson.slotIndex == row && lesson.isActive) {
                 *outPlan = &cp;
