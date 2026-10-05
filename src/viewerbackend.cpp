@@ -39,6 +39,34 @@ QString makeEnvelope(const QString &type, const QJsonObject &payload)
 constexpr int kFrameHeaderMax = 4096;
 constexpr int kReconnectMs = 5000;
 
+/* ── 静态区判定（UU 远程同款思路的轻量版）─────────────────────────────
+ * 被控端画面没在动的时候，收到多少帧都是同一张图 —— 解码 + 重绘一遍纯属白烧 CPU。
+ * 判定办法：给每帧算一个**稀疏指纹**（隔 7919 字节抽一个点，4096 个点，比整图遍历便宜得多，
+ * 但鼠标一动、窗口一开立刻就变），连续 kStaticStreak 帧指纹一致就认定"进了静态区"，
+ * 界面停止换 tick（QML 的 Image.source 不变 → 不再 requestImage → 不再解码重绘）。
+ *
+ * 为什么不用"JPEG 字节全等"来判：被控端每次抓屏都会重新编码一次，
+ * 同一张画面编出来的字节不可能一模一样，字节比较会永远判不出静态。
+ *
+ * 为什么不用定时器降帧率：降帧率只是从 15fps 变 5fps，带宽和解码照样在跑；
+ * 这里是"真不动就不画"，跟画面里有没有东西动无关。 */
+constexpr int kStaticStreak = 8;          // 约 0.5 秒（被控端 15fps）——太短会误判、太长画面发僵
+
+/** 画面指纹：宽高 + 整块缓冲里的伪随机采样和。同尺寸同画面 → 同指纹。 */
+quint64 frameFingerprint(const QImage &img)
+{
+    if (img.isNull()) return 0;
+    const qsizetype total = static_cast<qsizetype>(img.sizeInBytes());   // Qt 里没有 byteCount()，别照抄旧代码
+    if (total <= 0) return 0;
+    const uchar *p = img.constBits();
+    quint64 h = (quint64)img.width() << 32 | (quint64)img.height();
+    constexpr qsizetype stride = 7919;    // 质数：抽样点不会周期性落在同一片区域
+    for (int k = 0; k < 4096; ++k) {
+        h = h * 131 + p[(qsizetype)k * stride % total];
+    }
+    return h;
+}
+
 } // namespace
 
 ViewerBackend::ViewerBackend(QObject *parent)
@@ -337,7 +365,16 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
     }
     // 不在这里缩放：缩放是界面的事（QML 有自己的 Image 缩放与填充策略）
     m_frame = img;
-    emit frameChanged();
+
+    // ── 静态区：画面连续 kStaticStreak 帧一模一样 → 不再 emit frameChanged，
+    //    界面就不换 tick，等于"这张已经画出过了，别再画一遍"。
+    //    （画面内容本身没变，所以停刷显示的仍是最新内容，不是旧图。）
+    const quint64 fp = frameFingerprint(img);
+    m_sameFrameStreak = (fp == m_frameHash) ? (m_sameFrameStreak + 1) : 0;
+    m_frameHash = fp;
+    setStatic(m_sameFrameStreak >= kStaticStreak);
+    if (!m_screenStatic) emit frameChanged();
+
     if (m_frameCount % 30 == 1) {   // 每 30 帧报一次，别把日志刷爆
         const QString seq = header.isEmpty()
                                 ? QStringLiteral("(旧帧)")
@@ -345,6 +382,15 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
         logf("[viewer] 画面在动：第 %d 帧（seq=%s，%d 字节，%.1f fps）",
              m_frameCount, seq.toUtf8().constData(), m_lastFrameBytes, m_fps);
     }
+    emit statsChanged();
+}
+
+void ViewerBackend::setStatic(bool s)
+{
+    if (m_screenStatic == s) return;
+    m_screenStatic = s;
+    if (s) logf("[viewer] 画面进入静态区（连续 %d 帧一致）→ 停止重绘", kStaticStreak);
+    else   logf("[viewer] 画面恢复动态 → 恢复全帧率重绘");
     emit statsChanged();
 }
 

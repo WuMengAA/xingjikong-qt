@@ -460,6 +460,18 @@ ApplicationWindow {
                         font.pixelSize: 12
                     }
 
+                    // 静态区角标：被控端画面没在动时（老师看的是静止的投影/待机界面），
+                    // 我们就不白烧重绘 —— 但必须说清楚"是没动，不是卡了"，否则用户以为掉线。
+                    Text {
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.margins: 9
+                        visible: backend.screenStatic && backend.frameCount > 0
+                        text: "画面未变化 · 已暂停刷新"
+                        color: "#8A8A8A"   // 固定灰：不随主题变
+                        font.pixelSize: 11
+                    }
+
                     MouseArea {
                         id: screenArea
                         anchors.fill: parent

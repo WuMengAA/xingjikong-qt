@@ -33,6 +33,8 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QJsonArray devices READ devices NOTIFY devicesChanged)
     Q_PROPERTY(QString currentUid READ currentUid WRITE setCurrentUid NOTIFY currentUidChanged)
     Q_PROPERTY(QImage frame READ frame NOTIFY frameChanged)
+    /** 画面进入「静态区」（连续多帧像素一致）→ 界面停止重绘。见 applyFrameBytes 的注释。 */
+    Q_PROPERTY(bool screenStatic READ screenStatic NOTIFY statsChanged)
     Q_PROPERTY(double fps READ fps NOTIFY statsChanged)
     Q_PROPERTY(int frameCount READ frameCount NOTIFY statsChanged)
     Q_PROPERTY(int lastFrameBytes READ lastFrameBytes NOTIFY statsChanged)
@@ -61,6 +63,7 @@ public:
     QJsonArray devices() const { return m_devices; }
     QString currentUid() const { return m_currentUid; }
     QImage frame() const { return m_frame; }
+    bool screenStatic() const { return m_screenStatic; }
     double fps() const { return m_fps; }
     int frameCount() const { return m_frameCount; }
     int lastFrameBytes() const { return m_lastFrameBytes; }
@@ -138,6 +141,7 @@ private:
     void onBinaryMessage(const QByteArray &buf);
     void refreshDevices(const QJsonArray &arr);
     void applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header);
+    void setStatic(bool s);
     void tickFps();
     void sendEnvelope(const QString &type, const QJsonObject &payload);
     void sendNextChunk();
@@ -173,6 +177,9 @@ private:
 
     QJsonArray m_devices;
     QImage m_frame;
+    quint64 m_frameHash = 0;         // 上一帧的稀疏指纹（0 表示还没见过帧）
+    int m_sameFrameStreak = 0;       // 连续多少帧指纹一致
+    bool m_screenStatic = false;     // 静态区：画面没在动，界面别浪费重绘
     int m_frameCount = 0;
     int m_framesSinceCheck = 0;
     int m_lastFrameBytes = 0;
