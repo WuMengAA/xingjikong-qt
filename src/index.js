@@ -677,11 +677,21 @@ wss.on('connection', (ws) => {
       const auto = autoSubscribeViewers(uid);
       if (auto > 0) pushEvent('info', '已自动给管理端补上订阅', { uid, viewers: auto });
       // 回执：v1 收 registered（顺带**下发心跳参数**，不再靠两端各猜一个数字）；旧客户端仍收 registration-ok
+      // 2026-10-06：把 OTA 清单（ota.json）里的最新版本随注册回执一起下发给被控端 ——
+      // 被控端据此在托盘/「设置与信息」里提示升级，并复用 self_update 链路一键升。
+      // 没发布过版本时 latestFor 返回 null → 这些字段是 null，被控端按"未知"显示
+      // （**不是**"已是最新"：这两件事运维必须分得清，否则会以为升级链路是好的）。
+      const agentOta = latestFor('agent');
       snd(ws, ws.__v1 === true ? 'registered' : 'registration-ok', {
         uid,
         server: 'stelarith-cloud-ws/0.4.0',
         heartbeatMs: HEARTBEAT_INTERVAL_MS,
         timeoutMs: HEARTBEAT_TIMEOUT_MS,
+        latestVersion: agentOta ? agentOta.version : null,
+        updateUrl: agentOta ? agentOta.url : null,
+        updateSha256: agentOta ? agentOta.sha256 : null,
+        updateNotes: agentOta ? agentOta.notes : null,
+        updateMandatory: agentOta ? agentOta.mandatory : null,
       });
       // 重连补发：这台机器掉线期间"已下发未回执"的指令，按原顺序重发给它（内部无待补发则不动作）。
       replayPending(ws, uid);
