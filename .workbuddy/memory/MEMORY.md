@@ -12,9 +12,50 @@
 
 - ⚠️ **不删任何东西**（2026-10-06 用户明确）。两边 git 历史已经同一份（外部→工作区 快进/合并完成），
   各自都配了 remote：工作区三份有 `outer` 指向外部，外部三份有 `inner` 指向工作区。
-- ⚠️ **生产仍跑外部那份云端**（计划任务 `StelarithCloud` → `D:\Stelarith\Stelarith-cloud-ws\run-cloud.cmd`，
-  那边才有 `node_modules` / `.env` / `assets/pkg`）。要切到工作区跑，必须先补齐这三样并改计划任务。
+- ⚠️ **生产云端已经切到工作区那份**（2026-10-06 晚核实）：
+  计划任务 `StelarithCloud` → `D:\Stelarith\Stelarith-xingjikong-qt\Stelarith-cloud-ws\run-cloud.cmd`。
+  （此前那条"仍跑外部 D:\Stelarith\Stelarith-cloud-ws"的记录**已过时**。）
 - 合并历史（两边现在都有）：云端 `6592610`、被控端 `474cdd5`+`8d2594f`（工作区侧合并）、管理端 `83c9daf`。
+
+### 官网（**不在工作区内**，是独立工程 + 独立 git 仓）
+
+- 路径 `D:\Stelarith\Stelarith-website\stelarith`；SvelteKit 2 + Svelte 5 runes + Tailwind v4，adapter-node。
+- 生产：计划任务 `StelarithServer` → 同目录 `run-prod.bat`，监听 **8090**；公网 `https://www.245959623.xyz`。
+- **构建必须走旁路**（线上 `build/` 全程不被碰，构建中重启不会连崩）：
+  ```
+  cd /d/Stelarith/Stelarith-website/stelarith
+  CODEBUDDY_SAFE_DELETE_ENABLED=0 <node> scripts/release-site.mjs build   # → build.next
+  CODEBUDDY_SAFE_DELETE_ENABLED=0 <node> scripts/release-site.mjs switch  # 切换+重启+验收(/ 与 /console/ 200)，失败自动回滚
+  ```
+  日志在 `D:\Stelarith\_logs\release-build.log`（**注意不是** `Stelarith-website\_logs`）。
+- ⚠️ 构建**中途**改源文件不会进这次产物（vite 构建开始时就取过源）→ 改完必须重构建再 switch。
+- ⚠️ 构建偶发失败先看是不是 Windows 文件系统抖动（closeBundle 里 `.gz` `UNKNOWN: unknown error`）——
+  脚本会原样重试，**别当成代码问题去改代码**。
+- ⚠️ `content/nav.json` 被 `.gitignore`（运行时内容）→ 导航改动**只落盘不入库**，换机器要重建。
+- ⚠️ `content/changelog.json` 追加条目要**按原文件格式文本插入**（条目对象单行内联）。
+  用 `JSON.stringify` 整体重写会把全文件 reformat，diff 从 +15 行变成 114+/21-。
+
+### 星集控发版链路（2026-10-06 立，唯一真源原则）
+
+**版本号只维护一处 = 云端 `ota.json`**，有两个消费方，都别再抄一份：
+1. 被控端：`registered` 回执带最新版本 → 托盘提示「发现新版本…」→ `self_update` 下载+校验 sha256+静默装。
+2. 官网下载中心 `/download`：读**公开只读**端点 `GET /api/public/ota?product=agent|viewer` → 站点不自存版本号。
+
+- 发版用 `Stelarith-cloud-ws/scripts/publish-release.mjs`：`publish`（算 sha256→**复制**到 assets/pkg→
+  只改该产品→显式 Buffer 写 UTF-8 **无 BOM**→回读解析）/ `check`（清单 vs 磁盘逐条核对）/ `show`。
+  护栏：带 BOM 拒收；清单与文件不一致逐条点出并给修法；**版本倒退默认拒绝**（`--allow-downgrade` 才放行）。
+- ⚠️ `ota.json` **必须 UTF-8 无 BOM**（PS 5.1 `Set-Content -Encoding UTF8` 会加 BOM）：
+  带 BOM → `JSON.parse` 抛错 → 接口静默变 `latest:null`（"被控端说没有新版"和"清单坏了"现象一模一样）。
+- `ota.json` / `assets/pkg/` 都被 gitignore（部署产物，不入库），只留 `ota.json.example`。
+
+### 远端备份（2026-10-06）
+
+- 远端：`https://github.com/WuMengAA/xingjikong-qt.git`（公开仓；默认分支 `main` 是仓库原有内容，**不要强推**）。
+- 一个远端装四份历史，各占一条分支：`agent` / `viewer` / `cloud` / `workspace`。
+- 推送命令（token 当用户名，本机验证可用）：
+  `git push https://<PAT>@github.com/WuMengAA/xingjikong-qt.git HEAD:refs/heads/<分支>`
+- ⚠️ 本机 `credential.helper=store`（`~/.git-credentials` 明文）：**别把 PAT 塞进凭据存档**；
+  PAT 用过就让用户去 GitHub revoke（聊天里出现过 = 已泄露）。
 
 ### ⚠️ 我在这上面栽过的跟头（必须记住）
 
