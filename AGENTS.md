@@ -95,6 +95,28 @@ find <你的工程>/src -newermt '-15 minutes' -type f   # 最近 15 分钟有�
 ```
 两条任一有东西 → **先停，问清楚再动**。
 
+### 7.1 判断「某能力是否已实现」—— 必须 grep blob，不许读提交信息（2026-10-06 加）
+
+```bash
+git -C <你的工程> show HEAD:src/main.cpp | Select-String '关键字' | Measure-Object
+```
+
+**为什么**：mono 仓 `d5202ea` 提交信息写「紧急通知三档配色 + 不自动关闭」，
+但 blob 内 `QPalette::Window` / `m_confirmBtn` / `paintEvent` 全部 0 处 —— 提交信息名不副实。
+一条 `Select-String` 就抓到了；只读提交信息会误判成「已修好」，据此跳过真修复。
+（详见 §8.1）
+
+### 7.2 跨仓合并前，先确认对方没在动（2026-10-06 加）
+
+```bash
+git -C <另一仓> log -3 --format='%h %ad %s' --date=format:'%H:%M'
+ls -t <另一仓>/src | head -3       # 或看 mtime
+```
+
+**为什么**：本轮 00:33 开始把 standalone 合进 mono，00:48 发现 WorkBuddy 同时在 standalone
+做了反向合并（`474cdd5`）。两边结果恰好一致，但撞车本身就是 §0 警告的「两个 agent 同改一个文件」。
+上次开工先查这两个仓的 `git log -3` + 文件 mtime，是成本最低的防撞车手段。
+
 ---
 
 ## 8. 已知冲突登记（发现即登记，不自动处置）
