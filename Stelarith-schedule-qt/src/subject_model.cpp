@@ -139,8 +139,16 @@ bool SubjectModel::removeSubject(int row) {
 }
 
 bool SubjectModel::isReferenced(const QString& subjectId) const {
-    // TODO: 检查是否有 ClassPlan 引用该科目
-    // 需要传入 Profile 引用才能检查
+    // 检查档案里所有 ClassPlan 的课程是否引用了该科目
+    if (m_profileRef) {
+        const auto cpKeys = m_profileRef->classPlans.keys();
+        for (const QString& k : cpKeys) {
+            const ClassPlan& cp = m_profileRef->classPlans.value(k);
+            for (const Lesson& lesson : cp.lessons) {
+                if (lesson.subjectId == subjectId) return true;
+            }
+        }
+    }
     return false;
 }
 

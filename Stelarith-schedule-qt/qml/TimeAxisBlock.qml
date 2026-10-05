@@ -2,13 +2,24 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
+// 时间块：显示时间段，顶部/底部手柄可拖拽调整时长（松手写回模型）
 Rectangle {
     id: block
-    color: model.TimeTypeRole === 0 ? "#0078d4" : "#555"
+    color: model.timeType === 0 ? "#0078d4" : "#555"
     radius: 4
 
-    property real dragStartY: 0
-    property real dragStartHeight: 0
+    // 模型行号（由 Repeater 提供）
+    required property int index
+    // 父级时间轴引用（提供坐标换算函数）
+    required property var timeAxisRef
+
+    // 当前时间段（分钟自午夜）
+    readonly property int curStartMin: timeSlotModel.startMinAt(index)
+    readonly property int curEndMin: timeSlotModel.endMinAt(index)
+
+    // 显示用临时值（拖拽中更新）
+    property int dragStartMin: timeSlotModel.startMinAt(index)
+    property int dragEndMin: timeSlotModel.endMinAt(index)
 
     // 时间显示
     Text {
@@ -17,7 +28,7 @@ Rectangle {
         anchors.leftMargin: 12
         anchors.top: parent.top
         anchors.topMargin: 8
-        text: qsTr("%1 - %2").arg(model.StartTimeRole).arg(model.EndTimeRole)
+        text: qsTr("%1 - %2").arg(timeAxisRef.minutesToText(block.dragStartMin)).arg(timeAxisRef.minutesToText(block.dragEndMin))
         color: "#fff"
         font.pixelSize: 11
         font.bold: true
@@ -29,73 +40,83 @@ Rectangle {
         anchors.leftMargin: 12
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 8
-        text: qsTr("%1 (%2分钟)").arg(model.NameRole).arg(model.DurationMinutesRole)
+        text: qsTr("%1 (%2分钟)").arg(timeSlotModel.nameAt(index)).arg(Math.round(block.dragEndMin - block.dragStartMin))
         color: "#ddd"
         font.pixelSize: 10
     }
 
-    // 顶部拖拽手柄
+    // 顶部拖拽手柄：改开始时间
     Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 8
+        height: 10
         color: "transparent"
+        visible: parent.height > 24
 
         MouseArea {
+            id: topHandle
             anchors.fill: parent
             cursorShape: Qt.SizeVerCursor
-            property real startY: 0
-            property real startHeight: 0
+            property real startMouseY: 0
 
             onPressed: (mouse) => {
-                startY = mouse.y + parent.y
-                startHeight = block.height
+                startMouseY = mouse.y + parent.y
             }
             onPositionChanged: (mouse) => {
-                var deltaY = mouse.y + parent.y - startY
-                block.y += deltaY
-                block.height = startHeight - deltaY
-                // 更新 y 坐标
-                if (block.y < 0) {
-                    block.y = 0
-                }
+                var dy = mouse.y + parent.y - startMouseY
+                var newStartY = block.y + dy
+                var min = timeAxisRef.yToMinutes(newStartY)
+                if (min >= block.curEndMin - 5) min = block.curEndMin - 5
+                block.dragStartMin = min
+                // 视觉同步：块顶部移到新位置，高度按新跨度
+                block.y = timeAxisRef.timeToY(min)
+                block.height = Math.max(16, (block.curEndMin - min) * timeAxisRef.pixelsPerMinute)
             }
             onReleased: () => {
-                // 拖拽结束，触发模型更新
-                // TODO: 调用 timeSlotModel.setSlotTime()
+                var newStart = timeAxisRef.snapTo5(block.dragStartMin)
+                if (newStart < block.curEndMin - 5) {
+                    timeSlotModel.setSlotByMinutes(block.index, newStart, block.curEndMin)
+                }
+                block.dragStartMin = block.curStartMin
+                block.dragEndMin = block.curEndMin
             }
         }
     }
 
-    // 底部拖拽手柄
+    // 底部拖拽手柄：改结束时间
     Rectangle {
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 8
+        height: 10
         color: "transparent"
+        visible: parent.height > 24
 
         MouseArea {
+            id: bottomHandle
             anchors.fill: parent
             cursorShape: Qt.SizeVerCursor
-            property real startY: 0
-            property real startHeight: 0
+            property real startMouseY: 0
 
             onPressed: (mouse) => {
-                startY = mouse.y + parent.y
-                startHeight = block.height
+                startMouseY = mouse.y + parent.y
             }
             onPositionChanged: (mouse) => {
-                var deltaY = mouse.y + parent.y - startY
-                block.height += deltaY
-                if (block.height < 20) {
-                    block.height = 20
-                }
+                var dy = mouse.y + parent.y - startMouseY
+                var newEndY = block.y + block.height + dy
+                var min = timeAxisRef.yToMinutes(newEndY - block.y)
+                if (min <= block.curStartMin + 5) min = block.curStartMin + 5
+                block.dragEndMin = min
+                block.height = Math.max(16, (min - block.curStartMin) * timeAxisRef.pixelsPerMinute)
             }
             onReleased: () => {
-                // 拖拽结束，触发模型更新
-                // TODO: 调用 timeSlotModel.setSlotTime()
+                var newEnd = timeAxisRef.snapTo5(block.dragEndMin)
+                if (newEnd > block.curStartMin + 5) {
+                    timeSlotModel.setSlotByMinutes(block.index, block.curStartMin, newEnd)
+                }
+                block.dragStartMin = block.curStartMin
+                block.dragEndMin = block.curEndMin
             }
         }
     }

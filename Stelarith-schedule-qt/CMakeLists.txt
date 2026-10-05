@@ -38,6 +38,7 @@ qt_add_resources(stelarith-schedule-qt "qml_res"
         ${CMAKE_CURRENT_SOURCE_DIR}/qml/ScheduleGrid.qml
         ${CMAKE_CURRENT_SOURCE_DIR}/qml/TimeAxis.qml
         ${CMAKE_CURRENT_SOURCE_DIR}/qml/TimeAxisBlock.qml
+        ${CMAKE_CURRENT_SOURCE_DIR}/qml/SubjectManager.qml
 )
 
 # GUI 子系统：不要控制台窗口

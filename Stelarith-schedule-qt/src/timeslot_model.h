@@ -37,6 +37,37 @@ public:
     void setSlots(const QList<TimeSlot>& newSlots);
     const QList<TimeSlot>& timeSlots() const { return m_slots; }
 
+    // ---- QML 可调用 ----
+    Q_INVOKABLE QString startTimeAt(int row) const {
+        return (row >= 0 && row < m_slots.size()) ? m_slots[row].startTime.toString("HH:mm") : QString();
+    }
+    Q_INVOKABLE QString endTimeAt(int row) const {
+        return (row >= 0 && row < m_slots.size()) ? m_slots[row].endTime.toString("HH:mm") : QString();
+    }
+    Q_INVOKABLE QString nameAt(int row) const {
+        return (row >= 0 && row < m_slots.size()) ? m_slots[row].name : QString();
+    }
+    Q_INVOKABLE int durationMinAt(int row) const {
+        return (row >= 0 && row < m_slots.size()) ? m_slots[row].durationMinutes() : 0;
+    }
+    Q_INVOKABLE int startMinAt(int row) const {
+        if (row < 0 || row >= m_slots.size()) return 0;
+        const QTime& t = m_slots[row].startTime;
+        return t.hour() * 60 + t.minute();
+    }
+    Q_INVOKABLE int endMinAt(int row) const {
+        if (row < 0 || row >= m_slots.size()) return 0;
+        const QTime& t = m_slots[row].endTime;
+        return t.hour() * 60 + t.minute();
+    }
+    // 设置时间段（分钟自午夜；吸附到 5 分钟；返回是否成功）
+    Q_INVOKABLE bool setSlotByMinutes(int row, int startMin, int endMin) {
+        if (row < 0 || row >= m_slots.size()) return false;
+        QTime start = QTime(0, 0).addSecs(startMin * 60);
+        QTime end = QTime(0, 0).addSecs(endMin * 60);
+        return setSlotTime(row, start, end);
+    }
+
     // 吸附到 5 分钟
     static QTime snapTo5(QTime t);
     // 验证时间点不与相邻重叠

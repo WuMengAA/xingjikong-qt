@@ -23,6 +23,7 @@ $env:QTDIR   = $Qt
 $env:INCLUDE = "$Qt\include;$Qt\include\QtCore;$Qt\include\QtQml;$Qt\include\QtQuick;$Qt\include\QtGui;$Qt\include\QtNetwork;$Msvc\include;$Sdk\Include\$SdkVer\ucrt;$Sdk\Include\$SdkVer\um;$Sdk\Include\$SdkVer\shared"
 $env:LIB     = "$Qt\lib;$Msvc\lib\x64;$Sdk\Lib\$SdkVer\ucrt\x64;$Sdk\Lib\$SdkVer\um\x64"
 $env:PATH    = "$Qt\bin;$Msvc\bin\Hostx64\x64;$Sdk\bin\$SdkVer\x64;$env:PATH"
+$env:VCINSTALLDIR = 'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\'
 
 if ($Clean -and (Test-Path $Build)) { Remove-Item $Build -Recurse -Force }
 

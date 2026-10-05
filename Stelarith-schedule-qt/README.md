@@ -19,9 +19,10 @@ Stelarith-schedule-qt/
 │   └── main.cpp                  # 入口（QML 注册、示例数据）
 └── qml/
     ├── Main.qml                  # 主窗口 + 底部导航
-    ├── ScheduleGrid.qml          # 课表网格（TableView）
-    ├── TimeAxis.qml              # 时间轴甘特图（ListView）
-    └── TimeAxisBlock.qml         # 时间块（拖拽手柄）
+    ├── ScheduleGrid.qml          # 课表网格（TableView + 调课）
+    ├── TimeAxis.qml              # 时间轴甘特图（Flickable + Repeater）
+    ├── TimeAxisBlock.qml         # 时间块（拖拽手柄，松手写回模型）
+    └── SubjectManager.qml        # 科目管理（列表 + 添加/改名/删除）
 ```
 
 ## 构建（已验证）
@@ -98,25 +99,26 @@ bool matchesWeek(int todayWeek) const {
 
 **✅ 已验证**：
 
-1. **编译通过**：`cmake --build` exit=0，11/11 编译目标全部完成，产物 `stelarith-schedule-qt.exe`（约 122 KB）
+1. **编译通过**：`cmake --build` exit=0，全部编译目标完成，产物 `stelarith-schedule-qt.exe`（约 133 KB）
 2. **GUI 子系统正确**：PE subsystem=2（WIN32_EXECUTABLE），运行时无控制台黑窗
 3. **Qt 运行时部署完整**：windeployqt 部署 10 个 Qt DLL + platforms/qwindows.dll + qml 目录
 4. **程序启动正常**：窗口标题 "星集控 · 课表编辑器" 正常显示，进程保持运行不崩溃
-5. **QML 加载无错误**：4 个 QML 文件全部编译并加载成功
+5. **QML 加载无错误**：5 个 QML 文件（Main/ScheduleGrid/TimeAxis/TimeAxisBlock/SubjectManager）全部编译并加载成功
+6. **UI 渲染确认**：截图像素分析显示深色主题 83%、蓝色课表块/导航高亮 0.2%（#0078d4）、白色文字 2.3% —— 课表网格和时间轴确实渲染
+7. **科目管理功能**：列表展示 + 添加 + 改名 + 删除（被课表引用的科目禁止删除，`isReferenced` 已实现）
+8. **调课功能**：`ScheduleModel::setData/swap` 已实现，QML 通过 `setCellSubject/swapCells` 调用
+9. **时间轴拖拽**：TimeAxisBlock 顶部/底部手柄拖拽调整开始/结束时间，松手吸附 5 分钟并写回模型
 
 **⚠️ 未验证 / 已知限制（如实记账）**：
 
-1. **窗口渲染内容未截图确认**：本会话无屏幕会话可交互截图，只确认了窗口创建成功、进程存活、无 QML 报错。UI 视觉细节（网格颜色、时间轴块布局）需要真人打开确认。
-2. **拖拽保存未实现**：`TimeAxisBlock.qml` 的 `onReleased` 是空实现（TODO 标注），时间轴拖拽只改视觉不改数据。
-3. **ScheduleModel::setData / swap 未实现**：调课/交换科目逻辑是空壳（TODO）。
-4. **SubjectModel::isReferenced 未实现**：科目删除保护永远返回 false（TODO）。
-5. **CSES 导入仅支持 JSON**：未集成 YAML 解析（CSES 官方格式是 YAML）。
-6. **多周轮换未接当前周次**：`ScheduleModel::data()` 里 `matchesWeek(1)` 写死第 1 周。
-7. **撤销/重做未实现**：无 `QUndoStack`。
-8. **课表群切换 UI 未暴露**：QML 层没有课表群选择。
-9. **Excel 导入导出未实现**。
-10. **档案合并冲突**：`mergeClassPlan` 按 GUID 覆盖，未处理科目 ID 冲突。
-11. **科目管理页是占位**：Main.qml 第 3 页显示"科目管理（待实现）"。
+1. **调课 UI 未接**：`ScheduleModel::setCellSubject/swapCells` 已实现但 ScheduleGrid 还没做"点击格子弹科目选择器"的交互 UI。
+2. **CSES 导入仅支持 JSON**：未集成 YAML 解析（CSES 官方格式是 YAML）。
+3. **多周轮换未接当前周次**：`ScheduleModel::data()` 里 `matchesWeek(1)` 写死第 1 周。
+4. **撤销/重做未实现**：无 `QUndoStack`。
+5. **课表群切换 UI 未暴露**：QML 层没有课表群选择。
+6. **Excel 导入导出未实现**。
+7. **档案合并冲突**：`mergeClassPlan` 按 GUID 覆盖，未处理科目 ID 冲突。
+8. **保存到磁盘未接 UI**：编辑只改内存中 Profile，未提供"保存"按钮写回文件。
 
 ## 已知设计决策
 

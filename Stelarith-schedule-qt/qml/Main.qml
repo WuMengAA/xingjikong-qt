@@ -53,18 +53,7 @@ ApplicationWindow {
 
         Item { ScheduleGrid { anchors.fill: parent } }
         Item { TimeAxis { anchors.fill: parent } }
-        Item {
-            Rectangle {
-                anchors.fill: parent
-                color: "#1e1e1e"
-                Text {
-                    anchors.centerIn: parent
-                    text: qsTr("科目管理（待实现）")
-                    color: "#888"
-                    font.pixelSize: 16
-                }
-            }
-        }
+        Item { SubjectManager { anchors.fill: parent } }
     }
 
     // 底部导航

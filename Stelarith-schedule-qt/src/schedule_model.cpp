@@ -1,7 +1,7 @@
 #include "schedule_model.h"
 #include <algorithm>
 
-ScheduleModel::ScheduleModel(const Profile& profile, QObject* parent)
+ScheduleModel::ScheduleModel(Profile& profile, QObject* parent)
     : QAbstractTableModel(parent), m_profile(profile)
 {
     // 过滤出上课时间点（TimeType==0），按开始时间排序
@@ -88,15 +88,84 @@ QVariant ScheduleModel::headerData(int section, Qt::Orientation orientation, int
     return {};
 }
 
+// 找到某格子的可写 ClassPlan + Lesson
+bool ScheduleModel::findLessonRef(int row, int col, ClassPlan** outPlan, Lesson** outLesson) {
+    int weekDay = col + 1;
+    if (m_profile.selectedClassPlanGroupId.isEmpty()) return false;
+
+    // 直接在可变的 m_profile.classPlans 里找（跳过当前激活课表群内的）
+    const auto group = m_profile.classPlanGroups.value(m_profile.selectedClassPlanGroupId);
+    for (const QString& cpId : group.classPlanIds) {
+        auto it = m_profile.classPlans.find(cpId);
+        if (it == m_profile.classPlans.end()) continue;
+        ClassPlan& cp = it.value();
+        if (cp.weekDay != weekDay || !cp.matchesWeek(1)) continue;
+        for (Lesson& lesson : cp.lessons) {
+            if (lesson.slotIndex == row && lesson.isActive) {
+                *outPlan = &cp;
+                *outLesson = &lesson;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool ScheduleModel::setData(const QModelIndex& index, const QVariant& value, int role) {
-    if (!index.isValid() || role != Qt::EditRole) return false;
-    // TODO: 实现修改科目逻辑
+    if (!index.isValid()) return false;
+    int row = index.row();
+    int col = index.column();
+    if (row < 0 || row >= rowCount() || col < 0 || col >= 7) return false;
+
+    QString newSubjectId;
+    if (role == SubjectIdRole) {
+        newSubjectId = value.toString();
+    } else if (role == Qt::EditRole) {
+        // 传科目名：先查名→ID 映射
+        newSubjectId = value.toString();
+        for (auto it = m_subjectNames.begin(); it != m_subjectNames.end(); ++it) {
+            if (it.value() == newSubjectId) { newSubjectId = it.key(); break; }
+        }
+    } else {
+        return false;
+    }
+
+    // 清空：subjectId 为空串
+    ClassPlan* plan = nullptr;
+    Lesson* lesson = nullptr;
+    if (!findLessonRef(row, col, &plan, &lesson)) {
+        // 格子原本是空的，若 newSubjectId 非空则需新建 Lesson
+        if (newSubjectId.isEmpty()) return false;
+        // 在对应 ClassPlan 里新建条目
+        int weekDay = col + 1;
+        auto group = m_profile.classPlanGroups.value(m_profile.selectedClassPlanGroupId);
+        for (const QString& cpId : group.classPlanIds) {
+            auto it = m_profile.classPlans.find(cpId);
+            if (it == m_profile.classPlans.end()) continue;
+            ClassPlan& cp = it.value();
+            if (cp.weekDay != weekDay || !cp.matchesWeek(1)) continue;
+            Lesson l;
+            l.subjectId = newSubjectId;
+            l.weekDay = weekDay;
+            l.slotIndex = row;
+            l.weekCountDiv = 1;
+            l.weekCountDivTotal = 1;
+            l.isActive = true;
+            cp.lessons.append(l);
+            emit dataChanged(index, index);
+            return true;
+        }
+        return false;
+    }
+
+    lesson->subjectId = newSubjectId;
+    emit dataChanged(index, index);
     return true;
 }
 
 Qt::ItemFlags ScheduleModel::flags(const QModelIndex& index) const {
     if (!index.isValid()) return {};
-    return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable;
 }
 
 Lesson ScheduleModel::lessonAt(int row, int col) const {
@@ -115,6 +184,26 @@ Lesson ScheduleModel::lessonAt(int row, int col) const {
 }
 
 bool ScheduleModel::swap(int rowA, int colA, int rowB, int colB) {
-    // TODO: 实现交换逻辑
-    return false;
+    if (rowA < 0 || rowA >= rowCount() || colA < 0 || colA >= 7) return false;
+    if (rowB < 0 || rowB >= rowCount() || colB < 0 || colB >= 7) return false;
+
+    // 拿两格子的当前科目
+    QString a = data(index(rowA, colA), SubjectIdRole).toString();
+    QString b = data(index(rowB, colB), SubjectIdRole).toString();
+
+    // 两个空格交换无意义
+    if (a.isEmpty() && b.isEmpty()) return false;
+
+    // 先清空 A 再填 B，避免 findLessonRef 找到自己
+    setData(index(rowA, colA), a.isEmpty() ? b : a, SubjectIdRole);  // 暂存
+    // 正确做法：A 赋 B 的值，B 赋 A 的值
+    bool okA = setData(index(rowA, colA), b, SubjectIdRole);
+    bool okB = setData(index(rowB, colB), a, SubjectIdRole);
+    if (!okA || !okB) {
+        // 回滚
+        setData(index(rowA, colA), a, SubjectIdRole);
+        setData(index(rowB, colB), b, SubjectIdRole);
+        return false;
+    }
+    return true;
 }

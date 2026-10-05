@@ -1,6 +1,9 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlEngine>
+#include <QQmlError>
+#include <QTextStream>
 #include <QDir>
 #include <QFileInfo>
 #include <QDebug>
@@ -143,6 +146,7 @@ int main(int argc, char* argv[]) {
         timeSlotModel.setSlots(active);
     }
     SubjectModel subjectModel(profile.subjects);
+    subjectModel.setProfileRef(&profile);
 
     // QML 上下文（直接传指针，QML 通过 context property 访问）
     QQmlApplicationEngine engine;
@@ -153,9 +157,17 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), profilePath.isEmpty() ? repo.defaultProfilePath() : profilePath);
 
     // 加载主窗口（传统 qrc 资源：qrc:/qml/qml/Main.qml，见 build/.qt/rcc/qml_res.qrc）
+    // QML 警告/错误实时转发到 stderr（GUI 程序无控制台，但 stderr 可重定向到文件）
+    QObject::connect(&engine, &QQmlEngine::warnings,
+                     [](const QList<QQmlError>& warnings) {
+                         for (const QQmlError& e : warnings) {
+                             QTextStream(stderr) << "QML: " << e.toString() << "\n";
+                         }
+                     });
     engine.load(QUrl(QStringLiteral("qrc:/qml/qml/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
+        QTextStream(stderr) << "FATAL: QML failed to load\n";
         return -1;
     }
 
