@@ -16,3 +16,6 @@ node_modules/
 
 # 运行时状态
 .pids/
+
+# 装机台账（运行时数据，同 events.log 一样不进版本库）
+assets/provision-log.jsonl

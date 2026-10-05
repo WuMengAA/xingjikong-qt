@@ -15,7 +15,7 @@
 // ⚠️ 令牌会写进 bat（装机的人本来就要拿到它，这是"一机一密"），
 //    所以 bat 不能随手丢在公共盘上 —— buildAgentProvisionBat 里已带这条注释。
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, appendFileSync, readFileSync } from 'node:fs';
 import { join, normalize, extname, sep } from 'node:path';
 import { ASSETS_DIR } from './config.js';
 
@@ -44,6 +44,13 @@ export function agentWsUrl() {
   return `${scheme}://${base.replace(/^https?:\/\//i, '')}/ws/agent`;
 }
 
+/** 管理端（老师机）连云端的 ws 入口。同样是 wss，别写成 https。 */
+export function viewerWsUrl() {
+  const base = publicBase();
+  const scheme = /^https:/i.test(base) ? 'wss' : 'ws';
+  return `${scheme}://${base.replace(/^https?:\/\//i, '')}/ws/viewer`;
+}
+
 /** /assets 下的静态资源前缀。 */
 export const ASSET_PREFIX = '/assets/';
 
@@ -65,20 +72,104 @@ export function resolveAsset(urlPath) {
 }
 
 /**
- * 当前可用的教室机安装包文件名（扫 packages 目录里第一个 .exe）。
- * 一个都没有就返回 null —— 面板会明说"还没放安装包"，而不是生成一枚下不到东西的.bat。
+ * 在 packages 目录里按扩展名挑一个安装包。
+ * ⚠️ 必须按文件名里的关键字挑，不能"取第一个"：教学机和教室机的包都躺在同一个 pkg/ 下，
+ *    光按扩展名取会把 `stelarith-agent-msi-*.msi` 当成管理端的包发出去
+ *    —— 老师机装完 MSI 起的是被控端，装了等于没装（2026-10-05 实测撞到）。
+ *    所以 prefer 命中就优先；一个都不命中时**宁可返回 null**（面板明说"没放包"），也不瞎猜。
  */
-export function currentAgentPackage() {
+function pickPackage(ext, prefer) {
   if (!existsSync(PKG_DIR)) return null;
-  const hit = readdirSync(PKG_DIR)
-    .filter((f) => extname(f).toLowerCase() === '.exe')
-    .sort()
-    .find((f) => statSync(join(PKG_DIR, f)).isFile());
-  return hit || null;
+  const all = readdirSync(PKG_DIR)
+    .filter((f) => extname(f).toLowerCase() === ext)
+    .filter((f) => statSync(join(PKG_DIR, f)).isFile())
+    .sort();
+  if (!all.length) return null;
+  const eagerly = all.find((f) => f.toLowerCase().includes(prefer.toLowerCase()));
+  if (eagerly) return eagerly;
+  // 退一步：同名的另一条产品线（如 agent 只有 setup.exe 没有别的 exe）就用唯一的那个
+  return all.length === 1 ? all[0] : null;
+}
+
+/** 教室机安装包（.exe，取 stelarith-agent-setup*.exe）。 */
+export function currentAgentPackage() {
+  return pickPackage('.exe', 'agent-setup') || pickPackage('.exe', 'setup');
+}
+
+/** 管理端安装包（.msi，取 stelarith-viewer-msi*.msi）。 */
+export function currentViewerPackage() {
+  return pickPackage('.msi', 'viewer');
+}
+
+/* ---------- 装机台账（2026-10-05）----------
+ * 以前装一台机器要在纸上/备忘录里记一行「uid=… 班级=… 日期=…」，装几十台就记不住、对不上。
+ * 现在每生成一枚装机包就往这个 jsonl 追加一条，面板直接列出来 —— 台账这件事从人活变机器活。
+ * 用 jsonl（一行一条）而不是 json：装机是高频追加， rewrite 整个文件的写法会在并发下互相覆盖。
+ */
+const PROVISION_LOG = join(ASSETS_DIR, 'provision-log.jsonl');
+
+/** 记一条装机记录。写失败不能影响装机包本身 —— 台账丢了还能从事件流水补，所以这里宁可静默失败。 */
+export function recordProvision(type, uid, pkg) {
+  try {
+    const line = JSON.stringify({ at: new Date().toISOString(), type, uid, package: pkg || '' }) + '\n';
+    appendFileSync(PROVISION_LOG, line, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 最近 n 条装机记录（新的在前）。文件不存在/坏了就返回 []，别让面板挂掉。 */
+export function recentProvision(n = 20) {
+  try {
+    const raw = readFileSync(PROVISION_LOG, 'utf8').trim();
+    if (!raw) return [];
+    return raw.split(/\r?\n/)
+      .filter(Boolean)
+      .slice(-n)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter(Boolean)
+      .reverse();
+  } catch {
+    return [];
+  }
 }
 
 /** 装机脚本在 assets 里的相对路径（bat 需要它来下载自己）。 */
 export const PROVISION_SCRIPT = 'provision/install-agent.ps1';
+/** 管理端那支（老师机，装 MSI + 写用户环境变量 + 挂自启）。 */
+export const PROVISION_VIEWER_SCRIPT = 'provision/install-viewer.ps1';
+
+/**
+ * 生成"管理端（老师机）装机 bat"。
+ * 与教室机那支的区别：管理端不占设备 uid（它是看的人），配置靠用户级环境变量，见 install-viewer.ps1 头注。
+ *
+ * @param {string} label 备注名（老师/科室，只影响 bat 文件名与提示，不参与装机）
+ * @param {string} token 云端 CLOUD_VIEWER_TOKEN
+ */
+export function buildViewerProvisionBat(label, token) {
+  const pkg = currentViewerPackage();
+  if (!pkg) throw new Error('assets/pkg 目录下还没有 .msi 安装包，先把 stelarith-viewer-msi-0.5.0.msi 放进去');
+
+  const base = publicBase();
+  const scriptUrl = `${base}${ASSET_PREFIX}${PROVISION_VIEWER_SCRIPT}`;
+  const installerUrl = `${base}${ASSET_PREFIX}pkg/${pkg}`;
+  const safe = String(label || 'teacher').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'teacher';
+
+  return [
+    '@echo off',
+    'title Stelarith Viewer - Provisioning',
+    'cd /d "%~dp0"',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$d = $PWD.Path; $ps = Join-Path $d \'install-viewer.ps1\'; Write-Host \'[*] Downloading provisioning script...\'; Invoke-WebRequest -Uri \'' + scriptUrl + '\' -OutFile $ps -UseBasicParsing -TimeoutSec 120; Write-Host \'[*] Running installer. If a UAC box appears, choose Yes.\'; & $ps -Cloud \'' + viewerWsUrl() + '\' -Token \'' + token + '\' -InstallerUrl \'' + installerUrl + '\'; Write-Host \'\'; Read-Host \'Press Enter to exit\'"',
+    '',
+  ].join('\r\n');
+}
+
+/** 面板/路由统一入口：type=agent（教室机）| viewer（管理端），name 是那台机器的标识。 */
+export function buildProvisionBat(type, name, token) {
+  if (type === 'viewer') return buildViewerProvisionBat(name, token);
+  return buildAgentProvisionBat(name, token);
+}
 
 /**
  * 生成"教室机装机 bat"。

@@ -15,7 +15,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
-import { currentAgentPackage, buildAgentProvisionBat, resolveAsset, agentWsUrl } from './provision.js';
+import { currentAgentPackage, currentViewerPackage, buildProvisionBat, recordProvision,
+  recentProvision, resolveAsset, agentWsUrl, viewerWsUrl } from './provision.js';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
@@ -383,19 +384,35 @@ const server = http.createServer((req, res) => {
   // GET /api/admin/provision?uid=class_xxx_2028_08  → 一枚这台机器专属的装机 bat
   // 面板点"下载装机包"就走这里；教室机双击 bat 即完成装机（流程见 provision.js 头注释）。
   if (req.method === 'GET' && u.pathname === '/api/admin/provision') {
+    const type = (u.searchParams.get('type') || 'agent').trim();
+    if (type !== 'agent' && type !== 'viewer') {
+      return send(400, { ok: false, error: 'type 只支持 agent（教室机）或 viewer（管理端）' });
+    }
     const uid = (u.searchParams.get('uid') || '').trim();
     if (!uid) return send(400, { ok: false, error: '缺 uid' });
-    if (uid.length > 64 || !/^[\w.-]+$/.test(uid)) {
-      return send(400, { ok: false, error: 'uid 只允许字母/数字/下划线/点/横线，最长 64' });
+    // 教室机的 uid 是设备身份，命名规范要求全小写 ASCII（命名规范 class_<校简称>_<届>_<班号>），
+    // 收窄校验；管理端那框是给人看的备注，允许中文，但**只影响 bat 文件名**，不会写进 bat。
+    const re = type === 'agent' ? /^[a-z0-9][a-z0-9._-]{0,63}$/ : /^[\w\u4e00-\u9fa5][\w\u4e00-\u9fa5.-]{0,63}$/;
+    if (uid.length > 64 || !re.test(uid)) {
+      return send(400, {
+        ok: false,
+        error: type === 'agent'
+          ? '教室机 uid 只允许小写字母/数字/下划线/点/横线，最长 64（例 class_xlzx_2028_08）'
+          : '备注名只允许中英文/数字/下划线/点/横线，最长 64',
+      });
     }
     let bat;
     try {
-      bat = buildAgentProvisionBat(uid, DEV_TOKEN);
+      bat = buildProvisionBat(type, uid, DEV_TOKEN);
     } catch (e) {
       return send(500, { ok: false, error: e.message });
     }
+    // 台账：以前装一台要在纸上记一行 uid/班级/日期，装几十台就对不上；现在面板自己记
+    recordProvision(type, uid, type === 'viewer' ? currentViewerPackage() : currentAgentPackage());
+
     // 中文名字只在前端 blob 下载时用（浏览器认）；HTTP 头必须 ASCII，见上面 /assets 的注释。
-    const name = `provision-${uid}.bat`;
+    // 管理端备注名允许中文，直插进去照样会触发 ERR_INVALID_CHAR 掀翻进程，所以这里必须先糊一遍。
+    const name = `provision-${type === 'viewer' ? 'viewer' : 'agent'}-${asciiHeaderName(uid)}.bat`;
     res.writeHead(200, {
       'content-type': 'application/octet-stream',
       'content-length': Buffer.byteLength(bat),
@@ -406,13 +423,18 @@ const server = http.createServer((req, res) => {
     return res.end(bat);
   }
 
+  // GET /api/admin/provision/log?limit=20 → 装机台账（谁/什么类型/哪版包/什么时候下的）
+  if (req.method === 'GET' && u.pathname === '/api/admin/provision/log') {
+    const n = Math.min(Math.max(Number(u.searchParams.get('limit') || 20), 1), 200);
+    return send(200, { ok: true, total: recentProvision(9999).length, log: recentProvision(n) });
+  }
+
   // GET /api/admin/provision/status → 面板要知道"安装包放了没 / 云端对外地址是什么"
   if (req.method === 'GET' && u.pathname === '/api/admin/provision/status') {
     return send(200, {
       ok: true,
-      package: currentAgentPackage(),
-      script: 'provision/install-agent.ps1',
-      agentWsUrl: agentWsUrl(),
+      agent: { package: currentAgentPackage(), script: 'provision/install-agent.ps1', wsUrl: agentWsUrl() },
+      viewer: { package: currentViewerPackage(), script: 'provision/install-viewer.ps1', wsUrl: viewerWsUrl() },
     });
   }
 

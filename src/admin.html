@@ -264,9 +264,18 @@
 
     <!-- 装机（教室机）—— 全程浏览器操作，到教室机只要双击 -->
     <div class="card" style="margin-bottom:16px;">
-      <h2>装机 · 教室机 <span class="badge">不用敲命令行</span></h2>
+      <h2>装机 <span class="badge">不用敲命令行</span></h2>
       <div class="row">
-        <label>这台机器的 uid</label>
+        <label>装哪儿</label>
+        <select id="provType" onchange="renderProv()">
+          <option value="agent">教室机（被控端）</option>
+          <option value="viewer">管理端（老师机）</option>
+        </select>
+        <label>连接地址</label>
+        <span id="provWs" class="tag">—</span>
+      </div>
+      <div class="row">
+        <label id="provLbl">这台机器的 uid</label>
         <input type="text" id="provUid" class="mono" placeholder="class_xlzx_2028_08" spellcheck="false"
                list="provUidList" onkeydown="if(event.key==='Enter')downloadProvision()">
         <datalist id="provUidList"></datalist>
@@ -275,15 +284,22 @@
       <div class="row">
         <label>安装包</label>
         <span id="provPkg" class="tag warn">正在读取…</span>
-        <span class="note" id="provHint">把 <code>stelarith-agent-setup-0.5.0.exe</code> 放到云端的 <code>assets\pkg\</code> 下即可</span>
+        <span class="note" id="provHint">—</span>
       </div>
-      <div class="note" style="line-height:1.9; margin-top:6px;">
-        <b>三步装一台教室机（不需要碰命令行）：</b><br>
-        ① 上边填好这台机器的 uid（命名 <code>class_&lt;校简称&gt;_&lt;届&gt;_&lt;班号&gt;</code>，每台唯一、全小写），点<b>下载装机包</b>；<br>
-        ② 浏览器下载到的是一枚 <code>装机-&lt;uid&gt;.bat</code>，把它拷进 U 盘；<br>
-        ③ 到教室机：插 U 盘 → 双击这个 bat → 出现绿框 <code>[OK] 装机完成</code> 就好。<br>
-        <span style="color:var(--warn,#f0a35e)">⚠️ bat 里带着这台机器的专属令牌，别随手丢公共盘、别外发；丢了就在「安全配置」里换令牌重下。</span>
+      <div class="note" id="provSteps" style="line-height:1.9; margin-top:6px;"></div>
+
+      <div class="row" style="margin-top:10px; margin-bottom:4px;">
+        <label>装机台账</label>
+        <span class="note" id="provLogTip">读不到台账</span>
       </div>
+      <table>
+        <thead>
+          <tr><th style="width:150px;">时间</th><th style="width:110px;">类型</th><th style="width:220px;">机器</th><th>安装包</th></tr>
+        </thead>
+        <tbody id="provLogTable">
+          <tr><td colspan="4" style="color:var(--text-dim); text-align:center; padding:12px;">还没有下过装机包</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- 设备列表 -->
@@ -709,34 +725,98 @@ async function quickSend(uid, action) {
 }
 
 // ---- 工具 ----
-// ---- 装机：云端现算一枚 bat，浏览器下载，教室机双击 ----
-async function loadProvision() {
+// ---- 装机：云端现算一枚 bat，浏览器下载，到机器前双击 ----
+let provInfo = { agent: {}, viewer: {} };
+
+function renderProv() {
+  const type = document.getElementById('provType').value;
+  const info = provInfo[type] || {};
   const el = document.getElementById('provPkg');
+  const ws = document.getElementById('provWs');
   const hint = document.getElementById('provHint');
-  if (!el) return;
+  const steps = document.getElementById('provSteps');
+  const isAgent = type === 'agent';
+  const ext = isAgent ? '.exe' : '.msi';
+
+  document.getElementById('provLbl').textContent = isAgent ? '这台机器的 uid' : '这台机器的备注名';
+  document.getElementById('provUid').placeholder = isAgent ? 'class_xlzx_2028_08' : '例如 初三3班-讲台';
+
+  if (info.wsUrl) { ws.className = 'tag'; ws.textContent = info.wsUrl; }
+  if (info.package) {
+    el.className = 'tag ok';
+    el.textContent = info.package;
+    hint.textContent = '云端已托管，机器双击 bat 时会自动下载它';
+  } else {
+    el.className = 'tag warn';
+    el.textContent = '云端 assets/pkg 里还没有 ' + ext + ' 安装包';
+    hint.textContent = '把它拷到云端的 assets\\pkg\\ 下，刷新本页即可';
+  }
+
+  steps.innerHTML = isAgent
+    ? '<b>三步装一台教室机（不需要碰命令行）：</b><br>' +
+      '① 上边填 uid（命名 <code>class_&lt;校简称&gt;_&lt;届&gt;_&lt;班号&gt;</code>，每台唯一、全小写），点<b>下载装机包</b>；<br>' +
+      '② 浏览器下载到一枚 <code>装机-&lt;uid&gt;.bat</code>，拷进 U 盘；<br>' +
+      '③ 到教室机：插 U 盘 → <b>双击这个 bat</b> → 绿框 <code>[OK] 装机完成</code> 就好。'
+    : '<b>三步装管理端（老师机，1 台就一次）：</b><br>' +
+      '① 上边填个备注名（随便写，比如 <code>初三3班-讲台</code>，只影响文件名），点<b>下载装机包</b>；<br>' +
+      '② 浏览器下载到一枚 <code>装机-viewer-&lt;备注&gt;.bat</code>，拷进 U 盘；<br>' +
+      '③ 到老师机：插 U 盘 → <b>双击这个 bat</b> → 静默装完桌面出现「星集控管理端」图标、开机自启。<br>' +
+      '（管理端不占教室机设备位，它走的是 viewer 通道，看的是面板「设备列表」里的画面。）';
+
+  const tip = '<span style="color:var(--warn,#f0a35e)">⚠️ bat 里带着这台机器的专属令牌，别随手丢公共盘、别外发；' +
+              '丢了就在「安全配置」里换令牌重下。</span>';
+  steps.innerHTML += '<br>' + tip;
+}
+
+async function loadProvision() {
   try {
     const r = await api('/api/admin/provision/status');
-    if (r.ok && r.package) {
-      el.className = 'tag ok';
-      el.textContent = r.package;
-      hint.textContent = '云端已托管，教室机双击 bat 时会自动下载它';
-    } else {
-      el.className = 'tag warn';
-      el.textContent = '云端 assets/pkg 里还没有 .exe 安装包';
-      hint.textContent = '把 stelarith-agent-setup.exe 拷到云端的 assets\\pkg\\ 下，刷新本页即可';
-    }
+    provInfo = { agent: r.agent || {}, viewer: r.viewer || {} };
   } catch (e) {
-    el.className = 'tag warn';
-    el.textContent = '读取失败：' + e.message;
+    provInfo = { agent: {}, viewer: {}, error: e.message };
+  }
+  if (document.getElementById('provType')) renderProv();
+  loadProvisionLog();
+}
+
+// ---- 装机台账：谁 / 哪种类型 / 哪版包 / 什么时候下的 ----
+async function loadProvisionLog() {
+  const tbody = document.getElementById('provLogTable');
+  const tip = document.getElementById('provLogTip');
+  if (!tbody) return;
+  try {
+    const r = await api('/api/admin/provision/log?limit=20');
+    if (!r.ok || !r.log || !r.log.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim); text-align:center; padding:12px;">还没有下过装机包</td></tr>';
+      tip.textContent = '每下载一枚装机包就记一条，不用再拿纸笔记 uid 了';
+      return;
+    }
+    tip.textContent = '共 ' + r.total + ' 台，最近 ' + r.log.length + ' 条';
+    tbody.innerHTML = r.log.map(e => {
+      const d = new Date(e.at);
+      const ts = isNaN(d.getTime()) ? esc(e.at) : d.toLocaleString('zh-CN', { hour12: false });
+      const type = e.type === 'viewer'
+        ? '<span class="tag online">管理端</span>'
+        : '<span class="tag offline">教室机</span>';
+      return `<tr>
+        <td style="font-family:var(--mono); font-size:12px;">${esc(ts)}</td>
+        <td>${type}</td>
+        <td style="font-family:var(--mono); font-size:12px;">${esc(e.uid)}</td>
+        <td style="color:var(--text-dim); font-size:12px;">${esc(e.package || '-')}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    tip.textContent = '读不到台账：' + e.message;
   }
 }
 
 async function downloadProvision() {
+  const type = document.getElementById('provType').value;
   const uid = (document.getElementById('provUid').value || '').trim();
-  if (!uid) { toast('先填这台机器的 uid', 'err'); return; }
-  if (uid !== uid.toLowerCase()) toast('提醒：uid 建议全小写', 'warn');
+  if (!uid) { toast('先填这台机器的名称', 'err'); return; }
+  if (type === 'agent' && uid !== uid.toLowerCase()) toast('提醒：教室机 uid 建议全小写', 'warn');
   try {
-    const res = await fetch('/api/admin/provision?uid=' + encodeURIComponent(uid), {
+    const res = await fetch('/api/admin/provision?type=' + type + '&uid=' + encodeURIComponent(uid), {
       headers: { 'Authorization': 'Bearer ' + token }
     });
     if (res.status === 400 || res.status === 500) {
@@ -748,11 +828,11 @@ async function downloadProvision() {
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = '装机-' + uid + '.bat';
+    a.download = '装机-' + (type === 'viewer' ? '管理端' : '教室机') + '-' + uid + '.bat';
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    toast('已下载「装机-' + uid + '.bat」→ 拷 U 盘 → 教室机双击', 'ok');
+    toast('已下载「装机-' + (type === 'viewer' ? '管理端' : '教室机') + '-' + uid + '.bat」→ 拷 U 盘 → 目标机器双击', 'ok');
   } catch (e) {
     toast('下载失败：' + e.message, 'err');
   }
