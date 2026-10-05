@@ -262,6 +262,30 @@
       </div>
     </div>
 
+    <!-- 装机（教室机）—— 全程浏览器操作，到教室机只要双击 -->
+    <div class="card" style="margin-bottom:16px;">
+      <h2>装机 · 教室机 <span class="badge">不用敲命令行</span></h2>
+      <div class="row">
+        <label>这台机器的 uid</label>
+        <input type="text" id="provUid" class="mono" placeholder="class_xlzx_2028_08" spellcheck="false"
+               list="provUidList" onkeydown="if(event.key==='Enter')downloadProvision()">
+        <datalist id="provUidList"></datalist>
+        <button class="btn" onclick="downloadProvision()">下载装机包</button>
+      </div>
+      <div class="row">
+        <label>安装包</label>
+        <span id="provPkg" class="tag warn">正在读取…</span>
+        <span class="note" id="provHint">把 <code>stelarith-agent-setup-0.5.0.exe</code> 放到云端的 <code>assets\pkg\</code> 下即可</span>
+      </div>
+      <div class="note" style="line-height:1.9; margin-top:6px;">
+        <b>三步装一台教室机（不需要碰命令行）：</b><br>
+        ① 上边填好这台机器的 uid（命名 <code>class_&lt;校简称&gt;_&lt;届&gt;_&lt;班号&gt;</code>，每台唯一、全小写），点<b>下载装机包</b>；<br>
+        ② 浏览器下载到的是一枚 <code>装机-&lt;uid&gt;.bat</code>，把它拷进 U 盘；<br>
+        ③ 到教室机：插 U 盘 → 双击这个 bat → 出现绿框 <code>[OK] 装机完成</code> 就好。<br>
+        <span style="color:var(--warn,#f0a35e)">⚠️ bat 里带着这台机器的专属令牌，别随手丢公共盘、别外发；丢了就在「安全配置」里换令牌重下。</span>
+      </div>
+    </div>
+
     <!-- 设备列表 -->
     <div class="card" style="margin-bottom:16px;">
       <h2>设备列表 <span class="badge" id="devCountBadge"></span></h2>
@@ -422,7 +446,7 @@ function startPolling() {
 
 // ---- 刷新 ----
 async function refreshAll() {
-  await Promise.all([refreshDevices(), refreshEvents(), loadConfig(), loadOta()]);
+  await Promise.all([refreshDevices(), refreshEvents(), loadConfig(), loadOta(), loadProvision()]);
 }
 
 async function refreshDevices() {
@@ -455,6 +479,9 @@ async function refreshDevices() {
       </tr>`;
     }).join('');
     select.innerHTML = r.devices.map(d => `<option value="${esc(d.uid)}">${esc(d.uid)}</option>`).join('');
+    // 装机框的候选 uid：装过的/在线的都好抄，省得手写错
+    const dl = document.getElementById('provUidList');
+    if (dl) dl.innerHTML = r.devices.map(d => `<option value="${esc(d.uid)}">${esc(d.uid)}${d.online?'（在线）':'（离线）'}</option>`).join('');
   } catch(e) { /* 轮询失败静默，避免刷屏 */ }
 }
 
@@ -682,6 +709,55 @@ async function quickSend(uid, action) {
 }
 
 // ---- 工具 ----
+// ---- 装机：云端现算一枚 bat，浏览器下载，教室机双击 ----
+async function loadProvision() {
+  const el = document.getElementById('provPkg');
+  const hint = document.getElementById('provHint');
+  if (!el) return;
+  try {
+    const r = await api('/api/admin/provision/status');
+    if (r.ok && r.package) {
+      el.className = 'tag ok';
+      el.textContent = r.package;
+      hint.textContent = '云端已托管，教室机双击 bat 时会自动下载它';
+    } else {
+      el.className = 'tag warn';
+      el.textContent = '云端 assets/pkg 里还没有 .exe 安装包';
+      hint.textContent = '把 stelarith-agent-setup.exe 拷到云端的 assets\\pkg\\ 下，刷新本页即可';
+    }
+  } catch (e) {
+    el.className = 'tag warn';
+    el.textContent = '读取失败：' + e.message;
+  }
+}
+
+async function downloadProvision() {
+  const uid = (document.getElementById('provUid').value || '').trim();
+  if (!uid) { toast('先填这台机器的 uid', 'err'); return; }
+  if (uid !== uid.toLowerCase()) toast('提醒：uid 建议全小写', 'warn');
+  try {
+    const res = await fetch('/api/admin/provision?uid=' + encodeURIComponent(uid), {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (res.status === 400 || res.status === 500) {
+      const j = await res.json().catch(() => ({ error: '云端拒绝了（HTTP ' + res.status + '）' }));
+      toast(j.error || '云端拒绝了', 'err');
+      return;
+    }
+    if (!res.ok) { toast('下载失败 HTTP ' + res.status, 'err'); return; }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '装机-' + uid + '.bat';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast('已下载「装机-' + uid + '.bat」→ 拷 U 盘 → 教室机双击', 'ok');
+  } catch (e) {
+    toast('下载失败：' + e.message, 'err');
+  }
+}
+
 function esc(s) { return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
 function toast(msg, type='') {
   const t = document.getElementById('toast');

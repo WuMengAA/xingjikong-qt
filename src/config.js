@@ -86,3 +86,10 @@ export const QUEUE_SWEEP_INTERVAL_MS = Number(process.env.CLOUD_QUEUE_SWEEP_INTE
  * 云端按此文件声明"各产品最新版本 + 安装包 URL + sha256"；每次请求现读，改完即生效。
  * 文件缺失即"尚未发布过任何版本"（latestFor 返回 null，接口如实回 null，不谎报最新）。 */
 export const OTA_MANIFEST_FILE = process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.json';
+
+/* ---------- 装机资产（2026-10-05 · 面板化装机）----------
+ * assets/ 目录由云端原样托管 via /assets/<相对路径>，专门给教室机取安装包和装机脚本用。
+ * 里面不许出现任何秘密（.env 在仓库根，天然不在这个目录下）——
+ * 白名单只放 exe/msi/ps1/bat/zip/json/txt/sha256，见 provision.js 的 ASSET_ALLOW_EXT。
+ * 子目录：assets/pkg/（教室机安装包 .exe）、assets/provision/（装机脚本 .ps1）。 */
+export const ASSETS_DIR = process.env.CLOUD_ASSETS_DIR || 'assets';

@@ -10,11 +10,12 @@
 //   指令队列：已下发未回执的落盘（见 store.js）——设备重连按原顺序补发、云端重启不丢
 
 import http from 'node:http';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
+import { currentAgentPackage, buildAgentProvisionBat, resolveAsset, agentWsUrl } from './provision.js';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
@@ -23,6 +24,15 @@ import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEE
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENV_FILE = join(__dirname, '..', '.env');
 const ADMIN_HTML = join(__dirname, 'admin.html');
+
+/**
+ * HTTP 头只允许 latin1。文件名里出现中文/控制字符时，Node 会抛 ERR_INVALID_CHAR
+ * 并**终止整个进程**（2026-10-05 实测：一次下载请求就把云端打挂，教室机全体掉线，
+ * 要等看门狗 5 分钟才拉回来）。所以凡是写进响应头的名字必须先过这一道。
+ */
+function asciiHeaderName(name) {
+  return String(name).replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+}
 
 /* ---------- .env 读写（管理面板用）---------- */
 function readEnvFile() {
@@ -157,12 +167,41 @@ if (!VIEWER_SECRET) {
 console.log(`[cloud] 云端监听 http://${HOST}:${PORT} （被控端路径 /ws/agent，协议模式 ${PROTOCOL_MODE}）`);
 
 const server = http.createServer((req, res) => {
+  // 兜底一层：任何漏网的同步异常都不许掀翻进程。
+  // 云端是教室里几十台机器共用的入口，崩一次 = 全体掉线，等看门狗回来就是 5 分钟黑屏。
+  try {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const send = (code, obj) => {
     const body = JSON.stringify(obj);
     res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) });
     res.end(body);
   };
+
+  // /assets/* 静态托管（2026-10-05 · 面板化装机）：教室机取安装包和装机脚本用。
+  // ⚠️ 刻意放在下面那道管理面鉴权**之前** —— 教室机拿不到管理令牌，
+  //    但 bat 里本来就带着这枚"一机一密"的 agent 令牌，凑不出第二把门。
+  //    所以这里的安全边界只有一条：目录白名单（见 provision.js 的 ASSET_ALLOW_EXT），
+  //    保证 /assets 下不存在任何能被拖到公网的秘密文件。
+  if (u.pathname.startsWith('/assets/')) {
+    const file = resolveAsset(u.pathname);
+    if (!file) return send(404, { ok: false, error: 'assets 里没有这个文件或扩展名不允许'});
+    const st = statSync(file);
+    // ⚠️ HTTP 头只允许 latin1：中文/非 ASCII 字符写进头里，Node 会直接抛
+    //    ERR_INVALID_CHAR 并**终止整个进程**（2026-10-05 实测：一次下载把云端打挂了，
+    //    教室机全掉线，要等看门狗 5 分钟才拉回来）。所以头里的名字一律 ASCII 化。
+    const fname = asciiHeaderName(file.split(/[\\/]/).pop());
+    res.writeHead(200, {
+      'content-type': file.endsWith('.ps1') ? 'text/plain; charset=utf-8' :
+                      file.endsWith('.json') ? 'application/json; charset=utf-8' :
+                      file.endsWith('.txt') || file.endsWith('.sha256') ? 'text/plain; charset=utf-8' :
+                      'application/octet-stream',
+      'content-length': st.size,
+      // 装机 bat 每次都该拿到最新的脚本（改了云端脚本要立刻在教室机生效）
+      'cache-control': 'no-store',
+      'content-disposition': `attachment; filename="${fname}"`,
+    });
+    return createReadStream(file).pipe(res);
+  }
 
   // HTTP 管理面鉴权（2026-10-04 · 乙阶段收尾 + 补洞）：
   // /api/instructions / /api/devices / /api/events / /api/frame / /api/instructions/pending
@@ -171,7 +210,10 @@ const server = http.createServer((req, res) => {
   // 可信边界收紧到"持 viewer 令牌"）。/api/frame 是实时画面，最敏感，必须关死。
   // 用 VIEWER_TOKEN（与桌面管理端同一信任级），Bearer 头；缺/错 → 401 fail-closed。
   // ⚠️ 站点广播（broadcast.ts）是唯一合法调用方，已同步带 Bearer 头。
-  const isAdminApi = u.pathname === '/api/admin/config' || u.pathname === '/api/admin/ota';
+  // ⚠️ 用 startsWith 而不是精确相等：/api/admin/provision 下面还挂着 /status 子路由，
+  //    精确相等会把 status 漏在鉴权外面（2026-10-05 实测就是这么漏的，已修）。
+  const isAdminApi = u.pathname === '/api/admin/config' || u.pathname === '/api/admin/ota' ||
+    u.pathname.startsWith('/api/admin/provision');
   const isManageApi =
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
@@ -338,7 +380,53 @@ const server = http.createServer((req, res) => {
     return undefined;
   }
 
+  // GET /api/admin/provision?uid=class_xxx_2028_08  → 一枚这台机器专属的装机 bat
+  // 面板点"下载装机包"就走这里；教室机双击 bat 即完成装机（流程见 provision.js 头注释）。
+  if (req.method === 'GET' && u.pathname === '/api/admin/provision') {
+    const uid = (u.searchParams.get('uid') || '').trim();
+    if (!uid) return send(400, { ok: false, error: '缺 uid' });
+    if (uid.length > 64 || !/^[\w.-]+$/.test(uid)) {
+      return send(400, { ok: false, error: 'uid 只允许字母/数字/下划线/点/横线，最长 64' });
+    }
+    let bat;
+    try {
+      bat = buildAgentProvisionBat(uid, DEV_TOKEN);
+    } catch (e) {
+      return send(500, { ok: false, error: e.message });
+    }
+    // 中文名字只在前端 blob 下载时用（浏览器认）；HTTP 头必须 ASCII，见上面 /assets 的注释。
+    const name = `provision-${uid}.bat`;
+    res.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': Buffer.byteLength(bat),
+      'cache-control': 'no-store',
+      'content-disposition': `attachment; filename="${name}"`,
+    });
+    pushEvent('info', '生成装机包', { uid });
+    return res.end(bat);
+  }
+
+  // GET /api/admin/provision/status → 面板要知道"安装包放了没 / 云端对外地址是什么"
+  if (req.method === 'GET' && u.pathname === '/api/admin/provision/status') {
+    return send(200, {
+      ok: true,
+      package: currentAgentPackage(),
+      script: 'provision/install-agent.ps1',
+      agentWsUrl: agentWsUrl(),
+    });
+  }
+
   return send(404, { ok: false, error: `未知道路 ${req.method} ${u.pathname}` });
+  } catch (e) {
+    console.error('[cloud] FAIL HTTP 处理异常：', e);
+    try {
+      pushEvent('error', 'HTTP 处理异常', { path: String(req.url || '').slice(0, 200), msg: e.message });
+      if (res.headersSent) { res.end(); return; }
+      const body = JSON.stringify({ ok: false, error: '云端内部异常：' + e.message });
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) });
+      res.end(body);
+    } catch { /* 连兜底都失败就别再挣扎了 */ }
+  }
 });
 
 const wss = new WebSocketServer({ noServer: true });        // 被控端接入
