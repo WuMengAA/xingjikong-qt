@@ -1,6 +1,14 @@
 // 云端最小配置。纪律：任何取值都得能跑起来，不许出现"留空就死"。
 export const PORT = Number(process.env.CLOUD_WS_PORT || 8788);
 
+/* 监听地址（2026-10-05 · 公网上线改造）：
+ * 默认 0.0.0.0 —— 公网/局域网可达，被控端与移动管理端才能从别的机器连进来。
+ * 要"只在本机联调"时设 CLOUD_WS_HOST=127.0.0.1 收回到回环（旧行为）。
+ * ⚠️ 暴露到公网前**必须先**把 CLOUD_WS_TOKEN / CLOUD_VIEWER_TOKEN 换成生产强随机值：
+ *    0.0.0.0 + 内置开发令牌 = 任何人可发指令、可读教室机实时画面。
+ * 公网部署建议再叠一层 TLS 反代（wss://），云端自身只跑明文 ws。 */
+export const HOST = (process.env.CLOUD_WS_HOST || '0.0.0.0').trim();
+
 // 设备接入令牌：生产环境由站点下发；本机联调用内置开发令牌，启动会显式警告。
 export const DEV_TOKEN = process.env.CLOUD_WS_TOKEN || 'dev-cloud-token';
 

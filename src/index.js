@@ -10,7 +10,7 @@
 
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { PORT, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
+import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS } from './config.js';
 import { verifyViewerTicket } from './ticket.js';
@@ -87,7 +87,7 @@ if (VIEWER_TOKEN_IS_DEFAULT) {
 if (!VIEWER_SECRET) {
   console.warn('[cloud] ⚠ 未配置 CLOUD_VIEWER_SECRET：浏览器票据通道关闭（桌面端长期令牌通道仍可用）');
 }
-console.log(`[cloud] 云端监听 http://127.0.0.1:${PORT} （被控端路径 /ws/agent，协议模式 ${PROTOCOL_MODE}）`);
+console.log(`[cloud] 云端监听 http://${HOST}:${PORT} （被控端路径 /ws/agent，协议模式 ${PROTOCOL_MODE}）`);
 
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -486,8 +486,8 @@ wss.on('connection', (ws) => {
   });
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  pushEvent('info', '云端已启动，等被控端接入', { port: PORT });
+server.listen(PORT, HOST, () => {
+  pushEvent('info', '云端已启动，等被控端接入', { host: HOST, port: PORT });
 });
 
 server.on('error', (e) => {
