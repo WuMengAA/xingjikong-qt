@@ -205,3 +205,27 @@ node scripts/make-portable.mjs --check <zip>  # 只检查一个已存在的包�
 - Git Bash 会把 `/I<path>` 这类参数当路径转换 → 跑 cl.exe 加 `/I` 时加 `MSYS_NO_PATHCONV=1` 或干脆用 cmake 自己算 include。
 - 工作区外（如 `%TEMP%`）cl.exe 读 `D:\Qt\...` 头会 C1083；临时探针工程要**放在工程目录内**。
 - 临时验证用的探针/`.bat`/`build/` 验完就删，别留在仓库里。
+
+## ⚠️ 编被控端（control-qt）走 `scripts/build-agent.sh`，别手敲（2026-10-06）
+
+本机跑不了 `cmd.exe` → `build-qt-agent.bat`（vcvarsall 那路）在 WorkBuddy 内根本执行不了。
+不跑 vcvarsall 就得自己喂 INCLUDE/LIB，而且**本机 MSVC 的 include 里 15 个 C 运行头是缺的**
+（`stdio.h`/`stdlib.h`/`string.h`/`math.h`/`time.h`/`stddef.h`/`malloc.h`/`ctype.h`/`float.h`/
+`errno.h`/`wchar.h`/`io.h`/`process.h`/`signal.h`/`sys\stat.h`）—— 它们由
+**Windows SDK 的 UCRT** 提供（`Windows Kits\10\Include\<ver>\ucrt` 头 +
+`Lib\<ver>\ucrt\x64\ucrt.lib` 导入库；缺后者链接报 LNK1104）。INCLUDE/LIB 里必须写
+`C:/...` 不能写 `/c/...`（Git Bash 会传给 Win32 程序当相对路径）。全部已固化在
+`Stelarith-control-qt/scripts/build-agent.sh`。
+
+## 被控端 0.6.3 强制自动升级（2026-10-06，唯一真源 = control-qt `src/main.cpp`）
+
+- 触发：云端 registered 回执的 `updateMandatory` == true → 8 秒后 `maybeAutoUpdate()`
+  → 复用 `startSelfUpdate()`（下载→sha256→NSIS /S 静默装），**不再需要老师在教室机点**。
+- 三道保命：① 退避（3分/15分/1时/4时/**12时封顶**，记在 `ota-state.json`）
+  ② 装前备份当前 exe 到 `%LOCALAPPDATA%\xingjikong\ota\prev\` + 写 `ota-pending.json`
+  ③ 看门狗 = **升级前写下的** `ota-relaunch.bat`（旧字节，新 exe 崩了也救得回来）。
+- 回滚只认"新版本连没连上云端"；从没连通过就**不回滚**（避免网络差被误判降版）。
+- 紧急刹车：`%LOCALAPPDATA%\xingjikong\ota\ota-pause`（空文件）→ 本机暂停自动升级；
+  面板也有「暂停/恢复」按钮。灰度就用它。
+- ⚠️ 0.6.3 是第一个 mandatory=true 的版本，下发即全校教室机无人值守自装；
+  **真机端到端（下载→装→重启→回滚）一次都没验证过**，只有编译+冒烟+清单下发正确。
