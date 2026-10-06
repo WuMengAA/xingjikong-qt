@@ -32,6 +32,12 @@ add_executable(stelarith-agent-qt
   # ── 远程终端（2026-10-06 加：REPL 命令行，需确认 + 单会话）──
   src/terminal_console.cpp
   src/terminal_console.h
+  # ── 星璃账号绑定（2026-10-06 加：OAuth + 设备票，零手填接入）──
+  src/oauthbind.cpp
+  src/oauthbind.h
+  # ── 考试模式（2026-10-06 加：全屏拦截 + 白名单轮询 + 计时，设计文档 3.7 第一版）──
+  src/exam_mode.cpp
+  src/exam_mode.h
 )
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::WebEngineWidgets Qt6::Network)
 

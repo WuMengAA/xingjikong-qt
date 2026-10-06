@@ -22,6 +22,7 @@
 #include "singleinstance.h"
 #include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
 #include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
+#include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -46,6 +47,7 @@
 #include <QWebSocket>
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
 #include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
+#include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 白名单轮询 + 计时）
 #include <QHostInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -280,6 +282,8 @@ static const char *kActionNames[] = {
     // 不报 = 管理端永远置灰，功能做完了看得见摸不着。
     // 顺序照旧按字母表末段排，方便以后和别的动作一起校对。
     "terminal_close", "terminal_input", "terminal_open",
+    // 考试模式（2026-10-06，设计文档 3.7 第一版）：全屏拦截 + 白名单轮询 + 计时。
+    "exam_mode", "exam_mode_stop",
 };
 static const int kActionCount = (int)(sizeof(kActionNames) / sizeof(kActionNames[0]));
 
@@ -311,6 +315,21 @@ void sendRegister()
     p.insert(QStringLiteral("token"), token);
     p.insert(QStringLiteral("version"), QString::fromLatin1(kAppVersion));
     p.insert(QStringLiteral("caps"), caps);
+
+    // 2026-10-06：设备指纹（账号绑定路径需要）。
+    // 如果 token 是站点签的设备票（7 段 v1.…），云端验票时会拿这个 fp 比对；
+    // 旧静态令牌路径不校验 fp，这个字段会被忽略。不填也不报错（兼容旧云端）。
+    // 指纹算法与 oauthbind.cpp 的 computeFingerprint() 保持一致。
+    {
+        const QString raw = QStringLiteral("%1|%2|%3|%4")
+            .arg(QHostInfo::localHostName(),
+                 QSysInfo::currentCpuArchitecture(),
+                 QSysInfo::kernelVersion(),
+                 QSysInfo::machineUniqueId().toHex());
+        const QByteArray hash = QCryptographicHash::hash(raw.toUtf8(), QCryptographicHash::Sha256)
+            .toHex().left(32);
+        p.insert(QStringLiteral("fp"), QString::fromLatin1(hash).toLower());
+    }
 
     const QString hello = makeEnvelope(QStringLiteral("register"), p);
     g_ws->sendTextMessage(hello);
@@ -834,16 +853,51 @@ bool saveAgentEnv(const QString &url, const QString &token, const QString &uid)
  */
 
 // 云端 ws 地址 → 站点 http 基址（nullptr = 推导不出）
+// 站点（website）地址的**唯一真源**（2026-10-06 加）。
+//
+// 为什么必须有它：以前站点地址是从云端 ws 地址**推导**出来的
+// （ws://host:8788/ws/agent → http://host:8090）。在生产部署下这条推导两样都错：
+//   ① 域名错：云端在 control.245959623.xyz，站点在 www.245959623.xyz，不是同一个子域；
+//   ② 端口错：站点公网走 443（Cloudflare 回源），8090 是内网端口，公网根本不通。
+// 实测两条地址的差别（这是"被控端连不上 website"的根因）：
+//   https://control.245959623.xyz:8090/api/device/activate  → 超时，连不上
+//   https://www.245959623.xyz/api/device/activate           → HTTP 400（通了，400 只是没带参数）
+// 站点是被控端绑定班级 / 走账号体系的入口，地址必须是一等配置，不能靠猜。
+// 自建站点（别的学校自己搭）请显式设 STE_QT_SITE_URL 覆盖。
+static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
+
+/** 内网自建场景判断：只有这种时候"站点与云端同机"才成立，才允许推导。 */
+static bool isPrivateHost(const QString &host)
+{
+    if (host.isEmpty()) return false;
+    if (host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) == 0) return true;
+    if (host == QLatin1String("127.0.0.1") || host == QLatin1String("::1")) return true;
+    // 172.16.0.0–172.31.255.255 才是私网；这里只做前缀粗判（内网自建场景够用），
+    // 公网 IP 撞 172. 开头的情况由"显式设 STE_QT_SITE_URL"兜住。
+    return host.startsWith(QLatin1String("10."))
+           || host.startsWith(QLatin1String("192.168."))
+           || host.startsWith(QLatin1String("172."));
+}
+
 QString siteBaseFromWsUrl(const QString &wsUrl)
 {
+    // ① 显式配置优先（自建站点 / 本机联调）
+    const QString envSite = qEnvironmentVariable("STE_QT_SITE_URL").trimmed();
+    if (!envSite.isEmpty()) return envSite;
+
+    // ② 云端地址指向**内网**时，"站点与云端同机"这个前提才成立，允许推导
+    //    （且不拼 8090：自建场景站点端口用 STE_QT_SITE_PORT 显式给，不给就走默认 443/80）
     const QUrl u(wsUrl.trimmed());
-    if (!u.isValid() || u.host().isEmpty()) return QString();
-    const QString port = qEnvironmentVariable("STE_QT_SITE_PORT").trimmed();
-    const QString scheme = (u.scheme().compare(QStringLiteral("wss"), Qt::CaseInsensitive) == 0)
-                               ? QStringLiteral("https")
-                               : QStringLiteral("http");
-    return QStringLiteral("%1://%2:%3").arg(scheme, u.host(),
-                                            port.isEmpty() ? QStringLiteral("8090") : port);
+    if (u.isValid() && !u.host().isEmpty() && isPrivateHost(u.host())) {
+        const QString port = qEnvironmentVariable("STE_QT_SITE_PORT").trimmed();
+        const QString scheme = (u.scheme().compare(QStringLiteral("wss"), Qt::CaseInsensitive) == 0)
+                                   ? QStringLiteral("https") : QStringLiteral("http");
+        return port.isEmpty() ? QStringLiteral("%1://%2").arg(scheme, u.host())
+                              : QStringLiteral("%1://%2:%3").arg(scheme, u.host(), port);
+    }
+
+    // ③ 其余一律用生产站点常量 —— 公网部署下推导出来的地址必然是错的
+    return QString::fromUtf8(kDefaultSiteUrl);
 }
 
 // 消费接入码（异步）。回调里报结果；本机 uid 用于绑定。
@@ -1415,11 +1469,91 @@ void openConfigDialog()
     auto *root = new QVBoxLayout(&dlg);
 
     auto *intro = new QLabel(QStringLiteral(
-        "这台电脑还没有接入学校的集控系统。请把管理员给的下面几项填进去，"
-        "点「保存并连接」即可，不用重启。\n"
-        "不知道填什么？找发给你安装包、或负责这台设备的管理员要。"));
+        "这台电脑还没有接入学校的集控系统。\n\n"
+        "最简单的方式：点下面的「用星璃账号绑定」——浏览器里登录你的星璃账号、点同意，"
+        "这台机器就自动接入，不用填任何东西。\n\n"
+        "如果你有管理员给的地址和令牌，也可以手动填下面三项。"));
     intro->setWordWrap(true);
     root->addWidget(intro);
+
+    // 就地提示（校验失败/绑定结果/测试结果都写这里，**不弹二次窗口**）
+    // 必须在「用星璃账号绑定」按钮之前定义——绑定回调里要用到它。
+    auto *err = new QLabel();
+    err->setWordWrap(true);
+    err->setStyleSheet(QStringLiteral("color:#c03030;"));
+    err->hide();
+    root->addWidget(err);
+
+    // ── 「用星璃账号绑定」按钮（2026-10-06：零手填路径）──
+    // 点了之后：开浏览器 → 登录授权 → 自动换设备票 → 写 agent.env → 重连。
+    // 全程不用手填地址/令牌/设备名。
+    auto *bindBtn = new QPushButton(QStringLiteral("🔑 用星璃账号绑定（推荐）"));
+    bindBtn->setStyleSheet(QStringLiteral(
+        "QPushButton{background:#5b8def;color:white;border:none;padding:10px 16px;"
+        "border-radius:6px;font-size:14px;font-weight:600}"
+        "QPushButton:hover{background:#4a7ddf}"
+        "QPushButton:disabled{background:#aaa}"));
+    root->addWidget(bindBtn);
+
+    auto *bindHint = new QLabel(QStringLiteral(
+        "点了之后会打开浏览器，登录你的星璃账号、点同意，这台机器就自动接入集控。"));
+    bindHint->setWordWrap(true);
+    bindHint->setStyleSheet(QStringLiteral("color:#888;"));
+    root->addWidget(bindHint);
+
+    // 「用星璃账号绑定」的信号槽：OAuthBind 是独立对象，对话框关了也不能被析构（绑定时对话框还在）
+    auto *oauth = new OAuthBind(&dlg);   // parent=dlg，对话框关闭时自动析构
+
+    QObject::connect(bindBtn, &QPushButton::clicked, &dlg, [&, bindBtn, bindHint, oauth, err] {
+        if (oauth->busy()) return;
+        bindBtn->setEnabled(false);
+        bindHint->setStyleSheet(QStringLiteral("color:#666;"));
+        bindHint->setText(QStringLiteral("正在打开浏览器…登录完成后会自动回来。"));
+        err->hide();
+        oauth->begin();
+    });
+
+    // 绑定成功：写 agent.env + 立即重连 + 关窗（与手动保存走同一条重连路）
+    QObject::connect(oauth, &OAuthBind::succeeded, &dlg, [&, bindBtn](const QString &wsUrl, const QString &ticket, const QString &uid, const QString &owner) {
+        bindBtn->setText(QStringLiteral("✅ 已绑定（%1）").arg(owner));
+
+        // 把设备票写进 agent.env（token 字段放票，与旧静态令牌同字段、云端按段数区分）
+        if (!saveAgentEnv(wsUrl, ticket, uid)) {
+            err->setStyleSheet(QStringLiteral("color:#c03030;"));
+            err->setText(QStringLiteral("绑定成功但写配置失败（目录无写权限？）。请用管理员身份重装后再试。"));
+            err->show();
+            bindBtn->setEnabled(true);
+            return;
+        }
+        // 保存成功 → 立刻用新配置重连
+        g_configured = true;
+        g_unconfigured = false;
+        g_unconfiguredNotified = false;
+        g_registered = false;
+        g_backoffMs = 1000;
+        if (g_ws && g_ws->state() != QAbstractSocket::UnconnectedState) {
+            g_reconnectNow = true;
+            g_ws->close();
+        } else {
+            updateTray(TrayState::Disconnected, QStringLiteral("正在用绑定配置连接…"));
+            connectNow();
+        }
+        dlg.accept();
+    });
+
+    // 绑定失败：恢复按钮 + 显示原因（不关窗，让用户可以再试或改用手动填）
+    QObject::connect(oauth, &OAuthBind::failed, &dlg, [&, bindBtn, bindHint](const QString &reason) {
+        bindBtn->setEnabled(true);
+        bindBtn->setText(QStringLiteral("🔑 用星璃账号绑定（重试）"));
+        bindHint->setStyleSheet(QStringLiteral("color:#c03030;"));
+        bindHint->setText(QStringLiteral("绑定失败：%1").arg(reason));
+    });
+
+    // 手动填的分隔线
+    auto *sep = new QLabel(QStringLiteral("── 或者手动填写（管理员给了你地址和令牌时用）──"));
+    sep->setStyleSheet(QStringLiteral("color:#bbb;text-align:center;"));
+    sep->setAlignment(Qt::AlignCenter);
+    root->addWidget(sep);
 
     auto *form = new QFormLayout();
     root->addLayout(form);
@@ -1475,12 +1609,6 @@ void openConfigDialog()
     form->addRow(QString(), codeHint);
 
     // 就地提示（校验失败/测试结果都写这里，**不弹二次窗口**）
-    auto *err = new QLabel();
-    err->setWordWrap(true);
-    err->setStyleSheet(QStringLiteral("color:#c03030;"));
-    err->hide();
-    root->addWidget(err);
-
     auto *boxes = new QDialogButtonBox();
     auto *testBtn = boxes->addButton(QStringLiteral("测试连接"), QDialogButtonBox::ActionRole);
     auto *saveBtn = boxes->addButton(QStringLiteral("保存并连接"), QDialogButtonBox::AcceptRole);
@@ -3730,7 +3858,10 @@ void handleControlText(const QString &text)
     }
     if (type == QStringLiteral("error")) {
         // 统一错误通道：云端拒绝必须看得见（fail-silent 红线）。code 是机器可读的，message 是人话。
-        fprintf(stderr, "[agent-qt] FAIL: 云端拒绝 → %s：%s\n",
+        // 错误码体系（2026-10-06）：ecode = 数字码（AU1001/CM4001…），code = 语义码兼容。
+        const QString ecode = pay.value(QStringLiteral("ecode")).toString();
+        fprintf(stderr, "[agent-qt] FAIL: 云端拒绝 → %s/%s：%s\n",
+                qPrintable(ecode.isEmpty() ? QStringLiteral("-") : ecode),
                 qPrintable(pay.value(QStringLiteral("code")).toString()),
                 qPrintable(pay.value(QStringLiteral("message")).toString()));
         return;
@@ -3765,6 +3896,24 @@ void handleControlText(const QString &text)
             TerminalConsole::inst().close(params.value(QStringLiteral("sid")).toString(),
                                          QStringLiteral("remote"));
             sendActionReceipt(id, action, QStringLiteral("done"));
+            return;
+        }
+
+        // ── 考试模式（2026-10-06，设计文档 3.7 第一版）──
+        // 异步动作：启动全屏拦截窗口 + 白名单轮询 + 倒计时；回执"started"。
+        // exam_mode_stop 手动结束（管理员收卷）。到点自动结束由 ExamMode 内部触发。
+        if (action == QStringLiteral("exam_mode")) {
+            const int minutes = params.value(QStringLiteral("minutes")).toInt();
+            QStringList whitelist;
+            const QJsonArray arr = params.value(QStringLiteral("whitelist")).toArray();
+            for (const QJsonValue &v : arr) whitelist.append(v.toString());
+            ExamMode::inst().start(minutes, whitelist);
+            sendActionReceipt(id, action, QStringLiteral("started"));
+            return;
+        }
+        if (action == QStringLiteral("exam_mode_stop")) {
+            const bool was = ExamMode::inst().stop(QStringLiteral("manual"));
+            sendActionReceipt(id, action, was ? QStringLiteral("done") : QStringLiteral("not_active"));
             return;
         }
 
