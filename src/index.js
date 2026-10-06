@@ -192,9 +192,17 @@ const server = http.createServer((req, res) => {
   // 云端是教室里几十台机器共用的入口，崩一次 = 全体掉线，等看门狗回来就是 5 分钟黑屏。
   try {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
+  // API 版本管理（《全量设计文档》10.3 落地，2026-10-07）：
+  //  REST 接口统一带 apiVersion 字段 + X-API-Version 响应头。客户端可据此判断
+  //  "连的是新后端还是旧后端"，旧客户端不会因后端加字段而崩（只加不减的兼容策略）。
+  const API_VERSION = '1.0';
   const send = (code, obj) => {
-    const body = JSON.stringify(obj);
-    res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) });
+    const body = JSON.stringify({ apiVersion: API_VERSION, ...obj });
+    res.writeHead(code, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': Buffer.byteLength(body),
+      'x-api-version': API_VERSION,
+    });
     res.end(body);
   };
 
