@@ -67,6 +67,10 @@ public:
         int days = start.daysTo(date);
         return (days >= 0) ? (days / 7) + 1 : 1;
     }
+    // QML 可调版本（static 方法 QML 调不了，包一层）
+    Q_INVOKABLE int weekFromDateQml(const QDate& date, const QString& semesterStart = QStringLiteral("09-01")) const {
+        return weekFromDate(date, semesterStart);
+    }
 
     // ---- 课表群 ----
     // 课表群名列表（QML 下拉用）

@@ -42,17 +42,53 @@ Rectangle {
                 visible: scheduleModel.groupNames().length > 1
             }
 
-            // 周次切换
+            // 周次切换（1-20 周）
             ComboBox {
                 Layout.preferredWidth: 120
-                model: [
-                    qsTr("第 1 周"),
-                    qsTr("第 2 周"),
-                    qsTr("第 3 周"),
-                    qsTr("第 4 周")
-                ]
+                model: {
+                    const arr = []
+                    for (let i = 1; i <= 20; ++i) arr.push(qsTr("第 %1 周").arg(i))
+                    return arr
+                }
                 currentIndex: Math.max(0, scheduleModel.currentWeek - 1)
                 onActivated: (i) => scheduleModel.setCurrentWeek(i + 1)
+            }
+
+            // 学期起点（MM-dd）：改了自动按当前日期重算周次
+            Rectangle {
+                Layout.preferredWidth: 132
+                Layout.preferredHeight: 30
+                radius: 6
+                color: "#2d2d30"
+                border.color: "#3f3f46"
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter
+                    x: 8; spacing: 6
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "学期起点"
+                        color: "#888"
+                        font.pixelSize: 11
+                    }
+                    TextInput {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 52
+                        text: scheduleModel.semesterStart
+                        color: "#ccc"
+                        font.pixelSize: 12
+                        validator: RegularExpressionValidator { regularExpression: /[0-9]{2}-[0-9]{2}/ }
+                        onEditingFinished: {
+                            const v = text.trim()
+                            if (/^\d{2}-\d{2}$/.test(v)) {
+                                scheduleModel.semesterStart = v
+                                scheduleModel.setCurrentWeek(
+                                    scheduleModel.weekFromDateQml(new Date(), v))
+                            } else {
+                                text = scheduleModel.semesterStart
+                            }
+                        }
+                    }
+                }
             }
         }
     }

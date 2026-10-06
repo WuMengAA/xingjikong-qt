@@ -313,7 +313,7 @@ int main(int argc, char *argv[])
     }
     SubjectModel schedSubjectModel(schedProfile.subjects);
     schedSubjectModel.setProfileRef(&schedProfile);
-    UndoManager schedUndo(&schedModel);
+    UndoManager schedUndo(&schedModel, &schedTimeSlotModel, &schedSubjectModel);
 
     // 概览页「今日课表」数据提供者（读真机 ClassIsland 档案）
     ScheduleTodayProvider schedToday;

@@ -44,7 +44,8 @@ Rectangle {
                 onClicked: {
                     const name = newNameInput.text.trim()
                     if (name === "") return
-                    subjectModel.addSubjectQml(name)
+                    // 走撤销栈：可撤销
+                    undoManager.addSubject(name, name.length > 1 ? name[0] : name)
                     newNameInput.text = ""
                 }
             }
@@ -121,12 +122,13 @@ Rectangle {
                 Button {
                     text: qsTr("删除")
                     onClicked: {
-                        if (subjectModel.removeAt(index)) {
-                            // 成功
-                        } else {
+                        const sid = subjectModel.idAt(index)
+                        if (subjectModel.isReferenced(sid)) {
                             statusMsg.text = qsTr("「%1」被课表引用，无法删除").arg(model.name)
                             statusTimer.restart()
+                            return
                         }
+                        undoManager.removeSubject(sid)  // 可撤销
                     }
                 }
             }
@@ -181,12 +183,14 @@ Rectangle {
         }
 
         onAccepted: {
-            if (subjectModel.renameAt(row, renameInput.text)) {
-                // ok
-            } else {
+            const n = renameInput.text.trim()
+            if (n === "") {
                 statusMsg.text = qsTr("改名失败：名称不能为空")
                 statusTimer.restart()
+                return
             }
+            // 走撤销栈：可撤销
+            undoManager.renameSubject(subjectModel.idAt(row), n, n.length > 1 ? n[0] : n)
         }
 
         contentItem: TextField {

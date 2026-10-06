@@ -66,10 +66,13 @@ public:
         return (row >= 0 && row < m_subjects.size()) ? m_subjects[row].teacher : QString();
     }
     Q_INVOKABLE bool addSubjectQml(const QString& name) {
+        return addSubjectQml2(name, name.left(1));
+    }
+    Q_INVOKABLE bool addSubjectQml2(const QString& name, const QString& simplifiedName) {
         Subject s;
         s.id = QUuid::createUuid().toString();
         s.name = name;
-        s.simplifiedName = name.left(1);
+        s.simplifiedName = simplifiedName;
         return addSubject(s) >= 0;
     }
     Q_INVOKABLE bool removeAt(int row) {
@@ -78,6 +81,31 @@ public:
     Q_INVOKABLE bool renameAt(int row, const QString& newName) {
         if (newName.trimmed().isEmpty()) return false;
         return setSubjectName(row, newName);
+    }
+    // ── 撤销系统需要（2026-10-06 加）──
+    Q_INVOKABLE int indexOfId(const QString& id) const {
+        for (int i = 0; i < m_subjects.size(); ++i) {
+            if (m_subjects[i].id == id) return i;
+        }
+        return -1;
+    }
+    Q_INVOKABLE bool insertAt(int row, const QString& id, const QString& name,
+                              const QString& simplifiedName) {
+        if (row < 0 || row > m_subjects.size()) return false;
+        Subject s;
+        s.id = id; s.name = name; s.simplifiedName = simplifiedName;
+        beginInsertRows({}, row, row);
+        m_subjects.insert(row, s);
+        endInsertRows();
+        return true;
+    }
+    Q_INVOKABLE bool renameAt2(int row, const QString& newName, const QString& newShort) {
+        if (row < 0 || row >= m_subjects.size()) return false;
+        if (newName.trimmed().isEmpty()) return false;
+        m_subjects[row].name = newName;
+        if (!newShort.isEmpty()) m_subjects[row].simplifiedName = newShort;
+        emit dataChanged(index(row, 0), index(row, 0));
+        return true;
     }
 
 private:

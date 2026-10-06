@@ -23,6 +23,9 @@ Rectangle {
     // 显示用临时值（拖拽中更新）
     property int dragStartMin: blockStartMin
     property int dragEndMin: blockEndMin
+    // 拖拽中吸附预览：release 位置会被吸附到的 5 分钟刻度
+    property bool dragActive: false
+    property int snapPreviewMin: -1
 
     // 时间显示
     Text {
@@ -65,6 +68,7 @@ Rectangle {
 
             onPressed: (mouse) => {
                 startMouseY = mouse.y + parent.y
+                block.dragActive = true
             }
             onPositionChanged: (mouse) => {
                 var dy = mouse.y + parent.y - startMouseY
@@ -74,14 +78,18 @@ Rectangle {
                 block.dragStartMin = min
                 block.y = timeAxisRef.timeToY(min)
                 block.height = Math.max(16, (block.curEndMin - min) * timeAxisRef.pixelsPerMinute)
+                block.snapPreviewMin = timeAxisRef.snapTo5(min)
             }
             onReleased: () => {
                 var newStart = timeAxisRef.snapTo5(block.dragStartMin)
                 if (newStart < block.curEndMin - 5) {
-                    timeSlotModel.setSlotByMinutes(block.blockIndex, newStart, block.curEndMin)
+                    // 走撤销栈（undoManager 统一）
+                    undoManager.setSlotTime(block.blockIndex, newStart, block.curEndMin)
                 }
                 block.dragStartMin = block.curStartMin
                 block.dragEndMin = block.curEndMin
+                block.dragActive = false
+                block.snapPreviewMin = -1
             }
         }
     }
@@ -103,6 +111,7 @@ Rectangle {
 
             onPressed: (mouse) => {
                 startMouseY = mouse.y + parent.y
+                block.dragActive = true
             }
             onPositionChanged: (mouse) => {
                 var dy = mouse.y + parent.y - startMouseY
@@ -111,14 +120,17 @@ Rectangle {
                 if (min <= block.curStartMin + 5) min = block.curStartMin + 5
                 block.dragEndMin = min
                 block.height = Math.max(16, (min - block.curStartMin) * timeAxisRef.pixelsPerMinute)
+                block.snapPreviewMin = timeAxisRef.snapTo5(min)
             }
             onReleased: () => {
                 var newEnd = timeAxisRef.snapTo5(block.dragEndMin)
                 if (newEnd > block.curStartMin + 5) {
-                    timeSlotModel.setSlotByMinutes(block.blockIndex, block.curStartMin, newEnd)
+                    undoManager.setSlotTime(block.blockIndex, block.curStartMin, newEnd)
                 }
                 block.dragStartMin = block.curStartMin
                 block.dragEndMin = block.curEndMin
+                block.dragActive = false
+                block.snapPreviewMin = -1
             }
         }
     }
@@ -137,5 +149,22 @@ Rectangle {
         color: "#000"
         opacity: 0.3
         visible: hoverArea.hovered === true
+    }
+
+    // 拖拽吸附预览：显示 release 位置会被吸附到的 5 分钟刻度线
+    Rectangle {
+        id: snapLine
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: {
+            if (block.snapPreviewMin < 0) return -100
+            var rel = timeAxisRef.timeToY(block.snapPreviewMin) - block.y
+            // 顶部拖：线在块上边缘附近；底部拖：线在下边缘
+            return Math.max(0, Math.min(parent.height - 2, rel))
+        }
+        height: 2
+        color: "#ffd33d"
+        opacity: block.dragActive ? 0.9 : 0
+        visible: opacity > 0
     }
 }
