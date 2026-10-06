@@ -341,6 +341,23 @@ export function broadcastFrame(uid, buf, frameSeq = 0) {
   return { hits, bytes: buf.length };
 }
 
+/**
+ * 把被控端主动吐出来的 **terminal_* 文本帧** 转给订阅了这台的管理端。
+ * 不能复用 broadcastFrame：那条发的是 image/jpeg 二进制帧（makeFrame 合成），
+ * 终端流式输出要的是普通 JSON 文本帧，走不着那条路。
+ * @returns 命中几个管理端
+ */
+export function relayTerminalFrame(uid, type, payload) {
+  let hits = 0;
+  for (const [ws, v] of viewers) {
+    if (!v.subs.has(String(uid))) continue;
+    if (ws.readyState !== 1) { viewers.delete(ws); continue; }
+    try { sendTo(ws, type, payload); hits++; }
+    catch { viewers.delete(ws); }
+  }
+  return hits;
+}
+
 /** 设备表广播（管理端每几秒刷一次列表用）。 */
 export function broadcastDevices() {
   const devices = listDevices();
@@ -365,7 +382,14 @@ export function broadcastToViewers(type, payload) {
 }
 
 /**
- * 记录设备真实执行回执（done/failed）。失败必须如实记下，不许静默。
+ * 记录设备真实执行回执（done / failed / started）。失败必须如实记下，不许静默。
+ * 三态说明：
+ *   done     —— 做完了（老协议只有这一态，绝大多数动作都回这个）
+ *   failed   —— 没做成（带 error）
+ *   started  —— 起来了但活儿还没完（2026-10-06 远程终端的 terminal_open 回这个：
+ *               会话已经开好并会持续吐帧，不是失败，只是"别把它当成最终结果"）。
+ *               早期这版是 `(result === 'done') ? 'done' : 'failed'`，
+ *               started 会被非黑即白地记成 failed —— 审计上看着像"终端没开起来"，实为误报。
  * @param data 动作的附加数据（进程列表 / 日志行 / 音量实际值 / 截图路径…），可空。
  *             协议规范第十节：可选字段，客户端不认就忽略，不算错。
  * @returns {{id, uid, action, result, error, data, at}}
@@ -375,7 +399,8 @@ export function recordResult(id, uid, action, result, error, data) {
     id,
     uid,
     action,
-    result: (result === 'done') ? 'done' : 'failed',
+    // 只放行 three 种已知态；设备回了个没见过的串，一律按 failed 记（保底：宁可显眼，别蒙过去）
+    result: (result === 'done' || result === 'started') ? result : 'failed',
     error: error || null,
     data: (data && typeof data === 'object') ? data : null,
     at: new Date().toISOString(),
@@ -394,7 +419,8 @@ export function recordResult(id, uid, action, result, error, data) {
   // 回执到达 → 队列里这条"已下发未回执"标完成，之后重连不再补发。
   // 不在队列（已过期、或落盘降级）也不报错：回执本身仍如实转给管理端。
   settleQueue(id, rec.result, rec.error);
-  pushEvent(rec.result === 'done' ? 'info' : 'error',
+  // started 不是失败，别往红色事件流里塞
+  pushEvent(rec.result === 'failed' ? 'error' : 'info',
     `设备真实执行回执 action=${action} result=${rec.result}`,
     { uid, id, error: rec.error || undefined, ...(rec.notice_id !== undefined ? { notice_id: rec.notice_id } : {}) });
   return rec;

@@ -133,6 +133,7 @@ function sndErr(ws, code, detail) {
 import {
   pushEvent, markConnected, markDisconnected, addFrame, setRecentFrame,
   listDevices, getDevice, sendInstruction, listEvents, listPending, ensureEventsFile,
+  relayTerminalFrame,
   addViewer, removeViewer, subscribeViewer, unsubscribeViewer, pinViewer, autoSubscribeViewers,
   broadcastFrame, broadcastDevices, broadcastToViewers, recordResult, getResult, viewerCount,
   touchHeartbeat, sweepStale,
@@ -715,6 +716,17 @@ viewerWss.on('connection', (ws) => {
           return;
         }
         const r = sendInstruction(uid, String(action), params ?? {});
+        // ── 远程终端的审计：能跑 shell 就等于能把机器拆了，谁敲了什么必须留得下来 ──
+        if (action === 'terminal_open') {
+          pushEvent('warn', '管理端请求开远程终端（需被控端本机点头）',
+            { uid, sid: params?.sid ?? null, shell: params?.shell ?? null });
+        } else if (action === 'terminal_input') {
+          // 命令原文进事件流水；事件行有 4096 上限，这里先截到 200 免得把日志撑爆
+          const cmd = String(params?.keys ?? '');
+          pushEvent('warn', `终端输入：${cmd.slice(0, 200)}`, { uid, sid: params?.sid ?? null, cmdChars: cmd.length });
+        } else if (action === 'terminal_close') {
+          pushEvent('info', '管理端主动关了远程终端', { uid, sid: params?.sid ?? null });
+        }
         // 云端只说它发送成功与否；到没到机器、有没有真做，是设备回执的事
         snd(ws, 'instruction-result', {
           ok: r.state === 'sent', state: r.state, uid, action,
@@ -866,6 +878,23 @@ wss.on('connection', (ws) => {
     if (p.type === 'rtc-start' || p.type === 'rtc-stop') {
       // 云端的「有人在看了 / 没人看了」开关：设备端自己起停 WebRTC 推流，这里只记一条事件流水便于排障
       pushEvent('info', '设备收到 WebRTC 开关 ' + p.type, { uid });
+      return;
+    }
+
+    if (p.type === 'terminal_opened' || p.type === 'terminal_data'
+      || p.type === 'terminal_exit' || p.type === 'terminal_closed') {
+      // 被控端远程终端的流式帧：只投给订阅了这台的管理端，不群发（同抓屏那条规矩）。
+      // terminal_closed/exit 单独记一条 —— 会话什么时候开、什么时候没，是审计要能查到的。
+      const hits = relayTerminalFrame(uid, p.type, p.payload);
+      if (p.type === 'terminal_closed' || p.type === 'terminal_exit') {
+        pushEvent(p.type === 'terminal_closed' ? 'info' : 'warn',
+          `远程终端会话结束：${p.type}`, { uid, sid: p.payload?.sid ?? null, reason: p.payload?.reason ?? null });
+      }
+      if (hits > 0 && p.type !== 'terminal_data') {
+        pushEvent('info', `终端帧 ${p.type} 已推给管理端`, { uid, viewers: hits });
+      } else if (hits === 0) {
+        pushEvent('warn', `终端帧 ${p.type} 推了但没人订阅（管理端没连或没选这台）`, { uid });
+      }
       return;
     }
 
