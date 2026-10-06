@@ -19,10 +19,12 @@
 #include "schedule/undo_manager.h"
 #include "schedule_view.h"          // 2026-10-06：大屏今日课表窗口
 #include "schedule_today_provider.h" // 2026-10-06：概览页今日课表数据
+#include "file_dialogs.h"            // 2026-10-06：课表编辑器文件选择
 
 #include <QApplication>   // 2026-10-06：要托盘必须 QApplication（QSystemTrayIcon 属 QtWidgets）。
                           // Qt6Widgets 本来就链了（styles/Qt6Widgets.dll 也在绿色包里），
                           // 所以换 app 类型不增加任何打包负担。
+#include <QWindow>        // 2026-10-06：托盘点击切换主窗口显示/隐藏
 #include <QImage>
 #include <QMessageBox>
 #include <QQmlApplicationEngine>
@@ -221,6 +223,11 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationVersion(QString::fromLatin1(kViewerVersion));
     logf("[viewer] viewer-qt 版本 %s（日志：%s）", kViewerVersion, logFilePath().toLocal8Bit().constData());
 
+    // ── 后台托盘常驻（2026-10-06 补）────────────────────────────────────────
+    // 关主窗口不退出程序：管理端是常驻后台的工具，主窗口关了进程必须还在（收流/托盘活着），
+    // 只有托盘菜单「退出管理端」才真正退出。与被控端 control-qt 同一约定（L3796）。
+    app.setQuitOnLastWindowClosed(false);
+
     // ── 单机只允许一个管理端（2026-10-05 与被控端同款新增）──────────────────
     // 场景：桌面快捷方式 + 登录自启 + 老师又手点一次 → 两个实例抢同一台老师的屏幕，
     // 画面/日志互相覆盖。命名互斥体用 Global\ 优先（跨会话，兼容计划任务 Session 0），
@@ -322,6 +329,9 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("undoManager"), &schedUndo);
     engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), schedRepo.defaultProfilePath());
     engine.rootContext()->setContextProperty(QStringLiteral("scheduleToday"), &schedToday);
+    // 课表编辑器文件选择对话框
+    FileDialogs fileDlgs;
+    engine.rootContext()->setContextProperty(QStringLiteral("fileDialogs"), &fileDlgs);
     // 2026-10-06：QML 从**磁盘**加载，不再从 exe 里的资源读。
     // 为什么改：QML 编进 exe（qt_add_qml_module 的 QML_FILES）意味着改一个按钮文案都要重出整包，
     // 对教室里的管理端基本等于「改不了」。改成读磁盘后，界面层可作为补丁包单独下发（热更）。
@@ -398,6 +408,21 @@ int main(int argc, char *argv[])
         QObject::connect(actQuit, &QAction::triggered, &app, &QApplication::quit);
 
         tray->setContextMenu(menu);
+        // 点击托盘图标：主窗口 显示↔隐藏 切换（常驻托盘的标准交互）
+        QObject::connect(tray, &QSystemTrayIcon::activated, &app, [&engine, tray](QSystemTrayIcon::ActivationReason reason) {
+            if (reason != QSystemTrayIcon::Trigger && reason != QSystemTrayIcon::DoubleClick)
+                return;
+            auto *win = engine.rootObjects().isEmpty() ? nullptr : qobject_cast<QWindow *>(engine.rootObjects().first());
+            if (!win) return;
+            if (win->isVisible()) {
+                win->hide();
+            } else {
+                win->show();
+                win->raise();
+                win->requestActivate();
+            }
+            Q_UNUSED(tray);
+        });
         tray->show();          // 先设图标再 show，避免 "No Icon set" 警告
         logf("[viewer] 托盘已就绪（v%s）", kViewerVersion);
     } else {

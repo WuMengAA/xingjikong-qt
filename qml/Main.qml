@@ -28,6 +28,13 @@ ApplicationWindow {
     title: "星集控"
     color: th.win
 
+    // 关闭 = 隐藏到托盘（后台常驻；main.cpp 已 setQuitOnLastWindowClosed(false)，
+    // 只有托盘菜单「退出管理端」才真正退出）
+    onClosing: (close) => {
+        close.accepted = false
+        root.hide()
+    }
+
     // ── 主题令牌（黑白默认黑；浅色为备选）──
     // 页面里一律从 th 取色，不写死 —— 否则换主题必花。
     property bool darkMode: true

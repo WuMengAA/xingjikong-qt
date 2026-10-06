@@ -53,11 +53,14 @@ ApplicationWindow {
             Button {
                 text: qsTr("保存")
                 onClicked: {
-                    if (scheduleModel.saveTo(profilePath)) {
-                        saveStatus.text = qsTr("已保存 → %1").arg(profilePath)
+                    const p = fileDialogs.getSavePath(qsTr("保存课表档案"), profilePath,
+                                                      qsTr("JSON (*.json);;所有文件 (*.*)"))
+                    if (p === "") return
+                    if (scheduleModel.saveTo(p)) {
+                        saveStatus.text = qsTr("已保存 → %1").arg(p)
                         saveStatus.color = "#6ecb63"
                     } else {
-                        saveStatus.text = qsTr("保存失败：%1").arg(profilePath)
+                        saveStatus.text = qsTr("保存失败：%1").arg(p)
                         saveStatus.color = "#e06c6c"
                     }
                 }
@@ -65,7 +68,9 @@ ApplicationWindow {
             Button {
                 text: qsTr("导出CSES")
                 onClicked: {
-                    const p = profilePath + ".cses.json"
+                    const p = fileDialogs.getSavePath(qsTr("导出 CSES"), profilePath + ".cses.json",
+                                                      qsTr("JSON (*.json)"))
+                    if (p === "") return
                     if (scheduleModel.exportCses(p)) {
                         saveStatus.text = qsTr("已导出 → %1").arg(p)
                         saveStatus.color = "#6ecb63"
@@ -78,12 +83,42 @@ ApplicationWindow {
             Button {
                 text: qsTr("导入CSES")
                 onClicked: {
-                    const p = profilePath + ".cses.json"
+                    const p = fileDialogs.getOpenPath(qsTr("导入 CSES"), qsTr("JSON (*.json)"))
+                    if (p === "") return
                     if (scheduleModel.importCses(p)) {
                         saveStatus.text = qsTr("已导入 %1").arg(p)
                         saveStatus.color = "#6ecb63"
                     } else {
-                        saveStatus.text = qsTr("导入失败（先导出再导入）")
+                        saveStatus.text = qsTr("导入失败（文件格式不对？）")
+                        saveStatus.color = "#e06c6c"
+                    }
+                }
+            }
+            Button {
+                text: qsTr("导出CSV")
+                onClicked: {
+                    const p = fileDialogs.getSavePath(qsTr("导出 CSV 课表"), "schedule.csv",
+                                                      qsTr("CSV (*.csv)"))
+                    if (p === "") return
+                    if (scheduleModel.exportCsv(p)) {
+                        saveStatus.text = qsTr("已导出 CSV → %1").arg(p)
+                        saveStatus.color = "#6ecb63"
+                    } else {
+                        saveStatus.text = qsTr("导出 CSV 失败")
+                        saveStatus.color = "#e06c6c"
+                    }
+                }
+            }
+            Button {
+                text: qsTr("导入CSV")
+                onClicked: {
+                    const p = fileDialogs.getOpenPath(qsTr("导入 CSV 课表"), qsTr("CSV (*.csv)"))
+                    if (p === "") return
+                    if (scheduleModel.importCsv(p)) {
+                        saveStatus.text = qsTr("已导入 CSV → %1").arg(p)
+                        saveStatus.color = "#6ecb63"
+                    } else {
+                        saveStatus.text = qsTr("导入 CSV 失败")
                         saveStatus.color = "#e06c6c"
                     }
                 }
