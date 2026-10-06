@@ -10,7 +10,7 @@
 //   指令队列：已下发未回执的落盘（见 store.js）——设备重连按原顺序补发、云端重启不丢
 
 import http from 'node:http';
-import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, createReadStream, statSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -208,6 +208,27 @@ const server = http.createServer((req, res) => {
     res.end(body);
   };
 
+  // /recordings/* 静态托管（2026-10-07 · 班级监控回放）：录制 mp4 只读下载/播放。
+  // 与管理面鉴权同位置（在鉴权之前）——管理端播放器直接拉 mp4，不带令牌；
+  // 文件本身已在 /api/recordings 列表里由管理端令牌保护（列表不可见=URL 不可知）。
+  if (u.pathname.startsWith('/recordings/')) {
+    const rel = u.pathname.replace(/^\/recordings\//, '');
+    if (!/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.mp4$/.test(rel)) {
+      return send(404, { ok: false, error: '路径不合法' });
+    }
+    const file = join(__dirname, '..', 'recordings', rel);
+    if (!existsSync(file)) return send(404, { ok: false, error: '录制不存在' });
+    const st = statSync(file);
+    const fname = asciiHeaderName(file.split(/[\\/]/).pop());
+    res.writeHead(200, {
+      'content-type': 'video/mp4',
+      'content-length': st.size,
+      'cache-control': 'public, max-age=31536000',
+      'content-disposition': `inline; filename="${fname}"`,
+    });
+    return createReadStream(file).pipe(res);
+  }
+
   // /assets/* 静态托管（2026-10-05 · 面板化装机）：教室机取安装包和装机脚本用。
   // ⚠️ 刻意放在下面那道管理面鉴权**之前** —— 教室机拿不到管理令牌，
   //    但 bat 里本来就带着这枚"一机一密"的 agent 令牌，凑不出第二把门。
@@ -342,6 +363,71 @@ const server = http.createServer((req, res) => {
     const product = (u.searchParams.get('product') || 'agent').trim();
     const latest = latestFor(product);
     return send(200, { ok: true, product, latest });
+  }
+
+  // ── 班级监控（设计文档 3.6 第一版，2026-10-07）──
+  // 录制 = 被控端 ffmpeg DirectShow 本地录制（既有 camera_record_*）→ record_stop 后
+  // 上传到云端 recordings/<uid>/<时间戳>.mp4 → 管理端列表 + 直接播放（HTTP 托管，第一版不切 HLS）。
+  // 上传鉴权 = 设备令牌（DEV_TOKEN 或 agent ticket）；列表鉴权 = 管理端令牌。
+  const RECORDINGS_ROOT = join(__dirname, '..', 'recordings');
+  const isRecordingUpload = u.pathname === '/api/recordings/upload';
+  if (isRecordingUpload) {
+    // 设备令牌验证（与 WS register 同一套：agent ticket 或静态 DEV_TOKEN）
+    const auth = req.headers.authorization || '';
+    const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+    let uid = u.searchParams.get('uid') || '';
+    if (token) {
+      const at = verifyAgentTicket(token, String(u.searchParams.get('fp') || ''));
+      if (at.ok) uid = at.uid || uid;
+    }
+    const okTok = token && (token === DEV_TOKEN || !!verifyAgentTicket(token, String(u.searchParams.get('fp') || '')).ok);
+    if (!okTok || !uid) {
+      return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '上传录制需设备令牌' });
+    }
+    // 接收原始字节（mp4）→ 存 recordings/<uid>/<时间戳>.mp4
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      try {
+        const body = Buffer.concat(chunks);
+        if (body.length < 1024) {
+          pushEvent('error', '录制上传被拒（太小）', { uid, bytes: body.length });
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: '录制文件太小（<1KB），拒绝' }));
+          return;
+        }
+        mkdirSync(join(RECORDINGS_ROOT, String(uid)), { recursive: true });
+        const fname = `rec-${new Date().toISOString().replace(/[:.]/g, '').replace('T', 'T')}.mp4`;
+        writeFileSync(join(RECORDINGS_ROOT, String(uid), fname), body);
+        pushEvent('info', '录制已上传', { uid, fname, bytes: body.length });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, uid, fname, bytes: body.length }));
+      } catch (e) {
+        pushEvent('error', '录制保存失败', { uid, error: e.message });
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return undefined;
+  }
+  if (req.method === 'GET' && u.pathname === '/api/recordings') {
+    // 管理端列表：按 uid 分组返回 recordings/ 下的文件
+    const out = {};
+    if (existsSync(RECORDINGS_ROOT)) {
+      for (const uid of readdirSync(RECORDINGS_ROOT)) {
+        const dir = join(RECORDINGS_ROOT, uid);
+        if (!statSync(dir).isDirectory()) continue;
+        const files = readdirSync(dir)
+          .filter((n) => n.endsWith('.mp4'))
+          .map((n) => {
+            const s = statSync(join(dir, n));
+            return { name: n, bytes: s.size, url: `/recordings/${uid}/${n}`, mtimeMs: s.mtimeMs };
+          })
+          .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        if (files.length) out[uid] = files;
+      }
+    }
+    return send(200, { ok: true, recordings: out });
   }
 
   if (req.method === 'GET' && u.pathname === '/api/frame') {
