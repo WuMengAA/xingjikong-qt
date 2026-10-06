@@ -59,6 +59,9 @@ qt_add_executable(viewer-qt
   src/singleinstance.h
   src/oauthlogin.cpp
   src/oauthlogin.h
+  # ── 语音对讲（2026-10-07）：管理端 winmm waveIn 采集 ──
+  src/audio_capture.cpp
+  src/audio_capture.h
   # ── 课表编辑器模块（2026-10-06 从 schedule-qt 并入）──
   src/schedule/profile_repository.cpp
   src/schedule/schedule_model.cpp

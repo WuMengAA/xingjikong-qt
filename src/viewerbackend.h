@@ -32,6 +32,8 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 #include <QString>
 #include <QStringList>
 
+class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向声明，避免引入 mmsystem）
+
 class QDateTime;
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -245,6 +247,24 @@ public:
     Q_INVOKABLE void sendPing();
     Q_INVOKABLE void sendPointer(const QString &kind, double nx, double ny);
     Q_INVOKABLE void sendType(const QString &text);
+
+    // ── 语音对讲（设计文档 3.3，2026-10-07）──
+    /** 开始讲话：开麦克风采集 → 通知云端 audio.start → 每帧 PCM 二进制发出。 */
+    Q_INVOKABLE bool startSpeaking();
+    /** 停止讲话：关麦 → audio.stop。 */
+    Q_INVOKABLE void stopSpeaking();
+    /** 是否正在讲话。 */
+    Q_INVOKABLE bool speaking() const;
+    /** 最后一次开麦失败原因（QML 提示用）。 */
+    Q_INVOKABLE QString speakError() const;
+
+    // ── 屏幕广播（设计文档《屏幕广播-第一版设计》，2026-10-07）──
+    /** 开始屏幕广播：抓屏 QTimer → 每帧 JPEG 二进制发云端 → broadcast.start。 */
+    Q_INVOKABLE bool startBroadcast();
+    /** 停止屏幕广播。 */
+    Q_INVOKABLE void stopBroadcast();
+    /** 是否正在广播。 */
+    Q_INVOKABLE bool broadcasting() const;
 
     /**
      * 推一个本机文件给当前选中的教室机。
@@ -538,4 +558,13 @@ private:
     double m_fps = 0.0;
     qint64 m_lastFpsCheckMs = 0;
     qint64 m_pingSentMs = 0;
+
+    // ── 语音对讲（2026-10-07）──
+    AudioCapture *m_audioCapture = nullptr;   // 麦克风采集（懒创建）
+    bool m_speaking = false;                  // 当前是否在讲话
+    QString m_speakError;
+
+    // ── 屏幕广播（2026-10-07）──
+    QTimer *m_bcastTimer = nullptr;           // 抓屏节拍（3fps）
+    bool m_broadcasting = false;              // 是否在广播
 };

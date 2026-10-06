@@ -3,6 +3,7 @@
 #include "viewerbackend.h"
 
 #include "oauthlogin.h"
+#include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
 
 #include <QAbstractSocket>
 #include <QDateTime>
@@ -11,6 +12,10 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImage>
+#include <QScreen>
+#include <QPixmap>
+#include <QBuffer>
+#include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QDesktopServices>
@@ -1757,6 +1762,110 @@ void ViewerBackend::sendAction(const QString &action, const QJsonObject &params)
     p.insert(QStringLiteral("action"), action);
     if (!params.isEmpty()) p.insert(QStringLiteral("params"), params);
     sendEnvelope(QStringLiteral("instruction"), p);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 语音对讲（设计文档 3.3，2026-10-07）
+// 老师端：开麦 → audio.start → 每帧 PCM 二进制发云端 → 云端 fan-out → 学生端播放。
+// 安全（3.3.6）：默认静音，只有点"开始讲话"才采集；停止即完全静音；不录音不存储。
+// ──────────────────────────────────────────────────────────────────────
+
+bool ViewerBackend::startSpeaking()
+{
+    if (m_speaking) return true;
+    if (!m_audioCapture) m_audioCapture = new AudioCapture(this);
+
+    // 采集回调：每 20ms 一帧 PCM → 发云端（二进制帧，云端按 audio 会话转发）
+    m_audioCapture->onFrame = [this](const QByteArray &pcm) {
+        if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState) return;
+        m_ws->sendBinaryMessage(pcm); // 原始 PCM 帧（云端 parseFrame 兼容，mime 由会话推断）
+    };
+    m_audioCapture->onError = [this](const QString &err) {
+        setStatus(QStringLiteral("语音：") + err, true);
+        m_speakError = err;
+        m_speaking = false;
+    };
+
+    if (!m_audioCapture->startCapture()) {
+        m_speakError = m_audioCapture->lastError();
+        setStatus(QStringLiteral("开麦失败：") + m_speakError, true);
+        return false;
+    }
+
+    // 通知云端开始语音会话（之后二进制帧才被接受并转发）
+    sendEnvelope(QStringLiteral("audio.start"), QJsonObject());
+    m_speaking = true;
+    m_speakError.clear();
+    setStatus(QStringLiteral("🎤 正在讲话（全班可听），再次点击停止"), false);
+    qInfo("[viewer] 🎤 语音对讲开始");
+    return true;
+}
+
+void ViewerBackend::stopSpeaking()
+{
+    if (!m_speaking) return;
+    if (m_audioCapture) m_audioCapture->stopCapture();
+    sendEnvelope(QStringLiteral("audio.stop"), QJsonObject());
+    m_speaking = false;
+    setStatus(QStringLiteral("语音已停止（静音）"), false);
+    qInfo("[viewer] 🎤 语音对讲结束");
+}
+
+bool ViewerBackend::speaking() const
+{
+    return m_speaking;
+}
+
+QString ViewerBackend::speakError() const
+{
+    return m_speakError;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 屏幕广播（设计文档《屏幕广播-第一版设计》，2026-10-07）
+// 管理端抓屏（3fps JPEG）→ 二进制帧发云端 → 云端 fan-out → 被控端全屏显示。
+// ──────────────────────────────────────────────────────────────────────
+
+bool ViewerBackend::startBroadcast()
+{
+    if (m_broadcasting) return true;
+    if (!m_bcastTimer) {
+        m_bcastTimer = new QTimer(this);
+        m_bcastTimer->setInterval(330); // ~3fps（设计文档：讲课 3-5fps 足够且带宽友好）
+        connect(m_bcastTimer, &QTimer::timeout, this, [this] {
+            if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState) return;
+            QScreen *screen = QGuiApplication::primaryScreen();
+            if (!screen) return;
+            // 抓屏 → JPEG（质量 70，1280 内缩放 —— 带宽 60 台 × 300kbps 可承受）
+            QPixmap pm = screen->grabWindow(0);
+            if (pm.width() > 1280) pm = pm.scaledToWidth(1280, Qt::SmoothTransformation);
+            QByteArray jpg;
+            QBuffer buf(&jpg);
+            buf.open(QIODevice::WriteOnly);
+            if (pm.save(&buf, "JPG", 70)) m_ws->sendBinaryMessage(jpg);
+        });
+    }
+    m_bcastTimer->start();
+    m_broadcasting = true;
+    sendEnvelope(QStringLiteral("broadcast.start"), QJsonObject());
+    setStatus(QStringLiteral("📺 正在屏幕广播（老师屏幕 → 全部在线设备），再次点击停止"), false);
+    qInfo("[viewer] 📺 屏幕广播开始");
+    return true;
+}
+
+void ViewerBackend::stopBroadcast()
+{
+    if (!m_broadcasting) return;
+    if (m_bcastTimer) m_bcastTimer->stop();
+    m_broadcasting = false;
+    sendEnvelope(QStringLiteral("broadcast.stop"), QJsonObject());
+    setStatus(QStringLiteral("屏幕广播已停止"), false);
+    qInfo("[viewer] 📺 屏幕广播结束");
+}
+
+bool ViewerBackend::broadcasting() const
+{
+    return m_broadcasting;
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -1589,6 +1589,83 @@ ApplicationWindow {
                                 }
                             }
                         }
+
+                        // ── 语音对讲（2026-10-07，设计文档 3.3 第一版）──
+                        // 老师→全班单向广播：开麦采集 PCM → 云端 fan-out → 学生端播放。
+                        // 安全（3.3.6）：默认静音，只有点"开始讲话"才采集；停止即完全静音。
+                        Rectangle {
+                            width: parent.width
+                            height: speakCol.height + 32
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: speakCol
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.topMargin: 16
+                                spacing: 10
+                                Text { text: "语音对讲（老师讲话，全班听）"; color: th.fg3; font.pixelSize: 11 }
+                                Row {
+                                    spacing: 8
+                                    Button {
+                                        text: backend.speaking ? "停止讲话" : "开始讲话"
+                                        onClicked: {
+                                            if (backend.speaking) {
+                                                backend.stopSpeaking()
+                                                hint("语音已停止（静音）")
+                                            } else {
+                                                if (backend.startSpeaking()) {
+                                                    hint("🎤 正在讲话，全班可听；再次点击停止")
+                                                } else {
+                                                    hint("开麦失败：" + backend.speakError)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 屏幕广播（2026-10-07，设计文档《屏幕广播-第一版设计》）──
+                        // 老师屏幕 → 全部在线设备全屏显示（3fps JPEG，60 台可承受）。
+                        Rectangle {
+                            width: parent.width
+                            height: bcastCol2.height + 32
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: bcastCol2
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.topMargin: 16
+                                spacing: 10
+                                Text { text: "屏幕广播（老师屏幕 → 全部在线设备）"; color: th.fg3; font.pixelSize: 11 }
+                                Row {
+                                    spacing: 8
+                                    Button {
+                                        text: backend.broadcasting ? "停止广播" : "开始广播"
+                                        onClicked: {
+                                            if (backend.broadcasting) {
+                                                backend.stopBroadcast()
+                                                hint("屏幕广播已停止")
+                                            } else {
+                                                if (backend.startBroadcast()) {
+                                                    hint("📺 正在屏幕广播；再次点击停止")
+                                                } else {
+                                                    hint("广播启动失败")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
