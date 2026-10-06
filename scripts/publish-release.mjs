@@ -223,6 +223,26 @@ async function cmdShow() {
 }
 
 // ── 发布 ────────────────────────────────────────────────────────────────────
+/**
+ * 把包落进 assets/pkg/。默认**复制**（不是移动，源文件留在原处 —— 用户的规定）。
+ * `--hardlink`：同盘 NTFS 下先试硬链接（零额外磁盘占用）；跨盘或不支持一律 catch 回落复制。
+ * ⚠️ 硬链接的两个名字指向**同一份数据**：删除其中任一个，另一个也就没了。
+ *    所以它不等于"复制出了两份独立文件"——清理旧包时别按复制的直觉以为 dist/ 那份还在。
+ */
+function linkOrCopy(src, dest, hardlink) {
+	if (hardlink && src !== dest) {
+		try {
+			fs.linkSync(src, dest);
+			log(`  已硬链接 → ${path.relative(ROOT, dest)}（零额外占用）`);
+			return;
+		} catch (e) {
+			log(`  硬链接不可用（${e.code || e.message}），回落复制`);
+		}
+	}
+	fs.copyFileSync(src, dest);
+	log(`  已复制 → ${path.relative(ROOT, dest)}`);
+}
+
 async function cmdPublish() {
 	const product = arg('product');
 	const version = arg('version');
@@ -230,6 +250,8 @@ async function cmdPublish() {
 	const notes = arg('notes', '');
 	const mandatory = has('mandatory');
 	const dryRun = has('dry-run');
+	// 2026-10-06 新增：同盘下优先用硬链接落盘，省掉一份 125MB 的复制。
+	const useHardlink = has('hardlink');
 
 	if (typeof product !== 'string' || !PRODUCTS.includes(product)) {
 		fail(`--product 必须是 ${PRODUCTS.join(' 或 ')}`);
@@ -301,16 +323,18 @@ async function cmdPublish() {
 		return true;
 	}
 
-	// 复制（**不是移动**）：源文件留在原处，用户的规定。
+	// 落盘（**不是移动**）：源文件留在原处，用户的规定。
 	fs.mkdirSync(PKG_DIR, { recursive: true });
 	const dest = path.join(PKG_DIR, baseName);
 	if (fs.existsSync(dest)) {
 		const sameSha = (await sha256File(dest)) === sha;
 		log(`\n目标已存在 ${path.relative(ROOT, dest)}：${sameSha ? '内容相同，跳过复制' : '内容不同，覆盖'}`);
-		if (!sameSha) fs.copyFileSync(file, dest);
+		// ⚠️ 覆盖场景**禁硬链接**（第三参传 false）：
+		//    硬链接的两个名字指向同一份数据，覆盖 dest 就等于原地改写 dist/ 那份源包 —— 那不叫复制。
+		if (!sameSha) linkOrCopy(file, dest, false);
 	} else {
-		fs.copyFileSync(file, dest);
-		log(`\n已复制 → ${path.relative(ROOT, dest)}`);
+		// 新包：同盘 NTFS 下优先硬链接（零额外占用）。走的是链接还是回落成复制，linkOrCopy 内部已 log。
+		linkOrCopy(file, dest, useHardlink);
 	}
 
 	// 回读目标文件校验：复制也可能出岔子（磁盘满、被占用），清单必须描述真实存在的东西
