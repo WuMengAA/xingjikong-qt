@@ -1366,6 +1366,72 @@ ApplicationWindow {
                                 }
                             }
                         }
+
+                        // ── 考试模式（2026-10-06，设计文档 3.7 第一版）──
+                        // 对当前选中设备下发 exam_mode（全屏拦截 + 白名单轮询 + 倒计时）。
+                        // 参数：minutes 时长（0 = 不自动结束）、whitelist 允许保留的程序名列表。
+                        Rectangle {
+                            width: parent.width
+                            height: examCol.height + 32
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: examCol
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.topMargin: 16
+                                spacing: 10
+                                Text { text: "考试模式（全屏拦截 + 白名单进程）"; color: th.fg3; font.pixelSize: 11 }
+                                Row {
+                                    spacing: 8
+                                    TextField {
+                                        id: examMinutes
+                                        width: 90
+                                        placeholderText: "时长(分钟)"
+                                        color: th.fg
+                                        validator: IntValidator { bottom: 0; top: 300 }
+                                    }
+                                    TextField {
+                                        id: examWhitelist
+                                        width: 200
+                                        placeholderText: "白名单(逗号分隔，如 examclient,notepad)"
+                                        color: th.fg
+                                    }
+                                }
+                                Row {
+                                    spacing: 8
+                                    Button {
+                                        text: "开始考试"
+                                        onClicked: {
+                                            const uid = backend.currentUid
+                                            if (!uid) { hint("先在控制页选中一台设备"); return }
+                                            var whitelist = []
+                                            examWhitelist.text.split(",").forEach(function(s) {
+                                                var t = s.trim()
+                                                if (t) whitelist.push(t)
+                                            })
+                                            backend.sendAction("exam_mode", {
+                                                "minutes": parseInt(examMinutes.text, 10) || 0,
+                                                "whitelist": whitelist
+                                            })
+                                            hint("考试模式已下发 → " + uid)
+                                        }
+                                    }
+                                    Button {
+                                        text: "结束考试"
+                                        onClicked: {
+                                            const uid = backend.currentUid
+                                            if (!uid) { hint("先在控制页选中一台设备"); return }
+                                            backend.sendAction("exam_mode_stop", {})
+                                            hint("已请求结束考试 → " + uid)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

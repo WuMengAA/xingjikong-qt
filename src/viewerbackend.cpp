@@ -1364,9 +1364,24 @@ void ViewerBackend::onTextMessage(const QString &text)
         if (m_ws) m_ws->close();
     } else if (type == QStringLiteral("error")) {
         // 统一错误通道（v1）：云端拒绝必须看得见，不许静默
+        // 错误码体系（2026-10-06）：ecode = 数字码（AU1001/CM4001…），code = 语义码兼容，
+        // message = 人话。按 ecode 决定 UI 行为（认证类强制重登），其余展示 message。
+        const QString ecode = pay.value(QStringLiteral("ecode")).toString();
         const QString code = pay.value(QStringLiteral("code")).toString();
         const QString message = pay.value(QStringLiteral("message")).toString();
-        logf("[viewer] FAIL 云端拒绝 → %s：%s", code.toUtf8().constData(), message.toUtf8().constData());
+        logf("[viewer] FAIL 云端拒绝 → %s/%s：%s",
+             ecode.toUtf8().constData(), code.toUtf8().constData(), message.toUtf8().constData());
+        // 认证失效（AU1002 过期 / AU1003 无效）：旧令牌已不可用，直接走重登流程，
+        // 避免"看起来还连着，但每条指令都被拒"的假在线状态。
+        if (ecode == QLatin1String("AU1002") || ecode == QLatin1String("AU1003")) {
+            m_authFailReason = message;
+            m_authFailed = true;
+            m_retryStopped = true;
+            setStatus(QStringLiteral("登录已过期，请重新登录"), true);
+            emit authFailed(message);
+            if (m_ws) m_ws->close();
+            return;
+        }
         setStatus(QStringLiteral("云端拒绝：") + message, true);
     } else if (type == QStringLiteral("viewer-ready")) {
         logf("[viewer] 云端回话：管理端在线（云端在线管理端 %d 个）",
