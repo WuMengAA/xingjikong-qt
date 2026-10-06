@@ -545,6 +545,12 @@ ApplicationWindow {
                         property bool cur: (modelData.uid === root.currentUid)
                         color: cur ? th.cream : (devHover.containsMouse ? th.hover2 : "transparent")
 
+                        // 状态点：在线亮、离线暗。以前这一颗恒亮，掉线的机器也画成"在线"，
+                        // 老师按着它发指令，等半天没回音 —— 先把真假摆出来。
+                        // ⚠️ 只信云端给的 online 字段；老版本云端不带这个键时按在线处理
+                        // （`=== false` 才判离线），免得整个列表一夜之间全灰掉。
+                        property bool devOnline: (modelData.online !== false)
+
                         Row {
                             anchors.verticalCenter: parent.verticalCenter
                             x: 10
@@ -552,15 +558,37 @@ ApplicationWindow {
                             Rectangle {
                                 width: 5; height: 5; radius: 3
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: th.inv
+                                color: devOnline ? th.inv : th.fg4
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.uid
-                                color: cur ? th.fg : th.op
+                                color: cur ? th.fg : (devOnline ? th.op : th.fg4)
                                 font.pixelSize: 13
                                 font.weight: cur ? Font.Medium : Font.Normal
+                                elide: Text.ElideRight
+                                // 右侧那行小字要留位置，别让长机器名压上去
+                                width: Math.max(60, 168 - 10 - 5 - 9 - devMeta.width - 16)
                             }
+                        }
+
+                        // 右端一行小字：在线显示被控端版本，离线显示"多久没见"。
+                        // 全部取自云端真字段（version / lastSeenAgoSec），没有就不画 —— 不编数据。
+                        Text {
+                            id: devMeta
+                            anchors.right: parent.right
+                            anchors.rightMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: !devOnline
+                                  ? ((modelData.lastSeenAgoSec !== undefined
+                                      && modelData.lastSeenAgoSec >= 0)
+                                     ? (modelData.lastSeenAgoSec < 60 ? "刚断线"
+                                        : Math.floor(modelData.lastSeenAgoSec / 60) + " 分前")
+                                     : "离线")
+                                  : (modelData.version !== undefined && modelData.version !== ""
+                                     ? modelData.version : "")
+                            color: th.fg4
+                            font.pixelSize: 10
                         }
 
                         // ∠ 选中态（4.4）：选中的那台描边反白 + 右端一个小勾，

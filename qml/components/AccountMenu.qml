@@ -108,12 +108,28 @@ Item {
     // 下拉菜单（浮在顶栏下面，右对齐）
     Popup {
         id: menu
-        // ⚠️ 2026-10-06 修：x/y 以前是写死的（x = 胶囊右缘 - 236，y = 胶囊下缘 + 6）。
-        // 教室机屏幕常常只有 1366x768、浏览器又把窗口压窄 —— 菜单直接顶出右边、掉出下边框，
-        // 远看就像"弹窗飞出去了"，跟半成品没区别。现在两边都夹：横向不出左右，纵向贴底自动翻上去。
-        property real overlayH: Overlay.overlay ? Overlay.overlay.height : 720
-        x: Math.max(8, Math.min(acct.x + acct.width - width, acct.x))
-        y: Math.min(acct.y + acct.height + 6, overlayH - height - 8)
+        // ⚠️ 2026-10-06 二次修（第一次只夹了边界，没换坐标系，照旧飞出屏幕）：
+        // Popup 打开时会被 reparent 到 Overlay.overlay 上，它的 x/y 是**窗口级**坐标；
+        // 而 acct.x / acct.y 是胶囊**相对父容器**的坐标。两个坐标系一混，
+        // 胶囊嵌在顶栏 Row 里（acct.x 常常只有几十），算出来的位置就飘到窗口左上角甚至屏幕外。
+        // 另外旧式 `overlayH - height - 8` 在菜单比窗口还高时是**负数**，y 直接变负 → 出屏。
+        // 现在：先用 mapToGlobal 把胶囊位置换算进 overlay 坐标系，再四边夹住、下放不下就翻上去。
+        readonly property point anchorGlobal: acct.mapToGlobal(0, 0)
+        readonly property point overlayGlobal: Overlay.overlay ? Overlay.overlay.mapToGlobal(0, 0) : Qt.point(0, 0)
+        readonly property real ax: anchorGlobal.x - overlayGlobal.x
+        readonly property real ay: anchorGlobal.y - overlayGlobal.y
+        readonly property real avW: Overlay.overlay ? Overlay.overlay.width : 1280
+        readonly property real avH: Overlay.overlay ? Overlay.overlay.height : 720
+        // 菜单比可用高度还高时截到可用高度（配合下面的 clip，绝不许溢出到屏幕外）
+        readonly property real wantH: Math.min(implicitHeight, Math.max(120, avH - 16))
+        x: Math.max(8, Math.min(ax + acct.width - width, Math.max(8, avW - width - 8)))
+        y: {
+            var below = ay + acct.height + 6
+            if (below + wantH <= avH - 8) return below          // 下面放得下就贴着胶囊下缘
+            var above = ay - wantH - 6                          // 放不下就翻到胶囊上方
+            return Math.max(8, above)                           // 上下都放不下就贴顶，绝不许负数
+        }
+        height: wantH
         width: 236
         modal: true
         padding: 0
@@ -130,6 +146,7 @@ Item {
             spacing: 0
             padding: 8
             width: 236
+            clip: true
 
             // ── 账号信息 ──
             Text {

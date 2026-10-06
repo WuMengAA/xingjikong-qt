@@ -1,7 +1,8 @@
 // OAuth 登录流程实现（详见 oauthlogin.h 的头注释）。
 //
-// 时序：起临时端口 → 开浏览器 → 站点授权页（站内登录+同意）→ 回拨 127.0.0.1:<port>/oauth-callback?code&state
-//        → 接住并回一张提示页给浏览器 → 拿 code 换网站会话令牌 → 停端口。
+// 时序：起临时端口 → 打开授权页（内嵌窗口 / 系统浏览器）→ 站点授权页（站内登录+同意）
+//        → 回拨 127.0.0.1:<port>/oauth-callback?code&state
+//        → 接住并回一张提示页 → 拿 code 换网站会话令牌 → 停端口、关窗口。
 
 #include "oauthlogin.h"
 
@@ -15,9 +16,16 @@
 #include <QStringList>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QtGlobal>
+
+// 内嵌登录窗（2026-10-06 加）：QWebEngineView 是 QWidget。
+// WebEngine 上下文在管理端进程里本来就有（收流页那个离屏 view），这里只是复用，没有新增依赖。
+#include <QWidget>
+#include <QVBoxLayout>
+#include <QWebEngineView>
 
 #include <cstdlib>
 #include <ctime>
@@ -28,6 +36,9 @@ namespace {
 
 /** 站点会话令牌的兜底有效期（秒）。站点给 30 天，这里只做兜底 display 用。 */
 constexpr qint64 kDefaultSessionSec = 30 * 24 * 60 * 60;
+
+/** 登录成功后，内嵌窗口停留多久再自动关（让人看一眼"登录成功"）。 */
+constexpr int kCloseAfterSuccessMs = 1200;
 
 /** 随机串（state 用）。state 必须不可猜，否则别人能伪造回拨把 code 骗走。 */
 QString randomHex(int bytes)
@@ -63,6 +74,8 @@ OAuthLogin::~OAuthLogin()
         m_sock->deleteLater();
         m_sock = nullptr;
     }
+    // 窗口设了 WA_DeleteOnClose，这里只解引用不删，避免析构期二次 delete
+    m_loginWin = nullptr;
     if (m_nam) m_nam->deleteLater();
     m_nam = nullptr;
 }
@@ -70,7 +83,10 @@ OAuthLogin::~OAuthLogin()
 void OAuthLogin::begin()
 {
     if (m_busy) {
-        logf("[oauth] 上一次登录还没走完，忽略本次请求");
+        // ⚠️ 以前失败路径没复位 m_busy，第二次点登录就卡在这儿：既不继续、也不报错，
+        // 用户只看到按钮没反应。现在所有退出路径都复位了，这句正常情况下不该再出现；
+        // 真出现了就在日志里点名，别让它变成一句"莫名其妙没反应"。
+        logf("[oauth] 上一次登录还没走完，忽略本次请求（如反复出现即为状态未复位，属 bug）");
         return;
     }
 
@@ -101,6 +117,7 @@ void OAuthLogin::begin()
         && !m_siteUrl.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
         const QString why = QStringLiteral("站点地址不是 http/https（当前：%1）").arg(m_siteUrl);
         logf("[oauth] FAIL %s", why.toLocal8Bit().constData());
+        m_busy = false;
         emit failed(why);
         return;
     }
@@ -114,6 +131,7 @@ void OAuthLogin::begin()
                                            "请放行 127.0.0.1 的临时端口，或退出占用它的程序")
                                 .arg(m_server->errorString());
         logf("[oauth] FAIL %s", why.toLocal8Bit().constData());
+        m_busy = false;
         emit failed(why);
         stopServer();
         return;
@@ -134,19 +152,84 @@ void OAuthLogin::begin()
         authUrl.setQuery(q);
     }
 
-    logf("[oauth] 正在浏览器里打开授权页（回拨 %s，state=%s…）",
+    QObject::connect(m_server, &QTcpServer::newConnection, this, &OAuthLogin::onNewConnection);
+
+    logf("[oauth] 正在打开授权页（回拨 %s，state=%s…）",
          m_redirectUri.toLocal8Bit().constData(), m_state.left(8).toLocal8Bit().constData());
-    if (!QDesktopServices::openUrl(authUrl)) {
-        const QString why = QStringLiteral("打不开浏览器（没设成默认浏览器？）。"
-                                           "请手动把下面地址粘到浏览器地址栏：");
+    if (!openAuthUrl(authUrl)) {
+        const QString why = QStringLiteral("打不开登录窗口，系统浏览器也叫不起来。"
+                                           "请把下面这行地址复制到浏览器地址栏手动打开：");
         logf("[oauth] FAIL %s：%s", why.toLocal8Bit().constData(),
              authUrl.toString().toLocal8Bit().constData());
-        emit failed(why + authUrl.toString());
+        // ⚠️ 这两行顺序不能反：先落状态再发信号，否则界面收到 failed 时 busy 还是 true，
+        // 登录按钮会一直灰着（"点了没反应"的老毛病）。
+        m_busy = false;
         stopServer();
+        emit failed(why + QStringLiteral("\n") + authUrl.toString());
         return;
     }
+}
 
-    QObject::connect(m_server, &QTcpServer::newConnection, this, &OAuthLogin::onNewConnection);
+bool OAuthLogin::openAuthUrl(const QUrl &authUrl)
+{
+    // ① 内嵌窗口：不依赖系统里有没有默认浏览器，教室机上最稳的一条路
+    if (openEmbeddedWindow(authUrl)) {
+        logf("[oauth] 已用内嵌登录窗口打开授权页");
+        return true;
+    }
+    // ② 回落系统浏览器
+    if (QDesktopServices::openUrl(authUrl)) {
+        logf("[oauth] 已用系统浏览器打开授权页");
+        return true;
+    }
+    logf("[oauth] FAIL 内嵌窗口与系统浏览器都没能打开授权页");
+    return false;
+}
+
+bool OAuthLogin::openEmbeddedWindow(const QUrl &url)
+{
+    // 排障开关：STE_OAUTH_EMBEDDED=0 强制走系统浏览器（比如要复现"只有浏览器才有的问题"）
+    if (QString::fromLocal8Bit(qgetenv("STE_OAUTH_EMBEDDED")).trimmed() == QLatin1String("0")) {
+        logf("[oauth] STE_OAUTH_EMBEDDED=0：本次跳过内嵌窗口");
+        return false;
+    }
+
+    auto *win = new QWidget();
+    win->setWindowTitle(QStringLiteral("星集控 · 用星璃账号登录"));
+    win->setAttribute(Qt::WA_DeleteOnClose);
+    auto *lay = new QVBoxLayout(win);
+    lay->setContentsMargins(0, 0, 0, 0);
+    auto *view = new QWebEngineView(win);
+    lay->addWidget(view);
+
+    win->resize(520, 720);
+    win->setMinimumSize(400, 520);
+
+    m_loginWin = win;
+    // 用户直接把窗口关了 = 放弃这次登录。必须复位状态，否则下一次点登录会被
+    // begin() 开头那句"上一次还没走完"挡掉（同样是"点了没反应"）。
+    QObject::connect(win, &QObject::destroyed, this, [this](QObject *) {
+        m_loginWin = nullptr;
+        if (!m_busy) return;          // 正常收尾（成功/失败）已经复位过了
+        m_busy = false;
+        stopServer();
+        logf("[oauth] 用户关掉了登录窗口，本次登录取消");
+        emit failed(QStringLiteral("登录窗口被关掉了，没完成登录"));
+    });
+
+    view->setUrl(url);
+    win->show();
+    win->raise();
+    win->activateWindow();
+    return true;
+}
+
+void OAuthLogin::closeLoginWindow()
+{
+    if (!m_loginWin) return;
+    // 直接 delete：destroyed 回调里会看到 m_busy 已经复位过（false），不会再发一次 failed
+    m_loginWin->close();
+    m_loginWin = nullptr;
 }
 
 void OAuthLogin::onNewConnection()
@@ -182,6 +265,7 @@ void OAuthLogin::onReadyRead()
         s->deleteLater();
         m_sock = nullptr;
         stopServer();
+        m_busy = false;
         return;
     }
 
@@ -205,15 +289,22 @@ void OAuthLogin::onReadyRead()
         s->disconnectFromHost();
         m_sock = nullptr;
         stopServer();
+        // ⚠️ 原来这里漏了复位：授权页上点"取消"也会走到这条分支，
+        // 之后 m_busy 一直 true，用户再点登录就是"没反应"。
+        m_busy = false;
+        closeLoginWindow();
         emit failed(QStringLiteral("授权回拨校验没过（地址不对或状态不匹配），请重新登录"));
         return;
     }
 
-    // 先给浏览器一个交代（用户正盯着一个标签页），再去换令牌
-    servePage(s, 200, "<h2>登录成功</h2><p>管理端已拿到网站账号，这个标签页可以关掉了。</p>");
+    // 先给一个交代（用户正盯着那个窗口），再去换令牌
+    servePage(s, 200, "<h2>登录成功</h2><p>管理端已拿到网站账号，可以关掉这个页面了。</p>");
     s->disconnectFromHost();
     m_sock = nullptr;
     stopServer();
+
+    // 让人看一眼成功页再关，别在"正在换令牌"的时候窗口突然没了
+    QTimer::singleShot(kCloseAfterSuccessMs, this, [this] { closeLoginWindow(); });
 
     logf("[oauth] 回拨接住，正在换网站会话令牌…");
 
@@ -249,6 +340,7 @@ void OAuthLogin::onTokenFinished()
     if (status != 200) {
         logf("[oauth] FAIL 换令牌失败（HTTP %d）：%s", status, raw.left(512).constData());
         m_busy = false;
+        closeLoginWindow();
         emit failed(QStringLiteral("换网站会话令牌失败（站点返回 HTTP %d）").arg(status));
         return;
     }
@@ -262,6 +354,7 @@ void OAuthLogin::onTokenFinished()
         const QString why = QStringLiteral("换回来的响应里没有 token（站点改了 /oauth/token 的返回？）");
         logf("[oauth] FAIL %s：%s", why.toLocal8Bit().constData(), raw.left(512).constData());
         m_busy = false;
+        closeLoginWindow();
         emit failed(why);
         return;
     }
