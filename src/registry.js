@@ -556,3 +556,102 @@ export function ensureEventsFile() {
     console.error(`[cloud] FAIL 无法初始化 ${EVENTS_FILE}: ${e.message}`);
   }
 }
+
+/* ---------- 语音对讲（设计文档 3.3 第一版，2026-10-07）----------
+ * 老师→全班单向广播：管理端采集 PCM → 二进制帧发云端 → 云端 fan-out 给所有在线
+ * agent → agent 播放。云端只转发不解码不转码（设计文档 3.3 关键）。
+ * 第一版目标 = 全部在线设备（班级映射在站点侧，云端第一版不做按班路由）。
+ */
+
+/** 当前是否有老师正在讲话（音频会话状态，管理端 start/stop 控制）。 */
+let g_audioBroadcasting = false;
+export function isAudioBroadcasting() { return g_audioBroadcasting; }
+export function setAudioBroadcasting(on) {
+  g_audioBroadcasting = on;
+  pushEvent('info', `语音对讲${on ? '开始' : '结束'}`);
+  // 通知所有在线被控端：老师开始/结束讲话（学生端"正在讲话"提示用）
+  for (const d of devices.values()) {
+    if (!d.ws || d.ws.readyState !== 1) continue;
+    try {
+      const text = (d.ws.__v1 === true)
+        ? wrapOutgoing(true, on ? 'audio.start' : 'audio.stop', {}, '')
+        : JSON.stringify({ type: on ? 'audio.start' : 'audio.stop' });
+      d.ws.send(text);
+    } catch (e) {
+      pushEvent('error', '语音状态通知写给设备失败', { uid: d.uid, error: e.message });
+    }
+  }
+  return on;
+}
+
+/**
+ * 把一帧音频（PCM 二进制）转发给所有在线被控端。
+ * @param {Buffer} buf 音频帧原始字节
+ * @param {string} mime 内容类型（audio/pcm 等）
+ * @param {number} seq 帧序号（日志用）
+ * @returns {{hits:number, bytes:number}}
+ */
+export function broadcastAudioToAgents(buf, mime, seq) {
+  let hits = 0;
+  for (const d of devices.values()) {
+    if (!d.ws || d.ws.readyState !== 1) continue;
+    // 复用 v1 二进制帧格式（makeFrame 用 uid 标记来源）：audio 帧 uid 用虚拟
+    // "audio:<viewer>" 来源，mime 标 audio/pcm，agent 端按 mime 区分语音帧与画面帧。
+    try {
+      d.ws.send(makeFrame(`audio:${seq}`, seq, mime, buf));
+      hits++;
+    } catch (e) {
+      pushEvent('error', '语音帧写给设备失败', { uid: d.uid, error: e.message });
+    }
+  }
+  if (hits > 0) pushEvent('info', '语音帧已推给被控端', { hits, bytes: buf.length, seq });
+  return { hits, bytes: buf.length };
+}
+
+/* ---------- 屏幕广播（设计文档《屏幕广播-第一版设计》2026-10-07）----------
+ * 管理端抓屏 → 云端 → 被控端全屏显示。与语音同一 fan-out 机制，
+ * 区别只在 mime：image/jpeg（广播）vs audio/pcm（语音）。
+ */
+
+/** 当前是否有屏幕广播在播（管理端 broadcast.start/stop 控制）。 */
+let g_screenBroadcasting = false;
+export function isScreenBroadcasting() { return g_screenBroadcasting; }
+export function setScreenBroadcasting(on) {
+  g_screenBroadcasting = on;
+  pushEvent('info', `屏幕广播${on ? '开始' : '结束'}`);
+  // 通知所有在线被控端（学生端显示"正在接收老师屏幕"提示）
+  for (const d of devices.values()) {
+    if (!d.ws || d.ws.readyState !== 1) continue;
+    try {
+      const text = (d.ws.__v1 === true)
+        ? wrapOutgoing(true, on ? 'broadcast.start' : 'broadcast.stop', {}, '')
+        : JSON.stringify({ type: on ? 'broadcast.start' : 'broadcast.stop' });
+      d.ws.send(text);
+    } catch (e) {
+      pushEvent('error', '广播状态通知写给设备失败', { uid: d.uid, error: e.message });
+    }
+  }
+  return on;
+}
+
+/**
+ * 把一帧屏幕广播（JPEG 二进制）转发给所有在线被控端。
+ * @param {Buffer} buf JPEG 帧
+ * @param {number} seq 帧序号
+ * @returns {{hits:number, bytes:number}}
+ */
+export function broadcastScreenToAgents(buf, seq) {
+  let hits = 0;
+  for (const d of devices.values()) {
+    if (!d.ws || d.ws.readyState !== 1) continue;
+    try {
+      d.ws.send(makeFrame(`bcast:${seq}`, seq, 'image/jpeg', buf));
+      hits++;
+    } catch (e) {
+      pushEvent('error', '广播帧写给设备失败', { uid: d.uid, error: e.message });
+    }
+  }
+  if (hits > 0) pushEvent('info', '广播帧已推给被控端', { hits, bytes: buf.length, seq });
+  return { hits, bytes: buf.length };
+}
+

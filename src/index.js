@@ -138,6 +138,8 @@ import {
   broadcastFrame, broadcastDevices, broadcastToViewers, recordResult, getResult, viewerCount,
   touchHeartbeat, sweepStale,
   rtcSignalToAgent, rtcRelayToViewers, rtcRelayToAgent,
+  broadcastAudioToAgents, setAudioBroadcasting, isAudioBroadcasting,
+  broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
 } from './registry.js';
 
 /**
@@ -652,6 +654,7 @@ viewerWss.on('connection', (ws) => {
   // 关键：鉴权通过前绝不 addViewer()。否则设备表和画面帧会被推给没通过鉴权的连接，
   // 加了 auth 也等于没加——这是最容易写歪的一处。
   let authed = false;
+  let audioSeq = 0; // 语音帧序号（管理端→被控端）
   const deadline = setTimeout(() => {
     if (authed) return;
     pushEvent('warn', '管理端握手超时：连上后没在限定时间内鉴权，已踢掉');
@@ -660,7 +663,19 @@ viewerWss.on('connection', (ws) => {
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
-      pushEvent('warn', '管理端发了二进制消息（管理端只该发文本）', { bytes: data.length });
+      // 管理端二进制帧 = 语音 PCM 或屏幕广播 JPEG（2026-10-07）。
+      // 按当前活跃会话路由：语音播着就按音频转发，屏幕广播播着就按广播转发；
+      // 都没有 → 丢弃并提示（不许静默收下再扔掉）。
+      const buf = Buffer.from(data);
+      if (authed && isAudioBroadcasting()) {
+        broadcastAudioToAgents(buf, 'audio/pcm', ++audioSeq);
+        return;
+      }
+      if (authed && isScreenBroadcasting()) {
+        broadcastScreenToAgents(buf, ++audioSeq);
+        return;
+      }
+      pushEvent('warn', '管理端发了二进制消息（无活跃语音/广播会话，已丢弃）', { bytes: data.length });
       return;
     }
     // 入向统一走协议层：v1 信封与旧扁平格式都规范化成同一种内部表示
@@ -720,6 +735,30 @@ viewerWss.on('connection', (ws) => {
       }
       case 'devices':
         snd(ws, 'devices', { devices: listDevices(), at: new Date().toISOString() });
+        return;
+      // 语音对讲（2026-10-07，设计文档 3.3）：老师开始/停止讲话。
+      // 开始后云端接受该管理端的二进制音频帧并 fan-out；停止后拒绝新帧。
+      // 第一版目标 = 全部在线设备（班级映射在站点侧）。
+      case 'audio.start':
+        setAudioBroadcasting(true);
+        snd(ws, 'audio.started', { ok: true, targets: 'all-online' });
+        pushEvent('info', '管理端开始语音对讲（老师讲话，全班听）');
+        return;
+      case 'audio.stop':
+        setAudioBroadcasting(false);
+        snd(ws, 'audio.stopped', { ok: true });
+        pushEvent('info', '管理端结束语音对讲');
+        return;
+      // 屏幕广播（2026-10-07，设计文档《屏幕广播-第一版设计》）
+      case 'broadcast.start':
+        setScreenBroadcasting(true);
+        snd(ws, 'broadcast.started', { ok: true, targets: 'all-online' });
+        pushEvent('info', '管理端开始屏幕广播（老师屏幕 → 全部在线设备）');
+        return;
+      case 'broadcast.stop':
+        setScreenBroadcasting(false);
+        snd(ws, 'broadcast.stopped', { ok: true });
+        pushEvent('info', '管理端结束屏幕广播');
         return;
       case 'instruction': {
         const { uid, action, params } = p.payload;
