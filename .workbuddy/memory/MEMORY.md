@@ -19,11 +19,15 @@
 
 ## 三、编译 / 自检
 - 构建 `viewer-qt/build-qt-viewer.bat`（Ninja+MSVC）。被控端走 `scripts/build-agent.sh`。
+- ⚠️ **离屏自检的拦路虎是单实例守卫**（用户常开着管理端）⇒ 已加开发开关：
+  `STE_ALLOW_MULTI=1 viewer-qt.exe -platform offscreen`（默认不设＝行为不变，教室机别设）。
+  0.6.9/0.6.10/0.6.11 连续三轮因没自检而漏掉 QML 毛病（含 0.6.11 的 Binding loop），别省这一步。
+- ⚠️ **`build/qml/` 是运行时加载的**（exe 不内联 QML）⇒ 想临时探针只改 `build/qml/Stelarith/*.qml` 即可，
+  不必重编译；但**下次编译会被 POST_BUILD 覆盖**。
 - ⚠️ **qmllint 只查语法**：查不出未声明属性（`picked` 漏声明）、属性名错（`th` vs `theme`）、
   Row 内横向锚点、`Parameter "on" is not declared` ⇒ **只有真跑 exe 才暴露**。
 - 离屏自检：先 `cp D:/Qt/6.8.1/msvc2022_64/plugins/platforms/qoffscreen.dll build/platforms/`
-  （**windeployqt 每次构建都删它 ⇒ 每次编译后重补**），再 `viewer-qt.exe -platform offscreen`。
-  离屏只能证明"能加载"，看不出排版好看与否。
+  （**windeployqt 每次构建都删它 ⇒ 每次编译后重补，忘了就报 "Could not find the platform plugin"**）。
 - ⚠️ 自检拿不到 `build/viewer-run.log`：进程被 `timeout` 杀掉时 stdio 缓冲不刷。
   **改抓 stdout**（`logf` 里有 `fflush(stdout)`），再按 GBK 解码就是中文。
 - ⚠️ 改大文件用**锚点字符串**，别按行号切片（误删过闭合括号）。
@@ -67,8 +71,14 @@
 - ⚠️ **抽组件时调用点的属性名别和目标组件自己的属性同名**：`InputField { th: th }` 会自引用 ⇒
   `Binding loop detected`，属性恒 null ⇒ 悄悄用兜底值（0.6.11 的输入框就因此没真正修好）。
   写法一律限定作用域：`th: root.th`。
+- ⚠️ **`Layout.preferredWidth` 不是硬约束**：内容自然宽更大时会顶宽（右栏内容 293 被顶到 657），
+  多出来的宽度是从靠 `fillWidth` 吃剩余的邻居身上抢的 —— 控制页画面因此被压成 299 宽的竖缝。
+  要"这块不禁长"就写 `Layout.maximumWidth`（0.6.13）。**改布局前先用探针量，别猜**。
 - **控件级样式必须有唯一组件**：输入框 7 处各自只写 `color: th.fg`、没人设 `background` ⇒ 沿用系统白底，
   暗色下 th.fg 是近白 ⇒ **白底白字，字打出去了却看不见**（0.6.11）。统一走 `qml/components/InputField.qml`。
+- **不许在页面里直接用 Qt 自带 `Button`/`TextField`**：它们走系统调色板，是黑白界面里唯一会"自己变白"的
+  控件（0.6.13 清掉最后 5 处裸 Button）。用 `Btn`/`InputField`；`Btn` 是 Rectangle，**必须显式给 width**。
+  令牌/字号/圆角/禁用写法全在 `Stelarith-viewer-qt/docs/UI规范-2026-10-07.md`。
 - **批量/异步动作必须有收口**：`sendAction` 不检查设备在线 ⇒ 离线设备无回执 ⇒ 进度永远停在 0/N。
   下发前 `isDevOnline()` 过滤 + 超时兜底（0.6.12）。
 - **报错文案必须带系统原话**（`QFile::errorString()` 等）：只写"目标打不开"会把病因藏起来
