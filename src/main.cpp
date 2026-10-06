@@ -63,6 +63,7 @@
 #include <QSet>
 #include <QProcess>
 #include <QThread>      // QThread::msleep（camera_record 确认"真的在录"时等两秒）
+#include <functional>   // 2026-10-07：NotifyWindow 确认/快捷回复回调（std::function）
 // 2026-10-05：OTA 自更新要下载安装包 + 校验 sha256（详见 executeSelfUpdate）。
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -1783,23 +1784,32 @@ public:
 
     // severity：remind(绿) / inform(黄) / urgent(红)；仅对 fullscreen 生效（其它形态背景本就是深色半透明）。
     // emergency：紧急通知 —— 不自动关闭、强制置顶（WindowStaysOnTopAlways），点击任意处手动关闭。
+    // needConfirm：普通通知也要确认（2026-10-07 · 通知确认 + 快捷回复）；
+    //             显示「确认」按钮 + 快捷回复按钮行，点击后回调 onConfirm(reply)。
+    //             reply 为 "确认" 或用户点的快捷话术（如"收到"）。
     static void showNotice(Kind kind, const QString &title, const QString &content, int seconds, bool tts,
-                           const QString &severity = QString(), bool emergency = false)
+                           const QString &severity = QString(), bool emergency = false,
+                           bool needConfirm = false, const QStringList &replies = {},
+                           std::function<void(const QString &reply)> onConfirm = nullptr)
     {
         // 单例：先关掉旧的（同一时间只一个通知窗口）
         if (g_notify) {
             g_notify->hide();
             g_notify->deleteLater();
         }
-        g_notify = new NotifyWindow(kind, title, content, seconds, tts, severity, emergency);
+        g_notify = new NotifyWindow(kind, title, content, seconds, tts, severity, emergency,
+                                    needConfirm, replies, onConfirm);
         g_notify->showWindow();
     }
 
 private:
     explicit NotifyWindow(Kind kind, const QString &title, const QString &content, int seconds, bool tts,
-                          const QString &severity, bool emergency)
+                          const QString &severity, bool emergency,
+                          bool needConfirm = false, const QStringList &replies = {},
+                          std::function<void(const QString &reply)> onConfirm = nullptr)
         : m_kind(kind), m_title(title), m_content(content), m_seconds(seconds), m_tts(tts),
-          m_severity(severity), m_emergency(emergency)
+          m_severity(severity), m_emergency(emergency), m_needConfirm(needConfirm),
+          m_replies(replies), m_onConfirm(onConfirm)
     {
         // 所有通知统一置顶（Qt6 只有 WindowStaysOnTopHint 一种置顶标志，没有 Always 变体）。
         // 紧急通知的差异化靠"不自动关闭 + 点击才关"表达，不靠更强的置顶强度。
@@ -1845,24 +1855,36 @@ private:
         lay->addWidget(m_label);
 
         // 紧急通知：底部"确认"按钮（2026-10-05：需求文档要求确认按钮）
-        if (m_emergency) {
+        // 确认 + 快捷回复（2026-10-07）：needConfirm 时显示「确认」按钮；
+        // 有 replies 时再加一排快捷回复话术按钮。点击 → onConfirm(reply) → 关闭。
+        // 紧急通知（emergency）也走这里（此前只有确认按钮，现在同样带回调上报）。
+        if (m_emergency || m_needConfirm) {
             lay->addSpacing(16);
             auto *btnLay = new QHBoxLayout();
             btnLay->addStretch();
-            m_confirmBtn = new QPushButton(QStringLiteral("\u2713 \u786e\u8ba4"), this);
-            m_confirmBtn->setMinimumSize(220, 56);
-            m_confirmBtn->setStyleSheet(QStringLiteral(
-                "QPushButton {"
-                " font-size:22px; font-weight:700; color:#ffffff;"
-                " background:rgba(255,255,255,80); border:2px solid rgba(255,255,255,180);"
-                " border-radius:28px; padding:0 48px;}"
-                "QPushButton:hover { background:rgba(255,255,255,140);}"
-                "QPushButton:pressed { background:rgba(255,255,255,180);}"
-            ));
-            btnLay->addWidget(m_confirmBtn);
+            auto mkBtn = [this, lay](const QString &text, const QString &reply) {
+                auto *b = new QPushButton(text, this);
+                b->setMinimumSize(140, 48);
+                b->setStyleSheet(QStringLiteral(
+                    "QPushButton { font-size:18px; font-weight:700; color:#ffffff;"
+                    " background:rgba(255,255,255,80); border:2px solid rgba(255,255,255,180);"
+                    " border-radius:24px; padding:0 32px;}"
+                    "QPushButton:hover { background:rgba(255,255,255,140);}"
+                    "QPushButton:pressed { background:rgba(255,255,255,180);}"));
+                QObject::connect(b, &QPushButton::clicked, this, [this, reply]() {
+                    if (m_onConfirm) m_onConfirm(reply);
+                    close();
+                });
+                return b;
+            };
+            btnLay->addWidget(mkBtn(QStringLiteral("\u2713 \u786e\u8ba4"), QStringLiteral("\u786e\u8ba4")));
+            // 快捷回复：一排预设话术（如"收到"/"好的"/"稍后处理"）
+            for (const QString &r : m_replies) {
+                if (r.trimmed().isEmpty()) continue;
+                btnLay->addWidget(mkBtn(r, r));
+            }
             btnLay->addStretch();
             lay->addLayout(btnLay);
-            QObject::connect(m_confirmBtn, &QPushButton::clicked, this, &QWidget::close);
         }
 
         // 淡入：先透明再渐显（Qt 无内置透明度动画，用 QPropertyAnimation 要引动画模块——省了，
@@ -1944,8 +1966,11 @@ private:
     bool m_tts;
     QString m_severity;   // remind / inform / urgent（仅 fullscreen 生效）
     bool m_emergency;     // 紧急：不自动关 + 强制置顶 + 点击关闭
+    // 确认 + 快捷回复（2026-10-07）
+    bool m_needConfirm = false;
+    QStringList m_replies;                        // 快捷回复话术（可空）
+    std::function<void(const QString &reply)> m_onConfirm;
     QLabel *m_label = nullptr;
-    QPushButton *m_confirmBtn = nullptr;  // 紧急通知确认按钮
     static NotifyWindow *g_notify;
 
 protected:
@@ -1978,9 +2003,14 @@ protected:
 
 NotifyWindow *NotifyWindow::g_notify = nullptr;
 
+// 前向声明（2026-10-07）：notify 确认/快捷回复回调要在定义前用（二次回执）
+static void sendActionReceipt(const QString &id, const QString &action, const QString &result,
+                              const QString &error, const QJsonObject &data);
+
 // 解析 params（kind/title/content/seconds/notice_id/flags）并弹窗。
 // 返回 "" = 成功；非空 = 错误（调用方转 failed 回执）。
-static QString notifyFromParams(const QJsonObject &params)
+// id：本条指令的 instruction id（确认/快捷回复时发二次回执用，可为空）。
+static QString notifyFromParams(const QJsonObject &params, const QString &id = QString())
 {
     const QString kind = params.value(QStringLiteral("kind")).toString().trimmed().toLower();
     const QString title = params.value(QStringLiteral("title")).toString().trimmed();
@@ -2000,13 +2030,40 @@ static QString notifyFromParams(const QJsonObject &params)
     const bool emergency = flags.value(QStringLiteral("emergency_confirm")).toBool(false)
                            || flags.value(QStringLiteral("topmost")).toBool(false)
                            || params.value(QStringLiteral("emergency_confirm")).toBool(false);
+    // 确认 + 快捷回复（2026-10-07 · 通知被控端确认快捷回复）：
+    // flags.confirm → 需要学生点确认；flags.replies → 快捷回复话术列表（如 ["收到","好的"]）。
+    const bool needConfirm = flags.value(QStringLiteral("confirm")).toBool(false)
+                             || params.value(QStringLiteral("confirm")).toBool(false);
+    QStringList replies;
+    const QJsonArray repArr = flags.value(QStringLiteral("replies")).toArray();
+    if (!repArr.isEmpty()) {
+        for (const QJsonValue &v : repArr) replies.append(v.toString());
+    } else {
+        // 默认快捷回复（不传 replies 时给一组通用话术）
+        replies = { QStringLiteral("\u6536\u5230"), QStringLiteral("\u597d\u7684"),
+                    QStringLiteral("\u7a0d\u540e\u5904\u7406") };
+    }
 
     NotifyWindow::Kind k = NotifyWindow::Popup;
     if (kind == QStringLiteral("island")) k = NotifyWindow::Island;
     else if (kind == QStringLiteral("fullscreen")) k = NotifyWindow::Fullscreen;
     else k = NotifyWindow::Popup;   // popup 及未知值一律居中弹窗（安全默认）
 
-    NotifyWindow::showNotice(k, title, content, seconds, tts, severity, emergency);
+    // 确认/快捷回复回调：把结果作为**二次回执**发给云端（原 notify 回执已发 done，
+    // 这条补充 confirmed+reply，云端 recordResult 按 id 配对；管理端据此显示"已确认"）。
+    std::function<void(const QString &reply)> onConfirm;
+    if (needConfirm || emergency) {
+        onConfirm = [id](const QString &reply) {
+            if (id.isEmpty()) return;
+            QJsonObject d;
+            d.insert(QStringLiteral("confirmed"), true);
+            d.insert(QStringLiteral("reply"), reply);
+            sendActionReceipt(id, QStringLiteral("notify"), QStringLiteral("confirmed"), QString(), d);
+        };
+    }
+
+    NotifyWindow::showNotice(k, title, content, seconds, tts, severity, emergency,
+                             needConfirm || emergency, replies, onConfirm);
 
     // popup 额外进 Windows 通知中心（静默通知列表留存）——托盘存在时才发得出来
     if (k == NotifyWindow::Popup && g_tray) {
@@ -2335,19 +2392,41 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
 
     if (action == QStringLiteral("input")) {
         const QString kind = params.value(QStringLiteral("kind")).toString();
-        const int w = GetSystemMetrics(SM_CXSCREEN);
-        const int h = GetSystemMetrics(SM_CYSCREEN);
+        // 2026-10-07：三键。管理端会把 button 一起带过来（left/right/middle）。
+        // 旧版不管按的是哪个键，down/up 一律写 MOUSEEVENTF_LEFTDOWN/LEFTUP ——
+        // 右键点不出右键菜单、中键的自动滚也全废，而且"按住右键拖动"会被当成左键拖。
+        const QString btn = params.value(QStringLiteral("button")).toString();
+        const DWORD flagDown = (btn == QStringLiteral("right"))  ? MOUSEEVENTF_RIGHTDOWN
+                             : (btn == QStringLiteral("middle")) ? MOUSEEVENTF_MIDDLEDOWN
+                             : MOUSEEVENTF_LEFTDOWN;
+        const DWORD flagUp = (btn == QStringLiteral("right"))  ? MOUSEEVENTF_RIGHTUP
+                           : (btn == QStringLiteral("middle")) ? MOUSEEVENTF_MIDDLEUP
+                           : MOUSEEVENTF_LEFTUP;
+
+        // ⚠️ 绝对坐标的基准是**整个虚拟桌面**，不是主屏。
+        //   MOUSEEVENTF_VIRTUALDESK 的 dx/dy 按虚拟桌面归一化，而老写法拿
+        //   SM_CXSCREEN / SM_CYSCREEN（只要主屏的尺寸）去换算 —— 教室机接投影仪 +
+        //   副屏时（虚拟桌面比主屏宽一截，左上还有负偏移）算出来的落点整体偏出去，
+        //   越靠右偏得越狠。这就是"我点这儿、光标跑到那儿"的根因。
+        const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        const int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
         INPUT in = {};
         in.type = INPUT_MOUSE;
         if (kind == QStringLiteral("move") || kind == QStringLiteral("down") || kind == QStringLiteral("up")) {
-            const int x = qRound(params.value(QStringLiteral("x")).toDouble() * (w - 1));
-            const int y = qRound(params.value(QStringLiteral("y")).toDouble() * (h - 1));
-            in.mi.dx = (LONG)(x * 65535 / (w - 1));
-            in.mi.dy = (LONG)(y * 65535 / (h - 1));
+            // 归一化坐标夹到 [0,1]：越界就别发，免得把光标甩到桌面外去（会被夹回角上）
+            const double nx = qBound(0.0, params.value(QStringLiteral("x")).toDouble(), 1.0);
+            const double ny = qBound(0.0, params.value(QStringLiteral("y")).toDouble(), 1.0);
+            const int px = vx + qRound(nx * (vw - 1));
+            const int py = vy + qRound(ny * (vh - 1));
+            in.mi.dx = (LONG)((px - vx) * 65535 / (vw - 1));
+            in.mi.dy = (LONG)((py - vy) * 65535 / (vh - 1));
             in.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
             if (kind == QStringLiteral("move"))      in.mi.dwFlags |= MOUSEEVENTF_MOVE;
-            else if (kind == QStringLiteral("down")) in.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
-            else                                     in.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
+            else if (kind == QStringLiteral("down")) in.mi.dwFlags |= flagDown;
+            else                                     in.mi.dwFlags |= flagUp;
             if (SendInput(1, &in, sizeof(in)) == 1) out.result = QStringLiteral("done");
             else out.result = QStringLiteral("failed"),
                  out.error = QStringLiteral("SendInput 鼠标失败，错误码 %1").arg((int)GetLastError());
@@ -3985,6 +4064,15 @@ void handleControlText(const QString &text)
         // 由 startSelfUpdate 自己分阶段回执（started → installing/failed）。
         if (action == QStringLiteral("self_update")) {
             startSelfUpdate(id, params);
+            return;
+        }
+
+        // notify 确认 + 快捷回复（2026-10-07）：要走异步分支拿 instruction id，
+        // 学生点「确认」或快捷回复时发二次回执（confirmed + reply）给云端。
+        if (action == QStringLiteral("notify")) {
+            const QString err = notifyFromParams(params, id);
+            if (!err.isEmpty()) sendActionReceipt(id, action, QStringLiteral("failed"), err);
+            else sendActionReceipt(id, action, QStringLiteral("done"));
             return;
         }
 
