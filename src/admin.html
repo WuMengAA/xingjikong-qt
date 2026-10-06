@@ -173,11 +173,14 @@
   <div class="login-box">
     <h1>星集控 · 云端管理台</h1>
     <div class="desc">星璃集控云 Web 管理端</div>
+    <!-- 一户通（2026-10-06）：优先走网站账号；下面那条手敲令牌是老路，云端没配站点地址时只能走它 -->
+    <button class="btn" style="width:100%;" onclick="beginSiteLogin()" id="btnSiteLogin">用网站账号登录</button>
+    <div class="hint" style="margin-top:12px;">— 或 —</div>
     <div class="row">
-      <input type="password" id="loginToken" placeholder="输入管理令牌" style="flex:1">
+      <input type="password" id="loginToken" placeholder="手动输入管理令牌" style="flex:1">
     </div>
-    <button class="btn" style="width:100%;" onclick="doLogin()">登录</button>
-    <div class="hint">令牌在云端 .env 的 CLOUD_VIEWER_TOKEN<br>如果刚轮换过令牌，新令牌已自动填入</div>
+    <button class="btn outline" style="width:100%;" onclick="doLogin()">手动登录</button>
+    <div class="hint" id="loginHint">手动令牌在云端 .env 的 CLOUD_VIEWER_TOKEN<br>如果刚轮换过令牌，新令牌已自动填入</div>
   </div>
 </div>
 
@@ -191,6 +194,7 @@
     <div class="status">
       <span class="pill"><span id="hostDot" class="dot red"></span><span id="hostStatus">未连接</span></span>
       <span class="pill">设备 <strong id="devCount">0</strong></span>
+      <span class="pill" id="sessionPill">—</span>
       <span class="pill" id="tokenStrength"></span>
       <button class="btn outline sm" onclick="refreshAll()">刷新</button>
       <button class="btn outline sm" onclick="logout()">退出</button>
@@ -468,8 +472,74 @@ async function testLogin() {
 function logout() {
   token = '';
   localStorage.removeItem('admin_token');
+  localStorage.removeItem('admin_token_exp');
+  localStorage.removeItem('admin_token_user');
   localStorage.removeItem('_pending_new_viewer');
   location.reload();
+}
+
+// ---- 一户通：用网站账号登录（2026-10-06）----
+// 走 OAuth 授权码 + 本地回跳：浏览器跳站点授权页 → 站点的 code 落到这台云端
+// 自己起的 127.0.0.1 临时端口/adminoauth.js → 云端用 code 换网站会话，再签一张
+// 管理台票据交回来。浏览器手里拿的是票据，不是长期静态令牌。
+let oauthWin = null;
+
+async function beginSiteLogin() {
+  try {
+    const r = await fetch('/api/admin/oauth/begin');
+    const d = await r.json();
+    if (!d.enabled) {
+      // 没配站点地址的云端照旧只有手敲令牌一条路，说清楚，别让人以为按钮坏了
+      const h = document.getElementById('loginHint');
+      if (h) h.textContent = d.reason || '这台云端没配网站账号登录，请用下面的手动令牌';
+      toast(d.reason || '这台云端没配网站账号登录', 'err');
+      return;
+    }
+    // 必须弹窗：回跳落在 127.0.0.1 的临时端口上，同标签页跳转会把那个端口页直接顶掉，
+    // opener 随之失效，票据就传不回来。
+    oauthWin = window.open(d.authorizeUrl, 'xjk_admin_oauth', 'width=520,height=760');
+    if (!oauthWin) toast('浏览器拦了弹窗，请允许本站弹窗后重试', 'err');
+  } catch (e) {
+    toast('发起登录失败: ' + e.message, 'err');
+  }
+}
+
+window.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.type !== 'xjk-admin-oauth') return;
+  // 只认从回跳端口（http://127.0.0.1:<port>）发回来的消息，别的 origin 一律不收
+  if (!/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(e.origin)) return;
+  if (oauthWin) { try { oauthWin.close(); } catch (err) { /* 可能已经被自己关了 */ } oauthWin = null; }
+  if (!d.ok) { toast('登录失败：' + (d.error || '未知原因'), 'err'); return; }
+  token = d.ticket;
+  localStorage.setItem('admin_token', d.ticket);
+  localStorage.setItem('admin_token_exp', String(d.exp || 0));
+  localStorage.setItem('admin_token_user', d.user || '');
+  testLogin();
+});
+
+/** 票据快到期（5 分钟内）就把人踢回登录页，别等到一半操作被 401 打断。 */
+function ticketExpired() {
+  const exp = Number(localStorage.getItem('admin_token_exp') || 0);
+  if (!exp) return false;
+  return Date.now() > exp - 5 * 60 * 1000;
+}
+
+/** 顶栏那枚小 pill：显示当前是谁、票据什么时候到期。 */
+async function renderSession() {
+  const el = document.getElementById('sessionPill');
+  if (!el) return;
+  el.textContent = '';
+  try {
+    const r = await fetch('/api/admin/session', { headers: { 'Authorization': 'Bearer ' + token } });
+    const d = await r.json();
+    if (!d.signedIn) { el.textContent = '未登录'; el.className = 'pill'; return; }
+    const when = d.exp ? new Date(d.exp).toLocaleString('zh-CN', { hour12: false }) : '';
+    el.textContent = (d.user ? d.user : '本地令牌') + (when ? '（' + when + ' 前有效）' : '');
+    el.className = 'pill';
+  } catch (e) {
+    el.textContent = '登录状态未知';
+  }
 }
 
 // ---- API ----
@@ -491,6 +561,7 @@ function showMain() {
   document.getElementById('mainPage').classList.remove('hidden');
   document.getElementById('hostStatus').textContent = '已连接';
   document.getElementById('hostDot').className = 'dot green';
+  renderSession();
   refreshAll();
   startPolling();
 }
@@ -899,11 +970,25 @@ function toast(msg, type='') {
 
 // ---- 启动 ----
 // 如果刚轮换过令牌，登录页自动填入新管理令牌
-(function() {
+(async function() {
   const newV = localStorage.getItem('_pending_new_viewer');
   if (newV && document.getElementById('loginToken')) {
     document.getElementById('loginToken').value = newV;
   }
+  // 票快到期了就先请人重登一次，别让他在半路被 401 打断（手动令牌没有 exp，不受影响）
+  if (ticketExpired()) {
+    localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_token_exp');
+    localStorage.removeItem('admin_token_user');
+    token = '';
+  }
+  // 这台云端配没配网站账号登录，登录页说了才算，不据猜
+  try {
+    const r = await fetch('/api/admin/oauth/begin');
+    const d = await r.json();
+    const btn = document.getElementById('btnSiteLogin');
+    if (btn) btn.classList.toggle('hidden', !d.enabled);
+  } catch (e) { /* 拿不到就当没配：下面那条手动令牌照旧能用 */ }
   if (token) testLogin();
 })();
 </script>

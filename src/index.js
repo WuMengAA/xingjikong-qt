@@ -26,6 +26,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENV_FILE = join(__dirname, '..', '.env');
 const ADMIN_HTML = join(__dirname, 'admin.html');
 
+/** 管理台「用网站账号登录」的回跳 server（127.0.0.1 临时端口）。没配全站点就一直是 null。 */
+let adminOAuth = null;
+
 /**
  * HTTP 头只允许 latin1。文件名里出现中文/控制字符时，Node 会抛 ERR_INVALID_CHAR
  * 并**终止整个进程**（2026-10-05 实测：一次下载请求就把云端打挂，教室机全体掉线，
@@ -105,7 +108,8 @@ function restartCloudTask() {
   child.unref();
   pushEvent('info', '已触发云端重启（2 秒后执行）');
 }
-import { verifyViewerTicket } from './ticket.js';
+import { verifyViewerTicket, mintViewerTicket } from './ticket.js';
+import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
 import { latestFor } from './ota.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
@@ -245,6 +249,28 @@ const server = http.createServer((req, res) => {
     });
   }
 
+  /* ---------- 管理台「用网站账号登录」— 一户通（2026-10-06）----------
+   * 这三个端点必须在下面的 isManageApi 之前，否则登录页拿不到发起授权的入口。
+   * 它们只做"把浏览器送到站点授权页 / 回显当前是谁"，不碰任何管理操作。 */
+
+  if (req.method === 'GET' && u.pathname === '/api/admin/oauth/begin') {
+    // 前端点了「用网站账号登录」才来问；没配全站点就如实说"没有这项"，
+    // 让登录页继续保持手敲令牌那一条老路（不是报错，不是静默）。
+    return send(200, { ok: true, ...beginAuthorization(adminOAuth && adminOAuth.server, (m) => console.log(m)) });
+  }
+
+  if (req.method === 'GET' && u.pathname === '/api/admin/session') {
+    const auth = req.headers.authorization || '';
+    const tok = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+    if (!tok) return send(200, { ok: true, signedIn: false });
+    if (tok === VIEWER_TOKEN) {
+      return send(200, { ok: true, signedIn: true, mode: 'token', user: '', exp: 0 });
+    }
+    const v = verifyViewerTicket(tok);
+    if (!v.ok) return send(200, { ok: true, signedIn: false, mode: '', reason: v.reason });
+    return send(200, { ok: true, signedIn: true, mode: 'ticket', user: v.uid, exp: v.exp });
+  }
+
   // HTTP 管理面鉴权（2026-10-04 · 乙阶段收尾 + 补洞）：
   // /api/instructions / /api/devices / /api/events / /api/frame / /api/instructions/pending
   // 是"发指令/读设备表/读画面/读事件"的管理操作，此前完全无鉴权 ——
@@ -264,10 +290,17 @@ const server = http.createServer((req, res) => {
   if (isManageApi) {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-    if (!token || token !== VIEWER_TOKEN) {
+    /* 两条通道都认，2026-10-06 一户通：
+     *   ① 手敲的长期令牌 CLOUD_VIEWER_TOKEN —— 老机器/离线机房照旧，不能因为加了账号就断人路；
+     *   ② 网站账号签出来的管理台票据 —— 有 uid，被抄走也能在事件流水里看到是谁的。
+     * 顺序上是"先比静态令牌，再试票据"：静态令牌长得不像票，验它不会有任何副作用。 */
+    const isStatic = !!token && token === VIEWER_TOKEN;
+    const isTicket = !!token && !isStatic ? verifyViewerTicket(token).ok : false;
+    if (!token || (!isStatic && !isTicket)) {
       pushEvent('warn', 'HTTP 管理面鉴权失败，已拒绝', { path: u.pathname });
-      return send(401, { ok: false, error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN>' });
+      return send(401, { ok: false, error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN> 或网站账号签发的票据' });
     }
+    if (isTicket) req.__ticketUid = verifyViewerTicket(token).uid;
   }
 
   if (req.method === 'GET' && u.pathname === '/api/devices') {
@@ -878,6 +911,9 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, HOST, () => {
   pushEvent('info', '云端已启动，等被控端接入', { host: HOST, port: PORT });
+  // 回跳服务要等 listen 完成才知道真端口（listen(0) 是让系统分配），所以在回调里建。
+  const srv = createAdminOAuthServer((m) => console.log(m));
+  if (srv) adminOAuth = { server: srv };
 });
 
 server.on('error', (e) => {

@@ -30,6 +30,31 @@ export const VIEWER_SECRET = process.env.CLOUD_VIEWER_SECRET || '';
 
 export const VIEWER_TICKET_TTL_MS = Number(process.env.CLOUD_VIEWER_TICKET_TTL_MS || 120000);
 
+/* ---------- 云端管理台 /admin 走网站账号登录（2026-10-06 · 一户通）----------
+ * 三件配齐 = /admin 的登录页多出「用网站账号登录」；缺任一 = 还是手敲静态令牌
+ * CLOUD_VIEWER_TOKEN（老机器、离线机房照旧能用，这条是向后兼容不是新版强制）。
+ *
+ * 站点侧**零改动**：复用已登记的 loopback 客户端 xingjikong_native ——
+ * 站点的 validateRedirectUri 对 loopback 只要求 http + 127.0.0.1 + 路径以 /oauth-callback
+ * 结尾、端口任意（见站点 src/lib/server/oauth-clients.ts:257）。所以云端自己在
+ * 127.0.0.1 上开个临时端口当回跳出口就行，不必给后台再登记一个客户端。
+ *
+ * 密钥与站点的 OAUTH_DESKTOP_SECRET 是同一个值（客户端 xingjikong_native 的密钥），
+ * 两边各存一份：站点在 .env 里，云端在 STE_OAUTH_CLIENT_SECRET。改了一边要记得改另一边，
+ * 否则换完 code 会 401 invalid_client —— 失败信息里我们只说"客户端校验不通过"，
+ * 真实原因打在站点日志（[oauth/token]）。 */
+export const SITE_URL = (process.env.STE_SITE_URL || '').trim();
+export const OAUTH_CLIENT_ID = (process.env.STE_OAUTH_CLIENT_ID || 'xingjikong_native').trim();
+export const OAUTH_CLIENT_SECRET = process.env.STE_OAUTH_CLIENT_SECRET || '';
+export const OAUTH_REDIRECT_PATH = (process.env.STE_OAUTH_REDIRECT_PATH || '/oauth-callback').trim();
+
+/** 后台票据有效期：与桌面端一户通同一口径（30 天），可按需调，但硬顶 30 天。 */
+export const ADMIN_TICKET_TTL_MS = Number(
+  process.env.CLOUD_ADMIN_TICKET_TTL_MS || 30 * 24 * 60 * 60 * 1000);
+export const ADMIN_TICKET_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
+
+export const ADMIN_OAUTH_ENABLED = !!SITE_URL && !!OAUTH_CLIENT_SECRET && !!OAUTH_CLIENT_ID;
+
 // 握手（连上后必须在此期间内完成 register / auth，否则踢掉）——不做的话，
 // 没通过鉴权的连接会挂在那儿白占资源，且面板看着像"在线"。
 export const HANDSHAKE_TIMEOUT_MS = Number(process.env.CLOUD_HANDSHAKE_TIMEOUT_MS || 8000);
