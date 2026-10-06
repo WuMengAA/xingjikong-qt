@@ -41,15 +41,26 @@ if not exist "%TMP%" mkdir "%TMP%" 2>nul
 echo [tmp] TMP=%TMP%
 
 rem ---- 2) sanity check: can it actually write there? ----
+rem      Never leave this as an afterthought: NSIS writes its stubs and its
+rem      redirected-output temp files into %TEMP% ONLY. If %TEMP% is a directory
+rem      that cannot be written, makensisw.exe (the GUI compiler) swallows the
+rem      real cause and pops a modal "Error writing temporary file. Make sure
+rem      your temp folder is valid." — the user then has no idea which folder
+rem      nor how to fix it. So: check here, print the exact folder, exit.
+rem      (2026-10-06: this bit us — the GUI compiler hid the cause entirely.)
+del "%TMP%\.nsis-tmpcheck" >nul 2>&1
 echo . > "%TMP%\.nsis-tmpcheck" 2>nul
 if errorlevel 1 (
     echo [FATAL] temp folder is not writable: %TMP%
-    echo         Fix it first, e.g. in an administrator cmd:
+    echo         That exact path must exist AND be writable by the current user.
+    echo         In an elevated cmd, fix it with:
     echo             mkdir "%TMP%"
-    echo             icacls "%TMP%" /grant Users\(OI)(OI)F
+    echo             icacls "%TMP%" /grant "%USERNAME%:(OI)(OI)F"
+    echo         (icacls grants Modify on the folder and everything under it.)
     exit /b 2
 )
 del "%TMP%\.nsis-tmpcheck" >nul 2>&1
+echo [step] temp folder writable OK
 
 rem ---- 3) compile ----
 "%NSIS%\makensis.exe" installer.nsi

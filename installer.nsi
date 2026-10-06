@@ -10,6 +10,14 @@
 ;      那就是一次误删事故。固定成 C:\Program Files\Stelarith 之后，这个递归删除才是安全的。
 ;
 ; 构建：makensis installer.nsi      （工作目录＝本文件所在目录）
+;
+; ⚠️ 别直接**双击本文件**来编译：.nsi 关联的是 NSIS 的 GUI 编译器 makensisw.exe，
+;    它把临时文件写 %TEMP% 并把真实原因吞进一个模态框，弹的是
+;    「Error writing temporary file. Make sure your temp folder is valid.」——
+;    你既看不到是哪个目录、也看不到真正的原因。
+;    请改用 CLI 入口（任选其一，工作目录＝本文件所在目录）：
+;        build-agent-installer.sh     ← Git Bash / 脚本化（会自己把 %TEMP% 指到可用目录）
+;        build-agent-installer.bat    ← 普通 cmd 窗口（脚本内已强制 CLI 编译器 + 可写性检查）
 
 Unicode true
 !include "MUI2.nsh"
