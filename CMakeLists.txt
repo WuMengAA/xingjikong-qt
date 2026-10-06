@@ -8,7 +8,7 @@ add_compile_options(/utf-8)
 # ── 管理端版本号（2026-10-06 打磨）──
 # 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
 # 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
-set(VIEWER_VERSION "0.6.12")
+set(VIEWER_VERSION "0.6.13")
 add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
 
 # 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补）。

@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QLockFile>
 #include <QStandardPaths>
+#include <QtGlobal>
 
 #include <windows.h>
 
@@ -61,6 +62,14 @@ MutexTry openMutex(const wchar_t *name)
 
 bool SingleInstanceGuard::acquire(const wchar_t *mutexName, const wchar_t *lockFile, QString *reason)
 {
+    // ── 开发开关：STE_ALLOW_MULTI=1 时整个守卫放行 ────────────────────
+    // 用途：跑着正式版的同时起一个离屏实例做自检（QML 是运行时从 build 目录加载的，
+    // 只有开着一个实例才验不了新版），或者多开做界面比对。
+    // 默认不设 ⇒ 行为与以前逐字一致（生产照旧单实例）。**别在教室机上设这个。**
+    if (qEnvironmentVariableIsSet("STE_ALLOW_MULTI")) {
+        fprintf(stderr, "[stelarith] STE_ALLOW_MULTI 已设 → 跳过单实例守卫（仅调试）\n");
+        return true;
+    }
     if (!mutexName) {
         if (reason) *reason = QStringLiteral("没给互斥体名");
         return false;

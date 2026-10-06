@@ -525,7 +525,10 @@ ApplicationWindow {
 
             // ───── 左：设备（配角）─────
             Column {
-                Layout.preferredWidth: 168
+                Layout.preferredWidth: 160
+                // 硬上限。RowLayout 里"没写 preferredWidth 的项"会被内容顶大，
+                // 而画面是靠 fillWidth 吃剩余的 —— 谁被顶大，画面就少一截。
+                Layout.maximumWidth: 184
                 Layout.fillHeight: true
                 spacing: 2
 
@@ -674,7 +677,9 @@ ApplicationWindow {
 
             // ───── 中：画面（主体）─────
             ColumnLayout {
+                // 主体：窗口有多宽，画面就吃多少（左上 badge 那行也在这栏里）。
                 Layout.fillWidth: true
+                Layout.preferredWidth: 640
                 Layout.fillHeight: true
                 spacing: 10
 
@@ -890,7 +895,10 @@ ApplicationWindow {
             // 现在按「点了会怎样」分三组：**电源**（不可逆，独占整行、视觉更重）
             // / **看看**（只读，安全）/ **让它做事**（会改远端状态，成对的一左一右）。
             ColumnLayout {
-                Layout.preferredWidth: 196
+                // 2 列按钮（120+10+120=250）＋输入框＋回执条，280 够、300 封顶。
+                // 实测这栏曾被内容顶到 657，画面被压成 299 宽的竖条 —— 就是"留给画面的区域太少"。
+                Layout.preferredWidth: 280
+                Layout.maximumWidth: 300
                 Layout.fillHeight: true
                 spacing: 10
 
@@ -1357,7 +1365,9 @@ ApplicationWindow {
                                 Row {
                                     width: parent.width
                                     spacing: 10
-                                    Button {
+                                    Btn {
+                                        theme: th
+                                        width: 160
                                         text: root.picked.length > 1
                                               ? ("发送到选中的 " + root.picked.length + " 台")
                                               : "发送到选中设备"
@@ -1438,7 +1448,9 @@ ApplicationWindow {
                                         placeholderText: "HH:mm"
                                         validator: RegularExpressionValidator { regularExpression: /^([01]\d|2[0-3]):[0-5]\d$/ }
                                     }
-                                    Button {
+                                    Btn {
+                                        theme: th
+                                        width: 60
                                         text: "设定"
                                         onClicked: {
                                             // 定时关机/重启会把一批教室机排进日程，跟电源键一个量级
@@ -1486,7 +1498,9 @@ ApplicationWindow {
                                     width: parent.width
                                     placeholderText: "广播内容"
                                 }
-                                Button {
+                                Btn {
+                                    theme: th
+                                    width: parent.width
                                     text: "广播"
                                     // 真正的事（权限、空内容、逐台下发）都交给 root.broadcastAll()：
                                     // 命令面板上同一件事也得做一遍，抽出来才不会两边漂移
@@ -1531,7 +1545,9 @@ ApplicationWindow {
                                 }
                                 Row {
                                     spacing: 8
-                                    Button {
+                                    Btn {
+                                        theme: th
+                                        width: 90
                                         text: "开始考试"
                                         onClicked: {
                                             const uid = backend.currentUid
@@ -1548,7 +1564,9 @@ ApplicationWindow {
                                             hint("考试模式已下发 → " + uid)
                                         }
                                     }
-                                    Button {
+                                    Btn {
+                                        theme: th
+                                        width: 90
                                         text: "结束考试"
                                         onClicked: {
                                             const uid = backend.currentUid
