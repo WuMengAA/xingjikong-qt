@@ -263,6 +263,24 @@ void scheduleReconnect()
     g_backoffMs = qMin(g_backoffMs * 2, kMaxBackoffMs);
 }
 
+/** 本端真实实现的指令全集，**必须与 executeAction 的分支逐条对齐**。
+ *  （2026-10-06 契合度改造：以前 register 只报 screen/input/power 三个能力组，
+ *   actions 一条都不报 —— 于是云端和管端无从知道这台机器能不能拍照/定时/推文件，
+ *   管端只能把按钮对着所有机器开放，点下去才收到一句「未知指令」。）
+ * 放成常量数组而不是散在各个 if 里，是为了让"能做什么"只有一处真值来源：
+ * 以后 executeAction 加分支，这张表也得跟着加，否则设备会自称会做却做不了（或反之）。 */
+static const char *kActionNames[] = {
+    "camera_list", "camera_record_start", "camera_record_stop", "camera_snapshot",
+    "cancel_schedule", "file_chunk", "file_done", "file_push",
+    "input", "launch_app", "list_schedules", "list_shortcut_candidates",
+    "lock", "log_tail", "media_delete", "media_list",
+    "media_session_start", "media_session_stop", "notify", "open_app",
+    "ping", "process_list", "process_stop", "reboot",
+    "remote_control_start", "remote_control_stop", "schedule_reboot", "schedule_shutdown",
+    "screenshot", "self_update", "set_volume", "shutdown",
+};
+static const int kActionCount = (int)(sizeof(kActionNames) / sizeof(kActionNames[0]));
+
 void sendRegister()
 {
     g_uid = envOr("STE_QT_UID", QHostInfo::localHostName());
@@ -274,11 +292,17 @@ void sendRegister()
         if (g_ws && g_ws->state() != QAbstractSocket::UnconnectedState) g_ws->close();
         return;
     }
-    // caps：告诉云端这台机器能做什么（现在云端不用，先占位——协议规范 v1 第四节）
+    // caps：告诉云端这台机器能做什么。
+    // actions 是给机器比对的（管端据此决定按钮置不置灰），screen/input/power 是给人看的能力组。
     QJsonObject caps;
     caps.insert(QStringLiteral("screen"), true);
     caps.insert(QStringLiteral("input"), true);
     caps.insert(QStringLiteral("power"), true);
+    QJsonArray acts;
+    // 注：Qt6 的 QJsonArray 没有 reserve()（不是 QVector/QList），直接 append 即可。
+    for (int i = 0; i < kActionCount; ++i)
+        acts.append(QString::fromLatin1(kActionNames[i]));
+    caps.insert(QStringLiteral("actions"), acts);
 
     QJsonObject p;
     p.insert(QStringLiteral("uid"), uid);
