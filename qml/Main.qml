@@ -74,6 +74,24 @@ ApplicationWindow {
     property var results: []          // 概览页的「最近回执」流水（最多 20 条，只收真回执）
     property var candidates: []       // 软件弹窗的「可打开」候选（来自被控端 list_shortcut_candidates）
 
+    // ── 灵动岛的状态源（设计文档 3.8）────────────────────────────────
+    // 状态归主界面算：设备表、回执、文件读数都在 C++ 那边，组件不该猜。
+    // 每一项都对应一个真实存在的信号，缺数据源的一档（语音）不硬凑 —— 宁可不亮，
+    // 也不摆一个永远空的胶囊在那儿冒充"聚合器"。
+    property var islandStates: []      // [{ k, t, d, p }]，k ∈ offline/command/file/alert/monitor
+    // 批量指令：下发 +1、回执 -1（4.5「进度可见」）。老师盯着数往上走，
+    // 不让他对着一屋子设备猜"这会儿发到哪台了"。
+    property var batch: ({ label: "", total: 0, done: 0, ok: 0, fail: 0, active: false })
+    // 没处理的告警（4.3 场景四）：回执失败、文件没推成都算，攒起来给灵动岛。
+    property var alerts: []
+    // 全局提示（5.6 Toast）。见 toast() 上的注释：原来只有集控页内一份 hint。
+    property string toastText: ""
+    property int toastTick: 0
+    // 多选的设备 uid（4.4）。和 currentUid 是两套东西：那个管"看哪台"，
+    // 这个管"给哪些台发" —— 混在一处会互相踢（台数变了不知道该信哪个）。
+    property var picked: []
+    property int pickAnchor: -1       // Ctrl 点下的第一台，给 Shift 范围选当端点
+
     // 云端回来的东西：一切以它为准
     readonly property var devices: backend.devices
     readonly property string currentUid: backend.currentUid
@@ -124,6 +142,12 @@ ApplicationWindow {
                 schedDlg.setItems(data.items || [], data.file || "")
                 openOnly("sched")
             }
+
+            // 批量进度 / 告警 / 灵动岛：都挂在最后，别嵌进上面那些分支里 ——
+            // 一条回执可能既是"批量的一台"又是"软件列表"，分着走才不会互相踩。
+            if (batch.active) root.batchStep(uid, result === "done", error || "")
+            if (result !== "done") root.pushAlert(uid, action, error || detail || "")
+            root.refreshIsland()
         }
     }
 
@@ -539,12 +563,72 @@ ApplicationWindow {
                             }
                         }
 
+                        // ∠ 选中态（4.4）：选中的那台描边反白 + 右端一个小勾，
+                        //   不加这个反馈就等于让老师猜"到底选上没"。
+                        property bool picked: (root.picked.indexOf(modelData.uid) >= 0)
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 9
+                            color: picked ? th.cream : "transparent"
+                            border.color: picked ? th.fg4 : "transparent"
+                            border.width: picked ? 1 : 0
+                        }
                         MouseArea {
                             id: devHover
                             anchors.fill: parent
                             hoverEnabled: true
-                            onClicked: backend.currentUid = modelData.uid
+                            // 多选交给 root：按钮位置要拿 mods 和 index，那是主界面才知道的事
+                            onClicked: (mouse) => root.pickDevice(modelData.uid, mouse.modifiers, index)
                         }
+                    }
+                }
+
+                // 已选 N 台 + 批量动作（4.4 多选 / 4.5 批量三段式）
+                // ⚠️ 刻意放在**左栏设备列表下面**，不动右栏：右栏那列是固定高的一列，
+                //    塞进去只会把底部标签栏顶出去（见文件头 minimumHeight 的注释）。
+                Column {
+                    visible: root.picked.length > 0
+                    width: 168
+                    spacing: 6
+                    Text {
+                        text: "已选 " + root.picked.length + " 台"
+                        color: th.fg
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
+                    }
+                    // 批量按钮沿用右栏 ActBtn 的外观（同高 30、同圆角 rCtrl）：
+                    // 同一屏里一个方块一个方块地漂，比样式不统一更容易看出不对。
+                    Repeater {
+                        model: [
+                            { l: "锁屏选中的", a: "lock" },
+                            { l: "关机选中的", a: "shutdown" }
+                        ]
+                        delegate: Rectangle {
+                            id: batBtn
+                            width: 168; height: 30; radius: th.rCtrl
+                            color: batMa.containsMouse ? th.hover2 : "transparent"
+                            border.color: th.stroke
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData.l
+                                color: th.op
+                                font.pixelSize: 12
+                            }
+                            MouseArea {
+                                id: batMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.runOnPicked(modelData.a)
+                            }
+                        }
+                    }
+                    Text {
+                        text: "取消选择（Esc）"
+                        color: th.fg4
+                        font.pixelSize: 11
+                        MouseArea { anchors.fill: parent; onClicked: root.clearPick() }
                     }
                 }
 
@@ -1895,7 +1979,45 @@ ApplicationWindow {
     // 顶栏那颗「去设置」在账户组件里够不着 root，这里把跳转塞给它。
     // 不用 root.page = 3 写在组件里：页号是主界面的事，别让它去猜。
     // 命令面板：组件只负责「收得进 / 搜得到 / 显示对」，命令表由主界面在这里装配 ——
-    // 命令要跑 runAction / openOnly / page，郣些都住在主界面里，组件自己挑不到。
+    // 命令要跑 runAction / openOnly / page，那些都住在主界面里，组件自己猜不到。
+    // 灵动岛（3.8）：挂**窗口层** —— 它讲"现在系统在干什么"，跟老师在哪个标签无关。
+    // 悬浮在内容区上方（顶条 44 + 8 安全区），不占布局高度：
+    // 右栏那列是固定高度的结构，给它加高度只会把底部标签栏顶出去（见 minimumHeight 注释）。
+    Item {
+        anchors.top: root.top
+        anchors.topMargin: 52
+        anchors.horizontalCenter: root.horizontalCenter
+        width: island.width
+        height: island.height
+        DynamicIsland { id: island; theme: root.th; states: root.islandStates }
+    }
+
+    // Toast（5.6 组件规范）：底部居中、距底 32px、3 秒消失、上移淡入 200ms。
+    // 放在窗口层，所以任何一页都够得着（集控页那颗 hint 留着，它贴着卡片更好使）。
+    Rectangle {
+        id: toastw
+        anchors.bottom: root.bottom
+        anchors.bottomMargin: 32
+        anchors.horizontalCenter: root.horizontalCenter
+        width: toastwText.width + 28
+        height: 30
+        radius: th.rCtrl
+        color: th.cream
+        border.color: th.stroke
+        border.width: 1
+        opacity: root.toastText === "" ? 0 : 1
+        z: 40
+        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+        Text {
+            id: toastwText
+            anchors.centerIn: parent
+            text: root.toastText
+            color: th.fg
+            font.pixelSize: 12
+        }
+        Timer { id: toastTimer; interval: 3000; onTriggered: root.toastText = "" }
+    }
+
     CommandPalette {
         id: pal
         theme: root.th
@@ -1911,44 +2033,57 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+2"; onActivated: { root.page = 1 } }
     Shortcut { sequence: "Ctrl+3"; onActivated: { root.page = 2 } }
     Shortcut { sequence: "Ctrl+4"; onActivated: { root.page = 3 } }
+    // 选择类（4.7）：锁屏是最高频也最容易误伤的操作，给它两个键不加面板；
+    // Ctrl+L 的单键形态和 Ctrl+Shift+L 的全量形态分开，避免"我本来只想锁一台"。
+    Shortcut { sequence: "Ctrl+A";     onActivated: { root.selectAll() } }
+    Shortcut { sequence: "Esc";        onActivated: { root.clearPick() } }
+    Shortcut { sequence: "Ctrl+L";     onActivated: { root.runOnPicked("lock") } }
+    Shortcut { sequence: "Ctrl+Shift+L"; onActivated: { root.runOnPicked("") } }
 
     Component.onCompleted: {
         acctMenu.goSettings = function () { root.page = 3 }
         pal.cmds = [
-            // ── 敛c室机动作 ─────────────────────────────────────
-            // 全部走 runAction()，和右栏按钮同一条路 —— 权限门控、能力门控都在郣儿，命令面板軚0过去就等于开了条后门（界面置灰了，快捷键却点得动，最容易出事）。
-            { name: "锁屏敛c机机",       keys: ["lock", "suo", "sjb"], tip: "敛c机机立刻锁屏（要管理员身份）", run: function () { root.runAction({ l: "锁屏", a: "lock", t: false, p: "admin" }) } },
-            { name: "重启敛c机机",       keys: ["reboot", "chongqi", "cq"], tip: "重启敛c机机（要管理员身份）", run: function () { root.runAction({ l: "重启", a: "reboot", t: false, p: "admin" }) } },
-            { name: "关机敛c机机",       keys: ["shutdown", "guanji", "gj"], tip: "关控敛c机机（要管理员身份）", run: function () { root.runAction({ l: "关机", a: "shutdown", t: false, p: "admin" }) } },
-            { name: "给敛c机机发通知",   keys: ["notify", "tongzhi", "tz"], tip: "填标题和正文后下发（要填内容）", run: function () { root.runAction({ l: "通知", a: "", t: false }) } },
+            // ── 教室机动作 ─────────────────────────────────────────────
+            // 全部走 runAction()，和右栏按钮同一条路 —— 权限门控、能力门控都在那儿，
+            // 命令面板绕过去就等于开了条后门（界面置灰了，快捷键却点得动，最容易出事）。
+            { name: "锁屏教室机",       keys: ["lock", "suo", "sjb"], tip: "教室机立刻锁屏（要管理员身份）", run: function () { root.runAction({ l: "锁屏", a: "lock", t: false, p: "admin" }) } },
+            { name: "重启教室机",       keys: ["reboot", "chongqi", "cq"], tip: "重启教室机（要管理员身份）", run: function () { root.runAction({ l: "重启", a: "reboot", t: false, p: "admin" }) } },
+            { name: "关机教室机",       keys: ["shutdown", "guanji", "gj"], tip: "关掉教室机（要管理员身份）", run: function () { root.runAction({ l: "关机", a: "shutdown", t: false, p: "admin" }) } },
+            { name: "给教室机发通知",   keys: ["notify", "tongzhi", "tz"], tip: "填标题和正文后下发（要填内容）", run: function () { root.runAction({ l: "通知", a: "", t: false }) } },
             { name: "打开终端",         keys: ["terminal", "cmd", "zhongduan"], tip: "命令行窗口（要管理员身份）", run: function () { root.runAction({ l: "终端", a: "", t: false, p: "admin" }) } },
             { name: "开始远程控制",     keys: ["remote", "yuankong", "yk"], tip: "实时接管鼠标键盘（要管理员身份）", run: function () { root.runAction({ l: "远控开", a: "remote_control_start", t: false, p: "admin" }) } },
             { name: "停止远程控制",     keys: ["remote", "yk"], tip: "把上一路的远控收掉", run: function () { root.runAction({ l: "远控关", a: "remote_control_stop", t: false, p: "admin" }) } },
             { name: "截图",             keys: ["screenshot", "jieku", "jk"], tip: "抓一帧画面回来", run: function () { root.runAction({ l: "截图", a: "screenshot", t: false }) } },
             { name: "拍一张（摄像头）", keys: ["camera_snapshot", "paizhao", "pz"], tip: "摄像头存一帧", run: function () { root.runAction({ l: "拍一张", a: "camera_snapshot", t: false }) } },
             { name: "看可打开的软件",   keys: ["software", "ruanjian", "rj"], tip: "这台机器上有的程序 + 正在跑的", run: function () { root.runAction({ l: "软件", a: "process_list", t: false }) } },
-            { name: "看敛c机机日志",     keys: ["log", "rizhi", "rz"], tip: "读日志尾部", run: function () { root.runAction({ l: "日志", a: "log_tail", t: false }) } },
+            { name: "看教室机日志",     keys: ["log", "rizhi", "rz"], tip: "读日志尾部", run: function () { root.runAction({ l: "日志", a: "log_tail", t: false }) } },
             { name: "探一探活",         keys: ["ping", "tanhuo", "th"], tip: "看这台机器还在不在", run: function () { root.runAction({ l: "探活", a: "", t: false }) } },
             { name: "看摄像头列表",     keys: ["camera", "shexiangtou", "sxt"], tip: "这台机器上有几个摄像头", run: function () { root.runAction({ l: "摄像头", a: "camera_list", t: false }) } },
             { name: "调音量",           keys: ["volume", "yinliang", "yl"], tip: "打开音量浮层", run: function () { root.runAction({ l: "音量", a: "", t: false }) } },
-            { name: "分发文件",         keys: ["file", "wenjian", "wj"], tip: "选一个文件推给敛c机机", run: function () { root.runAction({ l: "文件", a: "", t: false }) } },
+            { name: "分发文件",         keys: ["file", "wenjian", "wj"], tip: "选一个文件推给教室机", run: function () { root.runAction({ l: "文件", a: "", t: false }) } },
             { name: "定时任务",         keys: ["schedule", "dingshi", "ds"], tip: "排一个定时关机 / 重启", run: function () { root.runAction({ l: "定时", a: "list_schedules", t: false }) } },
-            { name: "看媒体文件",       keys: ["media", "meiti", "mt"], tip: "敛c机机上的影音文件", run: function () { root.runAction({ l: "媒体", a: "media_list", t: false }) } },
+            { name: "看媒体文件",       keys: ["media", "meiti", "mt"], tip: "教室机上的影音文件", run: function () { root.runAction({ l: "媒体", a: "media_list", t: false }) } },
             { name: "开始录像",         keys: ["record", "luxiang", "lx"], tip: "摄像头开始录（要管理员身份）", run: function () { root.runAction({ l: "开录", a: "camera_record_start", t: false, p: "admin" }) } },
             { name: "停止录像",         keys: ["record", "lx"], tip: "把录制收掉", run: function () { root.runAction({ l: "停录", a: "camera_record_stop", t: false }) } },
-            { name: "播放媒体",         keys: ["play", "bofang", "bf"], tip: "在敛c机机放一遍", run: function () { root.runAction({ l: "播放", a: "media_session_start", t: false }) } },
+            { name: "播放媒体",         keys: ["play", "bofang", "bf"], tip: "在教室机放一遍", run: function () { root.runAction({ l: "播放", a: "media_session_start", t: false }) } },
             { name: "停止播放",         keys: ["stop", "tingbo", "tb"], tip: "把播放停掉", run: function () { root.runAction({ l: "停播", a: "media_session_stop", t: false }) } },
-            // ── 视图 ────────────────────────────────────
+            // ── 选择（4.4 / 4.7）──────────────────────────────────────
+            // 这四条走的是和多选按钮同一条路（runOnPicked），免得命令面板和按钮两条逻辑各写一版。
+            { name: "选中全部在线设备", keys: ["selectall", "quanxuan", "qx"], tip: "Ctrl+A：把在线设备全选上", run: function () { root.selectAll() } },
+            { name: "取消选择",         keys: ["clearpick", "quxiaoxuan", "qxz"], tip: "Esc/点空白：把选中的机器清掉", run: function () { root.clearPick() } },
+            { name: "锁屏选中的设备",   keys: ["locksel", "suoxuan", "sx"], tip: "Ctrl+L：只锁刚才选中的那几台", run: function () { root.runOnPicked("lock") } },
+            { name: "锁屏全部在线设备", keys: ["lockall", "quanbu", "qb"], tip: "Ctrl+Shift+L：所有在线机器一起锁（要管理员身份）", run: function () { root.runOnPicked("") } },
+            // ── 视图 ───────────────────────────────────────────────────
             { name: "切到概览",         keys: ["overview", "gailan", "gl"], tip: "在线设备 + 最近回执 + 今日课表", run: function () { root.page = 0 } },
-            { name: "切到控制",         keys: ["control", "kongzhi", "kz"], tip: "看敛c机机画面 + 下发动作", run: function () { root.page = 1 } },
+            { name: "切到控制",         keys: ["control", "kongzhi", "kz"], tip: "看教室机画面 + 下发动作", run: function () { root.page = 1 } },
             { name: "切到集控",         keys: ["jikong", "jk"], tip: "集控面板", run: function () { root.page = 2 } },
             { name: "切到设置",         keys: ["settings", "shezhi", "sz"], tip: "账户 / 连接 / 提醒 / 外观", run: function () { root.page = 3 } },
-            { name: "去广播给所有在线设备", keys: ["broadcast", "guangbo", "gb"], tip: "广播要填内容，去控制页下面填再点", run: function () { root.page = 1 } },
-            // ── 系统 ───────────────────────────────────
-            { name: "刷新设备列表",     keys: ["refresh", "shuaxin", "sx"], tip: "重新拉一運云端下发（也可按 F5）", run: function () { backend.requestDevices() } },
-            { name: "用网站账号登录",   keys: ["login", "denglu", "dl"], tip: "走星琥账号授权，不用填密钥", run: function () { backend.loginWithSite() } },
-            { name: "切成管理员身份",   keys: ["admin", "guanliyuan"], tip: "能操作敛c机机（电源 / 远控）", run: function () { backend.setRole("admin") } },
-            { name: "切成敛c师身份",     keys: ["teacher", "jiaoshi", "js"], tip: "只留看画面 / 发通知 / 推文件", run: function () { backend.setRole("teacher") } },
+            { name: "去广播给所有在线设备", keys: ["broadcast", "guangbo", "gb"], tip: "广播要填内容，去集控页下面填再点", run: function () { root.page = 2 } },
+            // ── 系统 ───────────────────────────────────────────────────
+            { name: "刷新设备列表",     keys: ["refresh", "shuaxin", "sx"], tip: "重新拉一遍云端下发（也可按 F5）", run: function () { backend.requestDevices() } },
+            { name: "用网站账号登录",   keys: ["login", "denglu", "dl"], tip: "走星璃账号授权，不用填密钥", run: function () { backend.loginWithSite() } },
+            { name: "切成管理员身份",   keys: ["admin", "guanliyuan"], tip: "能操作教室机（电源 / 远控）", run: function () { backend.setRole("admin") } },
+            { name: "切成教师身份",     keys: ["teacher", "jiaoshi", "js"], tip: "只留看画面 / 发通知 / 推文件", run: function () { backend.setRole("teacher") } },
             { name: "切到黑白外观",     keys: ["dark", "heibai", "hb"], tip: "默认外观", run: function () { root.darkMode = true } },
             { name: "切到浅色外观",     keys: ["light", "qianse", "qs"], tip: "换个亮堂的", run: function () { root.darkMode = false } },
             { name: "打开官网下载页",   keys: ["download", "xiazai", "xz"], tip: "在浏览器里打开 www.245959623.xyz/download", run: function () { backend.openExternal("https://www.245959623.xyz/download") } }
@@ -2057,7 +2192,7 @@ ApplicationWindow {
         }
     }
 
-    // 广播：原来这段逻辑写死在控制页那题按钮的 onClicked 里，现在命令面板也要发广播，
+    // 广播：原来这段逻辑写死在控制页那颗按钮的 onClicked 里，现在命令面板也要发广播，
     // 抽到这儿两边共用（顺序保持原样：权限 → 内容 → 有没有设备 → 逐台下发）。
     function broadcastAll(text) {
         if (!backend.mayDo("broadcast")) {
@@ -2078,4 +2213,134 @@ ApplicationWindow {
         }
         hint("已广播给 " + devs.length + " 台设备")
     }
+
+    // ── 全局提示（设计文档 5.6 Toast）──────────────────────────────────
+    // ⚠️ 原来只有一个 consolePage.hint()，而它**住在集控页里**：在别的页（概览 / 控制 / 设置）
+    //    调用 hint() 是 ReferenceError，提示根本不出来。broadcastAll 就踩过这一下 ——
+    //    广播发出去了、一句回话没有，看着跟"点了没反应"一模一样（4.6 点名的头号体验杀手）。
+    // 一律走 root.toast()；集控页那颗旧的保留（它贴着卡片、就在手边，换掉反而别扭）。
+    function toast(s) {
+        root.toastText = s || ""
+        root.toastTick = root.toastTick + 1
+        toastTimer.restart()
+    }
+
+    // 灵动岛：把"正在进行 / 需要处理"的事聚成一条（3.8）。
+    // 数组顺序就是优先级（3.8.3：离线 > 批量指令 > 文件 > 告警 > 监控），
+    // 组件取 states[0] 当主状态，其余在展开态列出来。
+    // 语音那一档本项目还没有数据源（被控端没这个能力），宁可不亮，不摆一个永远空的胶囊。
+    function refreshIsland() {
+        const s = []
+        if (!backend.loggedIn)
+            s.push({ k: "offline", t: "还没登录", d: "点右上角账户，用网站账号登录" })
+        else if (!backend.connected)
+            s.push({ k: "offline", t: "连接断开，重连中…", d: "设备表还是上次拉到的" })
+        if (batch.active)
+            s.push({ k: "command", t: batch.label + " " + batch.done + "/" + batch.total,
+                     d: (batch.fail > 0 ? "已失败 " + batch.fail + " 台" : "逐台下发中"),
+                     p: batch.total > 0 ? batch.done / batch.total : 0 })
+        if (backend.fileState === "sending" || backend.fileState === "pushing")
+            s.push({ k: "file", t: "分发文件 " + backend.filePercent + "%",
+                     d: backend.fileTarget || backend.fileName || "",
+                     p: Math.max(0, Math.min(100, backend.filePercent)) / 100 })
+        if (alerts.length > 0)
+            s.push({ k: "alert", t: alerts.length + " 条没处理", d: alerts[0].uid + " · " + alerts[0].action })
+        if (backend.rtcState === "track")
+            s.push({ k: "monitor", t: "正在看 " + backend.currentUid, d: "实时画面" })
+        islandStates = s
+    }
+
+    function pushAlert(uid, action, why) {
+        // 同一台同一条不重复攒：60 台一起失败会瞬间把列表顶满 —— 那不叫告警，叫噪声
+        for (let i = 0; i < alerts.length; ++i)
+            if (alerts[i].uid === uid && alerts[i].action === action) return
+        const arr = alerts.slice()
+        arr.unshift({ t: Qt.formatTime(new Date(), "hh:mm:ss"), uid: uid, action: action, why: why || "" })
+        alerts = arr.slice(0, 20)
+    }
+
+    // ── 批量三段式：发之前说清几台、发之中看得见走到哪、发完了报结果（4.5）──
+    function batchStart(label, total) {
+        batch = { label: label, total: total, done: 0, ok: 0, fail: 0, active: true }
+        refreshIsland()
+    }
+    function batchStep(uid, ok, why) {
+        if (!batch.active) return
+        batch.done = batch.done + 1
+        if (ok) batch.ok = batch.ok + 1
+        else batch.fail = batch.fail + 1
+        if (!ok) root.pushAlert(uid, batch.label, why || "")
+        if (batch.total > 0 && batch.done >= batch.total) {
+            // 全成了也得说一句（4.5）："没消息"不该被当成"都成了"
+            batch.active = false
+            toast(batch.label + "：完了 " + batch.ok + " 台" + (batch.fail > 0 ? "，" + batch.fail + " 台没成" : ""))
+        }
+        refreshIsland()
+    }
+
+    // ── 设备多选（4.4）：单击 / Ctrl / Shift / Ctrl+A / Esc ──────────────
+    // 单机选中（currentUid）管"看哪台"，多选（picked）管"给哪些台发" —— 两件事别合并：
+    // 老师先看一台确认，再对同班 30 台一起锁，这是两条动作链，硬并成一条会互相踢。
+    function pickDevice(uid, mods, idx) {
+        if (mods & Qt.ControlModifier) {
+            if (root.picked.indexOf(uid) >= 0)
+                root.picked = root.picked.filter(function (x) { return x !== uid })
+            else
+                root.picked = root.picked.concat([uid])
+            root.pickAnchor = idx
+        } else if (mods & Qt.ShiftModifier) {
+            if (root.pickAnchor < 0 || root.pickAnchor >= root.devices.length) {
+                root.picked = [uid]
+                root.pickAnchor = idx
+                return
+            }
+            const a = Math.min(root.pickAnchor, idx), b = Math.max(root.pickAnchor, idx)
+            const s2 = []
+            for (let i = a; i <= b; ++i) s2.push(root.devices[i].uid)
+            root.picked = s2
+        } else {
+            root.picked = [uid]
+            root.pickAnchor = idx
+            backend.currentUid = uid        // 单击照旧把画面切过去（原本就是这个行为）
+        }
+    }
+    function selectAll() {
+        const s2 = []
+        for (let i = 0; i < root.devices.length; ++i) s2.push(root.devices[i].uid)
+        root.picked = s2
+        root.pickAnchor = -1
+        toast("已选 " + root.picked.length + " 台")
+    }
+    function clearPick() {
+        if (root.picked.length > 0) toast("取消了选择")
+        root.picked = []
+        root.pickAnchor = -1
+    }
+    /** 对选中设备批量下发。a 为空 = 对全部在线设备（Ctrl+Shift+L 走这条）。
+     *  权限判据直接问 permOk(a)：a 就是 action 名，adminOnlyActions 里那批都要管理员。 */
+    function runOnPicked(a) {
+        if (!permOk(a)) {
+            backend.reportDenied("锁屏 / 关机")
+            return
+        }
+        const list = []
+        if (a === "") {
+            for (let i = 0; i < root.devices.length; ++i) list.push(root.devices[i].uid)
+        } else {
+            for (let i = 0; i < root.picked.length; ++i) list.push(root.picked[i])
+        }
+        if (list.length === 0) {
+            toast("还没有可操作的设备")
+            return
+        }
+        const label = (a === "lock" ? "锁屏" : a === "shutdown" ? "关机" : a)
+        root.batchStart(label + " " + list.length + " 台", list.length)
+        for (let i = 0; i < list.length; ++i) {
+            backend.currentUid = list[i]
+            backend.sendAction(a, {})
+        }
+        toast(label + "已下发 " + list.length + " 台")
+        root.picked = []
+    }
 }
+
