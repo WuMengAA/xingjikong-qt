@@ -25,3 +25,8 @@ deploy/*.exe
 # 本地归档（旧坏包 / 调试快照）与临时备份，不进版本库
 _archive/
 *.bak
+
+# 发版暂存副本：publish-release.mjs 要求文件名里带版本号（否则 assets/pkg 同名互相覆盖），
+# 所以打包完会先 cp 出一份 dist/stelarith-agent-setup-<ver>.exe 再发。
+# 正式件发布后就落在云端 assets/pkg/，这份暂存副本不必入库（dist 里只留 canonical 的 .exe）。
+dist/stelarith-agent-setup-*.exe
