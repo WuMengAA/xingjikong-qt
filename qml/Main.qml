@@ -1666,6 +1666,57 @@ ApplicationWindow {
                                 }
                             }
                         }
+
+                        // ── 班级监控（2026-10-07，设计文档 3.6 第一版）──
+                        // 录制列表（被控端 camera_record 录制 → 自动上传云端 recordings/）。
+                        Rectangle {
+                            width: parent.width
+                            height: recCol.height + 32
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: recCol
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.topMargin: 16
+                                spacing: 10
+                                Row {
+                                    width: parent.width
+                                    spacing: 8
+                                    Text { text: "班级监控（录制回放）"; color: th.fg3; font.pixelSize: 11 }
+                                    Button {
+                                        text: "刷新"
+                                        onClicked: {
+                                            backend.fetchRecordings()
+                                            hint("正在拉取录制列表…")
+                                        }
+                                    }
+                                }
+                                // 按设备分组列出录制
+                                Repeater {
+                                    model: Object.keys(backend.recordings).sort()
+                                    delegate: Item {
+                                        width: parent.width
+                                        height: 40
+                                        Row {
+                                            spacing: 8
+                                            Text { text: modelData; color: th.fg; font.pixelSize: 12; width: 130 }
+                                            Text {
+                                                text: (backend.recordings[modelData].length || 0) + " 段"
+                                                color: th.fg3; font.pixelSize: 11
+                                            }
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: "录制在被控端 camera_record_start 后生成，结束自动上传云端；点上面「刷新」查看。"
+                                    color: th.fg3; font.pixelSize: 10; wrapMode: Text.Wrap
+                                }
+                            }
+                        }
                     }
                 }
             }
