@@ -1220,13 +1220,13 @@ ApplicationWindow {
                                     width: parent.width
                                     spacing: 10
                                     InputField {
-                                        th: th
+                                        th: root.th
                                         id: ntTitle
                                         width: parent.width * 0.45
                                         placeholderText: "标题（必填，如：上课啦）"
                                     }
                                     InputField {
-                                        th: th
+                                        th: root.th
                                         id: ntContent
                                         width: parent.width - ntTitle.width - 10
                                         placeholderText: "内容"
@@ -1312,7 +1312,7 @@ ApplicationWindow {
                                         }
                                     }
                                     InputField {
-                                        th: th
+                                        th: root.th
                                         id: ntSeconds
                                         width: 150
                                         placeholderText: "秒数（空=按字数自适应）"
@@ -1379,10 +1379,13 @@ ApplicationWindow {
                                                          : (backend.currentUid ? [backend.currentUid] : [])
                                             if (list.length === 0) { root.toast("先在控制页选中一台设备"); return }
                                             root.batchStart("通知", list.length)
+                                            const dead = []
                                             for (let i = 0; i < list.length; ++i) {
+                                                if (!root.isDevOnline(list[i])) { dead.push(list[i]); continue }
                                                 backend.currentUid = list[i]
                                                 backend.sendAction("notify", r.params)
                                             }
+                                            for (let j = 0; j < dead.length; ++j) root.batchStep(dead[j], false, "设备不在线")
                                         }
                                     }
                                 }
@@ -1429,7 +1432,7 @@ ApplicationWindow {
                                         }
                                     }
                                     InputField {
-                                        th: th
+                                        th: root.th
                                         id: schedAt
                                         width: 140
                                         placeholderText: "HH:mm"
@@ -1478,7 +1481,7 @@ ApplicationWindow {
                                 spacing: 10
                                 Text { text: "广播（发给所有在线设备）"; color: th.fg3; font.pixelSize: 11 }
                                 InputField {
-                                    th: th
+                                    th: root.th
                                     id: bcastText
                                     width: parent.width
                                     placeholderText: "广播内容"
@@ -1513,14 +1516,14 @@ ApplicationWindow {
                                 Row {
                                     spacing: 8
                                     InputField {
-                                        th: th
+                                        th: root.th
                                         id: examMinutes
                                         width: 90
                                         placeholderText: "时长(分钟)"
                                         validator: IntValidator { bottom: 0; top: 300 }
                                     }
                                     InputField {
-                                        th: th
+                                        th: root.th
                                         id: examWhitelist
                                         width: 200
                                         placeholderText: "白名单(逗号分隔，如 examclient,notepad)"
@@ -2203,21 +2206,28 @@ ApplicationWindow {
     // 悬浮在内容区上方（顶条 44 + 8 安全区），不占布局高度：
     // 右栏那列是固定高度的结构，给它加高度只会把底部标签栏顶出去（见 minimumHeight 注释）。
     Item {
-        anchors.top: root.top
+        anchors.top: parent.top
         anchors.topMargin: 52
-        anchors.horizontalCenter: root.horizontalCenter
+        anchors.horizontalCenter: parent.horizontalCenter
         width: island.width
         height: island.height
         DynamicIsland { id: island; theme: root.th; states: root.islandStates }
+    }
+
+    // 批量的超时兜底（见 batchTimeoutClose）。放窗口层：跟老师在哪个标签页无关。
+    Timer {
+        id: batchTimeout
+        repeat: false
+        onTriggered: root.batchTimeoutClose()
     }
 
     // Toast（5.6 组件规范）：底部居中、距底 32px、3 秒消失、上移淡入 200ms。
     // 放在窗口层，所以任何一页都够得着（集控页那颗 hint 留着，它贴着卡片更好使）。
     Rectangle {
         id: toastw
-        anchors.bottom: root.bottom
+        anchors.bottom: parent.bottom
         anchors.bottomMargin: 32
-        anchors.horizontalCenter: root.horizontalCenter
+        anchors.horizontalCenter: parent.horizontalCenter
         width: toastwText.width + 28
         height: 30
         radius: th.rCtrl
@@ -2481,6 +2491,29 @@ ApplicationWindow {
     // ── 批量三段式：发之前说清几台、发之中看得见走到哪、发完了报结果（4.5）──
     function batchStart(label, total) {
         batch = { label: label, total: total, done: 0, ok: 0, fail: 0, active: true }
+        // 收口兜底：设备掉线、云端不回执时，不能让这句话永远挂在灵动岛上。
+        // 台数越多给的时间越长（每台 4 秒），卡在 10s ~ 60s 之间。
+        batchTimeout.interval = Math.max(10000, Math.min(60000, total * 4000))
+        batchTimeout.restart()
+        refreshIsland()
+    }
+
+    // 某台设备现在在不在线（认云端给的 online；老云端不带这个键就按在线处理）
+    function isDevOnline(uid) {
+        for (let i = 0; i < root.devices.length; ++i)
+            if (root.devices[i].uid === uid) return (root.devices[i].online !== false)
+        return false
+    }
+
+    // 超时收口：没回话的按"没成"结账，并且说出来 —— 不假装成功
+    function batchTimeoutClose() {
+        if (!batch.active) return
+        const left = Math.max(0, batch.total - batch.done)
+        batch.done = batch.total
+        batch.fail = batch.fail + left
+        batch.active = false
+        toast(batch.label + "：等超时了，" + batch.ok + " 台确认"
+              + (left > 0 ? "，" + left + " 台没回话（多半是掉线）" : ""))
         refreshIsland()
     }
     function batchStep(uid, ok, why) {
@@ -2492,7 +2525,10 @@ ApplicationWindow {
         if (batch.total > 0 && batch.done >= batch.total) {
             // 全成了也得说一句（4.5）："没消息"不该被当成"都成了"
             batch.active = false
+            batchTimeout.stop()
             toast(batch.label + "：完了 " + batch.ok + " 台" + (batch.fail > 0 ? "，" + batch.fail + " 台没成" : ""))
+        } else {
+            batchTimeout.restart()      // 还有台在等，把超时往后推
         }
         refreshIsland()
     }
@@ -2554,11 +2590,17 @@ ApplicationWindow {
         }
         const label = (a === "lock" ? "锁屏" : a === "shutdown" ? "关机" : a)
         root.batchStart(label + " " + list.length + " 台", list.length)
+        const dead = []
+        let sent = 0
         for (let i = 0; i < list.length; ++i) {
+            // 已经掉线的就别发了：发出去也没人回执，只会在灵动岛上挂成一个永不推进的 0/N
+            if (!root.isDevOnline(list[i])) { dead.push(list[i]); continue }
             backend.currentUid = list[i]
             backend.sendAction(a, {})
+            sent += 1
         }
-        toast(label + "已下发 " + list.length + " 台")
+        for (let j = 0; j < dead.length; ++j) root.batchStep(dead[j], false, "设备不在线")
+        toast(label + "已下发 " + sent + " 台" + (dead.length > 0 ? "，" + dead.length + " 台不在线" : ""))
         root.picked = []
     }
 }
