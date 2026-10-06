@@ -2,6 +2,8 @@
 
 #include "viewerbackend.h"
 
+#include "oauthlogin.h"
+
 #include <QAbstractSocket>
 #include <QDateTime>
 #include <QDir>
@@ -10,6 +12,9 @@
 #include <QImage>
 #include <QJsonDocument>
 #include <QJsonValue>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
 #include <QWebSocket>
@@ -175,6 +180,252 @@ ViewerBackend::~ViewerBackend()
     }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// 站点账号（OAuth 一户通）
+// ───────────────────────────────────────────────────────────────────────────
+// 凭据落盘位置：%LOCALAPPDATA%/Stelarith Viewer/account.json（程序名由 main.cpp 钉死，
+// 所以这个路径是可预期的；不是 exe 同目录 —— 绿色包会被覆盖、重装也会丢，
+// 把令牌跟程序文件放一起还容易被整文件夹拷走）。
+// JSON 里只有四个字段：会话令牌、接入票、票到期时刻、登录账号。
+// 强度与原来 viewer.env 里的静态令牌**同档**（都是本机明文），但多一层"是谁在连"的账号。
+
+QString ViewerBackend::accountText() const { return m_accountText; }
+bool ViewerBackend::accountBusy() const { return m_accountBusy; }
+
+static QByteArray accountFilePath()
+{
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dir.isEmpty()) dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    if (dir.isEmpty()) dir = QDir::currentPath();
+    return (dir + QStringLiteral("/account.json")).toLocal8Bit();
+}
+
+void ViewerBackend::loadAccount()
+{
+    const QByteArray path = accountFilePath();
+    QFile f(QString::fromLocal8Bit(path));
+    // 没存过是最常见的情况（第一次在这台机器登录），不算错，但要留一行 ——
+    // 否则"读不到凭据"和"压根没登录"在日志里长得一模一样，排障时只能靠猜。
+    if (!f.open(QIODevice::ReadOnly)) {
+        logf("[account] 没读到本机凭据（首次登录属正常）：%s", path.constData());
+        return;
+    }
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    const QJsonObject o = doc.object();
+    m_sessionToken = o.value(QStringLiteral("session")).toString();
+    m_cloudTicket = o.value(QStringLiteral("ticket")).toString();
+    m_ticketExp = (qint64)o.value(QStringLiteral("exp")).toDouble();
+    m_accountUser = o.value(QStringLiteral("user")).toString();
+    const QString expTxt = m_ticketExp > 0
+        ? QStringLiteral("，到期 %1")
+              .arg(QDateTime::fromMSecsSinceEpoch(m_ticketExp).toString(QStringLiteral("MM-dd HH:mm")))
+        : QStringLiteral("，到期时间没记");
+    logf("[account] 读到本机凭据：账号=%s 接入票 %d 个字符%ls",
+         m_accountUser.isEmpty() ? "(没记)" : m_accountUser.toUtf8().constData(),
+         m_cloudTicket.size(), expTxt.constData());
+}
+
+void ViewerBackend::saveAccount()
+{
+    // 凭据目录不存在就建一个：AppLocalDataLocation 在干净机器上可能还没生成过。
+    QDir().mkpath(QFileInfo(QString::fromLocal8Bit(accountFilePath())).path());
+    QJsonObject o;
+    o.insert(QStringLiteral("session"), m_sessionToken);
+    o.insert(QStringLiteral("ticket"), m_cloudTicket);
+    o.insert(QStringLiteral("exp"), (double)m_ticketExp);
+    o.insert(QStringLiteral("user"), m_accountUser);
+    QFile f(QString::fromLocal8Bit(accountFilePath()));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        logf("[account] WARN 凭据写不进 %s（登录状态会每次重启都要重登）",
+             accountFilePath().constData());
+        return;
+    }
+    f.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
+}
+
+void ViewerBackend::clearAccount()
+{
+    m_sessionToken.clear();
+    m_cloudTicket.clear();
+    m_ticketExp = 0;
+    m_accountUser.clear();
+    m_accountFatal = false;
+    QFile::remove(QString::fromLocal8Bit(accountFilePath()));
+}
+
+void ViewerBackend::refreshAccountText()
+{
+    QString s;
+    if (m_accountBusy) {
+        s = QStringLiteral("正在登录网站账号…");
+    } else if (m_siteUrl.isEmpty()) {
+        s = QStringLiteral("未配置站点地址（viewer.env 里加 STE_SITE_URL）");
+    } else if (!m_cloudTicket.isEmpty() && ticketUsable()) {
+        s = QStringLiteral("已登录：%1（云端接入票 %2 内有效）")
+                .arg(m_accountUser.isEmpty() ? QStringLiteral("网站账号") : m_accountUser,
+                     QDateTime::fromMSecsSinceEpoch(m_ticketExp).toString(QStringLiteral("MM-dd HH:mm")));
+    } else if (m_accountFatal) {
+        s = m_accountText;                 // 失败文案自己已经把原因写全了
+    } else if (!m_sessionToken.isEmpty()) {
+        s = QStringLiteral("网站会话过期，正在重新取票…");
+    } else {
+        s = QStringLiteral("未登录：点这里用网站账号登录");
+    }
+    if (s != m_accountText) {
+        m_accountText = s;
+        emit accountChanged();
+    }
+}
+
+bool ViewerBackend::ticketUsable(quint64 soonMs) const
+{
+    if (m_cloudTicket.isEmpty() || m_ticketExp <= 0) return false;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    return now < m_ticketExp - (qint64)soonMs;
+}
+
+void ViewerBackend::pickTicketOrToken(QJsonObject &p) const
+{
+    // 手里有一张没过期的票就发票（云端 authorizeViewer 认 ticket）；
+    // 一张都没有才退回原来那条静态令牌的路 —— 老机器/没配站点地址照样能连。
+    if (!m_cloudTicket.isEmpty() && m_ticketExp > 0
+        && QDateTime::currentMSecsSinceEpoch() < m_ticketExp) {
+        p.insert(QStringLiteral("ticket"), m_cloudTicket);
+        return;
+    }
+    p.insert(QStringLiteral("token"), m_token);
+}
+
+void ViewerBackend::loginWithSite()
+{
+    if (m_accountBusy) return;
+    if (m_siteUrl.isEmpty()) {
+        logf("[account] FAIL 没配 STE_SITE_URL，先去 viewer.env 加上站点地址");
+        m_accountFatal = true;
+        refreshAccountText();
+        return;
+    }
+    if (!m_oauth) {
+        m_oauth = new OAuthLogin(this);
+        QObject::connect(m_oauth, &OAuthLogin::succeeded,
+                         this, &ViewerBackend::onOAuthSucceeded);
+        QObject::connect(m_oauth, &OAuthLogin::failed, this, &ViewerBackend::onOAuthFailed);
+    }
+    m_accountBusy = true;
+    m_accountFatal = false;
+    refreshAccountText();
+    m_oauth->begin();
+}
+
+void ViewerBackend::forgetAccount()
+{
+    clearAccount();
+    logf("[account] 已忘记本机账号（凭据已删）");
+    refreshAccountText();
+}
+
+void ViewerBackend::onOAuthSucceeded(const QString &sessionToken, qint64 expiresInSec)
+{
+    // 站点说这张会话 30 天；没给就按 30 天兜底，别签出无限期的会话。
+    m_sessionToken = sessionToken;
+    m_accountBusy = false;
+    m_accountFatal = false;
+    logf("[account] 网站账号登录成功（会话 %lld 天）", expiresInSec / 86400);
+    ensureCloudTicket(true);
+}
+
+void ViewerBackend::onOAuthFailed(const QString &reason)
+{
+    m_accountBusy = false;
+    m_accountFatal = true;
+    m_accountText = QStringLiteral("登录失败：%1").arg(reason);
+    logf("[account] FAIL %s", reason.toLocal8Bit().constData());
+    emit accountChanged();
+}
+
+void ViewerBackend::onSessionTicketFinished()
+{
+    QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+    if (!reply) return;
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray raw = reply->readAll();
+    reply->deleteLater();
+    m_sessionReply = nullptr;
+    m_accountBusy = false;
+
+    if (status != 200) {
+        const QString why = QString::fromUtf8(raw).left(256);
+        m_accountFatal = true;
+        m_accountText = QStringLiteral("取云端接入票失败（HTTP %1%2）")
+                            .arg(status)
+                            .arg(why.isEmpty() ? QString() : QStringLiteral("：%1").arg(why));
+        logf("[account] FAIL 换接入票失败（HTTP %d）：%s", status, raw.left(512).constData());
+        emit accountChanged();
+        return;
+    }
+
+    const QJsonObject o = QJsonDocument::fromJson(raw).object();
+    m_cloudTicket = o.value(QStringLiteral("ticket")).toString();
+    m_ticketExp = (qint64)o.value(QStringLiteral("exp")).toDouble();
+    m_accountUser = o.value(QStringLiteral("user")).toString();
+    m_accountFatal = false;
+    if (m_cloudTicket.isEmpty()) {
+        m_accountText = QStringLiteral("取云端接入票失败：站点没返回 ticket");
+        m_accountFatal = true;
+        logf("[account] FAIL 站点换票响应里没有 ticket：%s", raw.left(512).constData());
+    } else {
+        logf("[account] 云端接入票到手（%s，%s 到期），正在连云端…",
+             m_accountUser.toUtf8().constData(),
+             QDateTime::fromMSecsSinceEpoch(m_ticketExp).toString(QStringLiteral("MM-dd HH:mm")).toLocal8Bit().constData());
+    }
+    saveAccount();
+    refreshAccountText();
+    if (!m_cloudTicket.isEmpty()) connectToCloud();
+}
+
+void ViewerBackend::ensureCloudTicket(bool interactive)
+{
+    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    if (m_sessionReply) return;   // 换票请求在飞，别叠一个
+
+    refreshAccountText();
+
+    if (!m_cloudTicket.isEmpty() && ticketUsable()) {
+        if (interactive) connectToCloud();
+        return;
+    }
+    if (m_sessionToken.isEmpty()) {
+        // 没会话也没票：只有用户主动点登录才去开浏览器，否则每次开机弹浏览器是骚扰
+        if (!interactive) {
+            logf("[account] 本机没有网站会话，跳过静默取票（用户可点托盘/界面里的「登录」）");
+            return;
+        }
+        if (!m_accountFatal) setStatus(QStringLiteral("正在用网站账号登录…"), false);
+        loginWithSite();
+        return;
+    }
+
+    // 有会话令牌 → 去站点换一张云端接入票
+    m_accountBusy = true;
+    m_accountFatal = false;
+    refreshAccountText();
+    QUrl u(QStringLiteral("%1/api/console/desktop/session").arg(m_siteUrl));
+    QNetworkRequest req(u);
+    req.setRawHeader("Authorization", ("Bearer " + m_sessionToken).toUtf8());
+    m_sessionReply = m_nam->post(req, QByteArray());
+    QObject::connect(m_sessionReply, &QNetworkReply::finished,
+                     this, &ViewerBackend::onSessionTicketFinished);
+    logf("[account] 正在向站点取云端接入票…");
+}
+
+void ViewerBackend::onAccountTimer()
+{
+    // 票快到期（<6 小时）就提前换一张；换了成功则顺手重连一次，免得卡在"票刚过期"的空窗
+    if ((m_cloudTicket.isEmpty() || !ticketUsable(6 * 60 * 60 * 1000)) && !m_accountBusy) {
+        ensureCloudTicket(false);
+    }
+}
+
 void ViewerBackend::start()
 {
     m_url = qEnvironmentVariable("STE_VIEWER_URL", QStringLiteral("ws://127.0.0.1:8788/ws/viewer")).trimmed();
@@ -182,10 +433,32 @@ void ViewerBackend::start()
     m_token = qEnvironmentVariable("STE_VIEWER_TOKEN", QString()).trimmed();
     if (m_token.isEmpty()) {
         logf("[viewer] WARN 未设环境变量 STE_VIEWER_TOKEN：云端 /ws/viewer 已加鉴权，"
-             "空令牌会被拒绝（不是网络问题，是没带令牌）");
+             "既没静态令牌也没接入票的话会被拒绝（不是网络问题，是没带凭据）");
     }
+    m_siteUrl = qEnvironmentVariable("STE_SITE_URL", QString()).trimmed();
     logf("[viewer] 云端地址 %s", m_url.toUtf8().constData());
     emit cloudUrlChanged();
+
+    // ── 站点账号（OAuth 一户通，2026-10-06）──
+    // 顺序：先读本机有没有存过的凭据 → 有就静默取票（取不到也不打扰）→ 没有就等用户点登录。
+    // 没配 STE_SITE_URL 时完全按老路走（静态令牌），这条改动对老机器是零影响。
+    m_oauth = new OAuthLogin(this);
+    QObject::connect(m_oauth, &OAuthLogin::succeeded, this, &ViewerBackend::onOAuthSucceeded);
+    QObject::connect(m_oauth, &OAuthLogin::failed, this, &ViewerBackend::onOAuthFailed);
+
+    loadAccount();
+    if (m_siteUrl.isEmpty()) {
+        logf("[viewer] 没配 STE_SITE_URL：不走网站账号登录，仍用 viewer.env 里的静态令牌");
+        m_accountText = QStringLiteral("未配置站点地址（只走静态令牌）");
+        emit accountChanged();
+    } else {
+        m_accountTimer = new QTimer(this);
+        m_accountTimer->setInterval(5 * 60 * 1000);   // 票到期巡检
+        QObject::connect(m_accountTimer, &QTimer::timeout, this, &ViewerBackend::onAccountTimer);
+        m_accountTimer->start();
+        refreshAccountText();
+        ensureCloudTicket(false);   // 静默：有票直接用，没票也不弹浏览器
+    }
 
     // Qt6 的 QWebSocket 构造是三参 (origin, version, parent)，只给 parent 会重载歧义；
     // 它是 QObject 子类但不收 QObject*，用 setParent 挂上来
@@ -713,9 +986,11 @@ void ViewerBackend::onConnected()
     setStatus(QStringLiteral("已连上云端，正在鉴权…"), false);
     m_authed = false;
     emit authedChanged();
-    // 云端要求第一条消息必须是 auth（v1 信封），否则直接拒收（鉴权前不推任何设备表/画面）
+    // 云端要求第一条消息必须是 auth（v1 信封），否则直接拒收（鉴权前不推任何设备表/画面）。
+    // 手里有没过期的接入票就发票，一张都没有才退回静态令牌 ——
+    // 两条通道云端一直都认（详见 cloud-ws/src/index.js 的 authorizeViewer）。
     QJsonObject p;
-    p.insert(QStringLiteral("token"), m_token);
+    pickTicketOrToken(p);
     sendEnvelope(QStringLiteral("auth"), p);
 }
 
@@ -826,8 +1101,23 @@ void ViewerBackend::onTextMessage(const QString &text)
         setStatus(QStringLiteral("已连上云端，等教室机推画面…"), false);
         requestDevices();   // 鉴权过后再拉设备表（之前是连上就拉，现在会被云端拒）
     } else if (type == QStringLiteral("auth-fail")) {
-        m_authFailed = true;
         m_authFailReason = pay.value(QStringLiteral("reason")).toString();
+        // 拿票连的、却被拒 —— 票可能是过期的、也可能是站点那边换了密钥（旧票仍签得出但验不过）。
+        // 这种情况下"停起重连"没意义（票还是那张票），正确做法是把票废掉、逼一次重新登录，
+        // 由用户在浏览器里重新同意一次拿到新票。别把人卡在一条死路上。
+        if (!m_cloudTicket.isEmpty()) {
+            logf("[viewer] FAIL 接入票被云端拒（%s）→ 废掉这张票，需要重新用网站账号登录",
+                 m_authFailReason.toUtf8().constData());
+            m_cloudTicket.clear();
+            m_ticketExp = 0;
+            m_accountFatal = true;
+            m_accountText = QStringLiteral("接入票失效（%1），请重新登录").arg(m_authFailReason);
+            emit accountChanged();
+            saveAccount();
+            if (m_ws) m_ws->close();
+            return;
+        }
+        m_authFailed = true;
         logf("[viewer] FAIL 云端拒绝鉴权：%s", m_authFailReason.toUtf8().constData());
         setStatus(QStringLiteral("云端拒绝鉴权：") + m_authFailReason, true);
         emit authFailed(m_authFailReason);

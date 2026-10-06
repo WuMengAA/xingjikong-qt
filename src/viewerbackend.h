@@ -18,9 +18,13 @@
 #include <QString>
 #include <QStringList>
 
+class QDateTime;
+class QNetworkAccessManager;
+class QNetworkReply;
 class QTimer;
 class QWebSocket;
 class QWebEngineView;
+class OAuthLogin;
 
 /** 全局日志（定义在 main.cpp；backend 与界面共用同一份落盘日志）。 */
 void logf(const char *fmt, ...);
@@ -41,6 +45,11 @@ class ViewerBackend : public QObject
     Q_PROPERTY(int frameCount READ frameCount NOTIFY statsChanged)
     Q_PROPERTY(int lastFrameBytes READ lastFrameBytes NOTIFY statsChanged)
     Q_PROPERTY(QString cloudUrl READ cloudUrl NOTIFY cloudUrlChanged)
+    // ── 站点账号（OAuth 一户通，2026-10-06）──
+    // 界面直接显示这一行就够了，别让它在"已登录"和"没登录"之间猜：
+    // 登不进去要能看见原因（配错了网站地址、密钥没填、站点没配密钥……都在这句里）。
+    Q_PROPERTY(QString accountText READ accountText NOTIFY accountChanged)
+    Q_PROPERTY(bool accountBusy READ accountBusy NOTIFY accountChanged)
     // ── 文件推送（file_push / file_chunk / file_done 三步走）──
     // 状态：idle（没在推）→ pushing（等被控端收下会话）→ sending（一片一片推）
     //       → done（推完，fileTarget 是被控端落盘路径）／ failed（中断，fileError 有原因）
@@ -101,6 +110,19 @@ public:
     int lastFrameBytes() const { return m_lastFrameBytes; }
     /** 云端地址（设置页要显示；它是启动时从环境变量读的，不是用户填的）。 */
     QString cloudUrl() const { return m_url; }
+
+    // ── 站点账号（OAuth 一户通）──
+    /** 账号那一行该显示什么（见 accountText 属性）。 */
+    QString accountText() const;
+    bool accountBusy() const;
+
+    /**
+     * 用网站账号登录：拉起浏览器走授权页，回拨接住后自动换云端接入票并连上云端。
+     * 已在登录中时会被忽略（不然点两下就是两个浏览器窗口）。
+     */
+    Q_INVOKABLE void loginWithSite();
+    /** 忘记本机上的账号（删本地凭据，下次要重新走一次授权）。 */
+    Q_INVOKABLE void forgetAccount();
 
     // 文件推送的 7 个读数：Q_PROPERTY 的 READ 就是这些，少了任何一个，
     // moc 生成的 _t->xxx() 和本文件里的 `ViewerBackend::xxx() const` 两侧同时报错
@@ -172,6 +194,8 @@ signals:
     void frameChanged();
     void statsChanged();
     void cloudUrlChanged();
+    /** 站点账号状态/文本变化（登录成功、失败、票换了、用户点了忘记）。 */
+    void accountChanged();
     /** 文件推送进度：状态/文件名/已推字节/百分比/失败原因/落盘路径，全走这一个信号。 */
     void fileProgressChanged();
     /** WebRTC 收流链路状态变化（ready / negotiating / failed / idle）。 */
@@ -203,6 +227,28 @@ private:
     void setStatic(bool s);
     void tickFps();
     void sendEnvelope(const QString &type, const QJsonObject &payload);
+
+    // ── 站点账号（OAuth 一户通）──
+    /** 读/写/清本机凭据（站点会话令牌 + 云端接入票），落 AppData 目录下的 json。 */
+    void loadAccount();
+    void saveAccount();
+    void clearAccount();
+    /** 刷新 accountText，并在状态变化时通知界面。 */
+    void refreshAccountText();
+    /**
+     * 确保手里有一张没过期的云端接入票。
+     * @param interactive true = 拿不到票就走完整登录（弹浏览器）；false = 静默，只报错不打扰
+     */
+    void ensureCloudTicket(bool interactive);
+    void onOAuthSucceeded(const QString &sessionToken, qint64 expiresInSec);
+    void onOAuthFailed(const QString &reason);
+    void onSessionTicketFinished();
+    /** 票快到期就提前换一张（常驻程序不能等断了才想起来）。 */
+    void onAccountTimer();
+    void pickTicketOrToken(QJsonObject &p) const;
+    /** 当前手上那张票还认不认（没票 / 已过 / 将在 soonMs 内到期都算不认）。 */
+    bool ticketUsable(quint64 soonMs = 60 * 60 * 1000) const;
+
     void sendNextChunk();
     void setFileFail(const QString &why);
     void clearFilePush();
@@ -237,6 +283,20 @@ private:
     void releaseRtcView();
     void scheduleRtcViewReap();
     void cancelRtcViewReap();
+
+    // ── 站点账号（OAuth 一户通）──
+    OAuthLogin *m_oauth = nullptr;
+    QNetworkAccessManager *m_nam = nullptr;
+    QTimer *m_accountTimer = nullptr;   // 票到期巡检（5 分钟一次）
+    QString m_siteUrl;                  // STE_SITE_URL：站点首页地址
+    QString m_sessionToken;             // 网站会话令牌（30 天，换云端票用）
+    QString m_cloudTicket;              // 云端接入票（30 天，WS 握手用）
+    qint64 m_ticketExp = 0;             // 接入票到期时刻（ms）
+    QString m_accountUser;              // 登录的是哪个网站账号（审计/显示用）
+    QString m_accountText;              // 状态行原文
+    bool m_accountBusy = false;         // 登录/换票进行中
+    bool m_accountFatal = false;        // 已明确失败：文本里带原因，别让人以为还在转
+    QNetworkReply *m_sessionReply = nullptr;   // 换票请求（同一时刻只发一个）
 
     QWebSocket *m_ws = nullptr;
     QTimer *m_fpsTimer = nullptr;
