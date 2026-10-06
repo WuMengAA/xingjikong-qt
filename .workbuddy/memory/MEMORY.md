@@ -16,6 +16,12 @@
   - ⚠️ `EXTRA_FILES`「**build/ 优先、回落 deploy/**」：`viewer.env`/`start-viewer.cmd` 住 `deploy/`。
   - ⚠️ 进包**文件名用 ASCII**（7z 列表按 GBK、node 按 UTF-8 ⇒ 假阴性）。
   - ⚠️ 0.6.0 手工包根层缺整个 QtWebEngine（照常起、看画面才炸）⇒ **一律走脚本出包**。
+- 出包 **被控端** `control-qt/scripts/make-portable-agent.mjs`（2026-10-07 加）：
+  素材 = `deploy/`（DLL / 插件目录 / 免安装件）+ `build/`（exe 与 **`resources/`、`translations/`**）；
+  `REQUIRED` **29 项**硬校验（缺一件就产不出包）；`NEVER_SHIP` 排除 `agent.env`（含真实设备令牌）与调试笔记；
+  版本读 `src/main.cpp` 的 `kAppVersion`。
+  ⚠️ **`resources/` 与 `translations/` 只由 windeployqt 产出到 `build/`，`deploy/` 素材库里没有** ——
+  所以"手工从 deploy 拼包"**必然**漏掉它们（见第十节第 9 条）。
 
 ## 三、编译 / 自检
 - 构建 `viewer-qt/build-qt-viewer.bat`（Ninja+MSVC）；被控端 `scripts/build-agent.sh`。
@@ -137,3 +143,12 @@
 6. **别把分叉说成"权威副本/WIP 副本"**含糊过去 —— 只能合并，不能挑一边覆盖；
    删除/回滚前先说清代价；**永远不用 `--force` 推送**。
 7. 交付别摊成"等你点单"的菜单 —— 用户说"点菜呢"＝自己判断该做的做完。
+8. **`cp` 跨树复制会带行尾**：把另一棵树的 CRLF 文件覆盖进来，提交后 diff 显示"全文件都变了"
+   （0.6.14 的 `singleinstance.cpp` 265 行全变，把真正的 4 处改动淹没）。
+   本仓 `core.autocrlf=true`、**仓库里存 LF**；提交后若见"全文件 diff"先数 CRLF，用
+   `git add --renormalize <file>` 修回。**改完大文件顺手 `git diff --stat` 看一眼行数是否合理。**
+9. **"缺资源类"故障的判据**：程序照常启动、照常连云端、**只在用到某功能时才崩/黑屏**
+   ⇒ 先怀疑包缺件，别查代码。0.6.0 管理端、0.6.4/0.6.5 被控端栽的是同一个坑
+   （缺 WebEngine 的 `resources/`）。查崩溃的固定套路：
+   事件日志 `Application Error`(1000) 看**出错模块 + 异常码 + 偏移**；
+   偏移三次一致 ⇒ 同一个确定崩溃点；再用"出错应用程序开始时间"(FILETIME) 减崩溃时间算出**存活了几秒**。
