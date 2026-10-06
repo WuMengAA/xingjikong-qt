@@ -137,7 +137,8 @@ export function pushEvent(level, msg, extra = {}) {
   return ev;
 }
 
-export function markConnected(uid, version, ws) {
+/** @param caps 被控端 register 里的能力对象（含 actions 指令全集），可空（老版本被控端不带）。 */
+export function markConnected(uid, version, ws, caps = null) {
   const old = devices.get(uid);
   if (old && old.ws && old.ws !== ws) {
     pushEvent('warn', '同 uid 重连，踢掉旧连接', { uid, reason: 'duplicate' });
@@ -155,6 +156,23 @@ export function markConnected(uid, version, ws) {
     heartbeatsIn: 0,
     lastError: null,
     recentFrame: old?.recentFrame ?? null,
+    // 能力清单（2026-10-06 契合度）：被控端 register 带上来，云端**原样转给管端**，
+    // 管端据此把不支持的按钮置灰，别让人点下去才吃一句"未知指令"。
+    // 重连时新包没带就沿用旧的 —— 老版本被控端发不回来，总不能让管端一见旧包
+    // 就以为这台机器"什么都不会"、把整排按钮全灰掉。
+    // 能力清单（2026-10-06 契合度）：被控端 register 带上来，云端**原样转给管端**，
+    // 管端据此把不支持的按钮置灰，别让人点下去才吃一句"未知指令"。
+    // 重连时的合并口径 = **字段级沿用**，不是整包替换：
+    //   · 老版本被控端压根不发 caps → 沿用旧的，不许让管端一见旧包就以为这台机器"什么都不会"
+    //   · 部分上报（例如重连只带 screen）→ 没带的字段从旧值留着，不许把 input/power 抹掉
+    //     抹掉的实际后果：管端读 caps.input === undefined 就算"不支持"，按钮整排变灰。
+    //   · 两边都没有（老版本首台上线）→ null，管端照旧全放开（见 deviceSupports 的兜底）
+    // ⚠️ 这里**不能再剥一层**：被控端 register 的 payload.caps 本身就是扁平的能力对象
+    // （{screen,input,power,actions}，见 control-qt sendRegister）。之前写成 caps?.caps
+    // 是照着"caps 里再包一个 caps"的臆想写的 —— 实测首台上线的设备 caps/actions 全是
+    // null。2026-10-06 端到端探针抓到并修正。
+    caps: (caps || old?.caps) ? { ...(old?.caps ?? {}), ...(caps ?? {}) } : null,
+    actions: caps?.actions ?? old?.actions ?? null,
   });
   pushEvent('info', '设备已注册并连上', { uid, version });
 }
@@ -235,6 +253,9 @@ export function listDevices() {
     bytesIn: d.bytesIn,
     heartbeatsIn: d.heartbeatsIn,
     lastError: d.lastError,
+    // 管端门控要用：没上报过就是 null（老版本被控端），管端照旧全放开
+    caps: d.caps ?? null,
+    actions: d.actions ?? null,
   }));
 }
 

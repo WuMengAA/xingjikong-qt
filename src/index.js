@@ -805,7 +805,11 @@ wss.on('connection', (ws) => {
       }
       registered = true;
       finish();
-      markConnected(uid, String(version || ''), ws);
+      // 能力清单原样转存：被控端 register 里带 caps/actions，云端不解释、不挑选，
+      // 由管端按 action 名决定按钮置不置灰（2026-10-06 契合度改造）。
+      const regCaps = (p.payload && typeof p.payload.caps === 'object' && p.payload.caps !== null)
+        ? p.payload.caps : null;
+      markConnected(uid, String(version || ''), ws, regCaps);
       // 设备上线：把还没挑设备的管理端补上订阅（否则老师先开软件 → 永远黑屏）
       const auto = autoSubscribeViewers(uid);
       if (auto > 0) pushEvent('info', '已自动给管理端补上订阅', { uid, viewers: auto });
