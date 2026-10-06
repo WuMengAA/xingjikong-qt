@@ -1,8 +1,0 @@
-# Build artifacts and debug outputs (root .gitignore already has build/)
-build/
-*.log
-*.png
-!website/assets/*.png
-app_pid.txt
-runresult.txt
-runtest*.ps1
