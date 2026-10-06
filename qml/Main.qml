@@ -255,14 +255,20 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.margins: 14
                             spacing: 8
-                            Row {
+                            // ⚠️ 这里原来是 Row + 子项 anchors.right —— Qt 每次启动刷两条
+                            //    "Row: Cannot specify left/right/horizontalCenter/fill/centerIn
+                            //     anchors for items inside Row. Row will not function."
+                            //    Row 内部子项只能用 x/spacing 定位；要左右分栏就得用 Item（2026-10-06 修）。
+                            Item {
                                 width: parent.width
+                                height: 16
                                 Text {
                                     text: "今日课表"
                                     color: th.fg; font.pixelSize: 12; font.weight: Font.Medium
                                 }
                                 Text {
                                     anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
                                     text: Qt.formatDate(new Date(), "MM月dd日 dddd")
                                     color: th.fg3; font.pixelSize: 11
                                 }
@@ -317,14 +323,18 @@ ApplicationWindow {
                                 anchors.margins: 16
                                 spacing: 10
 
-                                Row {
+                                // Row 里不许给子项设 right/fill 之类的 anchors（会报 "Row will not
+                                // function"）；左右分栏用 Item，同「今日课表」标题行（2026-10-06 修）。
+                                Item {
                                     width: parent.width
+                                    height: 16
                                     Text {
                                         text: "在线设备"
                                         color: th.fg; font.pixelSize: 12; font.weight: Font.Medium
                                     }
                                     Text {
                                         anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
                                         text: root.devices.length + " 台"
                                         color: th.fg3; font.pixelSize: 11
                                     }
