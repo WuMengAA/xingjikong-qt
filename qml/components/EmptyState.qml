@@ -26,14 +26,14 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: box.title
             color: box.theme && box.theme.op !== undefined ? box.theme.op : "#C8C8C8"
-            font.pixelSize: 12
+            font.pixelSize: 13
         }
         Text {
             id: note
             anchors.horizontalCenter: parent.horizontalCenter
             text: box.note
-            color: box.theme && box.theme.fg3 !== undefined ? box.theme.fg3 : "#5A5A5A"
-            font.pixelSize: 11
+            color: box.theme && box.theme.fg3 !== undefined ? box.theme.fg3 : "#8A8A8A"
+            font.pixelSize: 12
         }
         Loader {
             id: actionLoader

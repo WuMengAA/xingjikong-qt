@@ -20,13 +20,13 @@ TextField {
     property var th: null
 
     readonly property color colFg:    th ? (th.fg     || "#FAFAFA") : "#FAFAFA"
-    readonly property color colPh:    th ? (th.fg4    || "#3A3A3A") : "#3A3A3A"
-    readonly property color colLine:  th ? (th.stroke || "#242424") : "#242424"
-    readonly property color colLine2: th ? (th.fg3    || "#5A5A5A") : "#5A5A5A"
+    readonly property color colPh:    th ? (th.ph     || "#6E6E6E") : "#6E6E6E"
+    readonly property color colLine:  th ? (th.stroke || "#333333") : "#333333"
+    readonly property color colLine2: th ? (th.fg3    || "#8A8A8A") : "#8A8A8A"
     readonly property real  rad:      th ? (th.rCtrl  || 8)         : 8
 
     color: colFg
-    font.pixelSize: 12
+    font.pixelSize: 13
     leftPadding: 10
     rightPadding: 8
     verticalAlignment: Text.AlignVCenter

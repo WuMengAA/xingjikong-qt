@@ -87,8 +87,8 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: 12
                 text: "命令"
-                color: pal.theme.fg3 || "#5A5A5A"
-                font.pixelSize: 11
+                color: pal.theme.fg3 || "#8A8A8A"
+                font.pixelSize: 12
             }
             Rectangle { width: 1; height: 16; color: pal.theme.sepline; anchors.verticalCenter: parent.verticalCenter }
             // ⚠️ 输入框不要画底色：面板本身已经是 panel 底，再深一层就是"两层灰叠一起"
@@ -101,7 +101,7 @@ Popup {
                 rightPadding: 8
                 verticalAlignment: Text.AlignVCenter
                 placeholderText: "搜命令（打首字母也行：gj → 关机教室机）"
-                font.pixelSize: 12
+                font.pixelSize: 13
 
                 onTextChanged: { pal.refilter(text); pal.cur = 0 }
 
@@ -154,13 +154,13 @@ Popup {
                         width: 12; height: 12
                         radius: 6
                         anchors.verticalCenter: parent.verticalCenter
-                        color: (index === pal.cur) ? (pal.theme.win || "#0A0A0A") : (pal.theme.fg4 || "#3A3A3A")
+                        color: (index === pal.cur) ? (pal.theme.win || "#0A0A0A") : (pal.theme.fg4 || "#707070")
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.name
                         color: (index === pal.cur) ? (pal.theme.win || "#0A0A0A") : (pal.theme.fg || "#FAFAFA")
-                        font.pixelSize: 12
+                        font.pixelSize: 13
                     }
                     Item { width: 8 }
                     // 别名摆在右边：既能提示"还能这么搜"，又不抢名字的位置
@@ -168,8 +168,8 @@ Popup {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.right: parent.right
                         text: (modelData.keys && modelData.keys.length) ? modelData.keys[0] : ""
-                        color: (index === pal.cur) ? (pal.theme.win || "#0A0A0A") : (pal.theme.fg4 || "#3A3A3A")
-                        font.pixelSize: 11
+                        color: (index === pal.cur) ? (pal.theme.win || "#0A0A0A") : (pal.theme.fg4 || "#707070")
+                        font.pixelSize: 12
                     }
                 }
 
@@ -190,8 +190,8 @@ Popup {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: pal.hits.length === 0 ? "没有匹配的命令" : (pal.hits[pal.cur] ? (pal.hits[pal.cur].tip || "") : "")
-                color: pal.theme.fg3 || "#5A5A5A"
-                font.pixelSize: 11
+                color: pal.theme.fg3 || "#8A8A8A"
+                font.pixelSize: 12
                 width: parent.width - 24
                 wrapMode: Text.Wrap
                 elide: Text.ElideRight

@@ -33,7 +33,7 @@ Rectangle {
          : ma.containsMouse ? btn.theme.hover
          : "transparent"
     border.color: btn.strong ? btn.theme.inv
-                : btn.disabled ? (btn.theme.line || "#161616")
+                : btn.disabled ? (btn.theme.line || "#202020")
                 : btn.theme.stroke
     border.width: 1
 
@@ -41,8 +41,11 @@ Rectangle {
         id: label
         anchors.centerIn: parent
         text: btn.text
-        color: btn.theme.fg3
-        font.pixelSize: 12
+        // ⚠️ 反白态（strong）的字必须跟着"反转"：inv 是浅底，字要用 win（近黑）。
+        //    以前两种态共用 fg3 —— 暗色下 fg3 落在 inv 上只有 2.95:1（改了字号/对比度后
+        //    才暴露出来），亮色下反过来一样糊。
+        color: btn.strong ? btn.theme.win : btn.theme.fg3
+        font.pixelSize: 13
     }
 
     MouseArea {

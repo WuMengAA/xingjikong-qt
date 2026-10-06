@@ -25,7 +25,7 @@ Item {
         anchors.topMargin: 5
         text: row.text
         color: row.theme && row.theme.fg !== undefined ? row.theme.fg : "#FAFAFA"
-        font.pixelSize: 12
+        font.pixelSize: 13
     }
 
     Text {
@@ -34,8 +34,8 @@ Item {
         anchors.top: label.bottom
         visible: text !== ""
         text: row.note
-        color: row.theme && row.theme.fg4 !== undefined ? row.theme.fg4 : "#3A3A3A"
-        font.pixelSize: 11
+        color: row.theme && row.theme.fg4 !== undefined ? row.theme.fg4 : "#707070"
+        font.pixelSize: 12
     }
 
     Rectangle {
@@ -53,7 +53,7 @@ Item {
             width: 14; height: 14; radius: 4
             x: row.checked ? track.width - knob.width - 3 : 3
             y: 2
-            color: row.checked ? (row.theme.win || "#0A0A0A") : (row.theme.fg4 || "#3A3A3A")
+            color: row.checked ? (row.theme.win || "#0A0A0A") : (row.theme.fg4 || "#707070")
         }
 
         MouseArea {

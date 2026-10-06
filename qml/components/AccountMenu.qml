@@ -56,8 +56,8 @@ Item {
                     anchors.centerIn: parent
                     text: backend.loggedIn && backend.accountName !== ""
                               ? backend.accountName.charAt(0).toUpperCase() : "?"
-                    color: backend.loggedIn ? (acct.theme.win || "#0A0A0A") : (acct.theme.fg4 || "#3A3A3A")
-                    font.pixelSize: 11
+                    color: backend.loggedIn ? (acct.theme.win || "#0A0A0A") : (acct.theme.fg4 || "#707070")
+                    font.pixelSize: 12
                     font.weight: Font.Medium
                 }
             }
@@ -69,7 +69,7 @@ Item {
                     : backend.loggedIn ? (backend.accountName === "" ? "已登录" : backend.accountName)
                     : "登录"
                 color: backend.loggedIn ? (acct.theme.fg || "#FAFAFA") : (acct.theme.op || "#C8C8C8")
-                font.pixelSize: 12
+                font.pixelSize: 13
                 font.weight: backend.loggedIn ? Font.Normal : Font.Medium
             }
 
@@ -91,7 +91,7 @@ Item {
                     anchors.rightMargin: 6
                     text: backend.role === "admin" ? "管理员" : "教师"
                     color: acct.theme.op || "#C8C8C8"
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                 }
             }
         }
@@ -159,7 +159,7 @@ Item {
                           ? (backend.accountName === "" ? "星璃账号" : backend.accountName)
                           : "还没登录星璃账号"
                 color: acct.theme.fg || "#FAFAFA"
-                font.pixelSize: 13
+                font.pixelSize: 14
                 font.weight: Font.Medium
             }
             Text {
@@ -172,8 +172,8 @@ Item {
                                                   : "教师身份：可以看画面、发通知，操作类动作要管理员")
                       : "登录后自动接入教室机，不用填任何密钥"
                 wrapMode: Text.Wrap
-                color: acct.theme.fg3 || "#5A5A5A"
-                font.pixelSize: 11
+                color: acct.theme.fg3 || "#8A8A8A"
+                font.pixelSize: 12
             }
 
             // ⚠️ 分隔线就是分隔线：空行用 Item 撑，别指望 padding ——
@@ -215,8 +215,8 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: 10
                     text: "这一台上的身份"
-                    color: acct.theme.fg3 || "#5A5A5A"
-                    font.pixelSize: 11
+                    color: acct.theme.fg3 || "#8A8A8A"
+                    font.pixelSize: 12
                 }
 
                 // ⚠️ RowLayout / Column 都是定位器，**没有** padding 那组属性

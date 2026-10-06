@@ -29,6 +29,9 @@ ApplicationWindow {
     visible: true
     title: "星集控"
     color: th.win
+    // 字体兜底：没显式写 font.pixelSize 的文字走这一档（"正"）。
+    // 页面里该显式写还是要显式写 —— 这里只是保证"漏写"不会掉回系统默认的小字。
+    font.pixelSize: 13
 
     // 关闭 = 隐藏到托盘（后台常驻；main.cpp 已 setQuitOnLastWindowClosed(false)，
     // 只有托盘菜单「退出管理端」才真正退出）
@@ -42,24 +45,28 @@ ApplicationWindow {
     property bool darkMode: true
 
     readonly property var darkTh: ({
+        // ⚠️ 字号/对比度按 WCAG 定的：正文类文字对底色的对比度必须 ≥ 4.5:1（WCAG AA），
+        //    弱化文字（fg4）也不低于 4:1 —— 它是"次要"，不是"看不清"。
+        //    2026-10-07 实测旧值：fg3 #5A5A5A 只有 2.87:1、fg4 #3A3A3A 只有 1.74:1
+        //    （一个低于 AA、一个连大字号 3:1 都不到）⇒ 小字在暗底上基本糊掉。
         win: "#0A0A0A", body: "#080808", panel: "#101010",
         cream: "#141414", hover: "#1E1E1E", seg: "#121212",
-        hover2: "#111111", line: "#161616", canvas: "#1A1A1A",
-        stroke: "#242424", stroke2: "#1E1E1E", todo: "#191919",
-        card: "#181818", sepline: "#141414",
-        fg: "#FAFAFA", op: "#C8C8C8", fg3: "#5A5A5A",
-        fg4: "#3A3A3A", inv: "#F0F0F0", ph: "#4E4E4E",
+        hover2: "#111111", line: "#202020", canvas: "#1A1A1A",
+        stroke: "#333333", stroke2: "#2A2A2A", todo: "#191919",
+        card: "#242424", sepline: "#1E1E1E",
+        fg: "#FAFAFA", op: "#C8C8C8", fg3: "#8A8A8A",
+        fg4: "#707070", inv: "#F0F0F0", ph: "#6E6E6E",
         rWin: 16, rCard: 12, rCtrl: 8
     })
 
     readonly property var lightTh: ({
         win: "#F6F6F6", body: "#FFFFFF", panel: "#FFFFFF",
         cream: "#EDEDED", hover: "#E6E6E6", seg: "#E9E9E9",
-        hover2: "#EFEFEF", line: "#E3E3E3", canvas: "#DCDCDC",
-        stroke: "#C4C4C4", stroke2: "#BCBCBC", todo: "#CCCCCC",
-        card: "#DCDCDC", sepline: "#DEDEDE",
-        fg: "#161616", op: "#3C3C3C", fg3: "#787878",
-        fg4: "#A6A6A6", inv: "#1A1A1A", ph: "#9A9A9A",
+        hover2: "#EFEFEF", line: "#D4D4D4", canvas: "#DCDCDC",
+        stroke: "#B4B4B4", stroke2: "#ACACAC", todo: "#CCCCCC",
+        card: "#CCCCCC", sepline: "#D0D0D0",
+        fg: "#161616", op: "#3C3C3C", fg3: "#6E6E6E",
+        fg4: "#808080", inv: "#1A1A1A", ph: "#8A8A8A",
         rWin: 16, rCard: 12, rCtrl: 8
     })
 
@@ -181,7 +188,7 @@ ApplicationWindow {
                 Text {
                     text: "星集控"
                     color: th.fg
-                    font.pixelSize: 15
+                    font.pixelSize: 16
                     font.weight: Font.Medium
                 }
 
@@ -207,7 +214,7 @@ ApplicationWindow {
                                   : (backend.accountBusy ? "正在登录…"
                                      : (backend.loggedIn ? "没连上云端" : "没登录"))
                             color: th.fg3
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                             // 顶栏这一句必须能点：没登录/断开了的时候，用户第一件该做的事
                             // （去登录）不该藏在设置页第三张卡里。
                             MouseArea {
@@ -264,7 +271,7 @@ ApplicationWindow {
                             ]
                             delegate: Row {
                                 spacing: 8
-                                Text { text: modelData.k; color: th.fg3; font.pixelSize: 11 }
+                                Text { text: modelData.k; color: th.fg3; font.pixelSize: 12 }
                                 Text {
                                     text: modelData.v
                                     color: th.fg; font.pixelSize: 20; font.weight: Font.Medium
@@ -294,13 +301,13 @@ ApplicationWindow {
                                 height: 16
                                 Text {
                                     text: "今日课表"
-                                    color: th.fg; font.pixelSize: 12; font.weight: Font.Medium
+                                    color: th.fg; font.pixelSize: 13; font.weight: Font.Medium
                                 }
                                 Text {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: Qt.formatDate(new Date(), "MM月dd日 dddd")
-                                    color: th.fg3; font.pixelSize: 11
+                                    color: th.fg3; font.pixelSize: 12
                                 }
                             }
                             // 课程列表（scheduleToday.rows：JSON 数组）
@@ -319,13 +326,13 @@ ApplicationWindow {
                                         Text {
                                             text: modelData.time
                                             color: modelData.isNow ? th.fg : th.fg3
-                                            font.pixelSize: 11; width: 88
+                                            font.pixelSize: 12; width: 88
                                         }
                                         Text {
                                             text: modelData.subject
                                             color: modelData.isNow ? th.fg
                                                  : (modelData.isPast ? th.fg4 : th.fg)
-                                            font.pixelSize: 12
+                                            font.pixelSize: 13
                                             font.weight: modelData.isNow ? Font.Medium : Font.Normal
                                         }
                                     }
@@ -360,13 +367,13 @@ ApplicationWindow {
                                     height: 16
                                     Text {
                                         text: "在线设备"
-                                        color: th.fg; font.pixelSize: 12; font.weight: Font.Medium
+                                        color: th.fg; font.pixelSize: 13; font.weight: Font.Medium
                                     }
                                     Text {
                                         anchors.right: parent.right
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: root.devices.length + " 台"
-                                        color: th.fg3; font.pixelSize: 11
+                                        color: th.fg3; font.pixelSize: 12
                                     }
                                 }
                                 Repeater {
@@ -389,12 +396,12 @@ ApplicationWindow {
                                             Text {
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 text: modelData.uid
-                                                color: th.fg; font.pixelSize: 13
+                                                color: th.fg; font.pixelSize: 14
                                             }
                                             Text {
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 text: (modelData.framesIn || 0) + " 帧"
-                                                color: th.fg3; font.pixelSize: 11
+                                                color: th.fg3; font.pixelSize: 12
                                             }
                                         }
 
@@ -423,12 +430,12 @@ ApplicationWindow {
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             text: "暂无设备"
-                                            color: th.op; font.pixelSize: 12
+                                            color: th.op; font.pixelSize: 13
                                         }
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             text: "屏幕上的机器会自动出现"
-                                            color: th.fg3; font.pixelSize: 11
+                                            color: th.fg3; font.pixelSize: 12
                                         }
                                     }
                                 }
@@ -450,7 +457,7 @@ ApplicationWindow {
 
                                 Text {
                                     text: "最近回执"
-                                    color: th.fg; font.pixelSize: 12; font.weight: Font.Medium
+                                    color: th.fg; font.pixelSize: 13; font.weight: Font.Medium
                                 }
 
                                 // 稿 .feed：时间 42px/11/辅助色，✓ ✕ 固定宽 12px，
@@ -463,13 +470,13 @@ ApplicationWindow {
                                         Text {
                                             text: modelData.t
                                             color: th.fg3
-                                            font.pixelSize: 11
+                                            font.pixelSize: 12
                                             width: 42
                                         }
                                         Text {
                                             text: modelData.ok ? "✓" : "✕"
                                             color: th.fg
-                                            font.pixelSize: 12
+                                            font.pixelSize: 13
                                             width: 12
                                         }
                                         Text {
@@ -478,7 +485,7 @@ ApplicationWindow {
                                                   + (modelData.ok ? ""
                                                         : (modelData.err ? "（" + modelData.err + "）" : ""))
                                             color: modelData.ok ? th.op : th.fg3
-                                            font.pixelSize: 12
+                                            font.pixelSize: 13
                                             elide: Text.ElideRight
                                         }
                                     }
@@ -494,12 +501,12 @@ ApplicationWindow {
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             text: "还没有操作"
-                                            color: th.op; font.pixelSize: 12
+                                            color: th.op; font.pixelSize: 13
                                         }
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             text: "点了右边的动作，结果记在这儿"
-                                            color: th.fg3; font.pixelSize: 11
+                                            color: th.fg3; font.pixelSize: 12
                                         }
                                     }
                                 }
@@ -535,7 +542,7 @@ ApplicationWindow {
                 Text {
                     text: "设备"
                     color: th.fg3
-                    font.pixelSize: 11
+                    font.pixelSize: 12
                     leftPadding: 10
                     bottomPadding: 8
                 }
@@ -568,7 +575,7 @@ ApplicationWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.uid
                                 color: cur ? th.fg : (devOnline ? th.op : th.fg4)
-                                font.pixelSize: 13
+                                font.pixelSize: 14
                                 font.weight: cur ? Font.Medium : Font.Normal
                                 elide: Text.ElideRight
                                 // 右侧那行小字要留位置，别让长机器名压上去
@@ -592,7 +599,7 @@ ApplicationWindow {
                                   : (modelData.version !== undefined && modelData.version !== ""
                                      ? modelData.version : "")
                             color: th.fg4
-                            font.pixelSize: 10
+                            font.pixelSize: 12
                         }
 
                         // ∠ 选中态（4.4）：选中的那台描边反白 + 右端一个小勾，
@@ -625,7 +632,7 @@ ApplicationWindow {
                     Text {
                         text: "已选 " + root.picked.length + " 台"
                         color: th.fg
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         font.weight: Font.Medium
                     }
                     // 批量按钮沿用右栏 ActBtn 的外观（同高 30、同圆角 rCtrl）：
@@ -645,7 +652,7 @@ ApplicationWindow {
                                 anchors.centerIn: parent
                                 text: modelData.l
                                 color: th.op
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                             }
                             MouseArea {
                                 id: batMa
@@ -659,7 +666,7 @@ ApplicationWindow {
                     Text {
                         text: "取消选择（Esc）"
                         color: th.fg4
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         MouseArea { anchors.fill: parent; onClicked: root.clearPick() }
                     }
                 }
@@ -669,7 +676,7 @@ ApplicationWindow {
                 Text {
                     text: "全校"
                     color: th.fg3
-                    font.pixelSize: 11
+                    font.pixelSize: 12
                     leftPadding: 10
                     topPadding: 12
                 }
@@ -690,7 +697,7 @@ ApplicationWindow {
                     Text {
                         text: root.currentUid === "" ? "未选择设备" : root.currentUid
                         color: th.fg
-                        font.pixelSize: 15
+                        font.pixelSize: 16
                         font.weight: Font.Medium
                     }
                     Text {
@@ -698,7 +705,7 @@ ApplicationWindow {
                         text: Math.round(backend.fps * 10) / 10 + " fps · "
                               + Math.round(backend.lastFrameBytes / 1024) + " KB"
                         color: th.fg3
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                     }
 
                     // 链路徽标：让用户一眼看出"现在看的是实时流还是轮询截图"。
@@ -746,11 +753,11 @@ ApplicationWindow {
                             text: backend.frameSource === "rtc" ? "实时"
                                 : root.linkBusy ? "正在接通…"
                                 : backend.frameSource === "jpeg" ? "轮询" : "等待画面"
-                            color: backend.frameSource === "rtc" ? (root.darkMode ? "#0A0A0A" : "#FFFFFF")
+                            color: backend.frameSource === "rtc" ? th.win
                                  : th.fg3
                             // 稿上没有 10px 这一档（最小是"注 11"），徽标字太小会把
                             // "实时/轮询"变成需要凑近看的装饰 —— 统一提到 11。
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                             font.weight: backend.frameSource === "rtc" ? Font.Medium : Font.Normal
                         }
 
@@ -817,7 +824,7 @@ ApplicationWindow {
                                 : root.linkBusy ? "正在接通"
                                 : "等画面"
                             color: th.op
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -825,7 +832,7 @@ ApplicationWindow {
                                 : root.linkBusy ? "连上就有画面"
                                 : "这台机器还没发来第一帧"
                             color: th.fg3
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                         }
                     }
 
@@ -837,8 +844,10 @@ ApplicationWindow {
                         anchors.margins: 9
                         visible: backend.screenStatic && backend.frameCount > 0
                         text: "画面未变化 · 已暂停刷新"
-                        color: "#8A8A8A"   // 固定灰：不随主题变
-                        font.pixelSize: 11
+                        // 固定灰，刻意不跟主题走：这行浮在**远程画面**上，底色是对方的桌面（不可控），
+                        // 用主题色反而可能在浅色画面上消失。
+                        color: "#8A8A8A"
+                        font.pixelSize: 12
                     }
 
                     MouseArea {
@@ -872,19 +881,19 @@ ApplicationWindow {
                     Text {
                         visible: root.currentUid !== ""
                         text: "已收 " + backend.frameCount + " 帧"
-                        color: th.fg3; font.pixelSize: 11
+                        color: th.fg3; font.pixelSize: 12
                     }
                     Text {
                         visible: root.currentUid !== ""
                         text: backend.connected ? "连接正常" : "连不上云端"
-                        color: th.fg3; font.pixelSize: 11
+                        color: th.fg3; font.pixelSize: 12
                     }
                     Item { Layout.fillWidth: true }
                     Text {
                         // 只显示被控端确认过的音量，没确认过就空着（见 remoteVolume 注释）
                         visible: root.remoteVolume >= 0
                         text: root.remoteVolume + "%"
-                        color: th.fg3; font.pixelSize: 11
+                        color: th.fg3; font.pixelSize: 12
                     }
                 }
             }
@@ -938,7 +947,7 @@ ApplicationWindow {
                             anchors.centerIn: parent
                             text: d.l
                             color: d.t ? th.fg4 : heavy ? th.fg : th.op
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
 
                         MouseArea {
@@ -1014,7 +1023,7 @@ ApplicationWindow {
                 // ── 电源：这三个点下去就不可逆，所以独占整行、描边比别人重 ──
                 Column {
                     spacing: 6
-                    Text { text: "电源"; color: th.fg4; font.pixelSize: 11 }
+                    Text { text: "电源"; color: th.fg4; font.pixelSize: 12 }
                     Repeater {
                         model: [
                             { l: "锁屏", a: "lock",     t: false, p: "admin" },
@@ -1028,7 +1037,7 @@ ApplicationWindow {
                 // ── 看看：只读，不会动那台机器的状态 ──
                 Column {
                     spacing: 6
-                    Text { text: "看看"; color: th.fg4; font.pixelSize: 11 }
+                    Text { text: "看看"; color: th.fg4; font.pixelSize: 12 }
                     Grid {
                         columns: 2
                         columnSpacing: 7
@@ -1053,7 +1062,7 @@ ApplicationWindow {
                 //    这样"这是一组互逆操作"一眼能看出来，而不是在两个位置各找一个 ──
                 Column {
                     spacing: 6
-                    Text { text: "让它做事"; color: th.fg4; font.pixelSize: 11 }
+                    Text { text: "让它做事"; color: th.fg4; font.pixelSize: 12 }
                     Grid {
                         columns: 2
                         columnSpacing: 7
@@ -1099,7 +1108,7 @@ ApplicationWindow {
                         anchors.rightMargin: 10
                         verticalAlignment: TextInput.AlignVCenter
                         color: th.fg
-                        font.pixelSize: 12
+                        font.pixelSize: 13
                         selectByMouse: true
                         clip: true
                         Text {
@@ -1107,7 +1116,7 @@ ApplicationWindow {
                             visible: typeInput.text === ""
                             text: "打字发给教室机，回车"
                             color: th.fg4
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
                         Keys.onReturnPressed: {
                             if (text !== "") {
@@ -1139,13 +1148,13 @@ ApplicationWindow {
                             Text {
                                 text: modelData.ok ? "✓" : "✕"
                                 color: modelData.ok ? th.inv : th.op
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                             }
                             Text {
                                 width: parent.width - 30
                                 text: modelData.uid + " · " + modelData.action
                                 color: modelData.ok ? th.op : th.fg3
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                                 elide: Text.ElideRight
                             }
                         }
@@ -1155,7 +1164,7 @@ ApplicationWindow {
                         visible: root.results.length === 0
                         text: "还没有操作"
                         color: th.fg4
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                     }
                 }   // 回执流水（logbox）
             }       // 右栏动作（ColumnLayout）
@@ -1176,8 +1185,10 @@ ApplicationWindow {
                     anchors.top: parent.top; anchors.topMargin: 6
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: consolePage.hintText
-                    color: "#e0a03a"
-                    font.pixelSize: 12
+                    // 黑白稿里没有彩色，"更亮/反白"就是唯一的强调手段。
+                    // 原来是橙色 #e0a03a —— 全界面唯一一处彩色，且违反了本仓 UI 规范。
+                    color: th.inv
+                    font.pixelSize: 13
                     visible: consolePage.hintText !== ""
                 }
 
@@ -1222,7 +1233,7 @@ ApplicationWindow {
                                 property bool ntSpeech: false          // flags.speech
                                 property bool ntEmergency: false       // flags.emergency_confirm：不自动关 + 置顶
 
-                                Text { text: "通知下发"; color: th.fg3; font.pixelSize: 11 }
+                                Text { text: "通知下发"; color: th.fg3; font.pixelSize: 12 }
 
                                 Row {
                                     width: parent.width
@@ -1244,7 +1255,7 @@ ApplicationWindow {
                                 // 字数：被控端会截（标题 24 / 正文 64），提前说一声，别让人以为漏发了
                                 Text {
                                     width: parent.width
-                                    font.pixelSize: 11
+                                    font.pixelSize: 12
                                     property bool tOver: NotifyParams.willTruncate(ntTitle.text, NotifyParams.CAP_TITLE)
                                     property bool cOver: NotifyParams.willTruncate(ntContent.text, NotifyParams.CAP_CONTENT)
                                     color: (tOver || cOver) ? th.op : th.fg4
@@ -1260,7 +1271,7 @@ ApplicationWindow {
                                     Text {
                                         text: "形态"
                                         color: th.fg3
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
                                     Repeater {
@@ -1272,8 +1283,8 @@ ApplicationWindow {
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: modelData.k
-                                                color: (ntCol.ntKind === modelData.v) ? "#111" : th.fg3
-                                                font.pixelSize: 11
+                                                color: (ntCol.ntKind === modelData.v) ? th.win : th.fg3
+                                                font.pixelSize: 12
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
@@ -1295,8 +1306,8 @@ ApplicationWindow {
                                             id: ntSpeechLab
                                             anchors.centerIn: parent
                                             text: "朗读"
-                                            color: ntCol.ntSpeech ? "#111" : th.fg3
-                                            font.pixelSize: 11
+                                            color: ntCol.ntSpeech ? th.win : th.fg3
+                                            font.pixelSize: 12
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -1311,8 +1322,8 @@ ApplicationWindow {
                                             id: ntEmgLab
                                             anchors.centerIn: parent
                                             text: "紧急确认（不自动关 + 置顶）"
-                                            color: ntCol.ntEmergency ? "#111" : th.fg3
-                                            font.pixelSize: 11
+                                            color: ntCol.ntEmergency ? th.win : th.fg3
+                                            font.pixelSize: 12
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -1336,7 +1347,7 @@ ApplicationWindow {
                                     Text {
                                         text: (ntCol.ntKind === "fullscreen") ? "严重度" : "严重度（只有全屏才生效）"
                                         color: th.fg3
-                                        font.pixelSize: 11
+                                        font.pixelSize: 12
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
                                     Repeater {
@@ -1350,8 +1361,8 @@ ApplicationWindow {
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: modelData.k
-                                                color: parent.on ? "#111" : th.fg3
-                                                font.pixelSize: 11
+                                                color: parent.on ? th.win : th.fg3
+                                                font.pixelSize: 12
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
@@ -1419,7 +1430,7 @@ ApplicationWindow {
                                 anchors.topMargin: 16
                                 spacing: 10
                                 property string schedWhat: "schedule_shutdown"
-                                Text { text: "定时任务（被控端执行）"; color: th.fg3; font.pixelSize: 11 }
+                                Text { text: "定时任务（被控端执行）"; color: th.fg3; font.pixelSize: 12 }
                                 Row {
                                     width: parent.width
                                     spacing: 10
@@ -1432,8 +1443,8 @@ ApplicationWindow {
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: modelData.k
-                                                color: (schedCol.schedWhat === modelData.a) ? "#111" : th.fg3
-                                                font.pixelSize: 11
+                                                color: (schedCol.schedWhat === modelData.a) ? th.win : th.fg3
+                                                font.pixelSize: 12
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
@@ -1491,7 +1502,7 @@ ApplicationWindow {
                                 anchors.top: parent.top
                                 anchors.topMargin: 16
                                 spacing: 10
-                                Text { text: "广播（发给所有在线设备）"; color: th.fg3; font.pixelSize: 11 }
+                                Text { text: "广播（发给所有在线设备）"; color: th.fg3; font.pixelSize: 12 }
                                 InputField {
                                     th: root.th
                                     id: bcastText
@@ -1526,7 +1537,7 @@ ApplicationWindow {
                                 anchors.top: parent.top
                                 anchors.topMargin: 16
                                 spacing: 10
-                                Text { text: "考试模式（全屏拦截 + 白名单进程）"; color: th.fg3; font.pixelSize: 11 }
+                                Text { text: "考试模式（全屏拦截 + 白名单进程）"; color: th.fg3; font.pixelSize: 12 }
                                 Row {
                                     spacing: 8
                                     InputField {
@@ -1614,7 +1625,7 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 14
-                            Text { text: "账户"; color: th.fg3; font.pixelSize: 11 }
+                            Text { text: "账户"; color: th.fg3; font.pixelSize: 12 }
 
                             // 没登录：两颗按钮 + 一句话说清"登录之后会发生什么"
                             Column {
@@ -1628,7 +1639,7 @@ ApplicationWindow {
                                           ? "正在等浏览器里授权…（授权完会自动接上教室机）"
                                           : "还没登录。点登录会用星璃账号授权，" +
                                             "之后这台机器自动拿到接入票，不用填密钥。"
-                                    color: th.op; font.pixelSize: 12
+                                    color: th.op; font.pixelSize: 13
                                 }
                                 RowLayout {
                                     width: parent.width
@@ -1660,7 +1671,7 @@ ApplicationWindow {
                                     width: parent.width
                                     Text {
                                         text: backend.accountName === "" ? "星璃账号" : backend.accountName
-                                        color: th.fg; font.pixelSize: 14
+                                        color: th.fg; font.pixelSize: 15
                                         font.weight: Font.Medium
                                     }
                                     Rectangle {
@@ -1675,7 +1686,7 @@ ApplicationWindow {
                                             anchors.leftMargin: 7
                                             anchors.rightMargin: 7
                                             text: backend.role === "admin" ? "管理员" : "教师"
-                                            color: th.op; font.pixelSize: 11
+                                            color: th.op; font.pixelSize: 12
                                         }
                                     }
                                 }
@@ -1686,12 +1697,12 @@ ApplicationWindow {
                                           ? "管理员：能看画面，也能操作教室机（电源 / 远控 / 终端 / 广播）。"
                                             + "右边看得到但点不动的按钮，就是这个身份之外的事。"
                                           : "教师：能看画面、发通知、推文件；电源、远控、终端、广播这类动作要管理员。"
-                                    color: th.fg3; font.pixelSize: 11
+                                    color: th.fg3; font.pixelSize: 12
                                 }
                                 RowLayout {
                                     width: parent.width
                                     spacing: 10
-                                    Text { text: "这一台的身份"; color: th.fg3; font.pixelSize: 11 }
+                                    Text { text: "这一台的身份"; color: th.fg3; font.pixelSize: 12 }
                                     Item { Layout.fillWidth: true }
                                     Btn {
                                         Layout.preferredWidth: 96
@@ -1730,32 +1741,32 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 14
-                            Text { text: "连接"; color: th.fg3; font.pixelSize: 11 }
+                            Text { text: "连接"; color: th.fg3; font.pixelSize: 12 }
                             // 稿 .kv：键 70px 辅助色，值 12px 操作色
                             Column {
                                 width: parent.width
                                 spacing: 6
                                 Row {
-                                    Text { text: "云端"; color: th.fg3; font.pixelSize: 12; width: 70 }
-                                    Text { text: backend.cloudUrl; color: th.op; font.pixelSize: 12 }
+                                    Text { text: "云端"; color: th.fg3; font.pixelSize: 13; width: 70 }
+                                    Text { text: backend.cloudUrl; color: th.op; font.pixelSize: 13 }
                                 }
                                 Row {
-                                    Text { text: "状态"; color: th.fg3; font.pixelSize: 12; width: 70 }
+                                    Text { text: "状态"; color: th.fg3; font.pixelSize: 13; width: 70 }
                                     Text {
                                         // 术语换日常词：不说"已连接/未连接"以外的协议词（规则 2）
                                         text: backend.connected ? "连接正常" : "连不上云端"
-                                        color: th.op; font.pixelSize: 12
+                                        color: th.op; font.pixelSize: 13
                                     }
                                 }
                                 // 网站账号（2026-10-06，OAuth 一户通）：账号过期/没登录时要能看见原因，
                                 // 并且能当场点一下重新登录 —— 不能让用户去翻日志才知道"票过期了"。
                                 Row {
-                                    Text { text: "账号"; color: th.fg3; font.pixelSize: 12; width: 70 }
+                                    Text { text: "账号"; color: th.fg3; font.pixelSize: 13; width: 70 }
                                     Text {
                                         id: acctText
                                         text: backend.accountText
                                         color: backend.accountBusy ? th.fg3 : th.op
-                                        font.pixelSize: 12
+                                        font.pixelSize: 13
                                         Layout.fillWidth: true
                                         wrapMode: Text.Wrap
                                     }
@@ -1769,7 +1780,7 @@ ApplicationWindow {
                                     onClicked: backend.loginWithSite()
                                     Text {
                                         anchors.centerIn: parent
-                                        text: "点这里用网站账号登录"; color: th.op; font.pixelSize: 12
+                                        text: "点这里用网站账号登录"; color: th.op; font.pixelSize: 13
                                     }
                                 }
                             }
@@ -1790,7 +1801,7 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 14
-                            Text { text: "提醒"; color: th.fg3; font.pixelSize: 11 }
+                            Text { text: "提醒"; color: th.fg3; font.pixelSize: 12 }
                             Column {
                                 width: parent.width
                                 spacing: 4
@@ -1826,7 +1837,7 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 14
-                            Text { text: "外观"; color: th.fg3; font.pixelSize: 11 }
+                            Text { text: "外观"; color: th.fg3; font.pixelSize: 12 }
                             // 稿 .pick：等宽两块，选中的那块边框走反白
                             RowLayout {
                                 width: parent.width
@@ -1842,7 +1853,7 @@ ApplicationWindow {
                                         anchors.centerIn: parent
                                         text: "黑白"
                                         color: root.darkMode ? th.fg : th.fg3
-                                        font.pixelSize: 12
+                                        font.pixelSize: 13
                                         font.weight: root.darkMode ? Font.Medium : Font.Normal
                                     }
                                     MouseArea {
@@ -1862,7 +1873,7 @@ ApplicationWindow {
                                         anchors.centerIn: parent
                                         text: "浅色"
                                         color: root.darkMode ? th.fg3 : th.fg
-                                        font.pixelSize: 12
+                                        font.pixelSize: 13
                                         font.weight: root.darkMode ? Font.Normal : Font.Medium
                                     }
                                     MouseArea {
@@ -1890,10 +1901,10 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 10
-                            Text { text: "课表编辑器"; color: th.fg3; font.pixelSize: 11 }
+                            Text { text: "课表编辑器"; color: th.fg3; font.pixelSize: 12 }
                             Text {
                                 text: "排课、时间轴、科目管理与多周轮换（数据格式兼容 ClassIsland）"
-                                color: th.op; font.pixelSize: 12
+                                color: th.op; font.pixelSize: 13
                                 wrapMode: Text.Wrap
                                 width: parent.width
                             }
@@ -1909,7 +1920,7 @@ ApplicationWindow {
                                     anchors.centerIn: parent
                                     text: "打开课表编辑器"
                                     color: th.fg
-                                    font.pixelSize: 12
+                                    font.pixelSize: 13
                                 }
                                 MouseArea {
                                     id: hovered
@@ -1936,12 +1947,12 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 6
-                            Text { text: "关于"; color: th.fg3; font.pixelSize: 11 }
-                            Text { text: "星集控 · 管理端"; color: th.fg; font.pixelSize: 12 }
+                            Text { text: "关于"; color: th.fg3; font.pixelSize: 12 }
+                            Text { text: "星集控 · 管理端"; color: th.fg; font.pixelSize: 13 }
                             Row {
                                 spacing: 0
-                                Text { text: "版本"; color: th.fg3; font.pixelSize: 11; width: 70 }
-                                Text { text: backend.version; color: th.op; font.pixelSize: 11 }
+                                Text { text: "版本"; color: th.fg3; font.pixelSize: 12; width: 70 }
+                                Text { text: backend.version; color: th.op; font.pixelSize: 12 }
                             }
                             Text {
                                 width: parent.width
@@ -1949,7 +1960,7 @@ ApplicationWindow {
                                 text: "被控端是另一台机器上的另一个程序（星集控被控端 / 绿色包），" +
                                       "装到教室机上、登录同一个星璃账号之后，这台管理端就能看到它。" +
                                       "这里切不出被控端 —— 要看哪台机器，就在控制页左边选。"
-                                color: th.fg3; font.pixelSize: 11
+                                color: th.fg3; font.pixelSize: 12
                             }
                             RowLayout {
                                 width: parent.width
@@ -1965,7 +1976,7 @@ ApplicationWindow {
                             }
                             Text {
                                 text: "日志 stelarith-viewer-qt/viewer.log"
-                                color: th.fg3; font.pixelSize: 11
+                                color: th.fg3; font.pixelSize: 12
                             }
                         }
                     }
@@ -1997,7 +2008,7 @@ ApplicationWindow {
                             anchors.centerIn: parent
                             text: modelData
                             color: (index === root.page) ? th.fg : th.fg3
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                             font.weight: (index === root.page) ? Font.Medium : Font.Normal
                         }
 
@@ -2033,7 +2044,7 @@ ApplicationWindow {
             Text {
                 text: "音量"
                 color: th.fg
-                font.pixelSize: 13
+                font.pixelSize: 14
                 font.weight: Font.Medium
             }
 
@@ -2052,7 +2063,7 @@ ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.volumeValue + "%"
                     color: th.fg
-                    font.pixelSize: 14
+                    font.pixelSize: 15
                     font.weight: Font.Medium
                 }
             }
@@ -2066,7 +2077,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         text: "应用"
                         color: th.win
-                        font.pixelSize: 13
+                        font.pixelSize: 14
                         font.weight: Font.Medium
                     }
                     MouseArea {
@@ -2086,7 +2097,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         text: "取消"
                         color: th.op
-                        font.pixelSize: 13
+                        font.pixelSize: 14
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -2119,13 +2130,13 @@ ApplicationWindow {
             Text {
                 text: "打开程序"
                 color: th.fg
-                font.pixelSize: 13
+                font.pixelSize: 14
                 font.weight: Font.Medium
             }
             Text {
                 text: "填程序名或路径（不在安全名单里的会被拒绝）"
                 color: th.fg3
-                font.pixelSize: 11
+                font.pixelSize: 12
             }
 
             Rectangle {
@@ -2142,7 +2153,7 @@ ApplicationWindow {
                     anchors.rightMargin: 10
                     verticalAlignment: TextInput.AlignVCenter
                     color: th.fg
-                    font.pixelSize: 13
+                    font.pixelSize: 14
                     selectByMouse: true
                 }
             }
@@ -2156,7 +2167,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         text: "打开"
                         color: th.win
-                        font.pixelSize: 13
+                        font.pixelSize: 14
                         font.weight: Font.Medium
                     }
                     MouseArea {
@@ -2179,7 +2190,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         text: "取消"
                         color: th.op
-                        font.pixelSize: 13
+                        font.pixelSize: 14
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -2260,7 +2271,7 @@ ApplicationWindow {
             anchors.centerIn: parent
             text: root.toastText
             color: th.fg
-            font.pixelSize: 12
+            font.pixelSize: 13
         }
         Timer { id: toastTimer; interval: 3000; onTriggered: root.toastText = "" }
     }

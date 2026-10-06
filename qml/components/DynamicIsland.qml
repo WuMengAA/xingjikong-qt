@@ -49,7 +49,7 @@ Item {
         radius: (isl.mode === "expanded" ? 14 : 18)
         // 悬浮层：深色用边框、浅色才需要阴影（5.4「浅色模式用阴影，深色模式用边框」）
         color: isl.theme.cream || "#141414"
-        border.color: isl.theme.card || "#181818"
+        border.color: isl.theme.card || "#242424"
         border.width: 1
         opacity: isl.mode === "hidden" ? 0 : 1
         scale: isl.mode === "hidden" ? 0.86 : 1
@@ -78,8 +78,8 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: isl.glyph[isl.st.k] || "•"
-                    color: isl.theme.fg3 || "#5A5A5A"
-                    font.pixelSize: 13
+                    color: isl.theme.fg3 || "#8A8A8A"
+                    font.pixelSize: 14
                 }
                 Text {
                     id: capText
@@ -87,7 +87,7 @@ Item {
                     width: parent.width - 78
                     text: (isl.n > 1 ? (isl.n + " 项：") : "") + isl.st.t
                     color: isl.theme.fg || "#FAFAFA"
-                    font.pixelSize: 12
+                    font.pixelSize: 13
                     elide: Text.ElideRight
                 }
                 Item { width: 4 }
@@ -98,8 +98,8 @@ Item {
                     // 横向位置交给 Row 自己排；"展开"本来就是这一行的最后一个，删掉也一样在末尾。
                     anchors.verticalCenter: parent.verticalCenter
                     text: isl.n > 0 ? "展开" : ""
-                    color: isl.theme.fg4 || "#3A3A3A"
-                    font.pixelSize: 11
+                    color: isl.theme.fg4 || "#707070"
+                    font.pixelSize: 12
                 }
             }
             // 进度条只在有进度的状态上出现
@@ -111,12 +111,12 @@ Item {
                 anchors.rightMargin: 14
                 height: 2
                 radius: 1
-                color: isl.theme.stroke2 || "#1E1E1E"
+                color: isl.theme.stroke2 || "#2A2A2A"
                 Rectangle {
                     width: parent.width * (isl.st.p >= 0 ? isl.st.p : 0)
                     height: parent.height
                     radius: 1
-                    color: isl.theme.fg3 || "#5A5A5A"
+                    color: isl.theme.fg3 || "#8A8A8A"
                     Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
                 }
             }
@@ -136,15 +136,15 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "现在在做什么"
                     color: isl.theme.fg || "#FAFAFA"
-                    font.pixelSize: 12
+                    font.pixelSize: 13
                     font.weight: Font.Medium
                 }
                 Text {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     text: "点一下收起"
-                    color: isl.theme.fg4 || "#3A3A3A"
-                    font.pixelSize: 11
+                    color: isl.theme.fg4 || "#707070"
+                    font.pixelSize: 12
                 }
                 MouseArea { anchors.fill: parent; onClicked: isl.expanded = false }
             }
@@ -172,8 +172,8 @@ Item {
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: isl.glyph[modelData.k] || "•"
-                                color: (index === 0) ? (isl.theme.win || "#0A0A0A") : (isl.theme.fg4 || "#3A3A3A")
-                                font.pixelSize: 13
+                                color: (index === 0) ? (isl.theme.win || "#0A0A0A") : (isl.theme.fg4 || "#707070")
+                                font.pixelSize: 14
                             }
                             Column {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -181,13 +181,13 @@ Item {
                                 Text {
                                     text: (isl.n > 1 ? (index + 1) + ". " : "") + (modelData.t || "")
                                     color: (index === 0) ? (isl.theme.win || "#0A0A0A") : (isl.theme.fg || "#FAFAFA")
-                                    font.pixelSize: 12
+                                    font.pixelSize: 13
                                 }
                                 Text {
                                     visible: (modelData.d || "") !== ""
                                     text: modelData.d || ""
-                                    color: (index === 0) ? (isl.theme.win || "#0A0A0A") : (isl.theme.fg3 || "#5A5A5A")
-                                    font.pixelSize: 11
+                                    color: (index === 0) ? (isl.theme.win || "#0A0A0A") : (isl.theme.fg3 || "#8A8A8A")
+                                    font.pixelSize: 12
                                     elide: Text.ElideRight
                                     width: parent.width - 34
                                 }
