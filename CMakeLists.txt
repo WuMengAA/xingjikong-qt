@@ -42,6 +42,9 @@ qt_add_executable(viewer-qt
   # ── 大屏今日课表窗口（2026-10-06 与被控端对称）──
   src/schedule_view.cpp
   src/schedule_view.h
+  # ── 概览页今日课表数据（2026-10-06 补上概览页的课表卡）──
+  src/schedule_today_provider.cpp
+  src/schedule_today_provider.h
 )
 # 界面资源：QML 模块 URI = Stelarith。
 # 2026-10-06：Main.qml 不再列进 QML_FILES —— 它原先是跟 exe 一起烧进二进制的，

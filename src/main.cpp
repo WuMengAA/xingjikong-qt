@@ -17,7 +17,8 @@
 #include "schedule/timeslot_model.h"
 #include "schedule/subject_model.h"
 #include "schedule/undo_manager.h"
-#include "schedule_view.h"   // 2026-10-06：大屏今日课表窗口
+#include "schedule_view.h"          // 2026-10-06：大屏今日课表窗口
+#include "schedule_today_provider.h" // 2026-10-06：概览页今日课表数据
 
 #include <QApplication>   // 2026-10-06：要托盘必须 QApplication（QSystemTrayIcon 属 QtWidgets）。
                           // Qt6Widgets 本来就链了（styles/Qt6Widgets.dll 也在绿色包里），
@@ -307,6 +308,10 @@ int main(int argc, char *argv[])
     schedSubjectModel.setProfileRef(&schedProfile);
     UndoManager schedUndo(&schedModel);
 
+    // 概览页「今日课表」数据提供者（读真机 ClassIsland 档案）
+    ScheduleTodayProvider schedToday;
+    schedToday.setProfilePath(schedRepo.defaultProfilePath());
+
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
@@ -316,6 +321,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("subjectModel"), &schedSubjectModel);
     engine.rootContext()->setContextProperty(QStringLiteral("undoManager"), &schedUndo);
     engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), schedRepo.defaultProfilePath());
+    engine.rootContext()->setContextProperty(QStringLiteral("scheduleToday"), &schedToday);
     // 2026-10-06：QML 从**磁盘**加载，不再从 exe 里的资源读。
     // 为什么改：QML 编进 exe（qt_add_qml_module 的 QML_FILES）意味着改一个按钮文案都要重出整包，
     // 对教室里的管理端基本等于「改不了」。改成读磁盘后，界面层可作为补丁包单独下发（热更）。

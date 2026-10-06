@@ -243,6 +243,61 @@ ApplicationWindow {
                         }
                     }
 
+                    // ── 今日课表（2026-10-06 补上：读真机 ClassIsland 档案，不再空）──
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 148
+                        radius: th.rCard
+                        color: th.panel
+                        border.color: th.card
+                        border.width: 1
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 14
+                            spacing: 8
+                            Row {
+                                width: parent.width
+                                Text {
+                                    text: "今日课表"
+                                    color: th.fg; font.pixelSize: 12; font.weight: Font.Medium
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    text: Qt.formatDate(new Date(), "MM月dd日 dddd")
+                                    color: th.fg3; font.pixelSize: 11
+                                }
+                            }
+                            // 课程列表（scheduleToday.rows：JSON 数组）
+                            ListView {
+                                width: parent.width
+                                height: parent.height - 30
+                                clip: true
+                                model: scheduleToday.rows
+                                delegate: Rectangle {
+                                    width: parent.width
+                                    height: 30
+                                    color: modelData.isNow ? th.cream : "transparent"
+                                    Row {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        x: 8; spacing: 12
+                                        Text {
+                                            text: modelData.time
+                                            color: modelData.isNow ? th.fg : th.fg3
+                                            font.pixelSize: 11; width: 88
+                                        }
+                                        Text {
+                                            text: modelData.subject
+                                            color: modelData.isNow ? th.fg
+                                                 : (modelData.isPast ? th.fg4 : th.fg)
+                                            font.pixelSize: 12
+                                            font.weight: modelData.isNow ? Font.Medium : Font.Normal
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
