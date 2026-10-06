@@ -23,6 +23,9 @@ add_executable(stelarith-agent-qt
   # ── 课表时钟模块（2026-10-06 加：上下课提醒）──
   src/schedule_clock.cpp
   src/schedule_clock.h
+  # ── 大屏课表窗口（2026-10-06 加：今日课表展示）──
+  src/schedule_view.cpp
+  src/schedule_view.h
   src/schedule/profile_repository.cpp
   src/schedule/profile_repository.h
   src/schedule/profile.h

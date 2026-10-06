@@ -20,7 +20,8 @@
 //   · 云端拒绝时回的是统一 error 通道（code + 人话原因），这里必须打出来，不许静默。
 
 #include "singleinstance.h"
-#include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）   // 单实例守卫（与管理端 viewer 同一份实现）
+#include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
+#include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -3467,6 +3468,18 @@ int main(int argc, char *argv[])
         // 设置与信息（2026-10-06）：一眼看清 版本 / uid / 云端地址 / 连接状态 / 能不能升级
         auto *actInfo = menu->addAction(QStringLiteral("设置与信息…"));
         QObject::connect(actInfo, &QAction::triggered, &app, [] { openInfoDialog(); });
+        // 今日课表（2026-10-06）：教室大屏显示全天课程，双击全屏；读 ClassIsland 档案
+        auto *actSched = menu->addAction(QStringLiteral("今日课表…"));
+        QObject::connect(actSched, &QAction::triggered, &app, [] {
+            const QString profilePath = qEnvironmentVariable(
+                "STE_QT_PROFILE",
+                QStringLiteral("%1/ClassIsland/data/Profiles/Default.json")
+                    .arg(qEnvironmentVariable("LOCALAPPDATA")));
+            auto *win = new ScheduleViewWindow();
+            win->setAttribute(Qt::WA_DeleteOnClose);
+            win->setProfilePath(profilePath);
+            win->show();
+        });
         // 有新版时才出现的一条：默认隐藏，收到 registered 里的 latestVersion 后按需显示
         g_actUpdate = menu->addAction(QStringLiteral("发现新版本…"));
         g_actUpdate->setVisible(false);

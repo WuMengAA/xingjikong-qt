@@ -29,6 +29,21 @@ int main(int argc, char* argv[])
     const int weekday = today.dayOfWeek();
     std::printf("== 档案: %s\n", qPrintable(args[0]));
     std::printf("== 今日(周%d) 激活课表群课表数: %d\n", weekday, profile.activeClassPlans().size());
+    std::printf("== 选中群: %s\n", qPrintable(profile.selectedClassPlanGroupId));
+    std::printf("== 群总数: %d, 课表总数: %d, 时间点总数: %d\n",
+                profile.classPlanGroups.size(), profile.classPlans.size(), profile.timeSlots.size());
+    // 诊断：打印选中群里的课表 + 每个课表的 weekDay/轮换
+    const auto grpIt = profile.classPlanGroups.find(profile.selectedClassPlanGroupId);
+    if (grpIt != profile.classPlanGroups.end()) {
+        std::printf("== 选中群 [%s] ids: %d\n", qPrintable(grpIt->name), grpIt->classPlanIds.size());
+        for (const QString& cpId : grpIt->classPlanIds) {
+            const auto cpIt = profile.classPlans.find(cpId);
+            if (cpIt == profile.classPlans.end()) continue;
+            std::printf("   - %s (weekDay=%d, div=%d/%d, lessons=%d)\n",
+                        qPrintable(cpIt->name), cpIt->weekDay,
+                        cpIt->weekCountDiv, cpIt->weekCountDivTotal, cpIt->lessons.size());
+        }
+    }
 
     // 用 ScheduleClock 内部逻辑手动检查
     ScheduleClock clock(args[0]);
