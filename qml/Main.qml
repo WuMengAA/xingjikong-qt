@@ -13,6 +13,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / EmptyState / ToggleRow（2026-10-06 打磨抽出）
+import "NotifyParams.js" as NotifyParams
 
 ApplicationWindow {
     id: root
@@ -1203,61 +1204,185 @@ ApplicationWindow {
                                 anchors.top: parent.top
                                 anchors.topMargin: 16
                                 spacing: 10
-                                property string ntSeverity: "remind"
+
+                                // 参数怎么拼由 NotifyParams.js 定（那边有 scripts/test-notify-params.mjs 的 16 条断言），
+                                // 这里只负责收集 + 显示，绝不自己再拼一份 —— 之前界面自己拼了一份：
+                                // tts 写在 params 顶层（被控端只读 flags.speech）、severity 不管什么形态都带
+                                // （被控端只在全屏时读它）。结果就是「朗读」和「紧急/重要」点了等于没点。
+                                property string ntKind: "popup"        // popup 居中弹窗 / island 灵动岛 / fullscreen 全屏
+                                property string ntSeverity: "remind"   // 只有全屏形态下被控端才读
+                                property bool ntSpeech: false          // flags.speech
+                                property bool ntEmergency: false       // flags.emergency_confirm：不自动关 + 置顶
+
                                 Text { text: "通知下发"; color: th.fg3; font.pixelSize: 11 }
+
                                 Row {
                                     width: parent.width
                                     spacing: 10
-                                    TextField {
+                                    InputField {
+                                        th: th
                                         id: ntTitle
                                         width: parent.width * 0.45
-                                        placeholderText: "标题（如：上课啦）"
-                                        color: th.fg
+                                        placeholderText: "标题（必填，如：上课啦）"
                                     }
-                                    TextField {
+                                    InputField {
+                                        th: th
                                         id: ntContent
                                         width: parent.width - ntTitle.width - 10
                                         placeholderText: "内容"
-                                        color: th.fg
                                     }
                                 }
+
+                                // 字数：被控端会截（标题 24 / 正文 64），提前说一声，别让人以为漏发了
+                                Text {
+                                    width: parent.width
+                                    font.pixelSize: 11
+                                    property bool tOver: NotifyParams.willTruncate(ntTitle.text, NotifyParams.CAP_TITLE)
+                                    property bool cOver: NotifyParams.willTruncate(ntContent.text, NotifyParams.CAP_CONTENT)
+                                    color: (tOver || cOver) ? th.op : th.fg4
+                                    text: (tOver || cOver)
+                                          ? ((tOver ? "标题会截到 24 字  " : "") + (cOver ? "正文会截到 64 字" : ""))
+                                          : ("标题 " + ntTitle.text.length + "/24    正文 " + ntContent.text.length + "/64")
+                                }
+
+                                // 形态（kind）：被控端按 popup / island / fullscreen 三选一，未知值一律回落 popup
                                 Row {
                                     width: parent.width
                                     spacing: 10
-                                    // 严重度选择：remind绿 / inform黄 / urgent红
+                                    Text {
+                                        text: "形态"
+                                        color: th.fg3
+                                        font.pixelSize: 11
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
                                     Repeater {
-                                        model: [ { k: "普通", v: "remind" }, { k: "重要", v: "inform" }, { k: "紧急", v: "urgent" } ]
+                                        model: [ { k: "弹窗", v: "popup" }, { k: "灵动岛", v: "island" }, { k: "全屏", v: "fullscreen" } ]
                                         delegate: Rectangle {
                                             width: 64; height: 28; radius: th.rCtrl
-                                            color: (ntCol.ntSeverity === modelData.v) ? th.inv : "transparent"
+                                            color: (ntCol.ntKind === modelData.v) ? th.inv : "transparent"
                                             border.color: th.stroke; border.width: 1
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: modelData.k
-                                                color: (ntCol.ntSeverity === modelData.v) ? "#111" : th.fg3
+                                                color: (ntCol.ntKind === modelData.v) ? "#111" : th.fg3
                                                 font.pixelSize: 11
                                             }
                                             MouseArea {
                                                 anchors.fill: parent
+                                                onClicked: ntCol.ntKind = modelData.v
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 朗读 / 紧急确认 / 停留秒数
+                                Row {
+                                    width: parent.width
+                                    spacing: 10
+                                    Rectangle {
+                                        width: ntSpeechLab.width + 20; height: 28; radius: th.rCtrl
+                                        color: ntCol.ntSpeech ? th.inv : "transparent"
+                                        border.color: th.stroke; border.width: 1
+                                        Text {
+                                            id: ntSpeechLab
+                                            anchors.centerIn: parent
+                                            text: "朗读"
+                                            color: ntCol.ntSpeech ? "#111" : th.fg3
+                                            font.pixelSize: 11
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: ntCol.ntSpeech = !ntCol.ntSpeech
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: ntEmgLab.width + 20; height: 28; radius: th.rCtrl
+                                        color: ntCol.ntEmergency ? th.inv : "transparent"
+                                        border.color: th.stroke; border.width: 1
+                                        Text {
+                                            id: ntEmgLab
+                                            anchors.centerIn: parent
+                                            text: "紧急确认（不自动关 + 置顶）"
+                                            color: ntCol.ntEmergency ? "#111" : th.fg3
+                                            font.pixelSize: 11
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: ntCol.ntEmergency = !ntCol.ntEmergency
+                                        }
+                                    }
+                                    InputField {
+                                        th: th
+                                        id: ntSeconds
+                                        width: 150
+                                        placeholderText: "秒数（空=按字数自适应）"
+                                        validator: IntValidator { bottom: 0; top: 3600 }
+                                    }
+                                }
+
+                                // 严重度：被控端只在 fullscreen 下读它，别的形态带了也是被忽略 ——
+                                // 所以非全屏时把它置灰并写明原因，而不是让人选了半天发现没变化。
+                                Row {
+                                    width: parent.width
+                                    spacing: 10
+                                    Text {
+                                        text: (ntCol.ntKind === "fullscreen") ? "严重度" : "严重度（只有全屏才生效）"
+                                        color: th.fg3
+                                        font.pixelSize: 11
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Repeater {
+                                        model: [ { k: "普通", v: "remind" }, { k: "重要", v: "inform" }, { k: "紧急", v: "urgent" } ]
+                                        delegate: Rectangle {
+                                            width: 64; height: 28; radius: th.rCtrl
+                                            property bool on: (ntCol.ntKind === "fullscreen") && (ntCol.ntSeverity === modelData.v)
+                                            opacity: (ntCol.ntKind === "fullscreen") ? 1.0 : 0.35
+                                            color: on ? th.inv : "transparent"
+                                            border.color: th.stroke; border.width: 1
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData.k
+                                                color: parent.on ? "#111" : th.fg3
+                                                font.pixelSize: 11
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                enabled: ntCol.ntKind === "fullscreen"
                                                 onClicked: ntCol.ntSeverity = modelData.v
                                             }
                                         }
                                     }
-                                    Item { width: 10 }
+                                }
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 10
                                     Button {
-                                        text: "发送到选中设备"
+                                        text: root.picked.length > 1
+                                              ? ("发送到选中的 " + root.picked.length + " 台")
+                                              : "发送到选中设备"
                                         onClicked: {
-                                            const title = ntTitle.text.trim()
-                                            const content = ntContent.text.trim()
-                                            if (title === "" && content === "") { hint("先填标题或内容"); return }
-                                            const uid = backend.currentUid
-                                            if (!uid) { hint("先在控制页选中一台设备"); return }
-                                            backend.sendAction("notify", {
-                                                "title": title, "content": content,
-                                                "seconds": 8, "tts": true,
-                                                "flags": { "severity": ntCol.ntSeverity }
+                                            const r = NotifyParams.buildNotifyParams({
+                                                kind: ntCol.ntKind,
+                                                title: ntTitle.text,
+                                                content: ntContent.text,
+                                                seconds: ntSeconds.text,
+                                                speech: ntCol.ntSpeech,
+                                                severity: ntCol.ntSeverity,
+                                                emergency: ntCol.ntEmergency
                                             })
-                                            hint("通知已下发 → " + uid)
+                                            if (!r.ok) { root.toast(r.error); return }
+                                            if (!root.permOk("notify")) { backend.reportDenied("通知"); return }
+                                            // 选了多台就按批量走：进度计数 + 结果汇总都交给 root 那套（4.5 三段式）
+                                            const list = (root.picked.length > 0)
+                                                         ? root.picked.slice()
+                                                         : (backend.currentUid ? [backend.currentUid] : [])
+                                            if (list.length === 0) { root.toast("先在控制页选中一台设备"); return }
+                                            root.batchStart("通知", list.length)
+                                            for (let i = 0; i < list.length; ++i) {
+                                                backend.currentUid = list[i]
+                                                backend.sendAction("notify", r.params)
+                                            }
                                         }
                                     }
                                 }
@@ -1303,11 +1428,11 @@ ApplicationWindow {
                                             }
                                         }
                                     }
-                                    TextField {
+                                    InputField {
+                                        th: th
                                         id: schedAt
                                         width: 140
                                         placeholderText: "HH:mm"
-                                        color: th.fg
                                         validator: RegularExpressionValidator { regularExpression: /^([01]\d|2[0-3]):[0-5]\d$/ }
                                     }
                                     Button {
@@ -1352,11 +1477,11 @@ ApplicationWindow {
                                 anchors.topMargin: 16
                                 spacing: 10
                                 Text { text: "广播（发给所有在线设备）"; color: th.fg3; font.pixelSize: 11 }
-                                TextField {
+                                InputField {
+                                    th: th
                                     id: bcastText
                                     width: parent.width
                                     placeholderText: "广播内容"
-                                    color: th.fg
                                 }
                                 Button {
                                     text: "广播"
@@ -1387,18 +1512,18 @@ ApplicationWindow {
                                 Text { text: "考试模式（全屏拦截 + 白名单进程）"; color: th.fg3; font.pixelSize: 11 }
                                 Row {
                                     spacing: 8
-                                    TextField {
+                                    InputField {
+                                        th: th
                                         id: examMinutes
                                         width: 90
                                         placeholderText: "时长(分钟)"
-                                        color: th.fg
                                         validator: IntValidator { bottom: 0; top: 300 }
                                     }
-                                    TextField {
+                                    InputField {
+                                        th: th
                                         id: examWhitelist
                                         width: 200
                                         placeholderText: "白名单(逗号分隔，如 examclient,notepad)"
-                                        color: th.fg
                                     }
                                 }
                                 Row {

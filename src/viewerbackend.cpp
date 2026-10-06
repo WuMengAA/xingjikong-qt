@@ -18,6 +18,7 @@
 #include <QNetworkReply>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QTimer>
 #include <QUrl>
 #include <QWebSocket>
@@ -213,6 +214,10 @@ ViewerBackend::ViewerBackend(QObject *parent)
 // 已被释放，否则是 use-after-free 直接崩。这里用 deferDelete 把销毁推到事件循环之后。
 ViewerBackend::~ViewerBackend()
 {
+    if (!m_rtcHtmlPath.isEmpty()) {
+        QFile::remove(m_rtcHtmlPath);
+        m_rtcHtmlPath.clear();
+    }
     if (m_rtcView) {
         m_rtcView->deleteLater();
         m_rtcView = nullptr;
@@ -878,22 +883,33 @@ void ViewerBackend::initRtcView()
     // 子进程）还握着那个同名文件，新实例一开就写不进去，RTC 收流整条路直接废掉：
     // 画面看着还能动是因为有 JPEG 兜底，但那是 0.5–2 fps，不是实时流。
     // 带 PID 之后各写各的互不干扰；真写不进去时先把同名残留清掉再试一次。
-    const QString htmlPath = QDir::tempPath() + QStringLiteral("/stelarith-viewer-rtc-%1.html")
-                                 .arg(QCoreApplication::applicationPid());
-    {
-        QFile f(htmlPath);
-        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            QFile::remove(htmlPath);          // 可能是上一个实例的残留占着，清掉再试一次
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                logf("[viewer] FAIL 收流页写不进临时文件 %s（%s）",
-                     htmlPath.toUtf8().constData(), f.errorString().toUtf8().constData());
-                setRtcState(QStringLiteral("failed"));
-                return;
-            }
-        }
-        f.write(kRtcViewerHtml);
-        f.close();
+    // ⚠️ 2026-10-07 第二次修：光带进程号还不够，真机日志里带 PID 的名字一样报
+    // "拒绝访问"。根因不是名字撞车，是**目录**：Temp 是公共目录，系统清理、实时防护
+    // 扫描、别的程序都在那儿落文件，谁先握住谁说了算，文件名再唯一也躲不开。
+    // 这次两处一起改：① 挪到**本应用自己的缓存目录**（CacheLocation），不再跟 Temp 抢；
+    // ② 文件名交给 QTemporaryFile 发 —— 系统保证唯一且原子创建，撞了会自己换名重试，
+    // 而不是像 QFile::open 那样一次失败就完蛋。
+    const QString rtcDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    const QString baseDir = rtcDir.isEmpty() ? QDir::tempPath() : rtcDir;
+    QDir().mkpath(baseDir);                 // 目录不给就自己建，mkdir 失败下面照样会报出来
+
+    QTemporaryFile tmp(baseDir + QStringLiteral("/stelarith-viewer-rtc-XXXXXX.html"));
+    tmp.setAutoRemove(false);               // 文件要留给 WebEngine 加载，析构时绝不能删
+    if (!tmp.open()) {
+        logf("[viewer] FAIL 收流页临时文件建不出来（目录 %s）：%s",
+             baseDir.toUtf8().constData(), tmp.errorString().toUtf8().constData());
+        setRtcState(QStringLiteral("failed"));
+        return;
     }
+    const QByteArray pageBytes(kRtcViewerHtml);
+    if (tmp.write(pageBytes) != pageBytes.size()) {
+        logf("[viewer] FAIL 收流页没写全（%s）", tmp.fileName().toUtf8().constData());
+        setRtcState(QStringLiteral("failed"));
+        return;
+    }
+    tmp.close();
+    m_rtcHtmlPath = tmp.fileName();         // 退出时删掉，别在缓存目录里堆垃圾（见 ~ViewerBackend）
+    const QString htmlPath = m_rtcHtmlPath;
 
     auto *page = new QWebEnginePage(m_rtcView);
     m_rtcView->setPage(page);

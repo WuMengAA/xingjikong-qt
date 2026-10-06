@@ -501,6 +501,7 @@ private:
 
     // ── WebRTC 收流现场 ──
     QWebEngineView *m_rtcView = nullptr;
+    QString m_rtcHtmlPath;        // rtc page temp file (created by QTemporaryFile), removed on exit
     QString m_pendingOffer;   // 收流页 load 完成前到的 offer 先存这儿（见 initRtcView 的补灌）
     bool m_rtcReady = false;
     QString m_rtcState = QStringLiteral("idle");

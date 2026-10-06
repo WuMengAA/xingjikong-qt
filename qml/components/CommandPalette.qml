@@ -92,7 +92,8 @@ Popup {
             }
             Rectangle { width: 1; height: 16; color: pal.theme.sepline; anchors.verticalCenter: parent.verticalCenter }
             // ⚠️ 输入框不要画底色：面板本身已经是 panel 底，再深一层就是"两层灰叠一起"
-            TextField {
+            InputField {
+                th: pal.theme
                 id: input
                 height: 34
                 width: parent.width - 96
@@ -100,9 +101,7 @@ Popup {
                 rightPadding: 8
                 verticalAlignment: Text.AlignVCenter
                 placeholderText: "搜命令（打首字母也行：gj → 关机教室机）"
-                color: pal.theme.fg || "#FAFAFA"
                 font.pixelSize: 12
-                background: Rectangle { color: "transparent" }
 
                 onTextChanged: { pal.refilter(text); pal.cur = 0 }
 
