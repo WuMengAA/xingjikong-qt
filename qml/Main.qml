@@ -1164,9 +1164,12 @@ ApplicationWindow {
                     }
 
                     // ── 课表编辑器（2026-10-06 并入）──
+                    // 风格与「外观」等卡片一致：黑白、自绘按钮（不用 QtQuick.Controls 默认 Button，
+                    // 那个默认蓝会把黑白界面破掉）。
                     Rectangle {
                         Layout.columnSpan: 2
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 108
                         radius: th.rCard
                         color: th.panel
                         border.color: th.card
@@ -1182,9 +1185,26 @@ ApplicationWindow {
                                 wrapMode: Text.Wrap
                                 width: parent.width
                             }
-                            Button {
-                                text: "打开课表编辑器"
-                                onClicked: schedEditor.show()
+                            // 自绘按钮：反白风格与稿稿一致
+                            Rectangle {
+                                width: 132
+                                height: 32
+                                radius: th.rCtrl
+                                color: hovered ? th.hover : th.cream
+                                border.color: th.stroke
+                                border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "打开课表编辑器"
+                                    color: th.fg
+                                    font.pixelSize: 12
+                                }
+                                MouseArea {
+                                    id: hovered
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: schedEditor.show()
+                                }
                             }
                         }
                     }
