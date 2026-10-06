@@ -6,6 +6,7 @@
 
 #include <QAbstractSocket>
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -872,14 +873,23 @@ void ViewerBackend::initRtcView()
     // qrc:///qtwebchannel/qwebchannel.js。用 data: URL 加载会让 origin 变成 null，
     // 那个 <script src> 直接被同源策略拦掉，QWebChannel 建不起来 → JS 侧 __qt 是 undefined。
     // 文件写在临时目录、退出时清理；不放在工程目录里免得污染版本树。
-    const QString htmlPath = QDir::tempPath() + QStringLiteral("/stelarith-viewer-rtc.html");
+    // ⚠️ 2026-10-07：文件名带上进程号，不再所有实例共用同一个固定名。
+    // 真机上出现过 "收流页写不进临时文件（拒绝访问）" —— 上一个实例（或它残留的 Chromium
+    // 子进程）还握着那个同名文件，新实例一开就写不进去，RTC 收流整条路直接废掉：
+    // 画面看着还能动是因为有 JPEG 兜底，但那是 0.5–2 fps，不是实时流。
+    // 带 PID 之后各写各的互不干扰；真写不进去时先把同名残留清掉再试一次。
+    const QString htmlPath = QDir::tempPath() + QStringLiteral("/stelarith-viewer-rtc-%1.html")
+                                 .arg(QCoreApplication::applicationPid());
     {
         QFile f(htmlPath);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            logf("[viewer] FAIL 收流页写不进临时文件 %s（%s）",
-                 htmlPath.toUtf8().constData(), f.errorString().toUtf8().constData());
-            setRtcState(QStringLiteral("failed"));
-            return;
+            QFile::remove(htmlPath);          // 可能是上一个实例的残留占着，清掉再试一次
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                logf("[viewer] FAIL 收流页写不进临时文件 %s（%s）",
+                     htmlPath.toUtf8().constData(), f.errorString().toUtf8().constData());
+                setRtcState(QStringLiteral("failed"));
+                return;
+            }
         }
         f.write(kRtcViewerHtml);
         f.close();

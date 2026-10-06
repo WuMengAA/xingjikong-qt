@@ -92,8 +92,11 @@ Item {
                 }
                 Item { width: 4 }
                 Text {
+                    // ⚠️ 2026-10-07 删了 anchors.right: parent.right ——
+                    // Row 是定位器，子项不许自己指定 left/right/horizontalCenter/fill/centerIn
+                    // （真机日志每次启动刷十几条 "Row will not function"）。
+                    // 横向位置交给 Row 自己排；"展开"本来就是这一行的最后一个，删掉也一样在末尾。
                     anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: parent.right
                     text: isl.n > 0 ? "展开" : ""
                     color: isl.theme.fg4 || "#3A3A3A"
                     font.pixelSize: 11

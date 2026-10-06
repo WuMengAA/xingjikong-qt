@@ -1255,7 +1255,7 @@ ApplicationWindow {
                                             backend.sendAction("notify", {
                                                 "title": title, "content": content,
                                                 "seconds": 8, "tts": true,
-                                                "flags": { "severity": ntSeverity }
+                                                "flags": { "severity": ntCol.ntSeverity }
                                             })
                                             hint("通知已下发 → " + uid)
                                         }
@@ -1654,7 +1654,7 @@ ApplicationWindow {
                                     text: "操作完成时提示"
                                     note: "机器上真的做完了才说一句（云端收下不算）"
                                     checked: backend.notifyOnDone
-                                    onToggled: backend.notifyOnDone = on
+                                    onToggled: function (on) { backend.notifyOnDone = on }
                                 }
                                 ToggleRow {
                                     width: parent.width
@@ -1662,7 +1662,7 @@ ApplicationWindow {
                                     text: "设备离线时提醒"
                                     note: "与云端断开时弹一条（后台也能看见）"
                                     checked: backend.notifyOnOffline
-                                    onToggled: backend.notifyOnOffline = on
+                                    onToggled: function (on) { backend.notifyOnOffline = on }
                                 }
                             }
                         }
@@ -2290,13 +2290,13 @@ ApplicationWindow {
     // 抽到这儿两边共用（顺序保持原样：权限 → 内容 → 有没有设备 → 逐台下发）。
     function broadcastAll(text) {
         if (!backend.mayDo("broadcast")) {
-            hint("广播要给所有机器发，要管理员身份");
+            toast("广播要给所有机器发，要管理员身份");
             return
         }
         const content = (text || "").trim()
-        if (content === "") { hint("先填广播内容"); return }
+        if (content === "") { toast("先填广播内容"); return }
         const devs = backend.devices
-        if (!devs || devs.length === 0) { hint("没有在线设备"); return }
+        if (!devs || devs.length === 0) { toast("没有在线设备"); return }
         for (let i = 0; i < devs.length; ++i) {
             backend.currentUid = devs[i].uid
             backend.sendAction("notify", {
@@ -2305,7 +2305,7 @@ ApplicationWindow {
                 "flags": { "severity": "inform" }
             })
         }
-        hint("已广播给 " + devs.length + " 台设备")
+        toast("已广播给 " + devs.length + " 台设备")
     }
 
     // ── 全局提示（设计文档 5.6 Toast）──────────────────────────────────
