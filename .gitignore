@@ -32,3 +32,7 @@ _archive/
 #   想拿包就本地跑 ./build-agent-installer.sh（产物在 dist/，工作区里还有）。
 dist/*.exe
 dist/*.msi
+# 绿色包（免安装 zip）与临时分发目录：同样是产物，且动辄 100MB 级
+dist/*.zip
+dist/agent-portable-*/
+dist/_share/

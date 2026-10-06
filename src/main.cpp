@@ -117,7 +117,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //   exe 报 0.4.0-v1、安装器写 0.5.0）。
 //   ⚠️ 2026-10-06 收敛到 0.6.0：此前这里写 0.5.0、installer.nsi 写 0.5.1，本文件自己的注释
 //      还写着"两者必须一致"却没做到 —— 不一致的代价是云端按 0.5.0 判断 OTA，装出来却是 0.5.1。
-constexpr const char *kAppVersion = "0.6.3";
+constexpr const char *kAppVersion = "0.6.4";
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = 1000;
@@ -276,6 +276,10 @@ static const char *kActionNames[] = {
     "ping", "process_list", "process_stop", "reboot",
     "remote_control_start", "remote_control_stop", "schedule_reboot", "schedule_shutdown",
     "screenshot", "self_update", "set_volume", "shutdown",
+    // 远程终端三条（2026-10-06）。必须报上去：管理端按 caps 决定「终端」按钮亮不亮，
+    // 不报 = 管理端永远置灰，功能做完了看得见摸不着。
+    // 顺序照旧按字母表末段排，方便以后和别的动作一起校对。
+    "terminal_close", "terminal_input", "terminal_open",
 };
 static const int kActionCount = (int)(sizeof(kActionNames) / sizeof(kActionNames[0]));
 
