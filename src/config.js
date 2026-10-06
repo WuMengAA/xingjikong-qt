@@ -83,6 +83,16 @@ export const PROTOCOL_MODE = (process.env.CLOUD_PROTOCOL_MODE || 'v1-compat').tr
 // 事件流水落盘文件
 export const EVENTS_FILE = process.env.CLOUD_EVENTS_FILE || 'events.log';
 
+/* 事件日志轮转（2026-10-06 · 占用优化）：
+ * 之前 events.log 只 append、从不轮转 —— 教室机跑一学期能写几百兆，盘吃满了
+ * 云端连写文件都失败，排障日志反而成了放坏东西的地方。
+ * 现在按体积轮转：超过 CLOUD_EVENTS_MAX_BYTES 就改名归档 + 重建当前文件，
+ * 归档只留最近 CLOUD_EVENTS_KEEP_FILES 个，更老的删掉。
+ * 归档名带时间戳且全 ASCII —— 这台机器上非 ASCII 文件名曾把云端整个打挂过
+ * （ERR_INVALID_CHAR，见 index.js 的 asciiHeaderName 注释），别再踩同一个坑。 */
+export const EVENTS_MAX_BYTES = Number(process.env.CLOUD_EVENTS_MAX_BYTES || 10 * 1024 * 1024);
+export const EVENTS_KEEP_FILES = Number(process.env.CLOUD_EVENTS_KEEP_FILES || 3);
+
 /* ---------- 指令队列落盘（P0：设备离线一次不能永久漏掉那条指令）----------
  * 只解决"已下发但没等到回执"这一种丢失：那种指令落盘 → 云端重启不丢 → 设备重连按原顺序补发。
  * 设备**不在线**时下发的指令不进队列（离线一律仍返回 409，绝不把离线当成功）。

@@ -5,8 +5,10 @@
 //   3. 状态只有两种真值：online / offline，中间没有"大概在线"。
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { appendFile } from 'node:fs/promises';
-import { EV_LIMIT, KEEP_LAST_FRAME, EVENTS_FILE, HEARTBEAT_TIMEOUT_MS } from './config.js';
+import { EV_LIMIT, KEEP_LAST_FRAME, EVENTS_FILE, HEARTBEAT_TIMEOUT_MS,
+  EVENTS_MAX_BYTES, EVENTS_KEEP_FILES } from './config.js';
 import { wrapOutgoing, makeFrame } from './protocol.js';
 import { enqueueDispatch, dropDispatch, settle as settleQueue, pendingFor, listPendingAll, paramsOf } from './store.js';
 
@@ -35,17 +37,84 @@ const viewers = new Map();
 const events = [];
 let seq = 0;
 
+/* 已落盘字节数 —— **必须自己记，不能每次 statSync 现读**。
+ * appendFile 是异步的：广播那种一瞬间连着来几十条事件的场景里，同步循环跑完时
+ * 磁盘上的文件还几乎是空的，statSync 每次都读到旧大小，轮转判断永远不成立
+ * （2026-10-06 实测：钉 4096 字节上限、连推 301 条，文件长到 38KB 一次都没转）。
+ * 自己累加不受异步滞后影响。 */
+let eventsBytes = 0;
+
 /** id -> { id, uid, action, result:'done'|'failed', error, at }  设备真实执行回执 */
 const results = new Map();
+
+/**
+ * 事件日志体积到顶就归档：当前 events.log → events.log.<ISO时间戳>，然后重建一个空的。
+ * 归档按文件名倒序只留最近 EVENTS_KEEP_FILES 个，更老的删掉 —— 留痕还是留，
+ * 但不能让一个日志文件陪着教室机一起把盘吃干。
+ *
+ * 只在体积确实到顶时才会动 rename，平时花的是一次 statSync（十来字节的 syscall）。
+ * 失败必须报出来（本文件头第 1 条纪律），但**不许中断这一次 pushEvent**：
+ * 归档出问题不该让设备状态更新跟着失败。
+ */
+function rotateEventsLogIfNeeded(sizeBytes) {
+  if (!(sizeBytes >= EVENTS_MAX_BYTES) || EVENTS_MAX_BYTES <= 0) return;
+  try {
+    const stamp = new Date().toISOString().replace(/[-:.]/g, '-');
+    const archived = `${EVENTS_FILE}.${stamp}`;
+    fs.renameSync(EVENTS_FILE, archived);
+    fs.writeFileSync(EVENTS_FILE, '');
+    eventsBytes = 0;
+
+    const dir = path.dirname(EVENTS_FILE);
+    const base = path.basename(EVENTS_FILE);
+    let olds = [];
+    try {
+      olds = fs.readdirSync(dir)
+        .filter((f) => f.startsWith(base + '.') && f !== archived)
+        .sort()
+        .reverse()
+        // 归档名是 ISO 时间戳，字典序 == 时间序，直接截断就行
+        .slice(EVENTS_KEEP_FILES);
+    } catch { olds = []; }
+    for (const f of olds) {
+      try { fs.unlinkSync(path.join(dir, f)); } catch { /* 删不掉也要把轮转本身报完 */ }
+    }
+    console.log(`[cloud] 事件日志已轮转：${sizeBytes} 字节 → ${archived}，删除旧归档 ${olds.length} 个`);
+  } catch (e) {
+    console.error(`[cloud] FAIL 事件日志轮转失败（本次落盘照常进行）：${e.message}`);
+  }
+}
+
+/**
+ * 事件落盘走一条 Promise 链，一次只写一条。
+ *
+ * 为什么串行：appendFile 本来是并行的，但轮转要 rename 当前文件 ——
+ * 2026-10-06 实测，轮转那一瞬间还有几次异步写在飞，rename 之后它们写进了**归档文件**，
+ * 结果当前 events.log 只剩 31 行，最近一大段事全跑到归档里去了，主日志看着像断过。
+ * 串成一条链，检查与写之间不会插进别的写，轮转永远发生在两次写之间。
+ * 顺带还压掉了"广播风暴时几百个 appendFile 一起飞"这件事。
+ *
+ * 前一条写失败不影响后一条（then 的第二参数就是 run），失败照样在链上往下走。
+ */
+let eventsChain = Promise.resolve();
+function writeEventLine(line) {
+  const run = async () => {
+    rotateEventsLogIfNeeded(eventsBytes);
+    eventsBytes += Buffer.byteLength(line);
+    await appendFile(EVENTS_FILE, line);
+  };
+  eventsChain = eventsChain.then(run, run);
+  eventsChain.catch(() => {});   // 失败由下面的 catch 报，别在链上堆 unhandled rejection
+  return eventsChain;
+}
 
 export function pushEvent(level, msg, extra = {}) {
   const ev = { id: ++seq, at: new Date().toISOString(), level, msg, ...extra };
   events.push(ev);
   if (events.length > EV_LIMIT) events.splice(0, events.length - EV_LIMIT);
   // 事件流水落盘：被控端没日志等于瞎子，云端也一样。落盘失败要报出来。
-  appendFile(EVENTS_FILE, JSON.stringify(ev) + '\n')
-    .then(() => {})
-    .catch((e) => console.error(`[cloud] FAIL 事件落盘失败: ${e.message}`));
+  const logLine = JSON.stringify(ev) + '\n';
+  writeEventLine(logLine).catch((e) => console.error(`[cloud] FAIL 事件落盘失败: ${e.message}`));
   const line = `[cloud] ${ev.level.toUpperCase()} ${ev.msg}${ev.uid ? ' uid=' + ev.uid : ''}`;
   if (ev.level === 'error') console.error(line);
   else console.log(line);
@@ -417,6 +486,7 @@ export function listPending(uid) {
 
 export function ensureEventsFile() {
   try {
+    eventsBytes = fs.existsSync(EVENTS_FILE) ? fs.statSync(EVENTS_FILE).size : 0;
     if (!fs.existsSync(EVENTS_FILE)) fs.writeFileSync(EVENTS_FILE, '');
   } catch (e) {
     console.error(`[cloud] FAIL 无法初始化 ${EVENTS_FILE}: ${e.message}`);
