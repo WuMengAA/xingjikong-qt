@@ -6,8 +6,10 @@
 #include "singleinstance.h"
 
 #include <QDir>
+#include <QString>
 #include <QLockFile>
 #include <QStandardPaths>
+#include <QtGlobal>
 
 #include <windows.h>
 
@@ -61,6 +63,17 @@ MutexTry openMutex(const wchar_t *name)
 
 bool SingleInstanceGuard::acquire(const wchar_t *mutexName, const wchar_t *lockFile, QString *reason)
 {
+    // ── 开发开关：STE_ALLOW_MULTI=1 时整个守卫放行 ────────────────────
+    // 用途：跑着正式版的同时起一个离屏实例做自检（QML 是运行时从 build 目录加载的，
+    // 只有开着一个实例才验不了新版），或者多开做界面比对。
+    // 默认不设 ⇒ 行为与以前逐字一致（生产照旧单实例）。**别在教室机上设这个。**
+    if (qEnvironmentVariableIsSet("STE_ALLOW_MULTI")) {
+    // ⚠️ stderr 出口统一转本机编码：源码字面量是 UTF-8，而命令行/记事本按 GBK 解 ⇒ 中文全是乱码。
+    //    与 [viewer] 那套日志同一个规矩（见 main.cpp 的 installMessageHandler / writeLogBytes）。
+        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] STE_ALLOW_MULTI 已设 → 跳过单实例守卫（仅调试）")
+                                    .toLocal8Bit().constData());
+        return true;
+    }
     if (!mutexName) {
         if (reason) *reason = QStringLiteral("没给互斥体名");
         return false;
@@ -72,14 +85,15 @@ bool SingleInstanceGuard::acquire(const wchar_t *mutexName, const wchar_t *lockF
     const MutexTry mt = openMutex(mutexName);
     if (mt.alreadyExists) {
         CloseHandle(mt.h);                          // alreadyExists 时 h 仍有效，必须关
-        fprintf(stderr, "[stelarith] 已有另一个实例占着互斥体 Global\\%ls → 本次启动退出\n", mutexName);
+        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] 已有另一个实例占着互斥体 Global\\%1 → 本次启动退出")
+                                    .arg(QString::fromWCharArray(mutexName)).toLocal8Bit().constData());
         if (reason) *reason = QStringLiteral("已有实例占着互斥体（%1）").arg(QString::fromWCharArray(mutexName));
         return false;
     }
     m_mutex = mt.h;                                 // 可能为 nullptr：极端受限时只靠文件锁，不硬退
     if (!m_mutex) {
-        fprintf(stderr, "[stelarith] WARN 互斥体起不来（GetLastError=%lu），只靠文件锁兜底\n",
-                (unsigned long)GetLastError());
+        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] WARN 互斥体起不来（GetLastError=%1），只靠文件锁兜底")
+                                    .arg(GetLastError()).toLocal8Bit().constData());
     }
 
     /* ── ② 文件锁兜底 ────────────────────────────────────────────────────
@@ -106,7 +120,8 @@ bool SingleInstanceGuard::acquire(const wchar_t *mutexName, const wchar_t *lockF
     if (!lk->tryLock()) {
         delete lk;
         release();                                  // 互斥体若也拿到了，一并放掉
-        fprintf(stderr, "[stelarith] 已有另一个实例占着文件锁 %ls → 本次启动退出\n", lockFile);
+        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] 已有另一个实例占着文件锁 %1 → 本次启动退出")
+                                    .arg(QString::fromWCharArray(lockFile)).toLocal8Bit().constData());
         if (reason) *reason = QStringLiteral("已有实例占着文件锁（%1）").arg(path);
         return false;
     }
