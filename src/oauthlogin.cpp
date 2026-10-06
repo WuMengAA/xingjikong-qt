@@ -254,12 +254,14 @@ void OAuthLogin::onReadyRead()
     QTcpSocket *s = qobject_cast<QTcpSocket *>(sender());
     if (!s) return;
 
-    static QByteArray pending;
-    pending += s->readAll();
+    // ⚠️ 2026-10-07 修：以前这里是函数级 `static QByteArray pending;` ——
+    // 静态＝**所有实例共用一份**，上一次登录/上一个连接的残留会污染这一次的解析。
+    // 改成成员缓冲，一次登录一块。
+    m_pending += s->readAll();
     // 请求头到 \r\n\r\n 就完了，body 这里不会有（GET 无 body）
-    if (!pending.contains("\r\n\r\n")) return;
+    if (!m_pending.contains("\r\n\r\n")) return;
 
-    const QString head = QString::fromLatin1(pending.left(pending.indexOf("\r\n\r\n")));
+    const QString head = QString::fromLatin1(m_pending.left(m_pending.indexOf("\r\n\r\n")));
     const QStringList lines = head.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     if (lines.isEmpty()) {
         s->deleteLater();
@@ -270,11 +272,18 @@ void OAuthLogin::onReadyRead()
     }
 
     const QString requestLine = lines.first().trimmed();
-    const QString target = requestLine.mid(requestLine.indexOf(QLatin1Char(' ')) + 1);
+    // ⚠️ 2026-10-07 修（真机报「授权回拨校验没过」的根因）：
+    // 请求行形如 `GET /oauth-callback?code=…&state=… HTTP/1.1`。
+    // 老写法 mid(第一个空格之后) **把行尾的 " HTTP/1.1" 一起带进了 query 串**，
+    // state 被解析成 "<hex> HTTP/1.1" ⇒ 与发出去的值永不相等。
+    // 症状恰好是 `state匹配=否 带code=是`：code 落在第一个 & 之前所以干净，
+    // 只有排在最后、被行尾直接污染的那个参数（state）会错。
+    // 正确做法：请求行按空格切三段（方法/目标/协议），**只取中间那段**。
+    const QString target = requestLine.section(QLatin1Char(' '), 1, 1);
     const QString path = target.left(target.indexOf(QLatin1Char('?')));
     const QUrlQuery qq(target.mid(target.indexOf(QLatin1Char('?')) + 1));
 
-    pending.clear();
+    m_pending.clear();
 
     const bool pathOk = path.startsWith(QLatin1Char('/')) && path.endsWith(QStringLiteral("/oauth-callback"));
     const QString gotState = qq.queryItemValue(QStringLiteral("state"));
@@ -282,8 +291,10 @@ void OAuthLogin::onReadyRead()
 
     if (!pathOk || gotState != m_state || code.isEmpty()) {
         // 回拨对不上 state 一律按失败处理：那可能是别人点到我们端口（CSRF 面）
-        logf("[oauth] WARN 回拨被拒：path=%s state匹配=%s 带code=%s",
+        logf("[oauth] WARN 回拨被拒：path=%s state匹配=%s（收到 %.8s… / 期望 %.8s…）带code=%s",
              path.toLocal8Bit().constData(), gotState == m_state ? "是" : "否",
+             gotState.left(8).toLocal8Bit().constData(),
+             m_state.left(8).toLocal8Bit().constData(),
              code.isEmpty() ? "否" : "是");
         servePage(s, 400, "<h2>登录未完成</h2><p>回拨的地址或状态对不上，已拒绝。请回到管理端再点一次「登录」。</p>");
         s->disconnectFromHost();
