@@ -51,6 +51,7 @@
 #include <QHash>
 #include <QVector>
 #include <QFileInfo>
+#include <QStorageInfo>   // 2026-10-06 强制自动升级：装之前先看磁盘剩多少
 #include <QStringList>
 #include <QStandardPaths>
 #include <QSet>
@@ -114,7 +115,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //   exe 报 0.4.0-v1、安装器写 0.5.0）。
 //   ⚠️ 2026-10-06 收敛到 0.6.0：此前这里写 0.5.0、installer.nsi 写 0.5.1，本文件自己的注释
 //      还写着"两者必须一致"却没做到 —— 不一致的代价是云端按 0.5.0 判断 OTA，装出来却是 0.5.1。
-constexpr const char *kAppVersion = "0.6.2";
+constexpr const char *kAppVersion = "0.6.3";
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = 1000;
@@ -898,6 +899,8 @@ void consumeActivationCodeAsync(const QString &siteBase, const QString &code, co
 
 QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;
 bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
+bool g_updateMandatory = false;     // 2026-10-06：云端 ota.json 的 mandatory（true=强制自动升级）
+qint64 g_lastOnlineAt = 0;          // 最近一次连上云端（强制升级回滚判定用：从没连通就不许误判成"新版本坏了"）
 QAction *g_actUpdate = nullptr;     // 托盘里"发现新版本…"那一条（无更新时隐藏）
 
 /** 比语义化版本（**逐段比数字**，不做字符串比）：
@@ -923,7 +926,11 @@ int compareVersion(const QString &a, const QString &b)
     return 0;
 }
 
-/** 消化云端给的升级信息：记下来 + 该提示就提示。 */
+// 这两个定义在下文（强制升级段 / OTA 段）；这里提前声明好让"发现新版本"直接触发自动升级。
+static void startSelfUpdate(const QString &id, const QJsonObject &params);
+static void maybeAutoUpdate();
+
+/** 消化云端给的升级信息：记下来 + 该提示就提示 + 该自动装就自动装。 */
 void applyUpdateInfo(const QJsonObject &pay)
 {
     g_latestVer   = pay.value(QStringLiteral("latestVersion")).toString().trimmed();
@@ -931,6 +938,9 @@ void applyUpdateInfo(const QJsonObject &pay)
     g_updateSha   = pay.value(QStringLiteral("updateSha256")).toString().trimmed();
     g_updateNotes = pay.value(QStringLiteral("updateNotes")).toString().trimmed();
     g_updateChecked = true;
+    // mandatory 取值三种：true / false / null（没发布过版本）。
+    // 只有 **true** 才算"云端要求强制升级"—— null 是"未知"，绝不能当成强制。
+    g_updateMandatory = pay.value(QStringLiteral("updateMandatory")).toBool();
 
     if (g_latestVer.isEmpty()) {
         // 如实说：云端还没发布过版本（ota.json 不存在）。这不是"已是最新"。
@@ -939,24 +949,305 @@ void applyUpdateInfo(const QJsonObject &pay)
     }
     if (compareVersion(g_latestVer, QString::fromLatin1(kAppVersion)) > 0) {
         const bool canUpgrade = !g_updateUrl.isEmpty() && g_updateSha.length() == 64;
-        qInfo("[agent-qt] ⬆ 发现新版本 v%s（本机 v%s）%s —— 右键托盘 →「设置与信息…」可升级",
-              qPrintable(g_latestVer), kAppVersion,
-              canUpgrade ? "" : "（⚠ 清单缺 url/sha256，先别升，让管理员补 ota.json）");
+        if (g_updateMandatory) {
+            qInfo("[agent-qt] ⬆ 云端 v%s 标注为**强制升级**（本机 v%s，可升=%s）—— 到点自动装，不用老师点",
+                  qPrintable(g_latestVer), kAppVersion, canUpgrade ? "yes" : "no");
+            // 延迟 8 秒再动手：让 registered 握手彻底收尾，别在云端还在发别的东西时抢带宽。
+            QTimer::singleShot(8000, [] { maybeAutoUpdate(); });
+        } else {
+            qInfo("[agent-qt] ⬆ 发现新版本 v%s（本机 v%s）%s —— 右键托盘 →「设置与信息…」可升级",
+                  qPrintable(g_latestVer), kAppVersion,
+                  canUpgrade ? "" : "（⚠ 清单缺 url/sha256，先别升，让管理员补 ota.json）");
+        }
         if (g_actUpdate) {
             g_actUpdate->setVisible(true);
-            g_actUpdate->setText(QStringLiteral("发现新版本 v%1（点此查看）").arg(g_latestVer));
+            g_actUpdate->setText(g_updateMandatory
+                                     ? QStringLiteral("将自动升级到 v%1（云端强制）").arg(g_latestVer)
+                                     : QStringLiteral("发现新版本 v%1（点此查看）").arg(g_latestVer));
         }
         if (g_tray) {
             g_tray->showMessage(
                 QStringLiteral("星集控 · 被控端"),
-                QStringLiteral("有可用的新版本 v%1（当前 v%2）。\n右键托盘图标 →「设置与信息…」即可升级。")
-                    .arg(g_latestVer, QString::fromLatin1(kAppVersion)),
+                g_updateMandatory
+                    ? QStringLiteral("云端要求升级到 v%1（当前 v%2）。\n这台机器会在联网后自动安装，不用手动点——"
+                                     "装的过程中被控端会短暂重启，一两分钟内回来。")
+                          .arg(g_latestVer, QString::fromLatin1(kAppVersion))
+                    : QStringLiteral("有可用的新版本 v%1（当前 v%2）。\n右键托盘图标 →「设置与信息…」即可升级。")
+                          .arg(g_latestVer, QString::fromLatin1(kAppVersion)),
                 QSystemTrayIcon::Information, 12000);
         }
     } else {
         qInfo("[agent-qt] 升级检查：已是最新（云端 v%s，本机 v%s）",
               qPrintable(g_latestVer), kAppVersion);
     }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 强制自动升级（2026-10-06）
+ *
+ * 以前的行为：云端标 mandatory 也没用 —— 只有托盘提示 + 面板里一个「立即升级」按钮，
+ * 必须有人在教室机右键点一下才装。**全校教室机没人点 = 永远升不上来**，
+ * 于是 mandatory 只是一个好看的开关。现在补齐成一条完整链路：
+ *
+ *   云端 ota.json.mandatory=true
+ *     → register 回执带 updateMandatory
+ *     → 本机判定"到点了"就**自己下载、自己校验、自己静默装**（老师全程不用碰）
+ *     → 装完新版本自己起来；起不来（或起来注册不上）就把升级前的旧 exe 放回去
+ *
+ * 三道保命设计（缺一道都不敢让机器无人值守换自己）：
+ *   ① **退避**：失败一次等 3 分钟，再失败 15 分钟 / 1 小时 / 4 小时 / 12 小时封顶。
+ *      网络抖一下不至于半夜反复拉包。
+ *   ② **回滚**：装之前先备一份当前 exe（留在数据目录，不随安装目录被覆盖）+
+ *      写 pending 标记 + 删掉"最近一次启动成功"标记。
+ *   ③ **看门狗**：回滚判定写在**升级前生成**的 ota-relaunch.bat 里 ——
+ *      它体内是**旧版本的字节**，所以哪怕新 exe 一启动就崩，狗还在，照样能把机器救回来。
+ *      （只看 agent 自己是不行的：新 exe 崩了，它自己也已经没了。）
+ *
+ * 判定"新版本起没起来"只看一件事：**有没有连上云端注册成功**（register 成功即写 ota-last-ok.txt）。
+ * 网络本来就断的机器不算新版本坏了 —— 见过不到云端的机器被误判回滚，白降一版。
+ * 所以 `g_lastOnlineAt == 0`（从没连通过）时永不回滚。
+ *
+ * 紧急刹车（强制升级最要紧的东西）：数据目录里放一个 `ota-pause`（空文件）即暂停自动升级。
+ * 某个版本真把机器搞挂时，运维能不卸包、不重编，往机器上扔一个文件就止血。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+// 查"上一个下载任务还在不在跑"。**不能用变量声明**：g_otaBusy 的真身在后头的匿名 namespace
+// 里，在前面再来一次同名的 `static bool g_otaBusy;` 会被判成两个实体（C2086 重定义）。
+// 用一个函数绕开作用域——函数声明不引入变量实体。
+static bool otaIsBusy();
+
+// 回滚判定窗口：升级后新版本这么多秒内没注册成功 → 回滚
+static const int kOtaRollbackMs = 240 * 1000;
+// 装之前要求的数据盘余量（安装包 ~70MB，取 4 倍冗余：下载 + NSIS 解压 + 备份）
+static const qint64 kOtaMinFreeBytes = 400LL * 1024 * 1024;
+
+// ⚠️ 全部落在**数据目录**，不落在安装目录：NSIS 装完会换安装目录里的文件，
+//    放这儿的备份和标记才不会被一起换掉（2026-10-06 亲测这个坑：放安装目录=没有备份）。
+static QString otaBaseDir()
+{
+    static QString cached;
+    if (cached.isEmpty())
+        cached = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/ota");
+    return cached;
+}
+static QString otaStatePath()   { return otaBaseDir() + QStringLiteral("/ota-state.json"); }
+static QString otaOkPath()      { return otaBaseDir() + QStringLiteral("/ota-last-ok.txt"); }
+static QString otaPrevPath()    { return otaBaseDir() + QStringLiteral("/prev/stelarith-agent-qt.exe"); }
+static QString otaPendingPath() { return otaBaseDir() + QStringLiteral("/ota-pending.json"); }
+static QString otaPausePath()   { return otaBaseDir() + QStringLiteral("/ota-pause"); }
+
+static QJsonObject otaLoadState()
+{
+    QJsonObject s;
+    QFile f(otaStatePath());
+    if (f.open(QIODevice::ReadOnly)) {
+        const QJsonDocument d = QJsonDocument::fromJson(f.readAll());
+        if (d.isObject()) s = d.object();
+    }
+    return s;
+}
+
+static void otaSaveState(const QJsonObject &s)
+{
+    QDir().mkpath(otaBaseDir());
+    QFile f(otaStatePath());
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("[agent-qt] ⚠ 写不下 ota-state.json（%s）—— 重试退避会退化成每次都装", qPrintable(otaStatePath()));
+        return;
+    }
+    f.write(QJsonDocument(s).toJson(QJsonDocument::Indented));
+    f.flush();
+}
+
+/** 下一次尝试前要等多久：失败越多等越久（3 分 → 15 分 → 1 时 → 4 时 → 12 时封顶）。 */
+static qint64 otaRetryDelayMs(int failCount)
+{
+    static const qint64 table[] = {
+        3  * 60 * 1000LL,   // 第 1 次失败：网络抖一下，三分钟后再说
+        15 * 60 * 1000LL,   // 第 2 次：短时间重来也没用，等一刻钟
+        1  * 60 * 60 * 1000LL,
+        4  * 60 * 60 * 1000LL,
+        12 * 60 * 60 * 1000LL   // 封顶：一整天最多闹这么几次
+    };
+    if (failCount <= 0) return 0;
+    return table[failCount - 1 > 4 ? 4 : failCount - 1];
+}
+
+/** 记一次失败：把"下次最早几点能试"一起算好写进状态文件。 */
+static void otaNoteFailure(const QString &why)
+{
+    QJsonObject st = otaLoadState();
+    const int n = st.value(QStringLiteral("failCount")).toInt(0) + 1;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    st.insert(QStringLiteral("failCount"), n);
+    st.insert(QStringLiteral("lastResult"), QStringLiteral("failed"));
+    st.insert(QStringLiteral("lastError"), why);
+    st.insert(QStringLiteral("lastVer"), g_latestVer);
+    st.insert(QStringLiteral("lastAt"), (double)now);
+    st.insert(QStringLiteral("nextAt"), (double)(now + otaRetryDelayMs(n)));
+    otaSaveState(st);
+    qWarning("[agent-qt] ⏳ 自动升级失败（连续 %d 次：%s）→ %lld 分钟后再试",
+             n, qPrintable(why), otaRetryDelayMs(n) / 60000LL);
+}
+
+/** 记一次成功：清空失败计数（下次有网就立刻再试，不用再等退避）。 */
+static void otaNoteSuccess()
+{
+    QJsonObject st = otaLoadState();
+    st.insert(QStringLiteral("failCount"), 0);
+    st.insert(QStringLiteral("lastResult"), QStringLiteral("ok"));
+    st.insert(QStringLiteral("lastVer"), QString::fromLatin1(kAppVersion));
+    st.insert(QStringLiteral("lastAt"), (double)QDateTime::currentMSecsSinceEpoch());
+    st.insert(QStringLiteral("nextAt"), (double)0);
+    otaSaveState(st);
+}
+
+static bool otaPaused()
+{
+    return QFile::exists(otaPausePath());
+}
+
+/** 备份当前 exe 到数据目录（回滚的命根子）。失败返回空串 —— 见调用处宁可不装。 */
+static QString otaBackupExe()
+{
+    const QString src = QCoreApplication::applicationFilePath();
+    const QString dst = otaPrevPath();
+    QDir().mkpath(QFileInfo(dst).absolutePath());
+    QFile::remove(dst);
+    if (!QFile::copy(src, dst)) {
+        qWarning("[agent-qt] ⚠ 备份当前 exe 失败（%s → %s）", qPrintable(src), qPrintable(dst));
+        return QString();
+    }
+    if (QFileInfo(dst).size() != QFileInfo(src).size()) {
+        qWarning("[agent-qt] ⚠ 备份大小对不上（%lld vs %lld），不认这个备份",
+                 (long long)QFileInfo(dst).size(), (long long)QFileInfo(src).size());
+        QFile::remove(dst);
+        return QString();
+    }
+    // 备份是给回滚用的，权限要跟原件一致；设不上也不致命（安装器以管理员身份覆盖时会重设）。
+    QFile::setPermissions(dst, QFile::ReadOwner | QFile::WriteOwner);
+    qInfo("[agent-qt] 💾 已备份当前 exe（%lld 字节）用于回滚 → %s",
+          (long long)QFileInfo(dst).size(), qPrintable(dst));
+    return dst;
+}
+
+static void otaWritePending(const QString &prevExe, const QString &targetVer)
+{
+    QJsonObject pend;
+    pend.insert(QStringLiteral("target"), targetVer);
+    pend.insert(QStringLiteral("prevExe"), prevExe);
+    pend.insert(QStringLiteral("ts"), (double)QDateTime::currentMSecsSinceEpoch());
+    QDir().mkpath(otaBaseDir());
+    QFile f(otaPendingPath());
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("[agent-qt] ⚠ 写不下 pending 标记（%s）—— 看门狗分不清新旧版本", qPrintable(otaPendingPath()));
+        return;
+    }
+    f.write(QJsonDocument(pend).toJson(QJsonDocument::Indented));
+    f.flush();
+}
+
+/** 新版本起来并注册成功 → 标记 + 清掉 pending（清不掉就会被人造的启动失败误回滚）。 */
+static void otaMarkStartedOk()
+{
+    QDir().mkpath(otaBaseDir());
+    QFile f(otaOkPath());
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(QStringLiteral("v%1 %2\n")
+                    .arg(QString::fromLatin1(kAppVersion),
+                         QDateTime::currentDateTime().toString(Qt::ISODate))
+                    .toUtf8());
+        f.flush();
+    }
+    if (QFile::exists(otaPendingPath())) {
+        QFile::remove(otaPendingPath());
+        qInfo("[agent-qt] ✅ 新版本 v%s 已连上云端，本次升级确认成功（回滚标记已清）", kAppVersion);
+    }
+    otaNoteSuccess();
+}
+
+/** 回滚：把旧 exe 放回去并拉起来。当前进程（新版本）随后退出。 */
+static void otaRollback()
+{
+    const QString prev = otaPrevPath();
+    const QString exe  = QCoreApplication::applicationFilePath();
+    if (!QFile::exists(prev)) {
+        qWarning("[agent-qt] ⚠ 回滚备份不在（%s）—— 只能让这台机器保持现状，等下次升级 retry", qPrintable(prev));
+        QFile::remove(otaPendingPath());
+        otaNoteFailure(QStringLiteral("回滚备份不存在"));
+        return;
+    }
+    if (QFileInfo(prev).size() == 0) {
+        qWarning("[agent-qt] ⚠ 回滚备份是 0 字节（%s），拒绝用空壳覆盖", qPrintable(prev));
+        QFile::remove(otaPendingPath());
+        otaNoteFailure(QStringLiteral("回滚备份为 0 字节"));
+        return;
+    }
+    qWarning("[agent-qt] 🔙 回滚：用 %s 覆盖 %s，再把它拉起来", qPrintable(prev), qPrintable(exe));
+    // 覆盖自己正在跑的 exe 一定失败（文件被占），所以交出一个独立 cmd 去干：
+    // 杀进程 → 等 3 秒（自己也退干净）→ 拷回旧版 → 清 pending → 拉起旧版。
+    const QString cmd = QStringLiteral(
+        "taskkill /F /IM stelarith-agent-qt.exe >nul 2>&1 && "
+        "ping -n 4 127.0.0.1 >nul && "
+        "copy /Y \"%1\" \"%2\" >nul && "
+        "del /f /q \"%3\" && "
+        "start \"\" \"%2\"");
+    QProcess::startDetached(QStringLiteral("cmd.exe"),
+                            {QStringLiteral("/c"), cmd.arg(prev, exe, otaPendingPath())});
+    otaNoteFailure(QStringLiteral("新版本未能在 %d 秒内连上云端，已回滚").arg(kOtaRollbackMs / 1000));
+    QTimer::singleShot(1500, [] { QCoreApplication::quit(); });   // 让位给刚拉起来的旧版
+}
+
+/** 该不该现在自动装：全部满足才动手，任何一条不满足都**如实说为什么**不装。 */
+static void maybeAutoUpdate()
+{
+    if (!g_updateMandatory) return;                       // ① 只有云端明确要求强制才自动装
+    if (g_unconfigured) {                                 // ② 没配好就别自作主张（升完照样连不上）
+        qInfo("[agent-qt] 强制升级跳过：本机还没配好云端（未配置）");
+        return;
+    }
+    if (otaIsBusy()) {                                    // ③ 上一次下载还没完
+        qInfo("[agent-qt] 强制升级跳过：上一个更新任务还在跑");
+        return;
+    }
+    if (g_updateUrl.isEmpty() || g_updateSha.length() != 64) {   // ④ 清单不完整 = 不许升
+        qWarning("[agent-qt] 强制升级跳过：清单缺 url 或 sha256（不让管理员补 ota.json 就别硬升）");
+        return;
+    }
+    if (compareVersion(g_latestVer, QString::fromLatin1(kAppVersion)) <= 0) return;   // ⑤ 已经是最新
+
+    if (otaPaused()) {                                    // ⑥ 人工紧急刹车
+        qWarning("[agent-qt] ⛔ 强制升级已在本机暂停（存在 %s）—— 管理员排查用，删掉这个文件即恢复",
+                 qPrintable(otaPausePath()));
+        return;
+    }
+
+    {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const qint64 nextAt = otaLoadState().value(QStringLiteral("nextAt")).toVariant().toLongLong();
+        if (nextAt > now) {
+            qInfo("[agent-qt] ⏳ 强制升级还没到点：%lld 秒后再试（上次结果 %s）",
+                  (nextAt - now) / 1000, qPrintable(otaLoadState().value(QStringLiteral("lastError")).toString()));
+            return;
+        }
+    }
+    {
+        QStorageInfo si(qEnvironmentVariable("LOCALAPPDATA"));
+        si.refresh();
+        if (si.bytesAvailable() < kOtaMinFreeBytes) {      // ⑦ 盘快满了：宁可不升，也别装到一半没地方
+            qWarning("[agent-qt] ⚠ 强制升级跳过：数据盘只剩 %lld 字节（要求 ≥ %lld）",
+                     (long long)si.bytesAvailable(), (long long)kOtaMinFreeBytes);
+            return;
+        }
+    }
+
+    qInfo("[agent-qt] 🔒 云端要求强制升级：v%s → v%s，开始自动下载安装（无需人工操作）",
+          kAppVersion, qPrintable(g_latestVer));
+    QJsonObject p;
+    p.insert(QStringLiteral("url"), g_updateUrl);
+    p.insert(QStringLiteral("sha256"), g_updateSha);
+    p.insert(QStringLiteral("version"), g_latestVer);
+    startSelfUpdate(QStringLiteral("auto"), p);
 }
 
 /** 设置与信息：一眼看清"我是谁、连着谁、什么版本、能不能升"。只读 + 两个动作按钮。 */
@@ -1005,6 +1296,45 @@ void openInfoDialog()
         form->addRow(QStringLiteral("版本说明"), notes);
     }
 
+    // ── 强制自动升级（2026-10-06）：把"谁说了算""上次干得怎么样"摆到台面上 ──
+    // 强制升级最怕两件事：老师不知道机器在自动换程序；出了问题没法一眼看出是哪一版。
+    QLabel *otaAutoLbl = nullptr;
+    {
+        const QJsonObject st = otaLoadState();
+        const bool paused = otaPaused();
+        const int fc = st.value(QStringLiteral("failCount")).toInt(0);
+        const QString lastRes = st.value(QStringLiteral("lastResult")).toString();
+
+        auto *modeLbl = new QLabel(g_updateMandatory
+                                       ? QStringLiteral("强制：到点自动装，不用老师点（装完重启一次）")
+                                       : QStringLiteral("可选：只有点「立即升级」才装"));
+        if (g_updateMandatory) modeLbl->setStyleSheet(QStringLiteral("color:#c0392b;font-weight:bold;"));
+        form->addRow(QStringLiteral("升级方式"), modeLbl);
+
+        otaAutoLbl = new QLabel(paused
+                                    ? QStringLiteral("已暂停（停机排查用；删掉 %1 即恢复）").arg(otaPausePath())
+                                    : QStringLiteral("到点自动装"));
+        if (paused) otaAutoLbl->setStyleSheet(QStringLiteral("color:#c0392b;"));
+        form->addRow(QStringLiteral("自动升级"), otaAutoLbl);
+
+        QString lastText;
+        if (lastRes.isEmpty()) {
+            lastText = QStringLiteral("（这台机器还没自动升级过）");
+        } else if (lastRes == QLatin1String("ok")) {
+            lastText = QStringLiteral("成功（已升到 v%1）").arg(st.value(QStringLiteral("lastVer")).toString());
+        } else {
+            lastText = QStringLiteral("失败 ×%1：%2")
+                           .arg(fc).arg(st.value(QStringLiteral("lastError")).toString());
+        }
+        form->addRow(QStringLiteral("上次自动升级"), new QLabel(lastText));
+
+        const qint64 nextAt = st.value(QStringLiteral("nextAt")).toVariant().toLongLong();
+        form->addRow(QStringLiteral("下次自动升级"),
+                     new QLabel(nextAt > QDateTime::currentMSecsSinceEpoch()
+                                    ? QDateTime::fromMSecsSinceEpoch(nextAt).toString(QStringLiteral("MM-dd HH:mm"))
+                                    : QStringLiteral("立刻（有网就试）")));
+    }
+
     auto *btnRow = new QHBoxLayout();
     root->addLayout(btnRow);
 
@@ -1027,6 +1357,34 @@ void openInfoDialog()
     });
     QObject::connect(btnUpgrade, &QPushButton::clicked, &dlg, &QDialog::accept);
 
+    // 强制升级的紧急刹车：**不卸包、不重编、不改云端**，往数据目录扔一个空文件就停手。
+    // 某个版本真把全校教室机搞挂时，这是现场唯一来得及做的止血动作。
+    auto *btnPause = new QPushButton(otaPaused() ? QStringLiteral("恢复自动升级")
+                                                 : QStringLiteral("暂停自动升级"));
+    btnPause->setToolTip(QStringLiteral("暂停只在本机生效：写入 %1 之后，这台机器不再自动升级，"
+                                        "但别人照常升。删掉该文件即恢复。")
+                             .arg(otaPausePath()));
+    QObject::connect(btnPause, &QPushButton::clicked, &dlg, [btnPause, otaAutoLbl] {
+        if (otaPaused()) {
+            QFile::remove(otaPausePath());
+            qInfo("[agent-qt] 操作员恢复了本机自动升级");
+            btnPause->setText(QStringLiteral("暂停自动升级"));
+            if (otaAutoLbl) otaAutoLbl->setText(QStringLiteral("到点自动装"));
+        } else {
+            QDir().mkpath(otaBaseDir());
+            QFile f(otaPausePath());
+            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                f.write(QStringLiteral("paused by operator %1\n")
+                            .arg(QDateTime::currentDateTime().toString(Qt::ISODate)).toUtf8());
+                f.flush();
+            }
+            qWarning("[agent-qt] ⛔ 操作员暂停了本机自动升级（%s）", qPrintable(otaPausePath()));
+            btnPause->setText(QStringLiteral("恢复自动升级"));
+            if (otaAutoLbl)
+                otaAutoLbl->setText(QStringLiteral("已暂停（删掉 %1 即恢复）").arg(otaPausePath()));
+        }
+    });
+
     auto *btnLog = new QPushButton(QStringLiteral("打开日志目录"));
     QObject::connect(btnLog, &QPushButton::clicked, &dlg, [] {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(g_logPath).absolutePath()));
@@ -1036,6 +1394,7 @@ void openInfoDialog()
     QObject::connect(btnClose, &QPushButton::clicked, &dlg, &QDialog::reject);
 
     btnRow->addWidget(btnUpgrade);
+    btnRow->addWidget(btnPause);
     btnRow->addWidget(btnLog);
     btnRow->addStretch();
     btnRow->addWidget(btnClose);
@@ -1554,6 +1913,8 @@ static QCryptographicHash *g_otaHash = nullptr;
 static QString g_otaId, g_otaSha, g_otaVer, g_otaPath;
 static qint64 g_otaGot = 0;
 static bool g_otaBusy = false;
+// 见前面 otaIsBusy 的说明：强制升级的触发判定在文件更前面，只能靠这个函数看到这个标志。
+static bool otaIsBusy() { return g_otaBusy; }
 
 // 统一回执出口（被控端→云端）。断链时不静默：如实记一条，避免"以为回了其实没回"。
 static void sendActionReceipt(const QString &id, const QString &action, const QString &result,
@@ -1600,6 +1961,7 @@ static void startSelfUpdate(const QString &id, const QJsonObject &params)
     if (!url.startsWith(QStringLiteral("http://")) && !url.startsWith(QStringLiteral("https://"))) {
         sendActionReceipt(id, action, QStringLiteral("failed"),
                           QStringLiteral("url 必须是 http(s) 地址：%1").arg(url));
+        otaNoteFailure(QStringLiteral("url 不合法"));
         return;
     }
     // 护栏②：必须有合法 sha256 —— 没有校验的"更新"等于任意代码执行，一律拒绝
@@ -1607,6 +1969,7 @@ static void startSelfUpdate(const QString &id, const QJsonObject &params)
     if (!hex64.match(sha).hasMatch()) {
         sendActionReceipt(id, action, QStringLiteral("failed"),
                           QStringLiteral("sha256 必须是 64 位小写十六进制（拒绝无校验更新）"));
+        otaNoteFailure(QStringLiteral("sha256 不合法"));
         return;
     }
 
@@ -1624,6 +1987,7 @@ static void startSelfUpdate(const QString &id, const QJsonObject &params)
     if (!g_otaFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         sendActionReceipt(id, action, QStringLiteral("failed"),
                           QStringLiteral("无法写入下载文件：%1").arg(g_otaPath));
+        otaNoteFailure(QStringLiteral("无法写入下载目录（盘满了？）"));
         delete g_otaFile; g_otaFile = nullptr;
         return;
     }
@@ -1676,25 +2040,44 @@ static void otaOnFinished()
     const QString gotSha = g_otaHash ? QString::fromLatin1(g_otaHash->result().toHex()) : QString();
     if (g_otaHash) { delete g_otaHash; g_otaHash = nullptr; }
 
+    // 三种失败都要进"退避账"：强制升级失败的机器不能立刻又装一遍。
     if (got > kOtaMaxBytes) {
         QFile::remove(path);
         sendActionReceipt(id, action, QStringLiteral("failed"),
                           QStringLiteral("安装包超过体积上限（%1 字节）").arg(kOtaMaxBytes));
+        otaNoteFailure(QStringLiteral("安装包超过体积上限"));
         return;
     }
     if (nerr != QNetworkReply::NoError) {
         QFile::remove(path);
         sendActionReceipt(id, action, QStringLiteral("failed"),
                           QStringLiteral("下载失败：%1").arg(nerrStr));
+        otaNoteFailure(QStringLiteral("下载失败：").append(nerrStr).left(160));
         return;
     }
     if (gotSha != sha) {
         QFile::remove(path);
         sendActionReceipt(id, action, QStringLiteral("failed"),
                           QStringLiteral("sha256 校验不符（期望 %1 实得 %2），已删除下载文件").arg(sha, gotSha));
+        otaNoteFailure(QStringLiteral("sha256 校验不符"));
         return;
     }
     qInfo("[agent-qt] ✅ OTA 校验通过（%lld 字节，sha256=%s），准备安装", (long long)got, qPrintable(gotSha));
+
+    // ①-0 动安装器之前：先做"回滚三件套"。顺序不能反（装完就没人有机会备份了）。
+    //   · 删掉 ota-last-ok.txt，否则看门狗会拿**上一版的**成功标记冒充新版本起来了。
+    //   · 备份当前 exe → 写 pending（看门狗靠它知道"这次升级该验谁的账"）
+    //   · 备份失败就直接不装：宁可升不上，也不能留一台没有退路的机器。
+    QFile::remove(otaOkPath());
+    const QString prev = otaBackupExe();
+    if (prev.isEmpty()) {
+        QFile::remove(path);
+        sendActionReceipt(id, action, QStringLiteral("failed"),
+                          QStringLiteral("备份当前 exe 失败，拒绝无回滚地覆盖自己"));
+        otaNoteFailure(QStringLiteral("备份当前 exe 失败（拒绝无回滚升级）"));
+        return;
+    }
+    otaWritePending(prev, ver);
 
     // ① 先派重启助手：等安装器把文件换完，再把新版拉起来（本进程随后会被安装器杀掉）
     const QString exeDir = QCoreApplication::applicationDirPath();
@@ -1703,13 +2086,27 @@ static void otaOnFinished()
         QFile h(helper);
         if (h.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             // 纯 ASCII + CRLF：cmd.exe 按 GBK 解析 .bat，中文注释会吞行（同 install-autostart 的教训）
+            //
+            // ⚠️ 这份脚本是**升级前**由旧版本写下的，之后不会被新版本改写 ——
+            //    所以它体内是**旧代码的字节**：新版本一启动就崩也不影响它把机器救回来。
+            //    只看 agent 自己是不够的（新 exe 崩了它自己也已经没了），这道狗必须在进程外。
             const QString content =
                 QStringLiteral("@echo off\r\n"
-                               "rem Stelarith OTA relaunch helper (auto-generated). Pure ASCII.\r\n"
-                               "rem Wait for the installer to replace files, then start the new agent.\r\n"
-                               "ping -n 26 127.0.0.1 >nul\r\n"
-                               "start \"\" \"%1\"\r\n"
-                               "del \"%~f0\"\r\n").arg(exeDir + QStringLiteral("/stelarith-agent-qt.exe"));
+                               "rem Stelarith OTA guard (auto-generated by the PRE-upgrade build).\r\n"
+                               "rem Pure ASCII on purpose: cmd.exe parses .bat as GBK.\r\n"
+                               "rem 1) give the installer time to replace files\r\n"
+                               "ping -n 31 127.0.0.1 >nul\r\n"
+                               "rem 2) start the new agent, then see whether it ever reached the cloud\r\n"
+                               "start \"\" \"%3\"\r\n"
+                               "ping -n 91 127.0.0.1 >nul\r\n"
+                               "if exist \"%1\" goto done\r\n"
+                               "rem 3) it never registered -> restore the pre-upgrade exe and relaunch it\r\n"
+                               "del /f /q \"%1\" >nul 2>&1\r\n"
+                               "copy /Y \"%2\" \"%3\" >nul\r\n"
+                               "start \"\" \"%3\"\r\n"
+                               ":done\r\n"
+                               "del /f /q \"%~f0\"\r\n")
+                    .arg(otaOkPath(), otaPrevPath(), exeDir + QStringLiteral("/stelarith-agent-qt.exe"));
             h.write(content.toUtf8());
             h.flush();
             h.close();
@@ -3210,6 +3607,11 @@ void handleControlText(const QString &text)
             if (g_hbTimer) g_hbTimer->setInterval(g_heartbeatMs);
         }
         if (to > 0) g_timeoutMs = to;
+        g_lastOnlineAt = QDateTime::currentMSecsSinceEpoch();
+        // 连上云端 = 这一版是活的（强制升级就靠这一个信号判定"新版本起没起来"）。
+        // 注意要在 applyUpdateInfo **之前**执行：applyUpdateInfo 里可能立刻触发自动升级，
+        // 而升级前的成功标记必须带着"我当前这一版是好的"这个事实走。
+        otaMarkStartedOk();
         updateTray(TrayState::Connected, QStringLiteral("已连接"));
         qInfo("[agent-qt] ✅ 云端已确认注册 v1（uid=%s，server=%s，心跳 %d ms，超时 %d ms）",
               qPrintable(pay.value(QStringLiteral("uid")).toString()),
@@ -3588,6 +3990,21 @@ int main(int argc, char *argv[])
 
     connectNow();
     QMetaObject::invokeMethod(&timer, "timeout", Qt::QueuedConnection);
+
+    // ── 强制升级的回滚看门狗（2026-10-06）────────────────────────────────
+    // 还有一次升级没被"确认成功"摆在台面上（pending 标记还在）→ 起个定时器：
+    // 新版本这么多秒内没连上云端（且这台机器确实连通过）就把旧版放回去。
+    // 没连通过的机器**不回滚**：网络断了不该把升级判成失败、白降一版。
+    if (QFile::exists(otaPendingPath())) {
+        qWarning("[agent-qt] ⚠ 有一次升级还没确认成功（%s）—— %d 秒内没连上云端就回滚",
+                 qPrintable(otaPendingPath()), kOtaRollbackMs / 1000);
+        QTimer::singleShot(kOtaRollbackMs, [] {
+            if (g_registered || g_lastOnlineAt == 0) return;    // 起来了 / 从没连通 → 都不算新版本坏了
+            qWarning("[agent-qt] ⚠ 当前版本已运行 %d 秒仍连不上云端 → 回滚到上一版",
+                     kOtaRollbackMs / 1000);
+            otaRollback();
+        });
+    }
 
     // ── 课表时钟（2026-10-06 加）：上下课提醒 ────────────────────────────
     // 读 ClassIsland 档案（默认 %LOCALAPPDATA%\ClassIsland\data\Profiles\Default.json），
