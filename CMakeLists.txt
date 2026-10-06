@@ -4,6 +4,30 @@ project(stelarith-viewer-qt LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(/utf-8)
+
+# ── 管理端版本号（2026-10-06 打磨）──
+# 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
+# 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
+set(VIEWER_VERSION "0.6.3")
+add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
+
+# 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补）。
+# 背景：main.cpp 原先也硬编码 kViewerVersion="0.6.2"，CMake 这边已经 0.6.3 →
+# 日志首行写 0.6.2、「关于」写 0.6.3，用户一眼就看得出这软件没打磨过。
+# 光靠"记得同步"是守不住的（上面刚漂移过一次），所以在配置阶段直接读源码比对，不一致就别编。
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" _viewer_src)
+if (_viewer_src MATCHES "kViewerVersion[ \t\r\n]*=[ \t\r\n]*\"([0-9][^\"]*)\"")
+  set(_src_version "${CMAKE_MATCH_1}")
+  if(NOT _src_version STREQUAL "${VIEWER_VERSION}")
+    message(FATAL_ERROR
+      "版本号漂移：CMakeLists.txt 是 ${VIEWER_VERSION}，src/main.cpp 里的回落是 ${_src_version}。\n"
+      "改版本只改 CMakeLists.txt 的 set(VIEWER_VERSION ...) 这一行（main.cpp 那份会自动跟随，\n"
+      "不一致说明手改过 main.cpp —— 要么删掉手改，要么把这里的 VIEWER_VERSION 一起改）。")
+  endif()
+  message(STATUS "[viewer] 版本一致性检查通过：${_src_version}")
+else()
+  message(FATAL_ERROR "在 src/main.cpp 里找不到 kViewerVersion 字面量，版本号校验没法做")
+endif()
 if (MSVC)
   add_compile_options(/EHsc)
 endif()
@@ -20,7 +44,10 @@ endif()
 # Network（2026-10-06 加）：站点账号登录要 QNetworkAccessManager（换令牌、取云端接入票）
 # 与 QTcpServer（接OAuth 回拨的 loopback 端口）。QWebSockets 会传递依赖到 Qt6::Network，
 # 但这里显式列出来 —— 链接表上读得见，换掉 WebSockets 时才不会被顺手漏掉。
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Network WebSockets Widgets WebEngineWidgets WebChannel)
+# QuickControls2（2026-10-06 加）：main.cpp 要 QQuickStyle::setStyle("Basic")。
+# 不把这个模块挂上，QQuickStyle 头文件/链接都拿不到，默认风格那堆
+# "style does not support customization" 警告也就消不掉。
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets Widgets WebEngineWidgets WebChannel)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面

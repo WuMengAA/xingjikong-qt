@@ -204,9 +204,27 @@ private:
     ViewerBackend *m_backend;
 };
 
-// ⚠️ 管理端应用版本号的**唯一真源**（2026-10-06 补：这份发布副本原先连版本常量都没有）。
-// 与被控端 kAppVersion 对齐到同一套版本号，便于运维一眼对齐两端；改版本只改这里。
-static constexpr const char *kViewerVersion = "0.6.2";
+// ── 托盘气泡钩子（2026-10-06）──────────────────────────────────────────────
+// 「提醒」那两个开关（操作完成提示 / 设备离线提示）弹气泡走这里。
+// 为什么不在 ViewerBackend 里自己 new 一个 QSystemTrayIcon：Qt 6.8 把
+// QSystemTrayIcon::find() 拿掉了（只剩 isSystemTrayAvailable / supportsMessages），
+// 拿不回 main 建的常驻托盘；再造一个图标，桌面 tray 区就会出现两个星集控图标。
+// 所以托盘指针登记在这个文件作用域里，后端只调 stelarithNotifyTray()。
+static QSystemTrayIcon *g_notifyTray = nullptr;
+
+void stelarithNotifyTray(const QString &title, const QString &msg)
+{
+    if (!g_notifyTray) return;
+    g_notifyTray->showMessage(title, msg, QSystemTrayIcon::Information, 4000);
+}
+
+// ⚠️ 管理端应用版本号的**唯一真源是 CMakeLists.txt 的 VIEWER_VERSION**（2026-10-06 修）。
+// 修之前这里也硬编码一份 0.6.2：CMake 那侧已经是 0.6.3 → 日志/托盘/关于页互相打架
+// （"关于"显示 0.6.3、首行日志显示 0.6.2），这正是"这软件还没打磨就发出去"的痕迹。
+// CMakeLists.txt 在配置阶段会读这一行来校验两处一致，不一致直接 FATAL_ERROR ——
+// 别靠人记着同步，靠构建卡住（上面就是没卡住才漂到的）。
+// ⚠️ 保持这一行**单行**：跨行写（#ifdef 套宏）会让 CMake 的正则匹配不到，校验就白做了。
+static constexpr const char *kViewerVersion = "0.6.3";
 
 int main(int argc, char *argv[])
 {
@@ -319,6 +337,18 @@ int main(int argc, char *argv[])
     ScheduleTodayProvider schedToday;
     schedToday.setProfilePath(schedRepo.defaultProfilePath());
 
+    // ── 控件风格钉成 Basic（2026-10-06 打磨）────────────────────────────
+    // 默认风格（Windows 那套）不支持覆写 background，于是运行时刷一堆
+    //   "QQuickRectangle: The current style does not support customization of this control"
+    // —— 弹窗/日志框里那些自绘背景全被它warn，而界面本身是黑白自绘的，根本用不上默认外观。
+    // 顺带 Basic 只需要 QtQuickControls2Basic.dll（现在包里塞了 Basic/Fusion/Imagine/
+    // Material/Universal/FluentWinUI3 六套，全是被这个默认风格拖进来的）。
+    // 写进进程环境而不是 QQuickStyle::setStyle：这条变量由 QtQuick.Controls 的
+    // 风格插件在加载时读，越早设越好（main 开头、任何 QML 加载之前）。
+    // 效果同钉死风格，但不额外链接 QtQuickControls2 到本工程 —— 那个模块本来
+    // 只是随 QQC2 插件一起部署，没必拉进 exe 的依赖表。
+    qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
+
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
@@ -367,6 +397,7 @@ int main(int argc, char *argv[])
 
         auto *tray = new QSystemTrayIcon(QIcon(pm), &app);
         tray->setToolTip(QStringLiteral("星集控 · 管理端 v%1").arg(QString::fromLatin1(kViewerVersion)));
+        g_notifyTray = tray;   // 登记：设置页那两个「提醒」开关的气泡走它
 
         auto *menu = new QMenu();
         auto *actStatus = menu->addAction(QStringLiteral("状态：运行中"));

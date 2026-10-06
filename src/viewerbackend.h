@@ -29,6 +29,15 @@ class OAuthLogin;
 /** 全局日志（定义在 main.cpp；backend 与界面共用同一份落盘日志）。 */
 void logf(const char *fmt, ...);
 
+/**
+ * 弹一条托盘气泡（设置页「提醒」那两个开关用）。
+ *
+ * 定义在 main.cpp：托盘那个实例是 main 建的，而 Qt 6.8 把 QSystemTrayIcon::find() 拿掉了
+ * （只剩 isSystemTrayAvailable / supportsMessages），拿不回常驻的那一个。
+ * 这里只做声明 —— 后端不该知道托盘长什么样，只管调。
+ */
+void stelarithNotifyTray(const QString &title, const QString &msg);
+
 class ViewerBackend : public QObject
 {
     Q_OBJECT
@@ -53,6 +62,22 @@ class ViewerBackend : public QObject
     // 登不进去要能看见原因（配错了网站地址、密钥没填、站点没配密钥……都在这句里）。
     Q_PROPERTY(QString accountText READ accountText NOTIFY accountChanged)
     Q_PROPERTY(bool accountBusy READ accountBusy NOTIFY accountChanged)
+    // ── 登录态 / 角色 / 权限（2026-10-06 打磨）──
+    // 界面靠这几个读数决定「顶栏那个账户胶囊长什么样」以及「右边哪些按钮点得动」。
+    // 一律以**后端**（真实凭据有没有、角色存 Setting 里哪一份）为唯一真源，
+    // 界面不许自己记一份"我以为登录了"。
+    Q_PROPERTY(bool loggedIn READ loggedIn NOTIFY accountChanged)
+    /** 已登录时显示谁（没登录就是空串）。 */
+    Q_PROPERTY(QString accountName READ accountName NOTIFY accountChanged)
+    /** 当前身份："admin"（管理员）／"teacher"（教师）。未登录时也是 teacher（按最低权限看）。 */
+    Q_PROPERTY(QString role READ role NOTIFY roleChanged)
+    // ── 提醒（设置页那两个开关，以前是画的假开关，2026-10-06 做成真的）──
+    Q_PROPERTY(bool notifyOnDone READ notifyOnDone NOTIFY notifyPrefChanged
+               WRITE setNotifyOnDone)
+    Q_PROPERTY(bool notifyOnOffline READ notifyOnOffline NOTIFY notifyPrefChanged
+               WRITE setNotifyOnOffline)
+    // ── 应用版本（关于页 / 顶栏标题，编译期注入；以前界面上只显示一个「—」）──
+    Q_PROPERTY(QString version READ version CONSTANT)
     // ── 文件推送（file_push / file_chunk / file_done 三步走）──
     // 状态：idle（没在推）→ pushing（等被控端收下会话）→ sending（一片一片推）
     //       → done（推完，fileTarget 是被控端落盘路径）／ failed（中断，fileError 有原因）
@@ -133,6 +158,14 @@ public:
     /** 账号那一行该显示什么（见 accountText 属性）。 */
     QString accountText() const;
     bool accountBusy() const;
+    /** 界面「关于 / 顶栏」显示的版本（编译期注入，见 version 属性）。 */
+    QString version() const;
+    /** 有没有能连云端的凭据（接入票 or 静态令牌）——"登录了"的唯一判据。 */
+    bool loggedIn() const;
+    /** 登录的是谁（没登录是空串）。 */
+    QString accountName() const;
+    /** 当前身份："admin" / "teacher"。 */
+    QString role() const;
 
     /**
      * 用网站账号登录：拉起浏览器走授权页，回拨接住后自动换云端接入票并连上云端。
@@ -141,6 +174,29 @@ public:
     Q_INVOKABLE void loginWithSite();
     /** 忘记本机上的账号（删本地凭据，下次要重新走一次授权）。 */
     Q_INVOKABLE void forgetAccount();
+    /** 打开本机浏览器去站点注册新账号（注册页，不是授权页）。 */
+    Q_INVOKABLE void openRegisterPage();
+    /** 打开一个外部网址（站点首页 / 下载页）。走 QDesktopServices，不内嵌。 */
+    Q_INVOKABLE void openExternal(const QString &url);
+
+    // ── 角色与权限 ──
+    /** 切身份（"admin" / "teacher"）。当前登录账号必须是管理员才认（教师不能自己升管理员）。 */
+    Q_INVOKABLE bool setRole(const QString &role);
+    /**
+     * 这条操作当前身份能不能做（QML 用它把按钮置灰）。
+     *
+     * @param perm 权限键：等于 ADMIN_ONLY_ACTIONS 里那条（"lock" / "reboot" / "terminal_open" …）
+     *             或集控页用的 "broadcast"。没在这张表里的一律算"所有人都能做"。
+     */
+    Q_INVOKABLE bool mayDo(const QString &perm) const;
+
+    // ── 提醒开关 ──
+    bool notifyOnDone() const { return m_notifyOnDone; }
+    bool notifyOnOffline() const { return m_notifyOnOffline; }
+    void setNotifyOnDone(bool on);
+    void setNotifyOnOffline(bool on);
+    /** 该弹一条本机提示时由内部调用（状态行 + 可选的桌面气泡）。 */
+    void notifyPref(const QString &text);
 
     // 文件推送的 7 个读数：Q_PROPERTY 的 READ 就是这些，少了任何一个，
     // moc 生成的 _t->xxx() 和本文件里的 `ViewerBackend::xxx() const` 两侧同时报错
@@ -167,6 +223,8 @@ public:
     /** 能力门控被拦下时的反馈：状态行说人话 + 日志留证（**不静默**，红线）。
      * 单独开一个而不是让 QML 直接调 setStatus —— 后者不是 slot，QML 调不到。 */
     Q_INVOKABLE void reportUnsupported(const QString &label, const QString &action);
+    /** 权限被拦下的反馈（现状：说人话 + 留日志，绝不静默）。 */
+    Q_INVOKABLE void reportDenied(const QString &label);
 
     Q_INVOKABLE void requestDevices();
     Q_INVOKABLE void sendAction(const QString &action, const QJsonObject &params = QJsonObject());
@@ -252,6 +310,10 @@ signals:
     void frameDropped(const QString &reason);
     /** 鉴权被拒：界面应停止重连并把原因显示出来。 */
     void authFailed(const QString &reason);
+    /** 角色变了（顶栏徽标、按钮置灰都要跟着动）。 */
+    void roleChanged();
+    /** 提醒开关变了（设置页那两个开关）。 */
+    void notifyPrefChanged();
     /**
      * 指令结果。state: "sent"（云端已写进连接）/ "executed"（机器真做了）/ 其它=没发成。
      * result: "done" / "failed"（仅 executed 时有意义）。data: 动作附加数据（可选）。
@@ -275,6 +337,14 @@ signals:
 private:
     void setStatus(const QString &s, bool warn);
     void connectToCloud();
+    /** 读回角色与提醒开关（QSettings，构造时调一次）。 */
+    void loadPrefs();
+    /** 切身份成功/失败后统一刷一遍依赖这些读数的状态。 */
+    void refreshGateState();
+    /** 重连间隔（带退避）：5s / 10s / 20s / 30s 封顶。 */
+    int retryDelayMs() const;
+    /** 手上有没有任何云端凭据（接入票或静态令牌都没有 = 没得连，别空转）。 */
+    bool hasAnyCredential() const;
     void onConnected();
     void onDisconnected();
     void onTextMessage(const QString &text);
@@ -388,6 +458,17 @@ private:
     bool m_authed = false;
     bool m_authFailed = false;      // 鉴权被拒后别再一遍遍重连
     QString m_authFailReason;
+    // ── 重连退避（2026-10-06 打磨：以前固定 5 秒一轮，鉴权失败时能把日志刷爆）──
+    // 第一次断线 5s、之后 10s / 20s / 30s 封顶；期间如果压根没凭据（既没票也没令牌），
+    // 直接停在那儿等用户登录 —— 无凭据的循环重连只会刷日志，不会有任何进展。
+    int m_retryCount = 0;
+    bool m_retryStopped = false;    // 停机重连（没凭据 / 连着失败太多），要用户出手才恢复
+    QString m_version;
+
+    // ── 身份 / 提醒偏好（落在 QSettings，界面改完重启也还在）──
+    QString m_role = QStringLiteral("admin");   // "admin" / "teacher"，默认管理员（单机自用）
+    bool m_notifyOnDone = true;
+    bool m_notifyOnOffline = true;
 
     QString m_statusText;
     bool m_statusWarn = false;

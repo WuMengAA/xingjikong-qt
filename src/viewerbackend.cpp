@@ -12,8 +12,10 @@
 #include <QImage>
 #include <QJsonDocument>
 #include <QJsonValue>
+#include <QDesktopServices>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
@@ -51,6 +53,39 @@ QString makeEnvelope(const QString &type, const QJsonObject &payload)
 
 constexpr int kFrameHeaderMax = 4096;
 constexpr int kReconnectMs = 5000;
+
+// 管理端默认连的生产云端（2026-10-06：从本机 dev 的 127.0.0.1:8788 改过来）。
+// ⚠️ 只有"没设 STE_VIEWER_URL"时才用；本机联调请显式设 STE_VIEWER_URL=ws://127.0.0.1:8788/ws/viewer。
+// 一律 wss（走 443 的公网域名），别抄 ws —— 明文 ws 连公网会被中间人直投。
+static const QString kDefaultViewerUrl = QStringLiteral("wss://control.245959623.xyz/ws/viewer");
+
+/**
+ * 只有管理员才做得了的操作（2026-10-06 打磨：权限门控）。
+ *
+ * 判据不是"危险不危险"，是**影响面**：
+ *   ① 不可逆（锁屏/重启/关机）、② 能把整台教室机交给外人（远控/终端开一条 shell）、
+ *   ③ 一次动作打到所有设备（广播、定时）、④ 把程序推起来放到前台（launch）。
+ * 只读的（截图/日志/探活）和改一台机器一点小状态的（音量/通知/录播）教师都能用，
+ * 否则教师这个角色等于被锁在门外——那角色就是装饰。
+ *
+ * ⚠️ 这张表是**界面门控用**的，不是安全边界：真正的闸门在被控端和云端。
+ * 界面置灰只是"别让人白点一下"，别拿它当权限系统用。
+ */
+const QStringList &adminOnlyActions()
+{
+    static const QStringList kAdmin = {
+        QStringLiteral("lock"),
+        QStringLiteral("reboot"),
+        QStringLiteral("shutdown"),
+        QStringLiteral("remote_control_start"),
+        QStringLiteral("terminal_open"),
+        QStringLiteral("schedule_shutdown"),
+        QStringLiteral("schedule_reboot"),
+        QStringLiteral("launch_app"),
+        QStringLiteral("broadcast")   // 集控页「广播」：一发打所有在线设备
+    };
+    return kAdmin;
+}
 
 /* ── 静态区判定（UU 远程同款思路的轻量版）─────────────────────────────
  * 被控端画面没在动的时候，收到多少帧都是同一张图 —— 解码 + 重绘一遍纯属白烧 CPU。
@@ -105,6 +140,9 @@ QString jsonStringLiteral(const QString &s)
 ViewerBackend::ViewerBackend(QObject *parent)
     : QObject(parent)
 {
+    // 身份与提醒开关先落下来（QSettings），后面所有门控判断都基于它。
+    loadPrefs();
+
     // 文件推送的"发下一片"由回执驱动：收到一片 done 才发下一片。
     // 不这样写就只能靠定时器盲发，一旦被控端拒收一片，后面全乱序、越堆越多。
     QObject::connect(this, &ViewerBackend::resultReceived, this,
@@ -178,6 +216,137 @@ ViewerBackend::~ViewerBackend()
         m_rtcView->deleteLater();
         m_rtcView = nullptr;
     }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 版本 / 身份 / 角色 / 提醒偏好
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * 编译期注入的版本号（Windows 上带三个部分才显示版本号属性，只给两个的话
+ * Qt 会写 "8.0.0.0" 这种被当成文件的怪东西 —— 前面三段拼够三段就行）。
+ */
+#ifndef STELARITH_VIEWER_VERSION_STRING
+#  define STELARITH_VIEWER_VERSION_STRING "0.0.0"
+#endif
+#define STELARITH_MAKE_VERSION(a, b, c) #a "." #b "." #c
+
+QString ViewerBackend::version() const
+{
+    return QString::fromLatin1(STELARITH_MAKE_VERSION(
+        STELARITH_VIEWER_VERSION_STRING));
+}
+
+/**
+ * 是否处在"已经登录"的状态。
+ *
+ * 判据严格按**手上有没有能连云端的凭据**：有接入票，或者配了静态令牌，都算。
+ * 只看 sessionToken 不够 —— 那种情况下界面会显示"已登录"、但云端连不上，
+ * 用户对着一个登录着的顶栏纳闷为什么没设备（这就是以前那个坑）。
+ */
+bool ViewerBackend::loggedIn() const
+{
+    return !m_cloudTicket.isEmpty() || !m_token.isEmpty();
+}
+
+QString ViewerBackend::accountName() const { return m_accountUser; }
+
+QString ViewerBackend::role() const { return m_role; }
+
+bool ViewerBackend::mayDo(const QString &perm) const
+{
+    if (m_role != QStringLiteral("admin")) return adminOnlyActions().contains(perm);
+    return true;
+}
+
+bool ViewerBackend::setRole(const QString &role)
+{
+    const QString r = role.trimmed().toLower();
+    const bool ok = (r == QStringLiteral("admin") || r == QStringLiteral("teacher"));
+    if (!ok) return false;
+    if (r == m_role) return true;
+    // 没登录按最低权限看：这是"当前身份"的默认值，别让它显示成管理员。
+    if (!loggedIn() && r == QStringLiteral("admin")) return false;
+    m_role = r;
+    QSettings s;
+    s.setValue(QStringLiteral("account/role"), r);
+    logf("[viewer] 身份切到 %s（顶栏徽标与按钮门控同步）",
+         r.toUtf8().constData());
+    refreshGateState();
+    return true;
+}
+
+void ViewerBackend::openRegisterPage()
+{
+    if (m_siteUrl.isEmpty()) {
+        setStatus(QStringLiteral("还没配站点地址（viewer.env 里加 STE_SITE_URL）"), true);
+        return;
+    }
+    const QUrl u(QStringLiteral("%1/register").arg(m_siteUrl));
+    logf("[viewer] 打开站点注册页 %s", u.toString().toUtf8().constData());
+    QDesktopServices::openUrl(u);
+}
+
+void ViewerBackend::openExternal(const QString &url)
+{
+    if (url.isEmpty()) return;
+    QDesktopServices::openUrl(QUrl(url));
+}
+
+void ViewerBackend::setNotifyOnDone(bool on)
+{
+    if (m_notifyOnDone == on) return;
+    m_notifyOnDone = on;
+    QSettings s;
+    s.setValue(QStringLiteral("prefs/notifyOnDone"), on);
+    emit notifyPrefChanged();
+}
+
+void ViewerBackend::setNotifyOnOffline(bool on)
+{
+    if (m_notifyOnOffline == on) return;
+    m_notifyOnOffline = on;
+    QSettings s;
+    s.setValue(QStringLiteral("prefs/notifyOnOffline"), on);
+    emit notifyPrefChanged();
+}
+
+/**
+ * 弹一条本机提示（状态行 + 可选桌面气泡）。
+ *
+ * 以前"提醒"那两张卡是画着玩的（两个空心的圆，点了没反应）—— 2026-10-06 打通：
+ * 操作完成、设备离线这两件事在后端本来就是现成的时刻，直接接上就行。
+ */
+void ViewerBackend::notifyPref(const QString &text)
+{
+    setStatus(text, false);
+    // 桌面气泡走 main.cpp 登记的那个常驻托盘（Qt 6.8 没有 find() 可拿，靠这个钩子），
+    // 状态行那一行无论如何都写 —— 就算没有托盘（比如远程会话），提示也不该消失。
+    stelarithNotifyTray(QStringLiteral("星集控"), text);
+}
+
+/**
+ * 身份变了之后统一刷一遍：顶栏徽标、按钮置灰、连接区那行账号文案全挂着这些读数，
+ * 一个一个 emit 容易漏（漏了就是"切了身份但按钮还是能点"）。
+ */
+void ViewerBackend::refreshGateState()
+{
+    emit roleChanged();
+    emit accountChanged();
+    refreshAccountText();
+}
+
+/** 提醒开关从 QSettings 读回来（构造时调用一次）。 */
+void ViewerBackend::loadPrefs()
+{
+    QSettings s;
+    const auto roleValue = s.value(QStringLiteral("account/role")).toString().toLower();
+    // 默认值 = 管理员：这是单机自用场景（管理员在教室机上开这个程序），
+    // 一上来就把按钮全灰掉比"默认宽松"更招骂。
+    m_role = (roleValue == QStringLiteral("teacher")) ? QStringLiteral("teacher")
+                                                      : QStringLiteral("admin");
+    m_notifyOnDone = s.value(QStringLiteral("prefs/notifyOnDone"), true).toBool();
+    m_notifyOnOffline = s.value(QStringLiteral("prefs/notifyOnOffline"), true).toBool();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -428,8 +597,13 @@ void ViewerBackend::onAccountTimer()
 
 void ViewerBackend::start()
 {
-    m_url = qEnvironmentVariable("STE_VIEWER_URL", QStringLiteral("ws://127.0.0.1:8788/ws/viewer")).trimmed();
-    if (m_url.isEmpty()) m_url = QStringLiteral("ws://127.0.0.1:8788/ws/viewer");
+    // ⚠️ 2026-10-06 改默认值：原来是 ws://127.0.0.1:8788/ws/viewer（本机 dev 云端）。
+    // 包一发出去老师机拿到的就是这份默认值 → 指向"这台机器自己" = 永远连不上，
+    // 界面上表现就是"连不上云端 + 设备列表空"（用户看到的"半成品"其实是根本没连上云端）。
+    // 生产入口 = 云端监听 0.0.0.0:8788 的公网域名（见 Stelarith-cloud-ws/src/provision.js 的 CLOUD_PUBLIC_BASE）。
+    // 本机联调照旧设 STE_VIEWER_URL 覆盖就行，不要为了联调把默认值改回去。
+    m_url = qEnvironmentVariable("STE_VIEWER_URL", kDefaultViewerUrl).trimmed();
+    if (m_url.isEmpty()) m_url = kDefaultViewerUrl;
     m_token = qEnvironmentVariable("STE_VIEWER_TOKEN", QString()).trimmed();
     if (m_token.isEmpty()) {
         logf("[viewer] WARN 未设环境变量 STE_VIEWER_TOKEN：云端 /ws/viewer 已加鉴权，"
@@ -975,9 +1149,37 @@ void ViewerBackend::setStatus(const QString &s, bool warn)
     emit statusTextChanged();
 }
 
+bool ViewerBackend::hasAnyCredential() const
+{
+    return !m_cloudTicket.isEmpty() || !m_token.isEmpty();
+}
+
+int ViewerBackend::retryDelayMs() const
+{
+    // 5s → 10s → 20s → 30s 封顶。断线时先快速补一次（网络抖一下就回来了），
+    // 一直不通就退到分钟级 —— 常驻程序在后台空转连一个连不上的地址，
+    // 除了把日志刷爆没有任何收益，还会把真正的错误挤出去。
+    return qMin(30000, 5000 * (1 << qMin(m_retryCount, 2)));
+}
+
 void ViewerBackend::connectToCloud()
 {
     if (!m_ws) return;
+    // 没凭据就别连了（2026-10-06 打磨：这是重连风暴的真正根因）。
+    // 以前"既没有 ticket 也没有 token"也要硬连，云端回一句鉴权失败，
+    // 界面再 5 秒重试一次，日志里就是几十轮一模一样的 "已连上云端 → 正在鉴权 → FAIL"。
+    // 站在用户那边看：屏幕上一句"没登录"就够了，不需要后面的循环。
+    if (!hasAnyCredential()) {
+        if (!m_retryStopped) {
+            m_retryStopped = true;
+            logf("[viewer] 手上没有云端凭据（没登录），已停在那儿等用户登录——不再空转重连");
+            setStatus(QStringLiteral("没登录，连不上云端。点右上角「登录」用星璃账号进去"),
+                      true);
+            emit authFailed(QStringLiteral("未登录"));
+        }
+        return;
+    }
+    m_retryStopped = false;
     m_ws->close();
     m_ws->open(QUrl(m_url));
     logf("[viewer] 正在连云端 %s", m_url.toUtf8().constData());
@@ -1019,16 +1221,24 @@ void ViewerBackend::onDisconnected()
     if (!m_offlineSince) m_offlineSince = QDateTime::currentMSecsSinceEpoch();
     scheduleRtcViewReap();
     emit connectedChanged();
-    if (m_authFailed) {
-        // 鉴权失败再重连只会一遍遍失败：把原因留在屏幕上，别循环
+    // 「设备离线时提醒」：断线是常驻程序最该让用户知道的一件事，
+    // 以前只在日志里留一行，用户得盯着屏幕才知道"怎么没画面了"。
+    if (m_notifyOnOffline && !m_retryStopped && !m_authFailed) {
+        notifyPref(QStringLiteral("与云端断开了，正在自动重连…"));
+    }
+
+    if (m_authFailed || m_retryStopped) {
+        // 鉴权失败/已停机重连再连只会一遍遍失败：把原因留在屏幕上，别循环
         logf("[viewer] FAIL 鉴权没通过，已停止重连：%s", m_authFailReason.toUtf8().constData());
         setStatus(QStringLiteral("云端鉴权失败，已停止重连：") + m_authFailReason, true);
         emit authFailed(m_authFailReason);
         return;
     }
-    logf("[viewer] FAIL 与云端断开，5 秒后重连");
-    setStatus(QStringLiteral("与云端断开，5 秒后重连…"), true);
-    QTimer::singleShot(kReconnectMs, this, [this] { connectToCloud(); });
+    ++m_retryCount;
+    const int delay = retryDelayMs();
+    logf("[viewer] FAIL 与云端断开，%d 秒后重连（第 %d 次）", delay / 1000, m_retryCount);
+    setStatus(QStringLiteral("与云端断开，%1 秒后重连…").arg(delay / 1000), true);
+    QTimer::singleShot(delay, this, [this] { connectToCloud(); });
 }
 
 void ViewerBackend::requestDevices()
@@ -1109,6 +1319,8 @@ void ViewerBackend::onTextMessage(const QString &text)
 
     if (type == QStringLiteral("authed") || type == QStringLiteral("auth-ok")) {
         m_authed = true;
+        m_retryCount = 0;           // 通了就把退避计清零，下一次断线还是 5 秒起步
+        m_retryStopped = false;
         emit authedChanged();
         logf("[viewer] ✅ 云端鉴权通过（mode=%s）",
              pay.value(QStringLiteral("mode")).toString().toUtf8().constData());
@@ -1125,13 +1337,22 @@ void ViewerBackend::onTextMessage(const QString &text)
             m_cloudTicket.clear();
             m_ticketExp = 0;
             m_accountFatal = true;
-            m_accountText = QStringLiteral("接入票失效（%1），请重新登录").arg(m_authFailReason);
+            m_accountText = QStringLiteral("接入票失效，请重新登录");
             emit accountChanged();
             saveAccount();
+            // ⚠️ 2026-10-06：这里必须停机重连。旧代码只 close()，紧接着被 onDisconnected
+            // 重新排了一次 5 秒重连 → 那张（已清掉的）票换了个姿势再来一遍 →
+            // 日志里就是几十轮 "已连上云端 → 正在鉴权 → auth-fail → 关闭 → 5 秒后重连"，
+            // 界面上看着像"程序自己在抽风"。票废了就该停在这儿等用户重新授权。
+            m_retryStopped = true;
+            m_authFailReason = QStringLiteral("接入票失效（%1）").arg(m_authFailReason);
+            setStatus(QStringLiteral("接入票失效，请点右上角重新登录"), true);
+            emit authFailed(m_authFailReason);
             if (m_ws) m_ws->close();
             return;
         }
         m_authFailed = true;
+        m_retryStopped = true;      // 同 onDisconnected：拒绝一次就是拒绝一路，别硬碰
         logf("[viewer] FAIL 云端拒绝鉴权：%s", m_authFailReason.toUtf8().constData());
         setStatus(QStringLiteral("云端拒绝鉴权：") + m_authFailReason, true);
         emit authFailed(m_authFailReason);
@@ -1276,6 +1497,13 @@ void ViewerBackend::onTextMessage(const QString &text)
             data.insert(QStringLiteral("rttMs"),
                         (double)(QDateTime::currentMSecsSinceEpoch() - m_pingSentMs));
         }
+        // 「操作完成时提示」这个开关接在这儿：机器真做了（executed）才响，
+        // 云端"收下了"不算 —— 收下了但机器没做，用户等到的却是"完成了"，那 worse than 不提示。
+        if (state == QStringLiteral("executed") && m_notifyOnDone) {
+            notifyPref(err.isEmpty()
+                           ? QStringLiteral("%1 在 %2 上完成了").arg(action, uid)
+                           : QStringLiteral("%1 在 %2 上失败：%3").arg(action, uid, err));
+        }
         emit resultReceived(uid, action, state, result, err, detail, data);
     } else {
         logf("[viewer] 收到未处理的云端消息 type=%s", type.toUtf8().constData());
@@ -1334,6 +1562,18 @@ void ViewerBackend::reportUnsupported(const QString &label, const QString &actio
     logf("[viewer] 拦下「%s」：这台被控端的能力清单里没有 %s",
          label.toUtf8().constData(), action.toUtf8().constData());
     setStatus(QStringLiteral("这台被控端不支持「%1」（它没上报 %2 这个能力）").arg(label).arg(action), true);
+}
+
+/**
+ * 权限被拦下的反馈（和 reportUnsupported 成对：那边是"机器不支持"，
+ *  这边是"人没这个身份"—— 两种灰按钮的解释必须一样直白）。
+ * 不静默：拦了就得说一句，否则用户只会觉得"点了没反应"。
+ */
+void ViewerBackend::reportDenied(const QString &label)
+{
+    logf("[viewer] 拦下「%s」：当前身份（%s）做不了这件事",
+         label.toUtf8().constData(), m_role.toUtf8().constData());
+    setStatus(QStringLiteral("「%1」要管理员身份才做得到（点右上角账户就能切）").arg(label), true);
 }
 
 bool ViewerBackend::deviceSupports(const QString &action) const
