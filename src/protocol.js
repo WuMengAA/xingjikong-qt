@@ -26,6 +26,70 @@ export const ERR = {
   DEVICE_OFFLINE: { close: 0, msg: '设备不在线' },
 };
 
+/**
+ * 错误码体系（《全量设计文档》第七部分落地，2026-10-06）：
+ * 格式 [模块2位][类型1位][编号3位]，模块 AU 认证 / DV 设备 / CM 指令 /
+ * NT 网络 / ST 存储 / PV 权限 / SY 系统；类型 1 客户端 / 2 服务端 / 3 网络 / 4 业务。
+ * 语义码 → 数字码 双向映射：对外主用数字码（ecode），语义码保留给旧客户端兼容。
+ */
+export const ECODES = {
+  // 认证 AU
+  AU1001: { sem: 'BAD_CREDENTIALS', msg: '账号或密码错误', http: 401 },
+  AU1002: { sem: 'TOKEN_EXPIRED', msg: '登录已过期，请重新登录', http: 401 },
+  AU1003: { sem: 'TOKEN_INVALID', msg: '认证失败', http: 401 },
+  AU2001: { sem: 'ACCOUNT_DISABLED', msg: '账号已被禁用', http: 403 },
+  AU2002: { sem: 'LOGIN_LIMITED', msg: '尝试次数过多，请稍后再试', http: 429 },
+  // 设备 DV
+  DV1001: { sem: 'DEVICE_NOT_FOUND', msg: '设备不存在', http: 404 },
+  DV1002: { sem: 'DEVICE_DISABLED', msg: '该设备已被禁用', http: 403 },
+  DV2001: { sem: 'REGISTER_FAILED', msg: '注册失败，请检查注册码', http: 400 },
+  DV2002: { sem: 'FINGERPRINT_MISMATCH', msg: '设备验证失败', http: 403 },
+  DV3001: { sem: 'DEVICE_OFFLINE', msg: '设备离线，无法操作', http: 409 },
+  DV3002: { sem: 'HEARTBEAT_TIMEOUT', msg: '设备无响应', http: 408 },
+  // 指令 CM
+  CM1001: { sem: 'CMD_TYPE_UNSUPPORTED', msg: '不支持该操作', http: 400 },
+  CM1002: { sem: 'CMD_PARAM_INVALID', msg: '参数错误', http: 400 },
+  CM2001: { sem: 'CMD_EXEC_FAILED', msg: '操作失败', http: 500 },
+  CM2002: { sem: 'CMD_TIMEOUT', msg: '操作超时', http: 504 },
+  CM2003: { sem: 'CMD_REJECTED', msg: '设备拒绝执行', http: 409 },
+  CM4001: { sem: 'CMD_NO_PERMISSION', msg: '您没有权限执行该操作', http: 403 },
+  // 网络 NT
+  NT3001: { sem: 'NET_CONNECT_FAILED', msg: '连接失败，正在重连', http: 502 },
+  NT3002: { sem: 'NET_TIMEOUT', msg: '连接超时', http: 504 },
+  NT3003: { sem: 'NET_DISCONNECTED', msg: '连接断开', http: 502 },
+  NT3004: { sem: 'NET_SEND_FAILED', msg: '消息发送失败', http: 500 },
+  // 权限 PV
+  PV4001: { sem: 'NO_ACCESS', msg: '无权限访问', http: 403 },
+  PV4002: { sem: 'NO_DEVICE_PERMISSION', msg: '无权限操作该设备', http: 403 },
+  PV4003: { sem: 'ROLE_FORBIDDEN', msg: '角色不允许', http: 403 },
+  // 系统 SY
+  SY2001: { sem: 'INTERNAL_ERROR', msg: '系统内部错误', http: 500 },
+};
+
+/** 语义码 → 数字码（无映射则原样返回，兼容未编号的旧码）。 */
+export function semToEcode(sem) {
+  for (const [ec, def] of Object.entries(ECODES)) {
+    if (def.sem === sem) return ec;
+  }
+  return sem; // 旧码未编号：保留语义名，两端按原样显示
+}
+
+/**
+ * 统一错误负载（数字码主用 + 语义码兼容）：
+ * { ecode:'CM4001', code:'CMD_NO_PERMISSION', message:'您没有权限执行该操作', http:403 }
+ */
+export function errorPayload(semOrEcode, detail) {
+  let ecode = semOrEcode;
+  let sem = semOrEcode;
+  if (ECODES[semOrEcode]) { ecode = semOrEcode; sem = ECODES[semOrEcode].sem; }
+  else { ecode = semToEcode(semOrEcode); }
+  const def = ECODES[ecode] || null;
+  const msg = def ? def.msg : (ERR[sem]?.msg || '未知错误');
+  const p = { ecode, code: sem, message: detail ? `${msg}：${detail}` : msg };
+  if (def?.http) p.http = def.http;
+  return p;
+}
+
 export function errPayload(code, detail) {
   const e = ERR[code] || { msg: '未知错误' };
   return { code, message: detail ? `${e.msg}：${detail}` : e.msg };

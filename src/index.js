@@ -108,11 +108,11 @@ function restartCloudTask() {
   child.unref();
   pushEvent('info', '已触发云端重启（2 秒后执行）');
 }
-import { verifyViewerTicket, mintViewerTicket } from './ticket.js';
+import { verifyViewerTicket, mintViewerTicket, verifyAgentTicket, resolveTicketUid } from './ticket.js';
 import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
 import { latestFor } from './ota.js';
-import { parseIncoming, parseFrame, wrapOutgoing, errPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
+import { parseIncoming, parseFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 
 /** 发一条协议消息（自动按对端版本选格式），失败不静默。 */
 function snd(ws, type, payload, id = '') {
@@ -123,12 +123,12 @@ function snd(ws, type, payload, id = '') {
 
 /** 发一条协议错误；code 里标了要关连接的，发完就关（并写明原因，不许静默断）。 */
 function sndErr(ws, code, detail) {
-  const p = errPayload(code, detail);
+  const p = errorPayload(code, detail);       // 数字码 ecode + 语义码 code（设计文档第七部分）
   snd(ws, 'error', p);                        // v1：统一走 error 通道
   if (ws.__v1 !== true) snd(ws, p.code, p);   // 旧客户端：额外补一条它认得的类型，避免它看不懂 error
   const e = ERR[code];
   if (e?.close) { try { ws.close(e.close, code); } catch { /* 已断就算了 */ } }
-  pushEvent('warn', `协议错误 ${code}`, { detail: detail || e?.msg || '' });
+  pushEvent('warn', `协议错误 ${p.ecode || code}`, { detail: detail || p.message || '' });
 }
 import {
   pushEvent, markConnected, markDisconnected, addFrame, setRecentFrame,
@@ -299,7 +299,8 @@ const server = http.createServer((req, res) => {
     const isTicket = !!token && !isStatic ? verifyViewerTicket(token).ok : false;
     if (!token || (!isStatic && !isTicket)) {
       pushEvent('warn', 'HTTP 管理面鉴权失败，已拒绝', { path: u.pathname });
-      return send(401, { ok: false, error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN> 或网站账号签发的票据' });
+      // 错误码体系（2026-10-06）：REST 错误同样带 ecode（AU1003 令牌无效），站点/客户端可按码判断
+      return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN> 或网站账号签发的票据' });
     }
     if (isTicket) req.__ticketUid = verifyViewerTicket(token).uid;
   }
@@ -802,13 +803,34 @@ wss.on('connection', (ws) => {
         return;
       }
       const { uid: ruid, token, version } = p.payload;
-      if (token !== DEV_TOKEN) {
-        finish();
-        pushEvent('error', '设备令牌校验失败，连接已拒绝', { uid: String(ruid ?? '') });
-        sndErr(ws, 'BAD_TOKEN', '设备令牌与云端 CLOUD_WS_TOKEN 不一致');
-        return;
+
+      // ── 鉴权：设备接入票优先，长期令牌兜底（2026-10-06）──
+      // 设备票是站点 /api/device/bind 给登录用户签的（7 段 v1.exp.uid.fp.nonce.owner.sig），
+      // 被控端「用星璃账号绑定」走这条；长期令牌（CLOUD_WS_TOKEN）是旧路，保留兼容。
+      // 两条路互斥：有 token 就先按票验，验不过再退回去比静态令牌。
+      let authedBy = null;   // 'ticket' | 'static' | null
+      let ticketUid = '';    // 票里解出的 uid（供审计）
+      let ticketOwner = '';  // 票里解出的绑定者（供审计）
+      if (token) {
+        const at = verifyAgentTicket(token, String(p.payload.fp || ''));
+        if (at.ok) {
+          authedBy = 'agent-ticket';
+          ticketUid = at.uid;
+          ticketOwner = at.owner;
+        }
       }
-      uid = String(ruid || '').trim();
+      // 不是设备票：退回旧的静态令牌校验（保留原路，不破已有部署）
+      if (!authedBy) {
+        if (token !== DEV_TOKEN) {
+          finish();
+          pushEvent('error', '设备令牌校验失败，连接已拒绝', { uid: String(ruid ?? '') });
+          sndErr(ws, 'BAD_TOKEN', token ? '票据与静态令牌均校验失败' : '未提供令牌或设备票');
+          return;
+        }
+        authedBy = 'static';
+      }
+
+      uid = String(ruid || ticketUid || '').trim();
       if (!uid) {
         finish();
         pushEvent('error', 'register 没带 uid，拒绝');
@@ -817,6 +839,12 @@ wss.on('connection', (ws) => {
       }
       registered = true;
       finish();
+      // 审计：记下这台机器是用哪条路接入的、谁绑的。
+      if (authedBy === 'agent-ticket') {
+        console.log(`[cloud] 设备 ${uid} 通过账号绑定接入（owner=${ticketOwner}）`);
+      } else {
+        console.log(`[cloud] 设备 ${uid} 通过静态令牌接入`);
+      }
       // 能力清单原样转存：被控端 register 里带 caps/actions，云端不解释、不挑选，
       // 由管端按 action 名决定按钮置不置灰（2026-10-06 契合度改造）。
       const regCaps = (p.payload && typeof p.payload.caps === 'object' && p.payload.caps !== null)
