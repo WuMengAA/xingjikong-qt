@@ -29,6 +29,9 @@ add_executable(stelarith-agent-qt
   src/schedule/profile_repository.cpp
   src/schedule/profile_repository.h
   src/schedule/profile.h
+  # ── 远程终端（2026-10-06 加：REPL 命令行，需确认 + 单会话）──
+  src/terminal_console.cpp
+  src/terminal_console.h
 )
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::WebEngineWidgets Qt6::Network)
 

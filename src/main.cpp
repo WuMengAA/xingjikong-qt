@@ -44,6 +44,8 @@
 #include <QElapsedTimer>
 #include <QUrl>
 #include <QWebSocket>
+#include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
+#include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
 #include <QHostInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -197,16 +199,9 @@ QString envOr(const char *key, const QString &fallback)
  * 加任何新机制都要在两端各猜一遍。现在加功能 = 加一个带类型的消息，骨架不动。
  */
 
-QString makeEnvelope(const QString &type, const QJsonObject &payload, const QString &id = QString())
-{
-    QJsonObject o;
-    o.insert(QStringLiteral("v"), kProtocolVersion);
-    o.insert(QStringLiteral("type"), type);
-    o.insert(QStringLiteral("id"), id);
-    o.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
-    o.insert(QStringLiteral("payload"), payload);
-    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
-}
+// ⚠️ makeEnvelope 的**定义**已经在文件末尾（匿名 namespace 外面）。
+// 原先它就写在下面那段匿名 namespace（103–3846 行）里，匿名域符号跨不了 TU ——
+// terminal_console.cpp 一调用就 LNK2019。调用点仍在 namespace 内，靠 cloud_proto.h 的声明可见。
 
 QByteArray makeFrameBytes(const QString &uid, int seq, const QByteArray &jpeg)
 {
@@ -3576,6 +3571,75 @@ static void rtcStop(const QString &why)
     scheduleRtcViewReap();
 }
 
+/**
+ * 被控端**单独的一刀**：管理员要开终端 → 这台机器旁边的人必须点头。
+ *
+ * 为什么不开箱即用：能跑命令就等于能把这台机器折腾到要重装，教室里是老师/学生的机器。
+ * 所以第一次开会话弹一个模态确认（会话开着之后的输入不再问，免得敲一条问一次），
+ * 拒绝/超时不点 = 关掉 —— 无人值守时没人点，默认就是"不许进来"。
+ */
+static void openTerminal(const QString &id, const QJsonObject &params)
+{
+    TerminalConsole &t = TerminalConsole::inst();
+
+    if (t.hasSession()) {
+        sendActionReceipt(id, QStringLiteral("terminal_open"), QStringLiteral("failed"),
+                          QStringLiteral("已经有终端会话开着，同一台机器同时只放一个"));
+        return;
+    }
+
+    TermReq req;
+    req.sid = params.value(QStringLiteral("sid")).toString();
+    req.shell = params.value(QStringLiteral("shell")).toString().trimmed().toLower();
+    if (req.shell.isEmpty()) req.shell = QStringLiteral("cmd");
+    // 只放行 cmd / powershell：别的 shell（如直接起 wscript）不认，避免这条路被当后门用
+    if (req.shell != QStringLiteral("cmd") && req.shell != QStringLiteral("powershell")) {
+        sendActionReceipt(id, QStringLiteral("terminal_open"), QStringLiteral("failed"),
+                          QStringLiteral("不支持的 shell：") + req.shell);
+        return;
+    }
+    req.cols = params.value(QStringLiteral("cols")).toInt(100);
+    req.rows = params.value(QStringLiteral("rows")).toInt(30);
+    req.idleMs = params.value(QStringLiteral("idleMs")).toInt(60000);
+    req.cmdMs = params.value(QStringLiteral("cmdMs")).toInt(30000);
+
+    const QByteArray autoAllow = qgetenv("STE_TERM_AUTO_ALLOW");
+    bool allowed;
+    if (!autoAllow.isEmpty()) {
+        // 只给自动化/无人值守灰度用：设了它就不弹窗，一律放行。
+        // 默认（不设）一定弹 —— 能跑 shell 就是能把机器拆了，不能没人点头就开门。
+        allowed = (autoAllow != "0");
+        qWarning("[term] ⚠️ STE_TERM_AUTO_ALLOW 已设（=%s），跳过本机确认：这条链路上没人看着",
+                 autoAllow.constData());
+    } else {
+        QMessageBox box(QMessageBox::Question,
+                        QStringLiteral("远程终端请求"),
+                        QStringLiteral("有人要从管理端连这台机器的命令行（能执行任意命令）。\n允许吗？"),
+                        QMessageBox::Yes | QMessageBox::No,
+                        nullptr);
+        box.setButtonText(QMessageBox::Yes, QStringLiteral("允许"));
+        box.setButtonText(QMessageBox::No,  QStringLiteral("拒绝"));
+        // 模态阻塞：这段时间内 socket 消息也会被挡，但只等人点一下，可以接受
+        allowed = (box.exec() == QMessageBox::Yes);
+    }
+    if (!allowed) {
+        qInfo("[term] 管理员请求被本机拒绝（id=%s）", qPrintable(id));
+        sendActionReceipt(id, QStringLiteral("terminal_open"), QStringLiteral("failed"),
+                          QStringLiteral("本机拒绝了远程终端请求"));
+        t.close(req.sid, QStringLiteral("denied"));
+        return;
+    }
+
+    QString err;
+    if (!t.open(req, &err)) {
+        sendActionReceipt(id, QStringLiteral("terminal_open"), QStringLiteral("failed"), err);
+        return;
+    }
+    // 会话已经开好并会持续往外吐帧，这条回执只表示"点过头了"，别让它盖住后面的数据流
+    sendActionReceipt(id, QStringLiteral("terminal_open"), QStringLiteral("started"),
+                      QStringLiteral("本机已允许，终端会话已开"));
+}
+
 void handleControlText(const QString &text)
 {
     const QByteArray raw = text.toUtf8();
@@ -3681,6 +3745,25 @@ void handleControlText(const QString &text)
             return;
         }
 
+        // ── 远程终端（2026-10-06）：也只有它一个动作会**持续往外吐帧**，所以单独走分支 ──
+        // 开会话必须经被控端旁边的人点头 —— 能跑 shell 就等于能控制这台机器，不能无人值守。
+        if (action == QStringLiteral("terminal_open")) {
+            openTerminal(id, params);
+            return;
+        }
+        if (action == QStringLiteral("terminal_input")) {
+            TerminalConsole::inst().input(params.value(QStringLiteral("sid")).toString(),
+                                          params.value(QStringLiteral("keys")).toString());
+            sendActionReceipt(id, action, QStringLiteral("done"));
+            return;
+        }
+        if (action == QStringLiteral("terminal_close")) {
+            TerminalConsole::inst().close(params.value(QStringLiteral("sid")).toString(),
+                                         QStringLiteral("remote"));
+            sendActionReceipt(id, action, QStringLiteral("done"));
+            return;
+        }
+
         // D5：真执行，再如实回执。绝不许"报 done 其实没做"。
         const ExecOut r = executeAction(action, params);
         sendActionReceipt(id, action, r.result, r.error, r.data);
@@ -3754,6 +3837,22 @@ void captureAndSend(const QString &outDir)
 }
 
 } // namespace
+
+/* ---------- 协议 v1 封装（本文件唯一的 makeEnvelope 定义） ----------
+ * 为什么挪到这里：原定义就在上面那段匿名 namespace 里，匿名域符号**跨不了 TU**，
+ * 而远程终端 terminal_console.cpp 要发 v1 信封 —— 一调用就 LNK2019。
+ * 声明在 cloud_proto.h（调用点靠它可见），定义必须在全局，版本值只认 CloudProto::kVersion。
+ */
+QString makeEnvelope(const QString &type, const QJsonObject &payload, const QString &id)
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("v"), CloudProto::kVersion);
+    o.insert(QStringLiteral("type"), type);
+    o.insert(QStringLiteral("id"), id);
+    o.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
+    o.insert(QStringLiteral("payload"), payload);
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
 
 int main(int argc, char *argv[])
 {
@@ -3964,6 +4063,8 @@ int main(int argc, char *argv[])
     QObject::connect(g_ws, &QWebSocket::textMessageReceived, &app, [](const QString &msg) {
         handleControlText(msg);
     });
+    // 远程终端出帧通道（云端一推 terminal_data 就经这里出去；没连上会如实记 error 不假装成功）
+    TerminalConsole::inst().setSocket(g_ws);
 
     // 抓屏**默认不落盘**：每 2 秒一张、一天能堆上 10GB，是隐患。
     // 要留证请用 `screenshot` 动作（按需、走 g_shotDir），或显式设 STE_QT_STORE_FRAMES=1 复现旧行为。
