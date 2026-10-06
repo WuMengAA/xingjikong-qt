@@ -283,6 +283,7 @@ private:
     void releaseRtcView();
     void scheduleRtcViewReap();
     void cancelRtcViewReap();
+    void stopRtcTimers();        // 抽帧/诊断节拍停表（收流页回收时必须一起停）
 
     // ── 站点账号（OAuth 一户通）──
     OAuthLogin *m_oauth = nullptr;
@@ -301,6 +302,11 @@ private:
     QWebSocket *m_ws = nullptr;
     QTimer *m_fpsTimer = nullptr;
     QTimer *m_rtcReap = nullptr;          // 收流页延迟回收（scheduleRtcViewReap）
+    // 抽帧节拍与 RTC 诊断心跳：必须是成员，不能在建页的加载回调里 new。
+    // 之前挂在 this 上、页面回收时不停 —— 收流页每建一次就多留两个常驻 timer，
+    // 一天下来断线重连几十轮就是上百个空转的 timer，全在 tick 里空判 nullptr。
+    QTimer *m_grabTimer = nullptr;        // 收流页抽帧节拍（默认 40ms ≈ 25fps 上限）
+    QTimer *m_rtcDiagTimer = nullptr;     // 每 2 秒捞一次收流页内部状态
     qint64 m_offlineSince = 0;            // 与云端断开的起始时刻（0 = 在线）
 
     QString m_url;

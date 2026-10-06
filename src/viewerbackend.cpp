@@ -768,16 +768,20 @@ void ViewerBackend::initRtcView()
             logf("[viewer] RTC 收流页就绪后补灌远端 ICE 候选 %d 个", queued.size());
         }
 
-        // 抽帧节拍：25fps 上限，但真帧率受被控端推流 fps 限制
-        auto *timer = new QTimer(this);
-        QObject::connect(timer, &QTimer::timeout, this, [this] {
+        // 抽帧节拍：25fps 上限，但真帧率受被控端推流 fps 限制。
+        // 用成员 timer（2026-10-06 占用优化）：之前每次建页都 new 两个挂在本对象上的 timer，
+        // 收流页回收时不停，一轮重连留两个空转孤儿，攒多了 tick 全是白检 nullptr。
+        // 拿到页面所有权先复位，免得上一轮的旧 timer 还咬着已经 deleteLater 的 view。
+        stopRtcTimers();
+        if (!m_grabTimer) m_grabTimer = new QTimer(this);
+        QObject::connect(m_grabTimer, &QTimer::timeout, this, [this] {
             if (m_rtcView) m_rtcView->page()->runJavaScript(QStringLiteral("window.__grab()"));
         });
-        timer->start(40);
+        m_grabTimer->start(40);
         // 每 2 秒捞一次收流页内部状态：pc 建没建、ICE 走到哪、视频轨有没有、解码出多大画面。
         // 没有这个，画面不出来时你只能看到"没日志"，看不出卡在 offer/answer/ice 哪一步。
-        auto *diag = new QTimer(this);
-        QObject::connect(diag, &QTimer::timeout, this, [this] {
+        if (!m_rtcDiagTimer) m_rtcDiagTimer = new QTimer(this);
+        QObject::connect(m_rtcDiagTimer, &QTimer::timeout, this, [this] {
             if (!m_rtcView) return;
             m_rtcView->page()->runJavaScript(QStringLiteral("window.__diag()"),
                                              [](const QVariant &v) {
@@ -786,7 +790,7 @@ void ViewerBackend::initRtcView()
                                                      logf("[viewer] 收流页状态 %s", qPrintable(s));
                                              });
         });
-        diag->start(2000);
+        m_rtcDiagTimer->start(2000);
     });
 
     page->load(QUrl::fromLocalFile(htmlPath));
@@ -896,6 +900,9 @@ void ViewerBackend::deliverOffer(const QString &sdp)
 void ViewerBackend::releaseRtcView()
 {
     if (!m_rtcView) return;
+    // 节拍先停表：页面上已经排进 Chromium 主线程的 __grab()/__diag() 调用还挂着，
+    // 不停的话 view 一销毁它们就打在已释放的 page 上。
+    stopRtcTimers();
     m_rtcView->close();          // 不给 close 的话 Chromium 的渲染进程不退出
     m_rtcView->deleteLater();
     m_rtcView = nullptr;
@@ -909,6 +916,12 @@ void ViewerBackend::releaseRtcView()
 void ViewerBackend::cancelRtcViewReap()
 {
     if (m_rtcReap && m_rtcReap->isActive()) m_rtcReap->stop();
+}
+
+void ViewerBackend::stopRtcTimers()
+{
+    if (m_grabTimer) m_grabTimer->stop();
+    if (m_rtcDiagTimer) m_rtcDiagTimer->stop();
 }
 
 // 延迟回收：给"刚断又马上重连"留窗口，避免断线抖动时反复重建 Chromium（重建一次几百毫秒）。
