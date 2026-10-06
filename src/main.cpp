@@ -119,7 +119,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //   exe 报 0.4.0-v1、安装器写 0.5.0）。
 //   ⚠️ 2026-10-06 收敛到 0.6.0：此前这里写 0.5.0、installer.nsi 写 0.5.1，本文件自己的注释
 //      还写着"两者必须一致"却没做到 —— 不一致的代价是云端按 0.5.0 判断 OTA，装出来却是 0.5.1。
-constexpr const char *kAppVersion = "0.6.4";
+constexpr const char *kAppVersion = "0.6.5";
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = 1000;
@@ -3275,12 +3275,40 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         g_fileRecvBytes = 0;
         g_fileRecvNext = 0;
         g_fileRecvFile = new QFile(target);
-        if (!g_fileRecvFile->open(QIODevice::WriteOnly)) {
-            out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("file_push: 目标打不开（%1）").arg(target);
-            g_fileRecvTarget.clear();
+        // Truncate 显式带上：只给 WriteOnly 时，撞上"文件存在但处于删除挂起状态"
+        // （刚被 QFile::remove 掉、而句柄还没被系统真正释放）会直接失败。
+        if (!g_fileRecvFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            // 失败必须带**系统的原话**回来。以前只报"目标打不开（路径）"，
+            // 于是目录不存在 / 没权限 / 被别的进程占着 / 删不掉 —— 四种病长得一模一样，
+            // 每次都得从零猜一遍（2026-10-07 就因为这句含糊的话误判成"目录没建"）。
+            const QString why = g_fileRecvFile->errorString();
             delete g_fileRecvFile;
             g_fileRecvFile = nullptr;
+            // 同名打不开就换个名字再试一次：收件目录里撞名的往往是上一次没收口的残留，
+            // 换名能让这次推送**成功**，而不是让用户对着一句"打不开"干瞪眼。
+            const QString alt = g_recvDir + QStringLiteral("/") +
+                                QFileInfo(clean).completeBaseName() + QStringLiteral("-") +
+                                QString::number(QDateTime::currentSecsSinceEpoch()) +
+                                QStringLiteral(".") + QFileInfo(clean).suffix();
+            g_fileRecvFile = new QFile(alt);
+            if (!g_fileRecvFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("file_push: 目标打不开（%1）：%2；换名 %3 也失败：%4")
+                                .arg(target, why, alt, g_fileRecvFile->errorString());
+                delete g_fileRecvFile;
+                g_fileRecvFile = nullptr;
+                g_fileRecvTarget.clear();
+                return out;
+            }
+            qInfo("[agent] file_push 原名打不开（%s），已换名落盘 %s",
+                  qPrintable(why), qPrintable(alt));
+            g_fileRecvTarget = alt;
+            g_fileRecvBytes = 0;
+            g_fileRecvNext = 0;
+            out.result = QStringLiteral("done");
+            out.data.insert(QStringLiteral("target"), QDir::toNativeSeparators(alt));
+            out.data.insert(QStringLiteral("totalBytes"), total);
+            out.data.insert(QStringLiteral("ready"), true);
             return out;
         }
         out.result = QStringLiteral("done");

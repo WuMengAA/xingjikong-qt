@@ -1,4 +1,4 @@
-﻿; 星集控被控端 · 安装程序（NSIS 3）
+; 星集控被控端 · 安装程序（NSIS 3）
 ;
 ; 三个设计要点：
 ;   1. **装机参数因机器而异**（云端地址 / 设备令牌 / 设备 uid）→ 放在安装向导里输入，
@@ -27,7 +27,7 @@ Unicode true
 
 !define APPNAME "星集控被控端"
 !define APPID   "StelarithAgentQt"
-!define VER     "0.6.4"
+!define VER     "0.6.5"
 
 Name "${APPNAME}"
 OutFile "dist\stelarith-agent-setup.exe"
