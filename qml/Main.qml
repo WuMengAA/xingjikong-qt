@@ -941,6 +941,9 @@ ApplicationWindow {
                     // 通知：和上面那两列按钮不同，它要**凑内容**（形态/标题/正文/时长/播报/紧急），
                     // 所以给整行宽度单独摆一行，而不是挤进 2 列网格当第 9 个。
                     Btn { d: ({ l: "通知", a: "", t: false }); wide: true }
+                    // 远程终端：和通知一样单独占一行（full width）。它开着就是一条能跑任意命令的
+                    // 通道，得和普通"点一下就发"的按钮区分开，别挤进 2 列网格里混过去。
+                    Btn { d: ({ l: "终端", a: "", t: false }); wide: true }
                 }
 
                 // （这里原先有个 t:true 的置灰「通知」——"没做出来的能力单独躺着，标明没做"。
@@ -1542,6 +1545,7 @@ ApplicationWindow {
         candidates: root.candidates
     }
     LogDialog { id: logDlg; theme: root.th }
+    TerminalDialog { id: termDlg; theme: root.th }
 
     MediaDialog { id: mediaDlg; theme: root.th }
     ScheduleDialog { id: schedDlg; theme: root.th }
@@ -1568,12 +1572,14 @@ ApplicationWindow {
         schedDlg.close()
         fileDlg.close()
         notifyDlg.close()
+        termDlg.close()
         if      (which === "software") softwareDlg.open()
         else if (which === "log")      logDlg.open()
         else if (which === "media")    mediaDlg.open()
         else if (which === "sched")    schedDlg.open()
         else if (which === "file")     fileDlg.open()
         else if (which === "notify")   notifyDlg.open()
+        else if (which === "term")     termDlg.open()
     }
 
     // 右侧所有动作按钮的统一入口。以前这段分支散在 Repeater 的 onClicked 里，
@@ -1598,7 +1604,10 @@ ApplicationWindow {
         "定时": ["list_schedules"],
         "文件": ["file_push"],
         "通知": ["notify"],
-        "探活": ["ping"]
+        "探活": ["ping"],
+        // 没带 terminal_open 的被控端（0.6.3 之前那批）开不了终端，
+        // 按钮得跟着置灰 —— 让"点下去只弹一句不支持"不如让入口就不亮。
+        "终端": ["terminal_open"]
     })
     /** 这个按钮要哪些指令才点得动（[d.a] 或按文案取到的数组）。没声明 = 不参与门控。 */
     function capNeedOf(d) {
@@ -1640,6 +1649,9 @@ ApplicationWindow {
             openOnly("notify")
         } else if (d.l === "远控开") {
             backend.sendAction("remote_control_start", { "fps": 20 })
+        } else if (d.l === "终端") {
+            // 开之前先把别的弹窗收掉：这条链路弹出的是全屏终端窗口，和画面弹窗叠着没法用
+            termDlg.open()
         } else if (d.a !== "") {
             backend.sendAction(d.a, {})
         }

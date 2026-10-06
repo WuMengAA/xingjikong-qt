@@ -75,6 +75,12 @@ class ViewerBackend : public QObject
     // / "rtc"（WebRTC 实时流）。界面要靠它告诉用户"现在看的是实时还是轮询"，
     // 否则 RTC 通没通、有没有降级回落，只能靠猜。
     Q_PROPERTY(QString frameSource READ frameSource NOTIFY frameSourceChanged)
+    // 远程终端状态读数：界面靠它决定"开终端"按钮能不能点、显示什么提示。
+    // 状态机 Idle → Pending（请求已发，等本机点头）→ Open（会话在跑）→ Idle。
+    Q_PROPERTY(TermState termState READ termState NOTIFY termStateChanged)
+    Q_PROPERTY(QString termSid READ termSid NOTIFY termStateChanged)
+    Q_PROPERTY(QString termNote READ termNote NOTIFY termStateChanged)
+    Q_PROPERTY(bool termBusy READ termBusy NOTIFY termStateChanged)
 
 public:
     // 帧的来源。以前两路都调同一个 applyFrameBytes 且不区分来源，结果被控端的 JPEG
@@ -84,6 +90,15 @@ public:
         PushJpeg,   ///< 被控端经云端推来的 JPEG（二进制帧 / 文本 frame / 裸帧三条老路径）
         RtcGrab     ///< WebRTC 收流页抽出来的帧
     };
+
+    /// 远程终端会话状态：没会话 / 请求已发出在等被控端本机点头 / 会话开着。
+    /// 中间那态要有：不然"点了开终端"之后按钮一直能点，连点五下全是五条 terminal_open。
+    enum TermState {
+        TermIdle,     ///< 没有会话
+        TermPending,  ///< 已下发，等被控端本机确认（弹窗点头，可能要几秒，也可能直接被拒）
+        TermOpen      ///< 会话是通的，可以敲命令
+    };
+    Q_ENUM(TermState)
     explicit ViewerBackend(QObject *parent = nullptr);
     /** 析构：QWebEngineView 必须在 event loop 停止之后销毁，否则 Chromium 直接崩。 */
     ~ViewerBackend() override;
@@ -196,6 +211,22 @@ public:
     /** JS 侧 ontrack 触发（真正拿到远端视频轨）。 */
     Q_INVOKABLE void rtcGotTrack();
 
+    // ── 远程终端（2026-10-06）──────────────────────────────────────────
+    /**
+     * 开一个远程终端。shell 只收 "cmd" / "powershell"，别的（wscript 之流）云端这侧也不认。
+     * @note 返回的不是结果：这条只是"点了"，真开没开起来看 terminalOpened / terminalClosed。
+     */
+    Q_INVOKABLE void termOpen(const QString &shell = QStringLiteral("cmd"));
+    /** 发一行命令；回车调它。会话没开时不发（不排队：排队的命令会错序，不值当）。 */
+    Q_INVOKABLE void termInput(const QString &sid, const QString &keys);
+    /** 主动关会话。 */
+    Q_INVOKABLE void termClose();
+
+    TermState termState() const { return m_termState; }
+    QString termSid() const { return m_termSid; }
+    QString termNote() const { return m_termNote; }
+    bool termBusy() const { return m_termState == TermPending; }
+
 signals:
     void connectedChanged();
     void authedChanged();
@@ -215,6 +246,8 @@ signals:
     void rtcStateChanged();
     /** 画面来源切换（jpeg ↔ rtc）——界面上那个链路徽标靠它刷新。 */
     void frameSourceChanged();
+    /** 终端状态四件套（state/sid/note/busy）共用一个信号。 */
+    void termStateChanged();
     /** 帧没画成（解码失败等）——界面可以往屏幕上说明一句，别让画面无声无息不动。 */
     void frameDropped(const QString &reason);
     /** 鉴权被拒：界面应停止重连并把原因显示出来。 */
@@ -226,6 +259,18 @@ signals:
     void resultReceived(const QString &uid, const QString &action, const QString &state,
                         const QString &result, const QString &error, const QString &detail,
                         const QJsonObject &data);
+
+    // ── 远程终端（2026-10-06）──────────────────────────────────────────
+    // 四帧一一对应，别在中途合并：QML 那边靠 sid 判断"这是哪一路会话"，
+    // 合并成一条信号会让"开没开起来"和"有没有输出"分不清。
+    /** 会话开起来了。shell=cmd/powershell，prompt/cwd 直接拿过来画第一行。 */
+    void terminalOpened(const QString &sid, const QString &shell, const QString &prompt, const QString &cwd);
+    /** 输出块（被控端 50ms 攒一块，所以这里收的是一小段，不是整屏）。 */
+    void terminalData(const QString &sid, const QString &data);
+    /** 单条命令跑完了：code=退出码，ms=耗时。 */
+    void terminalExit(const QString &sid, int code, int ms);
+    /** 会话关了（remote=管理端主动关 / idle=没人理自动关 / denied=本机拒绝 / agent-exit=被控端退了）。 */
+    void terminalClosed(const QString &sid, const QString &reason);
 
 private:
     void setStatus(const QString &s, bool warn);
@@ -240,6 +285,12 @@ private:
     void setStatic(bool s);
     void tickFps();
     void sendEnvelope(const QString &type, const QJsonObject &payload);
+
+    // ── 远程终端 ──
+    /** 改状态并通知界面（状态四件套共用一个信号，省得四个 NOTIFY 各写一遍）。 */
+    void setTermState(TermState s, const QString &sid, const QString &note);
+    /** 组装 terminal_* 的 params 并下发；没选设备 / 会话不对一律不发。 */
+    void sendTermAction(const QString &action, const QJsonObject &params);
 
     // ── 站点账号（OAuth 一户通）──
     /** 读/写/清本机凭据（站点会话令牌 + 云端接入票），落 AppData 目录下的 json。 */
@@ -313,6 +364,12 @@ private:
     QNetworkReply *m_sessionReply = nullptr;   // 换票请求（同一时刻只发一个）
 
     QWebSocket *m_ws = nullptr;
+    // 远程终端会话状态（Idle/Pending/Open）。++ 会话 sid：每次开都换一个新的，
+    // 这样"上一会话的迟到输出"不会灌进新窗口里。
+    TermState m_termState = TermIdle;
+    QString m_termSid;
+    QString m_termNote;
+    int m_termSidSeq = 0;
     QTimer *m_fpsTimer = nullptr;
     QTimer *m_rtcReap = nullptr;          // 收流页延迟回收（scheduleRtcViewReap）
     // 抽帧节拍与 RTC 诊断心跳：必须是成员，不能在建页的加载回调里 new。
