@@ -17,6 +17,7 @@
 #include "schedule/timeslot_model.h"
 #include "schedule/subject_model.h"
 #include "schedule/undo_manager.h"
+#include "schedule_view.h"   // 2026-10-06：大屏今日课表窗口
 
 #include <QApplication>   // 2026-10-06：要托盘必须 QApplication（QSystemTrayIcon 属 QtWidgets）。
                           // Qt6Widgets 本来就链了（styles/Qt6Widgets.dll 也在绿色包里），
@@ -365,6 +366,20 @@ int main(int argc, char *argv[])
         auto *actForget = menu->addAction(QStringLiteral("退出网站登录"));
         QObject::connect(actForget, &QAction::triggered, &backend, [&backend] {
             backend.forgetAccount();
+        });
+        menu->addSeparator();
+        // 今日课表（2026-10-06）：老师机也能看全天课程，与被控端同一窗口；
+        // 读 ClassIsland 档案（可配 STE_VIEWER_PROFILE，默认 %LOCALAPPDATA%/ClassIsland/...）
+        auto *actSched = menu->addAction(QStringLiteral("今日课表…"));
+        QObject::connect(actSched, &QAction::triggered, &app, [] {
+            const QString profilePath = qEnvironmentVariable(
+                "STE_VIEWER_PROFILE",
+                QStringLiteral("%1/ClassIsland/data/Profiles/Default.json")
+                    .arg(qEnvironmentVariable("LOCALAPPDATA")));
+            auto *win = new ScheduleViewWindow();
+            win->setAttribute(Qt::WA_DeleteOnClose);
+            win->setProfilePath(profilePath);
+            win->show();
         });
         menu->addSeparator();
         auto *actLog = menu->addAction(QStringLiteral("打开日志目录"));
