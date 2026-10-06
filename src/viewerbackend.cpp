@@ -1075,6 +1075,7 @@ void ViewerBackend::setCurrentUid(const QString &uid)
 {
     if (uid.isEmpty() || uid == m_currentUid) return;
     m_currentUid = uid;
+    refreshCapActions();          // 换机器 = 换一套能力，门控要立刻跟着变
     emit currentUidChanged();
     logf("[viewer] 切到 %s，向云端订阅它的画面", uid.toUtf8().constData());
     QJsonObject sp;
@@ -1272,11 +1273,55 @@ void ViewerBackend::onBinaryMessage(const QByteArray &buf)
     applyFrameBytes(buf, QJsonObject());
 }
 
+/**
+ * 把当前选中设备的能力清单抽出来给 QML 用（2026-10-06 契合度改造）。
+ * 设备的 actions 是云端 devices 广播里带下来的（云端原样转发被控端 register 的 caps.actions）。
+ * 老版本被控端/老云端都不带这个字段 → m_capActions 保持空，见 deviceSupports 的兜底。
+ */
+void ViewerBackend::refreshCapActions()
+{
+    const QStringList before = m_capActions;
+    m_capActions.clear();
+    if (!m_currentUid.isEmpty()) {
+        for (const QJsonValue &v : m_devices) {
+            const QJsonObject d = v.toObject();
+            if (d.value(QStringLiteral("uid")).toString() != m_currentUid) continue;
+            const QJsonValue acts = d.value(QStringLiteral("actions"));
+            if (acts.isArray()) {
+                for (const QJsonValue &a : acts.toArray()) {
+                    const QString s = a.toString();
+                    if (!s.isEmpty()) m_capActions.append(s);
+                }
+            }
+            break;
+        }
+    }
+    if (m_capActions != before) emit capActionsChanged();
+}
+
+void ViewerBackend::reportUnsupported(const QString &label, const QString &action)
+{
+    logf("[viewer] 拦下「%s」：这台被控端的能力清单里没有 %s",
+         label.toUtf8().constData(), action.toUtf8().constData());
+    setStatus(QStringLiteral("这台被控端不支持「%1」（它没上报 %2 这个能力）").arg(label).arg(action), true);
+}
+
+bool ViewerBackend::deviceSupports(const QString &action) const
+{
+    if (action.isEmpty()) return false;
+    // 没能力表就一律放开：老版本被控端没上报 actions（或云端还没升级），
+    // 这时候门控不能反过来把整排按钮锁死 —— 那比不门控更糟，老师会以为软件坏了。
+    // 门控只用来"少让人白点一下"，不是用来拦人的。
+    if (m_capActions.isEmpty()) return true;
+    return m_capActions.contains(action);
+}
+
 void ViewerBackend::refreshDevices(const QJsonArray &arr)
 {
     const bool countChanged = (arr.size() != m_devices.size());
     m_devices = arr;
     if (countChanged) logf("[viewer] 设备表更新：在线 %d 台", (int)arr.size());
+    refreshCapActions();          // 设备一变（新增/掉线/换 uid），能力表就要重算
     emit devicesChanged();
 
     if (arr.isEmpty()) {

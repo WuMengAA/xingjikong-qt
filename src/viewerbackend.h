@@ -38,6 +38,9 @@ class ViewerBackend : public QObject
     Q_PROPERTY(bool statusWarn READ statusWarn NOTIFY statusTextChanged)
     Q_PROPERTY(QJsonArray devices READ devices NOTIFY devicesChanged)
     Q_PROPERTY(QString currentUid READ currentUid WRITE setCurrentUid NOTIFY currentUidChanged)
+    /** 当前选中设备上报的指令能力全集（老版本被控端没这字段 → 空）。
+     *  管端据此把不支持的按钮置灰，而不是让人点下去才吃到一句「未知指令」。 */
+    Q_PROPERTY(QStringList capActions READ capActions NOTIFY capActionsChanged)
     Q_PROPERTY(QImage frame READ frame NOTIFY frameChanged)
     /** 画面进入「静态区」（连续多帧像素一致）→ 界面停止重绘。见 applyFrameBytes 的注释。 */
     Q_PROPERTY(bool screenStatic READ screenStatic NOTIFY statsChanged)
@@ -141,6 +144,14 @@ public:
 
     /** 切到某台设备 → 向云端订阅它的画面。 */
     void setCurrentUid(const QString &uid);
+    // 契合度（2026-10-06）：能力门控。QML 里问"这台机器认不认这条指令"。
+    // 见 refreshCapActions / deviceSupports 的说明，别在 QML 里自己判。
+    QStringList capActions() const { return m_capActions; }
+    void refreshCapActions();
+    Q_INVOKABLE bool deviceSupports(const QString &action) const;
+    /** 能力门控被拦下时的反馈：状态行说人话 + 日志留证（**不静默**，红线）。
+     * 单独开一个而不是让 QML 直接调 setStatus —— 后者不是 slot，QML 调不到。 */
+    Q_INVOKABLE void reportUnsupported(const QString &label, const QString &action);
 
     Q_INVOKABLE void requestDevices();
     Q_INVOKABLE void sendAction(const QString &action, const QJsonObject &params = QJsonObject());
@@ -191,6 +202,8 @@ signals:
     void statusTextChanged();
     void devicesChanged();
     void currentUidChanged();
+    /** 当前选中设备的能力清单（actions）变了 —— 按钮门控要跟着刷。 */
+    void capActionsChanged();
     void frameChanged();
     void statsChanged();
     void cloudUrlChanged();
@@ -313,6 +326,7 @@ private:
     QString m_token;
 
     QString m_currentUid;
+    QStringList m_capActions;              // 当前设备的指令能力全集（空=没上报过）
     bool m_connected = false;
     bool m_authed = false;
     bool m_authFailed = false;      // 鉴权被拒后别再一遍遍重连

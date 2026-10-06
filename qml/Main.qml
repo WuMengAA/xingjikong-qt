@@ -751,10 +751,13 @@ ApplicationWindow {
                         MouseArea {
                             id: ma
                             anchors.fill: parent
-                            enabled: !d.t
+                            // t = 这功能压根没做；capOk = 这台被控端上报的能力清单里认不认这条指令。
+                            // 两者都置灰：没做的留白、不支持的照样看得见（灰着），但都不引诱人去点。
+                            enabled: !d.t && capOkAll(d)
                             hoverEnabled: !d.t
                             // 以前鼠标移上去还是箭头，看不出这东西能点
-                            cursorShape: d.t ? Qt.ArrowCursor : Qt.PointingHandCursor
+                            cursorShape: d.t ? Qt.ArrowCursor
+                                        : capOkAll(d) ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onPressed: pressed2 = true
                             onReleased: pressed2 = false
                             onCanceled: pressed2 = false
@@ -762,10 +765,14 @@ ApplicationWindow {
                         }
 
                         ToolTip {
-                            visible: ma.containsMouse && !d.t
+                            // 不支持的也显示 tooltip（不然灰按钮 Why 都不问，像坏了），
+                            // 文案分四种情况：不可逆 / 没选机器 / 这台机器不支持 / 正常
+                            visible: ma.containsMouse && (!d.t || !capOkAll(d))
                             delay: 500
                             text: heavy ? "点了立刻执行，没法撤销"
                                 : root.currentUid === "" ? "先在左边选一台机器"
+                                : !capOkAll(d)
+                                  ? ("这台被控端不支持：它上报的能力里没有 " + capNeedOf(d).filter(function (x) { return !capOk(x) }).join(" / "))
                                 : ""
                         }
                     }
@@ -1501,8 +1508,46 @@ ApplicationWindow {
     // 分组之后每组的 delegate 都得抄一份 —— 所以抽出来，按钮只管显示。
     // 几个"按文案分支"的特殊成员之所以特殊，是因为它们要开弹窗/配额外参数，
     // 不是简单的 sendAction(action)。
+    // ── 能力门控（2026-10-06 契合度）──────────────────────────────
+    // 被控端 register 时会把自己真实实现的指令清单（caps.actions）报上来，
+    // 云端原样转进 devices 广播，这里按它决定按钮置不置灰。
+    // 老版本被控端/老云端不带这个字段 → capActions 是空的 → 一律放行：
+    // 门控的目的是"少让人白点一下"，不是拿它当闸门把老机器锁死。
+    function capOk(a) {
+        if (!a || backend.capActions.length === 0) return true
+        return backend.capActions.indexOf(a) >= 0
+    }
+    // 几个 a 为空、实际走分支的按钮（音量/软件/定时/文件/通知/探活），真正依赖哪几条
+    // 指令得单独点名 —— 按钮上写的 a 是空串，光看 d.a 拦不住它们。
+    // 写成数组：像「软件」这种要同时拿到候选列表**和**进程列表才算真能开，单看一条会漏。
+    readonly property var capByLabel: ({
+        "音量": ["set_volume"],
+        "软件": ["list_shortcut_candidates", "process_list"],
+        "定时": ["list_schedules"],
+        "文件": ["file_push"],
+        "通知": ["notify"],
+        "探活": ["ping"]
+    })
+    /** 这个按钮要哪些指令才点得动（[d.a] 或按文案取到的数组）。没声明 = 不参与门控。 */
+    function capNeedOf(d) {
+        return (d.a !== "" && d.a !== undefined) ? [d.a] : (capByLabel[d.l] || []);
+    }
+    /** 全部具备才放行。空数组 = 这条按钮不归门管。 */
+    function capOkAll(d) {
+        const need = capNeedOf(d);
+        return need.length === 0 ? true : need.every(capOk);
+    }
+
     function runAction(d) {
         if (d.t) return                      // 未实现的按钮：压根不该点得到
+
+        // 能力门控兜底：按钮已经置灰了，但状态行/快捷键/老界面可能绕过 runAction，
+        // 这里统一再拦一次，拦下就给一句话（reportUnsupported 里带日志，不静默）。
+        if (!capOkAll(d)) {
+            const need = capNeedOf(d).filter(function (x) { return !capOk(x) });
+            backend.reportUnsupported(d.l, need.join(" / "));
+            return;
+        }
 
         if (d.l === "音量") {
             volumeDlg.open()
