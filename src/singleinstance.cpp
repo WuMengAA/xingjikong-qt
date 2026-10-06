@@ -68,9 +68,9 @@ bool SingleInstanceGuard::acquire(const wchar_t *mutexName, const wchar_t *lockF
     // 只有开着一个实例才验不了新版），或者多开做界面比对。
     // 默认不设 ⇒ 行为与以前逐字一致（生产照旧单实例）。**别在教室机上设这个。**
     if (qEnvironmentVariableIsSet("STE_ALLOW_MULTI")) {
-    // ⚠️ stderr 出口统一转本机编码：源码字面量是 UTF-8，而命令行/记事本按 GBK 解 ⇒ 中文全是乱码。
-    //    与 [viewer] 那套日志同一个规矩（见 main.cpp 的 installMessageHandler / writeLogBytes）。
-        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] STE_ALLOW_MULTI 已设 → 跳过单实例守卫（仅调试）")
+    // ⚠️ stderr 出口统一转本机编码：源码字面量是 UTF-8，而命令行/记事本按 GBK 解 ⇒ 中文全是乱码。
+    //    与 [viewer] 那套日志同一个规矩（见 main.cpp 的 installMessageHandler / writeLogBytes）。
+        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] STE_ALLOW_MULTI 已设 → 跳过单实例守卫（仅调试）")
                                     .toLocal8Bit().constData());
         return true;
     }
@@ -85,7 +85,7 @@ bool SingleInstanceGuard::acquire(const wchar_t *mutexName, const wchar_t *lockF
     const MutexTry mt = openMutex(mutexName);
     if (mt.alreadyExists) {
         CloseHandle(mt.h);                          // alreadyExists 时 h 仍有效，必须关
-        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] 已有另一个实例占着互斥体 Global\\%1 → 本次启动退出")
+        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] 已有另一个实例占着互斥体 Global\\%1 → 本次启动退出")
                                     .arg(QString::fromWCharArray(mutexName)).toLocal8Bit().constData());
         if (reason) *reason = QStringLiteral("已有实例占着互斥体（%1）").arg(QString::fromWCharArray(mutexName));
         return false;
@@ -120,7 +120,7 @@ bool SingleInstanceGuard::acquire(const wchar_t *mutexName, const wchar_t *lockF
     if (!lk->tryLock()) {
         delete lk;
         release();                                  // 互斥体若也拿到了，一并放掉
-        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] 已有另一个实例占着文件锁 %1 → 本次启动退出")
+        fprintf(stderr, "%s\n", QStringLiteral("[stelarith] 已有另一个实例占着文件锁 %1 → 本次启动退出")
                                     .arg(QString::fromWCharArray(lockFile)).toLocal8Bit().constData());
         if (reason) *reason = QStringLiteral("已有实例占着文件锁（%1）").arg(path);
         return false;
