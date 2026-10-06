@@ -3114,12 +3114,16 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         const int want = qBound(1, params.value(QStringLiteral("fps")).toInt(20), 60);
         const int oldFps = g_currentFps;
         g_currentFps = want;
+        // 学生端知情（设计文档 6.5 隐私边界）：远控=屏幕正被老师查看，学生必须知道。
+        // 用 Island 形态（灵动岛小条）非打扰式提示 3 秒，不遮操作。
+        NotifyWindow::showNotice(NotifyWindow::Island, QStringLiteral("屏幕正在被查看"),
+                                  QStringLiteral("老师正在远程查看这台电脑的屏幕"), 3, false);
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("active"), true);
         out.data.insert(QStringLiteral("fps"), want);
         out.data.insert(QStringLiteral("fpsBefore"), oldFps);
         out.data.insert(QStringLiteral("sessionSince"), QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
-        qInfo("[agent-qt] 🔴 远控会话开启，抓屏帧率 %d → %d fps", oldFps, want);
+        qInfo("[agent-qt] 🔴 远控会话开启，抓屏帧率 %d → %d fps（已提示学生知情）", oldFps, want);
         return out;
     }
 
