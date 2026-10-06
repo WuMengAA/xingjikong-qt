@@ -224,7 +224,7 @@ void stelarithNotifyTray(const QString &title, const QString &msg)
 // CMakeLists.txt 在配置阶段会读这一行来校验两处一致，不一致直接 FATAL_ERROR ——
 // 别靠人记着同步，靠构建卡住（上面就是没卡住才漂到的）。
 // ⚠️ 保持这一行**单行**：跨行写（#ifdef 套宏）会让 CMake 的正则匹配不到，校验就白做了。
-static constexpr const char *kViewerVersion = "0.6.3";
+static constexpr const char *kViewerVersion = "0.6.4";
 
 int main(int argc, char *argv[])
 {
