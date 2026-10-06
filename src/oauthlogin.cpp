@@ -108,15 +108,15 @@ void OAuthLogin::begin()
             ? QStringLiteral("/oauth-callback")
             : QString::fromLocal8Bit(qgetenv("STE_OAUTH_REDIRECT_PATH")).trimmed();
 
-    logf("[oauth] 站点=%s 客户端=%s 密钥=%s", m_siteUrl.toLocal8Bit().constData(),
-         m_clientId.toLocal8Bit().constData(),
+    logf("[oauth] 站点=%s 客户端=%s 密钥=%s", m_siteUrl.toUtf8().constData(),
+         m_clientId.toUtf8().constData(),
          m_clientSecret.isEmpty() ? "不带（公开客户端）" : "带");
     // 站点只认 http:// 的 127.0.0.1 回拨，别把 https 或局域网地址塞进去 ——
     // 授权页会在 inspect() 那一步直接回 invalid_redirect_uri，用户只看得到"登录失败"。
     if (!m_siteUrl.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
         && !m_siteUrl.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
         const QString why = QStringLiteral("站点地址不是 http/https（当前：%1）").arg(m_siteUrl);
-        logf("[oauth] FAIL %s", why.toLocal8Bit().constData());
+        logf("[oauth] FAIL %s", why.toUtf8().constData());
         m_busy = false;
         emit failed(why);
         return;
@@ -130,7 +130,7 @@ void OAuthLogin::begin()
         const QString why = QStringLiteral("本机临时端口开不出来（%1），可能是安全软件拦了回拨。"
                                            "请放行 127.0.0.1 的临时端口，或退出占用它的程序")
                                 .arg(m_server->errorString());
-        logf("[oauth] FAIL %s", why.toLocal8Bit().constData());
+        logf("[oauth] FAIL %s", why.toUtf8().constData());
         m_busy = false;
         emit failed(why);
         stopServer();
@@ -155,12 +155,12 @@ void OAuthLogin::begin()
     QObject::connect(m_server, &QTcpServer::newConnection, this, &OAuthLogin::onNewConnection);
 
     logf("[oauth] 正在打开授权页（回拨 %s，state=%s…）",
-         m_redirectUri.toLocal8Bit().constData(), m_state.left(8).toLocal8Bit().constData());
+         m_redirectUri.toUtf8().constData(), m_state.left(8).toUtf8().constData());
     if (!openAuthUrl(authUrl)) {
         const QString why = QStringLiteral("打不开登录窗口，系统浏览器也叫不起来。"
                                            "请把下面这行地址复制到浏览器地址栏手动打开：");
-        logf("[oauth] FAIL %s：%s", why.toLocal8Bit().constData(),
-             authUrl.toString().toLocal8Bit().constData());
+        logf("[oauth] FAIL %s：%s", why.toUtf8().constData(),
+             authUrl.toString().toUtf8().constData());
         // ⚠️ 这两行顺序不能反：先落状态再发信号，否则界面收到 failed 时 busy 还是 true，
         // 登录按钮会一直灰着（"点了没反应"的老毛病）。
         m_busy = false;
@@ -292,9 +292,9 @@ void OAuthLogin::onReadyRead()
     if (!pathOk || gotState != m_state || code.isEmpty()) {
         // 回拨对不上 state 一律按失败处理：那可能是别人点到我们端口（CSRF 面）
         logf("[oauth] WARN 回拨被拒：path=%s state匹配=%s（收到 %.8s… / 期望 %.8s…）带code=%s",
-             path.toLocal8Bit().constData(), gotState == m_state ? "是" : "否",
-             gotState.left(8).toLocal8Bit().constData(),
-             m_state.left(8).toLocal8Bit().constData(),
+             path.toUtf8().constData(), gotState == m_state ? "是" : "否",
+             gotState.left(8).toUtf8().constData(),
+             m_state.left(8).toUtf8().constData(),
              code.isEmpty() ? "否" : "是");
         servePage(s, 400, "<h2>登录未完成</h2><p>回拨的地址或状态对不上，已拒绝。请回到管理端再点一次「登录」。</p>");
         s->disconnectFromHost();
@@ -363,7 +363,7 @@ void OAuthLogin::onTokenFinished()
     const QString sessionToken = obj.value(QStringLiteral("token")).toString();
     if (sessionToken.isEmpty()) {
         const QString why = QStringLiteral("换回来的响应里没有 token（站点改了 /oauth/token 的返回？）");
-        logf("[oauth] FAIL %s：%s", why.toLocal8Bit().constData(), raw.left(512).constData());
+        logf("[oauth] FAIL %s：%s", why.toUtf8().constData(), raw.left(512).constData());
         m_busy = false;
         closeLoginWindow();
         emit failed(why);

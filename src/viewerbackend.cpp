@@ -512,7 +512,7 @@ void ViewerBackend::onOAuthFailed(const QString &reason)
     m_accountBusy = false;
     m_accountFatal = true;
     m_accountText = QStringLiteral("登录失败：%1").arg(reason);
-    logf("[account] FAIL %s", reason.toLocal8Bit().constData());
+    logf("[account] FAIL %s", reason.toUtf8().constData());
     emit accountChanged();
 }
 
@@ -549,7 +549,7 @@ void ViewerBackend::onSessionTicketFinished()
     } else {
         logf("[account] 云端接入票到手（%s，%s 到期），正在连云端…",
              m_accountUser.toUtf8().constData(),
-             QDateTime::fromMSecsSinceEpoch(m_ticketExp).toString(QStringLiteral("MM-dd HH:mm")).toLocal8Bit().constData());
+             QDateTime::fromMSecsSinceEpoch(m_ticketExp).toString(QStringLiteral("MM-dd HH:mm")).toUtf8().constData());
     }
     saveAccount();
     refreshAccountText();

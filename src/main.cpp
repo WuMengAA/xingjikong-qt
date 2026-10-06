@@ -74,26 +74,45 @@ static QString logFilePath()
 static FILE *g_log = nullptr;
 static bool g_logTried = false;
 
+// ⚠️ 2026-10-07 修（真机级乱码）：日志以前是**原样把 UTF-8 字节写进文件**，
+// 而 Windows 控制台（代码页 936）和记事本都按本机 ANSI（GBK）去解 ⇒ 中文全变
+// "鐗堟湰""宸蹭粠"这种谁也读不懂的字（"版本"的 UTF-8 字节被当 GBK 读就是这个样子）。
+//
+// 规矩改成一个：**内部一律 QString（Unicode），出口一律转本机编码**。
+// 代价是用 UTF-8 编辑器打开会乱 —— 但看日志的人是老师/运维，用的是命令行和记事本，
+// 那边乱码才是真出事。
+static void writeLogBytes(const QByteArray &bytes)
+{
+    if (!g_log) return;
+    fwrite(bytes.constData(), 1, bytes.size(), g_log);
+    fputc('\n', g_log);
+    fflush(g_log);
+}
+
+/** 写一行日志。入参约定：**UTF-8**（源文件中文字面量就是 UTF-8）。 */
 static void writeLog(const char *s)
 {
     if (!g_log && !g_logTried) {
         g_logTried = true;
+        // 路径必须本机编码：fopen 不吃 UTF-8
         const QByteArray pathLocal = logFilePath().toLocal8Bit();
         g_log = fopen(pathLocal.constData(), "w");
         if (!g_log) {
             // 写不进必须**喊出来**：静默丢日志的时候，现场只剩下"好像跑了但什么都没记"，
             // 比压根没日志还贵。控制台跑这一步一定看得见。
-            fprintf(stderr, "[viewer] FAIL 日志写不进 %s —— 后面所有日志都会丢，请改用控制台运行\n",
-                    pathLocal.constData());
+            const QByteArray m =
+                QStringLiteral("[viewer] FAIL 日志写不进 %1 —— 后面所有日志都会丢，请改用控制台运行")
+                    .arg(logFilePath()).toLocal8Bit();
+            fwrite(m.constData(), 1, m.size(), stderr);
+            fputc('\n', stderr);
             fflush(stderr);
             return;
         }
-        fprintf(g_log, "=== viewer-qt 启动，日志=%s ===\n", pathLocal.constData());
-        fflush(g_log);
+        const QByteArray head =
+            QStringLiteral("=== viewer-qt 启动，日志=%1 ===").arg(logFilePath()).toLocal8Bit();
+        writeLogBytes(head);
     }
-    if (!g_log) return;
-    fprintf(g_log, "%s\n", s);
-    fflush(g_log);
+    writeLogBytes(QString::fromUtf8(s).toLocal8Bit());
 }
 
 void logf(const char *fmt, ...)
@@ -101,8 +120,12 @@ void logf(const char *fmt, ...)
     char buf[2048];
     va_list ap; va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
-    writeLog(buf);
-    fprintf(stdout, "%s\n", buf); fflush(stdout);
+    // buf 是 UTF-8（源文件中的中文字面量）；转成本机编码再写盘、再打控制台
+    const QByteArray local = QString::fromUtf8(buf).toLocal8Bit();
+    writeLogBytes(local);
+    fwrite(local.constData(), 1, local.size(), stdout);
+    fputc('\n', stdout);
+    fflush(stdout);
 }
 
 static void installMessageHandler()
@@ -115,13 +138,14 @@ static void installMessageHandler()
         case QtWarningMsg:  tag = "WARN";  break;
         default:            tag = "INFO";  break;
         }
-        const QByteArray b = msg.toUtf8();
-        // QML 加载/绑定错误都会走这里，原样留着 —— 否则界面白屏时无从查起
-        fprintf(stdout, "[viewer] %s: %s\n", tag, b.constData());
+        // QML 加载/绑定错误都会走这里，原样留着 —— 否则界面白屏时无从查起。
+        // 直接走 QString 拼，出口统一转本机编码（不再手拼 UTF-8 的 char 数组）。
+        const QByteArray local =
+            QStringLiteral("[viewer] %1: %2").arg(QLatin1String(tag), msg).toLocal8Bit();
+        fwrite(local.constData(), 1, local.size(), stdout);
+        fputc('\n', stdout);
         fflush(stdout);
-        char line[2048];
-        snprintf(line, sizeof(line), "[viewer] %s: %s", tag, b.constData());
-        writeLog(line);
+        writeLogBytes(local);
     });
 }
 
@@ -224,7 +248,7 @@ void stelarithNotifyTray(const QString &title, const QString &msg)
 // CMakeLists.txt 在配置阶段会读这一行来校验两处一致，不一致直接 FATAL_ERROR ——
 // 别靠人记着同步，靠构建卡住（上面就是没卡住才漂到的）。
 // ⚠️ 保持这一行**单行**：跨行写（#ifdef 套宏）会让 CMake 的正则匹配不到，校验就白做了。
-static constexpr const char *kViewerVersion = "0.6.9";
+static constexpr const char *kViewerVersion = "0.6.10";
 
 int main(int argc, char *argv[])
 {
@@ -239,7 +263,7 @@ int main(int argc, char *argv[])
     // 凭据读不到（表现为"每次重启都要重新登录"），这里钉死成一眼认得出的名字。
     QCoreApplication::setApplicationName(QStringLiteral("Stelarith Viewer"));
     QCoreApplication::setApplicationVersion(QString::fromLatin1(kViewerVersion));
-    logf("[viewer] viewer-qt 版本 %s（日志：%s）", kViewerVersion, logFilePath().toLocal8Bit().constData());
+    logf("[viewer] viewer-qt 版本 %s（日志：%s）", kViewerVersion, logFilePath().toUtf8().constData());
 
     // ── 后台托盘常驻（2026-10-06 补）────────────────────────────────────────
     // 关主窗口不退出程序：管理端是常驻后台的工具，主窗口关了进程必须还在（收流/托盘活着），
