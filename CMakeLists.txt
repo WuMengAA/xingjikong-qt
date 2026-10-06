@@ -20,6 +20,12 @@ add_executable(stelarith-agent-qt
   src/main.cpp
   src/singleinstance.cpp
   src/singleinstance.h
+  # ── 课表时钟模块（2026-10-06 加：上下课提醒）──
+  src/schedule_clock.cpp
+  src/schedule_clock.h
+  src/schedule/profile_repository.cpp
+  src/schedule/profile_repository.h
+  src/schedule/profile.h
 )
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::WebEngineWidgets Qt6::Network)
 

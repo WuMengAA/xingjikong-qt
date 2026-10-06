@@ -19,7 +19,8 @@
 //   · 画面帧走二进制帧 [1B 版本][2B 大端 headerLen][header JSON][JPEG]，带 seq/ts/mime；
 //   · 云端拒绝时回的是统一 error 通道（code + 人话原因），这里必须打出来，不许静默。
 
-#include "singleinstance.h"   // 单实例守卫（与管理端 viewer 同一份实现）
+#include "singleinstance.h"
+#include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）   // 单实例守卫（与管理端 viewer 同一份实现）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -264,8 +265,8 @@ void scheduleReconnect()
 }
 
 /** 本端真实实现的指令全集，**必须与 executeAction 的分支逐条对齐**。
- *  （2026-10-06 契合度改造：以前 register 只报 screen/input/power 三个能力组，
- *   actions 一条都不报 —— 于是云端和管端无从知道这台机器能不能拍照/定时/推文件，
+ *  （2026-10-06 契合度改造：以前 register 只报 screen/input/power 三个能力组、
+ *   这条表一个都不报，于是云端和管端无从知道这台机器能不能拍照/定时/推文件，
  *   管端只能把按钮对着所有机器开放，点下去才收到一句「未知指令」。）
  * 放成常量数组而不是散在各个 if 里，是为了让"能做什么"只有一处真值来源：
  * 以后 executeAction 加分支，这张表也得跟着加，否则设备会自称会做却做不了（或反之）。 */
@@ -3574,6 +3575,34 @@ int main(int argc, char *argv[])
 
     connectNow();
     QMetaObject::invokeMethod(&timer, "timeout", Qt::QueuedConnection);
+
+    // ── 课表时钟（2026-10-06 加）：上下课提醒 ────────────────────────────
+    // 读 ClassIsland 档案（默认 %LOCALAPPDATA%\ClassIsland\data\Profiles\Default.json），
+    // 每 30 秒轮询当前时间；到上课/下课边界触发大屏通知（复用 showNotice）。
+    // 档案路径可配 STE_QT_PROFILE；无档案/无课表时静默（日志留一行，不打扰教室）。
+    {
+        const QString profilePath = qEnvironmentVariable(
+            "STE_QT_PROFILE",
+            QStringLiteral("%1/ClassIsland/data/Profiles/Default.json")
+                .arg(qEnvironmentVariable("LOCALAPPDATA")));
+        auto *clock = new ScheduleClock(profilePath, &app);
+        QObject::connect(clock, &ScheduleClock::periodStarted, &app,
+            [](const QString& name, const QTime& at) {
+                NotifyWindow::showNotice(NotifyWindow::Popup, QStringLiteral("上课啦"),
+                           QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm")),
+                           6, true, QStringLiteral("remind"));
+                qInfo().noquote() << "[agent-qt] 上课提醒已弹: " << name;
+            });
+        QObject::connect(clock, &ScheduleClock::periodEnded, &app,
+            [](const QString& name, const QTime& at) {
+                NotifyWindow::showNotice(NotifyWindow::Popup, QStringLiteral("下课啦"),
+                           QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm")),
+                           6, true, QStringLiteral("remind"));
+                qInfo().noquote() << "[agent-qt] 下课提醒已弹: " << name;
+            });
+        clock->start();
+        qInfo().noquote() << "[agent-qt] 课表时钟已启动，档案: " << profilePath;
+    }
 
     // ── 首次运行（未配置）自动弹一次配置向导 ──
     // 判据：走到这里 g_unconfigured=true ⇔ agent.env 不存在 或 URL/令牌为空（loadEnvFile 后判定）。
