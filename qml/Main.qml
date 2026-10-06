@@ -64,7 +64,7 @@ ApplicationWindow {
     readonly property var th: darkMode ? darkTh : lightTh
 
     // 界面自身的状态（只跟显示有关的东西）
-    property int page: 1                 // 0 概览 / 1 控制 / 2 设置
+    property int page: 1                 // 0 概览 / 1 控制 / 2 集控 / 3 设置
     property int volumeValue: 30
     // 远端确认过的音量（set_volume 回执里的 data.volume）。-1 = 还没拿到，就别往界面上写。
     // 刻意不用滑块那个值：root.volumeValue 只是本机拖动出来的数字，被控端根本没确认过，
@@ -1027,7 +1027,214 @@ ApplicationWindow {
             }       // 三栏 RowLayout
             }       // 控制页 Item
 
-            // ══ 2 设置 ══
+            // ══ 2 集控（2026-10-06：web console 核心功能并入管理端）══
+            // 通知下发 / 定时任务 / 广播 —— 全部走 backend.sendAction 到云端 → 被控端。
+            Item {
+                id: consolePage
+                Rectangle { anchors.fill: parent; color: th.body }
+
+                // 操作结果提示（简单 toast）
+                property string hintText: ""
+                Timer { id: hintTimer; interval: 2500; onTriggered: consolePage.hintText = "" }
+                function hint(s) { consolePage.hintText = s; hintTimer.restart() }
+                Text {
+                    anchors.top: parent.top; anchors.topMargin: 6
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: consolePage.hintText
+                    color: "#e0a03a"
+                    font.pixelSize: 12
+                    visible: consolePage.hintText !== ""
+                }
+
+                Flickable {
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    contentHeight: col.height
+                    clip: true
+                    Column {
+                        id: col
+                        width: parent.width
+                        spacing: 14
+
+                        // ── 通知下发 ──
+                        Rectangle {
+                            width: parent.width
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: ntCol
+                                anchors.fill: parent
+                                anchors.margins: 16
+                                spacing: 10
+                                property string ntSeverity: "remind"
+                                Text { text: "通知下发"; color: th.fg3; font.pixelSize: 11 }
+                                Row {
+                                    width: parent.width
+                                    spacing: 10
+                                    TextField {
+                                        id: ntTitle
+                                        width: parent.width * 0.45
+                                        placeholderText: "标题（如：上课啦）"
+                                        color: th.fg
+                                    }
+                                    TextField {
+                                        id: ntContent
+                                        width: parent.width - ntTitle.width - 10
+                                        placeholderText: "内容"
+                                        color: th.fg
+                                    }
+                                }
+                                Row {
+                                    width: parent.width
+                                    spacing: 10
+                                    // 严重度选择：remind绿 / inform黄 / urgent红
+                                    Repeater {
+                                        model: [ { k: "普通", v: "remind" }, { k: "重要", v: "inform" }, { k: "紧急", v: "urgent" } ]
+                                        delegate: Rectangle {
+                                            width: 64; height: 28; radius: th.rCtrl
+                                            color: (ntCol.ntSeverity === modelData.v) ? th.inv : "transparent"
+                                            border.color: th.stroke; border.width: 1
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData.k
+                                                color: (ntCol.ntSeverity === modelData.v) ? "#111" : th.fg3
+                                                font.pixelSize: 11
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: ntCol.ntSeverity = modelData.v
+                                            }
+                                        }
+                                    }
+                                    Item { width: 10 }
+                                    Button {
+                                        text: "发送到选中设备"
+                                        onClicked: {
+                                            const title = ntTitle.text.trim()
+                                            const content = ntContent.text.trim()
+                                            if (title === "" && content === "") { hint("先填标题或内容"); return }
+                                            const uid = backend.currentUid
+                                            if (!uid) { hint("先在控制页选中一台设备"); return }
+                                            backend.sendAction("notify", {
+                                                "title": title, "content": content,
+                                                "seconds": 8, "tts": true,
+                                                "flags": { "severity": ntSeverity }
+                                            })
+                                            hint("通知已下发 → " + uid)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 定时任务 ──
+                        Rectangle {
+                            width: parent.width
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: schedCol
+                                anchors.fill: parent
+                                anchors.margins: 16
+                                spacing: 10
+                                property string schedWhat: "schedule_shutdown"
+                                Text { text: "定时任务（被控端执行）"; color: th.fg3; font.pixelSize: 11 }
+                                Row {
+                                    width: parent.width
+                                    spacing: 10
+                                    Repeater {
+                                        model: [ { k: "定时关机", a: "schedule_shutdown" }, { k: "定时重启", a: "schedule_reboot" } ]
+                                        delegate: Rectangle {
+                                            width: 84; height: 28; radius: th.rCtrl
+                                            color: (schedCol.schedWhat === modelData.a) ? th.inv : "transparent"
+                                            border.color: th.stroke; border.width: 1
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData.k
+                                                color: (schedCol.schedWhat === modelData.a) ? "#111" : th.fg3
+                                                font.pixelSize: 11
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: schedCol.schedWhat = modelData.a
+                                            }
+                                        }
+                                    }
+                                    TextField {
+                                        id: schedAt
+                                        width: 140
+                                        placeholderText: "HH:mm"
+                                        color: th.fg
+                                        validator: RegularExpressionValidator { regularExpression: /^([01]\d|2[0-3]):[0-5]\d$/ }
+                                    }
+                                    Button {
+                                        text: "设定"
+                                        onClicked: {
+                                            const at = schedAt.text.trim()
+                                            if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(at)) { hint("时间格式 HH:mm"); return }
+                                            const uid = backend.currentUid
+                                            if (!uid) { hint("先选中设备"); return }
+                                            const now = new Date()
+                                            const [h, m] = at.split(":").map(Number)
+                                            const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m)
+                                            if (target <= now) target.setDate(target.getDate() + 1)
+                                            // 被控端要 ISO 8601（含毫秒）——见 control-qt main.cpp schedule 分支
+                                            const iso = target.toISOString()
+                                            backend.sendAction(schedWhat, { "at": iso })
+                                            hint("已设定 " + at + " → " + uid)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 广播（对所有在线设备）──
+                        Rectangle {
+                            width: parent.width
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                anchors.fill: parent
+                                anchors.margins: 16
+                                spacing: 10
+                                Text { text: "广播（发给所有在线设备）"; color: th.fg3; font.pixelSize: 11 }
+                                TextField {
+                                    id: bcastText
+                                    width: parent.width
+                                    placeholderText: "广播内容"
+                                    color: th.fg
+                                }
+                                Button {
+                                    text: "广播"
+                                    onClicked: {
+                                        const content = bcastText.text.trim()
+                                        if (content === "") { hint("先填广播内容"); return }
+                                        const devs = backend.devices
+                                        if (!devs || devs.length === 0) { hint("没有在线设备"); return }
+                                        for (let i = 0; i < devs.length; ++i) {
+                                            backend.currentUid = devs[i].uid
+                                            backend.sendAction("notify", {
+                                                "title": "广播", "content": content,
+                                                "seconds": 10, "tts": false,
+                                                "flags": { "severity": "inform" }
+                                            })
+                                        }
+                                        hint("已广播给 " + devs.length + " 台设备")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ══ 3 设置 ══
             // 稿 03：pad + 两列卡片（账户 / 连接 / 提醒 / 外观）+ 通栏「关于」。
             // 现在只有「连接」「外观」两张是真的：前者读运行时状态，后者深浅切换确实做了。
             // 账户、提醒没有数据源 —— 规则要求"不假装能用"，所以卡片位置留着、内容留白，
@@ -1336,7 +1543,7 @@ ApplicationWindow {
                 spacing: 0
 
                 Repeater {
-                    model: [ "概览", "控制", "设置" ]
+                    model: [ "概览", "控制", "集控", "设置" ]
                     delegate: Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
