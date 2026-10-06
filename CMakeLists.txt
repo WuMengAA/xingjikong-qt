@@ -17,7 +17,10 @@ endif()
 # 刻意选 Widgets 版而不是 QML 版 WebEngineView：收流页根本不参与界面布局（它只负责
 # 渲染 <video> 再由 C++ 抽帧走现有 frame 通道），用 Widget 版可以像被控端那样 show 到屏幕外，
 # 不必为了一个隐藏渲染层去改 QML 布局。
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick WebSockets Widgets WebEngineWidgets WebChannel)
+# Network（2026-10-06 加）：站点账号登录要 QNetworkAccessManager（换令牌、取云端接入票）
+# 与 QTcpServer（接OAuth 回拨的 loopback 端口）。QWebSockets 会传递依赖到 Qt6::Network，
+# 但这里显式列出来 —— 链接表上读得见，换掉 WebSockets 时才不会被顺手漏掉。
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Network WebSockets Widgets WebEngineWidgets WebChannel)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
@@ -27,6 +30,15 @@ qt_add_executable(viewer-qt
   src/viewerbackend.h
   src/singleinstance.cpp
   src/singleinstance.h
+  src/oauthlogin.cpp
+  src/oauthlogin.h
+  # ── 课表编辑器模块（2026-10-06 从 schedule-qt 并入）──
+  src/schedule/profile_repository.cpp
+  src/schedule/schedule_model.cpp
+  src/schedule/timeslot_model.cpp
+  src/schedule/subject_model.cpp
+  src/schedule/cses_importer.cpp
+  src/schedule/undo_manager.cpp
 )
 # 界面资源：QML 模块 URI = Stelarith。
 # 2026-10-06：Main.qml 不再列进 QML_FILES —— 它原先是跟 exe 一起烧进二进制的，
@@ -44,6 +56,11 @@ qt_add_qml_module(viewer-qt
     qml/FilePushDialog.qml
     qml/NotifyDialog.qml
     qml/NotifyParams.js
+    qml/schedule/ScheduleEditor.qml
+    qml/schedule/ScheduleGrid.qml
+    qml/schedule/TimeAxis.qml
+    qml/schedule/TimeAxisBlock.qml
+    qml/schedule/SubjectManager.qml
 )
 
 # 2026-10-06：QML 不再编进 exe（见上面对 QML_FILES 的改动），改为构建后拷到
@@ -56,7 +73,7 @@ add_custom_command(TARGET viewer-qt POST_BUILD
           "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith"
   VERBATIM)
 
-target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::WebSockets Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel)
+target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel)
 set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE OFF)
 
 # ── Qt 运行时部署（用 Qt 官方部署工具 windeployqt）──

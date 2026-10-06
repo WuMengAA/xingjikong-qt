@@ -11,6 +11,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 
 ApplicationWindow {
     id: root
@@ -1022,6 +1023,31 @@ ApplicationWindow {
                                         color: th.op; font.pixelSize: 12
                                     }
                                 }
+                                // 网站账号（2026-10-06，OAuth 一户通）：账号过期/没登录时要能看见原因，
+                                // 并且能当场点一下重新登录 —— 不能让用户去翻日志才知道"票过期了"。
+                                Row {
+                                    Text { text: "账号"; color: th.fg3; font.pixelSize: 12; width: 70 }
+                                    Text {
+                                        id: acctText
+                                        text: backend.accountText
+                                        color: backend.accountBusy ? th.fg3 : th.op
+                                        font.pixelSize: 12
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+                                // 只在"没登录 / 失败了"这个可点的时候才出现，已登录时界面不该多一个按钮
+                                MouseArea {
+                                    visible: !backend.accountBusy && backend.accountText.indexOf("未登录") === 0
+                                    height: visible ? 26 : 0
+                                    width: parent.width
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: backend.loginWithSite()
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "点这里用网站账号登录"; color: th.op; font.pixelSize: 12
+                                    }
+                                }
                             }
                         }
                     }
@@ -1133,6 +1159,32 @@ ApplicationWindow {
                                         onClicked: root.darkMode = false
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    // ── 课表编辑器（2026-10-06 并入）──
+                    Rectangle {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        radius: th.rCard
+                        color: th.panel
+                        border.color: th.card
+                        border.width: 1
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 16
+                            spacing: 10
+                            Text { text: "课表编辑器"; color: th.fg3; font.pixelSize: 11 }
+                            Text {
+                                text: "排课、时间轴、科目管理与多周轮换（数据格式兼容 ClassIsland）"
+                                color: th.op; font.pixelSize: 12
+                                wrapMode: Text.Wrap
+                                width: parent.width
+                            }
+                            Button {
+                                text: "打开课表编辑器"
+                                onClicked: schedEditor.show()
                             }
                         }
                     }
@@ -1399,6 +1451,9 @@ ApplicationWindow {
     // 注意类名是 FilePushDialog 不是 FileDialog：同个文件里要 import QtQuick.Dialogs 拿原生
     // 选文件对话框，两个 FileDialog 撞名 qml 编译期就冲突了，所以弹窗这侧改名（2026-10-03）
     FilePushDialog { id: fileDlg; theme: root.th }
+
+    // 课表编辑器独立窗口（2026-10-06 并入）：设置页按钮 schedEditor.show() 打开
+    ScheduleEditor { id: schedEditor; visible: false }
 
     // ══════════════ 弹窗互斥 ══════════════
     // 软件/日志/媒体/定时/文件 都是同一块居中 modal 弹窗，谁后开谁压在谁上面。

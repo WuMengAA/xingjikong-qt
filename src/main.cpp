@@ -10,6 +10,14 @@
 #include "singleinstance.h"
 #include "viewerbackend.h"
 
+// ── 课表编辑器模块（从 schedule-qt 并入，2026-10-06）──
+#include "schedule/profile.h"
+#include "schedule/profile_repository.h"
+#include "schedule/schedule_model.h"
+#include "schedule/timeslot_model.h"
+#include "schedule/subject_model.h"
+#include "schedule/undo_manager.h"
+
 #include <QApplication>   // 2026-10-06：要托盘必须 QApplication（QSystemTrayIcon 属 QtWidgets）。
                           // Qt6Widgets 本来就链了（styles/Qt6Widgets.dll 也在绿色包里），
                           // 所以换 app 类型不增加任何打包负担。
@@ -203,6 +211,11 @@ int main(int argc, char *argv[])
     // 只有 QApplication 才建得起来。Qt6Widgets.dll 与 styles/ 本来就在绿色包里（为了 QFileDialog），
     // 所以这一步不增加任何打包负担、也不需要动 CMakeLists 的依赖表。
     QApplication app(argc, argv);
+    // 程序名必须显式定死：凭据（网站会话令牌 / 云端接入票）落在
+    // AppLocalDataLocation，Windows 上就是 %LOCALAPPDATA%/<程序名>。
+    // 默认程序名是 exe 文件名（viewer-qt），换 exe 名或改名打包就会换一个目录、
+    // 凭据读不到（表现为"每次重启都要重新登录"），这里钉死成一眼认得出的名字。
+    QCoreApplication::setApplicationName(QStringLiteral("Stelarith Viewer"));
     QCoreApplication::setApplicationVersion(QString::fromLatin1(kViewerVersion));
     logf("[viewer] viewer-qt 版本 %s（日志：%s）", kViewerVersion, logFilePath().toLocal8Bit().constData());
 
@@ -227,9 +240,81 @@ int main(int argc, char *argv[])
 
     ViewerBackend backend;
 
+    // ── 课表编辑器模型（2026-10-06 并入）──────────────────────────────
+    // 加载 ClassIsland 档案（默认 %LOCALAPPDATA%/ClassIsland/data/Profiles/Default.json），
+    // 为空则生成示例档案；模型持有 Profile 可变引用，编辑即改内存，点保存落盘。
+    ProfileRepository schedRepo;
+    Profile schedProfile = schedRepo.loadDefault();
+    if (schedProfile.classPlans.isEmpty()) {
+        logf("[viewer] 课表档案为空，生成示例档案（%s）",
+             qPrintable(schedRepo.defaultProfilePath()));
+        // 构造一份最小示例（3 节时间点 + 3 科目 + 2 套课表群）
+        schedProfile = Profile();
+        schedProfile.name = QStringLiteral("示例档案");
+        schedProfile.id = QUuid::createUuid().toString();
+        auto mkSlot = [](const QString& n, int h1, int m1, int h2, int m2) {
+            TimeSlot ts; ts.id = QUuid::createUuid().toString(); ts.name = n;
+            ts.startTime = QTime(h1, m1); ts.endTime = QTime(h2, m2);
+            ts.timeType = 0; ts.isActive = true; return ts;
+        };
+        TimeSlot ts1 = mkSlot(QStringLiteral("第一节"), 8,0, 8,45);
+        TimeSlot ts2 = mkSlot(QStringLiteral("第二节"), 8,55, 9,40);
+        TimeSlot ts3 = mkSlot(QStringLiteral("第三节"), 10,10, 10,55);
+        schedProfile.timeSlots.insert(ts1.id, ts1);
+        schedProfile.timeSlots.insert(ts2.id, ts2);
+        schedProfile.timeSlots.insert(ts3.id, ts3);
+        auto mkSub = [](const QString& n) { Subject s; s.id = QUuid::createUuid().toString();
+            s.name = n; s.simplifiedName = n.left(1); return s; };
+        Subject s1 = mkSub(QStringLiteral("语文"));
+        Subject s2 = mkSub(QStringLiteral("数学"));
+        Subject s3 = mkSub(QStringLiteral("英语"));
+        schedProfile.subjects.insert(s1.id, s1);
+        schedProfile.subjects.insert(s2.id, s2);
+        schedProfile.subjects.insert(s3.id, s3);
+        auto mkPlan = [&](const QString& name, int wd, const QList<QString>& subs) {
+            ClassPlan cp; cp.id = QUuid::createUuid().toString(); cp.name = name;
+            cp.weekDay = wd; cp.weekCountDiv = 1; cp.weekCountDivTotal = 1; cp.isActive = true;
+            int i = 0;
+            for (const QString& sid : subs) {
+                cp.lessons.append(Lesson{sid, wd, i++, 1, 1, true});
+            }
+            return cp;
+        };
+        ClassPlan c1 = mkPlan(QStringLiteral("周一"), 1, {s1.id, s2.id, s3.id});
+        ClassPlan c2 = mkPlan(QStringLiteral("周二"), 2, {s2.id, s3.id, s1.id});
+        schedProfile.classPlans.insert(c1.id, c1);
+        schedProfile.classPlans.insert(c2.id, c2);
+        ClassPlanGroup grp;
+        grp.id = QUuid::createUuid().toString();
+        grp.name = QStringLiteral("默认课表"); grp.isActive = true;
+        grp.classPlanIds = {c1.id, c2.id};
+        schedProfile.classPlanGroups.insert(grp.id, grp);
+        schedProfile.selectedClassPlanGroupId = grp.id;
+    }
+
+    ScheduleModel schedModel(schedProfile);
+    schedModel.setCurrentWeek(ScheduleModel::weekFromDate(QDate::currentDate()));
+    TimeSlotModel schedTimeSlotModel;
+    {
+        QList<TimeSlot> active;
+        for (const auto& ts : schedProfile.timeSlots) {
+            if (ts.isActive) active.append(ts);
+        }
+        schedTimeSlotModel.setSlots(active);
+    }
+    SubjectModel schedSubjectModel(schedProfile.subjects);
+    schedSubjectModel.setProfileRef(&schedProfile);
+    UndoManager schedUndo(&schedModel);
+
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    // 课表编辑器 context property（2026-10-06 并入）
+    engine.rootContext()->setContextProperty(QStringLiteral("scheduleModel"), &schedModel);
+    engine.rootContext()->setContextProperty(QStringLiteral("timeSlotModel"), &schedTimeSlotModel);
+    engine.rootContext()->setContextProperty(QStringLiteral("subjectModel"), &schedSubjectModel);
+    engine.rootContext()->setContextProperty(QStringLiteral("undoManager"), &schedUndo);
+    engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), schedRepo.defaultProfilePath());
     // 2026-10-06：QML 从**磁盘**加载，不再从 exe 里的资源读。
     // 为什么改：QML 编进 exe（qt_add_qml_module 的 QML_FILES）意味着改一个按钮文案都要重出整包，
     // 对教室里的管理端基本等于「改不了」。改成读磁盘后，界面层可作为补丁包单独下发（热更）。
@@ -269,6 +354,18 @@ int main(int argc, char *argv[])
         auto *menu = new QMenu();
         auto *actStatus = menu->addAction(QStringLiteral("状态：运行中"));
         actStatus->setEnabled(false);                       // 只显示，不可点
+        menu->addSeparator();
+        // 网站账号登录（2026-10-06）：登录入口必须有一个"看得见、点得到"的地方。
+        // 管理端常年缩在托盘里，账号过期这种事绝不能只躺在日志里 —— 就挂在这个菜单上。
+        auto *actLogin = menu->addAction(QStringLiteral("用网站账号登录"));
+        QObject::connect(actLogin, &QAction::triggered, &backend, [&backend] {
+            logf("[viewer] 用户点了托盘的「用网站账号登录」");
+            backend.loginWithSite();
+        });
+        auto *actForget = menu->addAction(QStringLiteral("退出网站登录"));
+        QObject::connect(actForget, &QAction::triggered, &backend, [&backend] {
+            backend.forgetAccount();
+        });
         menu->addSeparator();
         auto *actLog = menu->addAction(QStringLiteral("打开日志目录"));
         QObject::connect(actLog, &QAction::triggered, &app, [] {
