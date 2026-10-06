@@ -48,6 +48,8 @@
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
 #include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
 #include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 白名单轮询 + 计时）
+#include "audio_player.h"      // 2026-10-07：语音对讲播放（waveOut）
+#include "broadcast_view.h"    // 2026-10-07：屏幕广播全屏显示
 #include <QHostInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -123,6 +125,9 @@ constexpr const char *kAppVersion = "0.6.5";
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = 1000;
+// 语音对讲（2026-10-07）：学生端播放器（waveOut，懒打开——只在收到音频帧时开）
+AudioPlayer g_audioPlayer;
+bool g_audioHintShown = false;   // "老师正在讲话"提示是否已显示（每会话一次）
 int g_frameSeq = 0;
 qint64 g_frameBytes = 0;      // 累计发出的 JPEG 净荷（不含帧头）——与云端 bytesIn 对账用这个
 int g_instructionSeq = 0;
@@ -3899,6 +3904,32 @@ void handleControlText(const QString &text)
         return;
     }
 
+    // 语音对讲（2026-10-07）：老师开始/结束讲话 —— 重置"正在讲话"提示标记。
+    // （提示的实际显示在收到第一帧音频时触发；stop 后下次 start 再提示。）
+    if (type == QStringLiteral("audio.start")) {
+        g_audioHintShown = false;
+        qInfo("[agent-qt] 🔊 老师开始讲话（语音对讲）");
+        return;
+    }
+    if (type == QStringLiteral("audio.stop")) {
+        g_audioHintShown = true;   // 结束后不再提示
+        g_audioPlayer.closePlayer();
+        qInfo("[agent-qt] 🔊 老师结束讲话（语音对讲已静音）");
+        return;
+    }
+
+    // 屏幕广播（2026-10-07）：学生端提示"正在接收老师屏幕"。
+    // 实际显示在收到第一帧时；stop 关闭窗口恢复。
+    if (type == QStringLiteral("broadcast.start")) {
+        qInfo("[agent-qt] 📺 老师开始屏幕广播");
+        return;
+    }
+    if (type == QStringLiteral("broadcast.stop")) {
+        BroadcastView::inst().stop();
+        qInfo("[agent-qt] 📺 老师结束屏幕广播，已恢复");
+        return;
+    }
+
     if (type == QStringLiteral("instruction")) {
         g_instructionSeq++;
         const QString action = pay.value(QStringLiteral("action")).toString();
@@ -3939,8 +3970,12 @@ void handleControlText(const QString &text)
             QStringList whitelist;
             const QJsonArray arr = params.value(QStringLiteral("whitelist")).toArray();
             for (const QJsonValue &v : arr) whitelist.append(v.toString());
-            ExamMode::inst().start(minutes, whitelist);
-            sendActionReceipt(id, action, QStringLiteral("started"));
+            // ⚠️ 2026-10-07 蓝屏事故后：start() 会**拒绝**在"白名单为空"时启用进程终止
+            //    （空白名单⇒无差别杀进程⇒杀掉 critical 的 svchost⇒内核 0xEF 蓝屏）。
+            //    这里必须如实把原因带进回执 —— 报"started 一切正常"就是骗老师。
+            const bool enforcing = ExamMode::inst().start(minutes, whitelist);
+            sendActionReceipt(id, action, QStringLiteral("started"),
+                              enforcing ? QString() : ExamMode::inst().reason());
             return;
         }
         if (action == QStringLiteral("exam_mode_stop")) {
@@ -4247,6 +4282,36 @@ int main(int argc, char *argv[])
 
     QObject::connect(g_ws, &QWebSocket::textMessageReceived, &app, [](const QString &msg) {
         handleControlText(msg);
+    });
+    // 语音对讲（2026-10-07）：云端转发来的音频帧（v1 二进制帧，mime=audio/pcm）。
+    // 与画面帧区分：画面帧是 agent→云端→viewer 的单向（被控端不接收）；这里只收 audio。
+    QObject::connect(g_ws, &QWebSocket::binaryMessageReceived, &app, [](const QByteArray &msg) {
+        // v1 帧：[1B 版本][2B headerLen][header JSON][payload]；header.mime 标 audio/pcm
+        if (msg.size() < 4 || (uchar)msg[0] != 1) return; // 非 v1 帧忽略
+        const int hLen = ((uchar)msg[1] << 8) | (uchar)msg[2];
+        if (hLen <= 0 || hLen > 4096 || msg.size() < 3 + hLen) return;
+        const QByteArray head = msg.mid(3, hLen);
+        const QJsonDocument doc = QJsonDocument::fromJson(head);
+        if (!doc.isObject()) return;
+        const QString mime = doc.object().value(QStringLiteral("mime")).toString();
+        const QByteArray payload = msg.mid(3 + hLen);
+        if (mime == QLatin1String("audio/pcm")) {
+            // 语音对讲（设计文档 3.3.6）：老师讲话学生可见（每会话一次，不刷屏）
+            if (!g_audioHintShown) {
+                g_audioHintShown = true;
+                NotifyWindow::showNotice(NotifyWindow::Island, QStringLiteral("老师正在讲话"),
+                                         QStringLiteral("老师正在通过语音对讲广播"), 4, false);
+            }
+            if (!g_audioPlayer.isOpen()) g_audioPlayer.open();
+            g_audioPlayer.write(payload);
+            return;
+        }
+        if (mime == QLatin1String("image/jpeg")) {
+            // 屏幕广播（2026-10-07）：老师屏幕全屏显示
+            BroadcastView::inst().showFrame(payload);
+            return;
+        }
+        // 其他 mime 忽略（画面帧等）
     });
     // 远程终端出帧通道（云端一推 terminal_data 就经这里出去；没连上会如实记 error 不假装成功）
     TerminalConsole::inst().setSocket(g_ws);

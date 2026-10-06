@@ -38,6 +38,12 @@ add_executable(stelarith-agent-qt
   # ── 考试模式（2026-10-06 加：全屏拦截 + 白名单轮询 + 计时，设计文档 3.7 第一版）──
   src/exam_mode.cpp
   src/exam_mode.h
+  # ── 语音对讲（2026-10-07 加：waveOut 播放，设计文档 3.3 第一版）──
+  src/audio_player.cpp
+  src/audio_player.h
+  # ── 屏幕广播（2026-10-07 加：全屏显示老师屏幕，设计文档《屏幕广播》第一版）──
+  src/broadcast_view.cpp
+  src/broadcast_view.h
 )
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::WebEngineWidgets Qt6::Network)
 
