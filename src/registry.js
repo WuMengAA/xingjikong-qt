@@ -20,12 +20,17 @@ function sendTo(ws, type, payload, id = '') {
 /** uid -> { uid, version, ws, connectedAt, lastSeen, framesIn, bytesIn, lastError, recentFrame } */
 const devices = new Map();
 
+/** 上次记进日志的"观看结论"（uid + 被看人数），用来决定要不要再记一行 —— 见 pushWatchToAgent 末尾。 */
+let lastWatchLogUid = null;
+let lastWatchLogN = -1;
+
 /* 说明：指令队列已改为**落盘**（见 store.js）。
  * 原先这里有个内存态 `pending` Map，但云端一重启就没了、设备重连也不回放——那正是本功能要修的洞。
  * 现在"已下发未回执"的指令一律进 SQLite，重启不丢、设备重连按原顺序补发。 */
 
 /**
- * viewer ws -> { subs:Set<uid>, auto:boolean }
+ * viewer ws -> { subs:Set<uid>, live:Set<uid>, auto:boolean }
+ *   live 里的 uid = 这个管理端要实时流（远控中）；只有它们才会让设备端 rtc-start。
  *   subs = 这个管理端在看哪几台
  *   auto = true 表示「还没让管理端显式挑过」，设备上线时自动补订阅
  * 为什么要有 auto：管理端常常比教室机先开机（老师先打开管理软件，教室机后启动），
@@ -175,6 +180,10 @@ export function markConnected(uid, version, ws, caps = null) {
     actions: caps?.actions ?? old?.actions ?? null,
   });
   pushEvent('info', '设备已注册并连上', { uid, version });
+  // 刚上线：之前那些"订阅/退订"它一条都没收到过（那时它不在线，全记成 warn 了）。
+  // 补发一次当前的"你在被看着"结论，否则新上线会停在"没人看"上一直不抓屏。
+  // 没人看时这次推送只是白跑一回 send（uids 空数组），比让它永久空转强。
+  pushWatchToAgent(String(uid || '').trim());
 }
 
 export function markDisconnected(ws) {
@@ -266,23 +275,41 @@ export function getDevice(uid) {
 /* ---------- 管理端（viewer）：订阅帧 + 收设备表 ---------- */
 
 export function addViewer(ws) {
-  viewers.set(ws, { subs: new Set(), auto: true });
+  // live：按 uid 记"这个管理端要的是实时流还是只看图"。
+  // 默认（不记）就是只看图 —— 别一接上就让人家被控端烧起 Chromium 推流。
+  viewers.set(ws, { subs: new Set(), live: new Set(), auto: true });
   return viewers.size;
 }
 
 export function removeViewer(ws) {
+  // 这个管理端 diss 掉之后，它订阅过的那几台"到底还有没有人看"全变了 ——
+  // 必须逐台重算并推给设备（否则设备还停在那台管理端已走的旧结论上，继续白抓屏）。
+  const affected = [];
+  for (const [vws, v] of viewers) {
+    if (vws !== ws) continue;
+    for (const k of v.subs) if (!affected.includes(k)) affected.push(k);
+  }
   viewers.delete(ws);
+  for (const k of affected) pushWatchToAgent(k);
 }
 
 export function viewerCount() {
   return viewers.size;
 }
 
-/** 订阅某设备的帧。返回 false = 这个.ws 不是已注册的 viewer（连接早断了）。 */
-export function subscribeViewer(ws, uid) {
+/**
+ * 订阅某设备的帧。返回 false = 这个.ws 不是已注册的 viewer（连接早断了）。
+ * live=true 记进 v.live：只有它需要实时流（管理端点过"远控"）时才让设备端起推流。
+ */
+export function subscribeViewer(ws, uid, live) {
   const v = viewers.get(ws);
   if (!v) return false;
-  v.subs.add(String(uid || '').trim());
+  const k = String(uid || '').trim();
+  v.subs.add(k);
+  if (live === true) v.live.add(k); else v.live.delete(k);
+  // 订阅变了 → 把"现在谁在看这台"的最新结论推给设备（见 pushWatchToAgent）。
+  // 设备端靠它决定要不要继续抓屏发帧：没人看的机器一个字节帧都不该发。
+  pushWatchToAgent(k);
   return true;
 }
 
@@ -290,7 +317,53 @@ export function subscribeViewer(ws, uid) {
 export function unsubscribeViewer(ws, uid) {
   const v = viewers.get(ws);
   if (!v) return false;
-  return v.subs.delete(String(uid || '').trim());
+  const k = String(uid || '').trim();
+  v.live.delete(k);
+  const gone = v.subs.delete(k);
+  if (gone) pushWatchToAgent(k);
+  return gone;
+}
+
+/**
+ * 把"这台设备当前被谁看着"的最新结论推给设备（type=watch）。
+ * 为什么不让设备自己猜：设备端根本不知道云端有几个管理端、谁订了谁没订，
+ * 只能"按时抓屏发帧"——机房几十台常年这么空转，CPU/GPU 就是这么吃满的（2026-10-07）。
+ * 现在订阅关系一变，云端就显式告诉设备：你在不在被看。没人看就不抓、不编码、不发包。
+ *
+ * ⚠️ 失败必须如实记（不让设备停在一个过期的"没人看"结论上，那就等于永久黑屏）：
+ * 设备此刻不在线很常见（管端先订阅、机器后开机），这种只记 warn；
+ * 真写出去了才算送到。
+ * @param {string} uid 设备码
+ * @returns {{ok:boolean, watchers:number}}
+ */
+export function pushWatchToAgent(uid) {
+  const key = String(uid || '').trim();
+  const d = devices.get(key);
+  if (!d || !d.ws || d.ws.readyState !== 1) {
+    // 设备不在线：这次推不成，等它上线自会再收到一次（markConnected 末尾会补一次），
+    // 不至于永久停在旧结论上。仍然记一笔，不许假装送到了。
+    pushEvent('warn', '没人看这台的通知没送到设备（这台此刻不在线）', { uid: key, type: 'watch' });
+    return { ok: false, watchers: -1 };
+  }
+  const uids = [];
+  for (const [ws, v] of viewers) {
+    if (ws.readyState !== 1) continue;
+    if (v.subs.has(key)) uids.push(key);
+  }
+  try {
+    sendTo(d.ws, 'watch', { uids });
+  } catch (e) {
+    pushEvent('error', '没人看这台的通知写给设备失败', { uid: key, error: e.message });
+    return { ok: false, watchers: -1 };
+  }
+  // 只在"被看着的人数"发生变化时记一行：订阅一变就推，每次都记会把日志刷满。
+  // 这行同时是排障凭据 —— 不然云端说"发了"、设备说"没收到"，两边只能互相猜。
+  if (lastWatchLogUid !== key || lastWatchLogN !== uids.length) {
+    lastWatchLogUid = key;
+    lastWatchLogN = uids.length;
+    pushEvent('info', '已把观看结论推给设备', { uid: key, watchers: uids.length });
+  }
+  return { ok: true, watchers: uids.length };
 }
 
 /** 管理端显式挑了某台之后，就不再自动给它补订阅别的设备了。 */
@@ -310,8 +383,13 @@ export function autoSubscribeViewers(uid) {
     n++;
     try { sendTo(ws, 'subscribed', { uid: key, auto: true }); }
     catch (e) { pushEvent('error', '给管理端补订阅通知失败', { uid: key, error: e.message }); viewers.delete(ws); }
-    // 设备上线后第一次有人看 -> 让设备把 WebRTC 推流起起来（没人看就不推，不空耗 CPU）
-    rtcSignalToAgent(key, 'rtc-start', { uid: key, auto: true });
+    // 设备上线后第一次有人看：只有这个管理端选的是"实时流"（之前点过远控）才推流。
+    // 只看图的话不推 —— 被控端每推一次都要抓屏 + 拉起 Chromium 采集，机房几十台一起推，
+    // 机器直接卡。默认一律走 JPEG 轮询，点远控才升级成实时。
+    if (v.live && v.live.has(key)) rtcSignalToAgent(key, 'rtc-start', { uid: key, auto: true });
+    // 补完订阅就把"你在被看着"的最新结论补发一次 —— 设备刚上线，之前所有订阅变更它都没收到过，
+    // 停在一个"没人看"的旧结论上就会一直不抓屏（画面永远空着）。
+    pushWatchToAgent(key);
   }
   return n;
 }
@@ -399,8 +477,9 @@ export function recordResult(id, uid, action, result, error, data) {
     id,
     uid,
     action,
-    // 只放行 three 种已知态；设备回了个没见过的串，一律按 failed 记（保底：宁可显眼，别蒙过去）
-    result: (result === 'done' || result === 'started') ? result : 'failed',
+    // 只放行三种已知态 + confirmed（2026-10-07 通知确认）：设备回了个没见过的串，
+    // 一律按 failed 记（保底：宁可显眼，别蒙过去）。
+    result: (result === 'done' || result === 'started' || result === 'confirmed') ? result : 'failed',
     error: error || null,
     data: (data && typeof data === 'object') ? data : null,
     at: new Date().toISOString(),
