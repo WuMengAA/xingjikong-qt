@@ -201,9 +201,12 @@ function make(fromDir, outDir) {
 	if (!fs.existsSync(SEVEN_ZIP)) fail(`找不到 7-Zip：${SEVEN_ZIP}`);
 
 	// 1) 先按清单核源目录（在拷之前就报错，别拷一半）
-	const missing = REQUIRED.filter((f) => !fs.existsSync(path.join(fromDir, f)));
+	//    ⚠️ 必需件允许回落 deploy/：viewer.env / start-viewer.cmd 是配置文件，构建不产出它们
+	//    （0.6.3 之前这点没人管过，所以那包里压根没这两件）。只有"两边都没有"才算真缺。
+	const has = (f) => fs.existsSync(path.join(fromDir, f)) || fs.existsSync(path.join(ROOT, "deploy", f));
+	const missing = REQUIRED.filter((f) => !has(f));
 	if (missing.length) {
-		fail(`构建输出里就缺这些必需件，先修构建再出包：\n  · ${missing.join("\n  · ")}`);
+		fail(`构建输出里就缺这些必需件（build/ 和 deploy/ 都没有），先补上再出包：\n  · ${missing.join("\n  · ")}`);
 	}
 
 	// 2) 组装干净的一层目录（不嵌套、不带旧副本）
@@ -212,7 +215,25 @@ function make(fromDir, outDir) {
 	fs.mkdirSync(pkg, { recursive: true });
 	log(`组装 → ${path.relative(ROOT, pkg)}`);
 
+	// ⚠️ 2026-10-06 修：viewer.env / start-viewer.cmd 住在 deploy/ 下，**构建从来不产出它们**
+	//    （CMake 的 POST_BUILD 只拷 qml/）。原来这份白名单只认 build/ 里的同名文件，
+	//    等于永远匹配不上 —— 0.6.3 那包"配置没带全"就是这么来的（0.6.4 能过是因为恰好
+	//    有人手动往 build/ 里塞过一次，靠巧合，不可依赖）。找不到就回落到 deploy/ 取。
+	const extraFrom = new Map();
+	for (const name of EXTRA_FILES) {
+		if (fs.existsSync(path.join(fromDir, name))) continue;
+		const inDeploy = path.join(ROOT, "deploy", name);
+		if (fs.existsSync(inDeploy)) {
+			extraFrom.set(name, inDeploy);
+			log(`  build/ 里没有 ${name} → 从 deploy/ 取`);
+		}
+	}
+
 	const copied = [];
+	for (const [name, src] of extraFrom) {
+		fs.copyFileSync(src, path.join(pkg, name));
+		copied.push(name);
+	}
 	for (const ent of fs.readdirSync(fromDir, { withFileTypes: true })) {
 		if (EXCLUDE_NAMES.has(ent.name)) continue;
 		const src = path.join(fromDir, ent.name);

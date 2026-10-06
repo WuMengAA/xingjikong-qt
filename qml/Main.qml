@@ -1246,28 +1246,11 @@ ApplicationWindow {
                                     placeholderText: "广播内容"
                                     color: th.fg
                                 }
-                                    Button {
-                                        text: "广播"
-                                        onClicked: {
-                                            // 广播一发打到所有在线设备，跟"选一台发通知"不是一个量级
-                                            if (!backend.mayDo("broadcast")) {
-                                                hint("广播要给所有机器发，要管理员身份");
-                                                return
-                                            }
-                                            const content = bcastText.text.trim()
-                                            if (content === "") { hint("先填广播内容"); return }
-                                        const devs = backend.devices
-                                        if (!devs || devs.length === 0) { hint("没有在线设备"); return }
-                                        for (let i = 0; i < devs.length; ++i) {
-                                            backend.currentUid = devs[i].uid
-                                            backend.sendAction("notify", {
-                                                "title": "广播", "content": content,
-                                                "seconds": 10, "tts": false,
-                                                "flags": { "severity": "inform" }
-                                            })
-                                        }
-                                        hint("已广播给 " + devs.length + " 台设备")
-                                    }
+                                Button {
+                                    text: "广播"
+                                    // 真正的事（权限、空内容、逐台下发）都交给 root.broadcastAll()：
+                                    // 命令面板上同一件事也得做一遍，抽出来才不会两边漂移
+                                    onClicked: root.broadcastAll(bcastText.text)
                                 }
                             }
                         }
@@ -1911,7 +1894,67 @@ ApplicationWindow {
     // 音量滑块（volumeDlg）是贴在画面上的小浮层，不在这四个里，照旧可共存。
     // 顶栏那颗「去设置」在账户组件里够不着 root，这里把跳转塞给它。
     // 不用 root.page = 3 写在组件里：页号是主界面的事，别让它去猜。
-    Component.onCompleted: acctMenu.goSettings = function () { root.page = 3 }
+    // 命令面板：组件只负责「收得进 / 搜得到 / 显示对」，命令表由主界面在这里装配 ——
+    // 命令要跑 runAction / openOnly / page，郣些都住在主界面里，组件自己挑不到。
+    CommandPalette {
+        id: pal
+        theme: root.th
+        ctx: root
+    }
+
+    // 快捷键（设计文档 4.7）：老师站在讲台前，一等一按就出事。
+    // Ctrl+F 在原设计里是「集焦搜索框」，这版界面没有设备搜索框，命令面板就是那个入口。
+    Shortcut { sequence: "Ctrl+K"; onActivated: { pal.open() } }
+    Shortcut { sequence: "Ctrl+F"; onActivated: { pal.open() } }
+    Shortcut { sequence: "F5";     onActivated: { backend.requestDevices() } }
+    Shortcut { sequence: "Ctrl+1"; onActivated: { root.page = 0 } }
+    Shortcut { sequence: "Ctrl+2"; onActivated: { root.page = 1 } }
+    Shortcut { sequence: "Ctrl+3"; onActivated: { root.page = 2 } }
+    Shortcut { sequence: "Ctrl+4"; onActivated: { root.page = 3 } }
+
+    Component.onCompleted: {
+        acctMenu.goSettings = function () { root.page = 3 }
+        pal.cmds = [
+            // ── 敛c室机动作 ─────────────────────────────────────
+            // 全部走 runAction()，和右栏按钮同一条路 —— 权限门控、能力门控都在郣儿，命令面板軚0过去就等于开了条后门（界面置灰了，快捷键却点得动，最容易出事）。
+            { name: "锁屏敛c机机",       keys: ["lock", "suo", "sjb"], tip: "敛c机机立刻锁屏（要管理员身份）", run: function () { root.runAction({ l: "锁屏", a: "lock", t: false, p: "admin" }) } },
+            { name: "重启敛c机机",       keys: ["reboot", "chongqi", "cq"], tip: "重启敛c机机（要管理员身份）", run: function () { root.runAction({ l: "重启", a: "reboot", t: false, p: "admin" }) } },
+            { name: "关机敛c机机",       keys: ["shutdown", "guanji", "gj"], tip: "关控敛c机机（要管理员身份）", run: function () { root.runAction({ l: "关机", a: "shutdown", t: false, p: "admin" }) } },
+            { name: "给敛c机机发通知",   keys: ["notify", "tongzhi", "tz"], tip: "填标题和正文后下发（要填内容）", run: function () { root.runAction({ l: "通知", a: "", t: false }) } },
+            { name: "打开终端",         keys: ["terminal", "cmd", "zhongduan"], tip: "命令行窗口（要管理员身份）", run: function () { root.runAction({ l: "终端", a: "", t: false, p: "admin" }) } },
+            { name: "开始远程控制",     keys: ["remote", "yuankong", "yk"], tip: "实时接管鼠标键盘（要管理员身份）", run: function () { root.runAction({ l: "远控开", a: "remote_control_start", t: false, p: "admin" }) } },
+            { name: "停止远程控制",     keys: ["remote", "yk"], tip: "把上一路的远控收掉", run: function () { root.runAction({ l: "远控关", a: "remote_control_stop", t: false, p: "admin" }) } },
+            { name: "截图",             keys: ["screenshot", "jieku", "jk"], tip: "抓一帧画面回来", run: function () { root.runAction({ l: "截图", a: "screenshot", t: false }) } },
+            { name: "拍一张（摄像头）", keys: ["camera_snapshot", "paizhao", "pz"], tip: "摄像头存一帧", run: function () { root.runAction({ l: "拍一张", a: "camera_snapshot", t: false }) } },
+            { name: "看可打开的软件",   keys: ["software", "ruanjian", "rj"], tip: "这台机器上有的程序 + 正在跑的", run: function () { root.runAction({ l: "软件", a: "process_list", t: false }) } },
+            { name: "看敛c机机日志",     keys: ["log", "rizhi", "rz"], tip: "读日志尾部", run: function () { root.runAction({ l: "日志", a: "log_tail", t: false }) } },
+            { name: "探一探活",         keys: ["ping", "tanhuo", "th"], tip: "看这台机器还在不在", run: function () { root.runAction({ l: "探活", a: "", t: false }) } },
+            { name: "看摄像头列表",     keys: ["camera", "shexiangtou", "sxt"], tip: "这台机器上有几个摄像头", run: function () { root.runAction({ l: "摄像头", a: "camera_list", t: false }) } },
+            { name: "调音量",           keys: ["volume", "yinliang", "yl"], tip: "打开音量浮层", run: function () { root.runAction({ l: "音量", a: "", t: false }) } },
+            { name: "分发文件",         keys: ["file", "wenjian", "wj"], tip: "选一个文件推给敛c机机", run: function () { root.runAction({ l: "文件", a: "", t: false }) } },
+            { name: "定时任务",         keys: ["schedule", "dingshi", "ds"], tip: "排一个定时关机 / 重启", run: function () { root.runAction({ l: "定时", a: "list_schedules", t: false }) } },
+            { name: "看媒体文件",       keys: ["media", "meiti", "mt"], tip: "敛c机机上的影音文件", run: function () { root.runAction({ l: "媒体", a: "media_list", t: false }) } },
+            { name: "开始录像",         keys: ["record", "luxiang", "lx"], tip: "摄像头开始录（要管理员身份）", run: function () { root.runAction({ l: "开录", a: "camera_record_start", t: false, p: "admin" }) } },
+            { name: "停止录像",         keys: ["record", "lx"], tip: "把录制收掉", run: function () { root.runAction({ l: "停录", a: "camera_record_stop", t: false }) } },
+            { name: "播放媒体",         keys: ["play", "bofang", "bf"], tip: "在敛c机机放一遍", run: function () { root.runAction({ l: "播放", a: "media_session_start", t: false }) } },
+            { name: "停止播放",         keys: ["stop", "tingbo", "tb"], tip: "把播放停掉", run: function () { root.runAction({ l: "停播", a: "media_session_stop", t: false }) } },
+            // ── 视图 ────────────────────────────────────
+            { name: "切到概览",         keys: ["overview", "gailan", "gl"], tip: "在线设备 + 最近回执 + 今日课表", run: function () { root.page = 0 } },
+            { name: "切到控制",         keys: ["control", "kongzhi", "kz"], tip: "看敛c机机画面 + 下发动作", run: function () { root.page = 1 } },
+            { name: "切到集控",         keys: ["jikong", "jk"], tip: "集控面板", run: function () { root.page = 2 } },
+            { name: "切到设置",         keys: ["settings", "shezhi", "sz"], tip: "账户 / 连接 / 提醒 / 外观", run: function () { root.page = 3 } },
+            { name: "去广播给所有在线设备", keys: ["broadcast", "guangbo", "gb"], tip: "广播要填内容，去控制页下面填再点", run: function () { root.page = 1 } },
+            // ── 系统 ───────────────────────────────────
+            { name: "刷新设备列表",     keys: ["refresh", "shuaxin", "sx"], tip: "重新拉一運云端下发（也可按 F5）", run: function () { backend.requestDevices() } },
+            { name: "用网站账号登录",   keys: ["login", "denglu", "dl"], tip: "走星琥账号授权，不用填密钥", run: function () { backend.loginWithSite() } },
+            { name: "切成管理员身份",   keys: ["admin", "guanliyuan"], tip: "能操作敛c机机（电源 / 远控）", run: function () { backend.setRole("admin") } },
+            { name: "切成敛c师身份",     keys: ["teacher", "jiaoshi", "js"], tip: "只留看画面 / 发通知 / 推文件", run: function () { backend.setRole("teacher") } },
+            { name: "切到黑白外观",     keys: ["dark", "heibai", "hb"], tip: "默认外观", run: function () { root.darkMode = true } },
+            { name: "切到浅色外观",     keys: ["light", "qianse", "qs"], tip: "换个亮堂的", run: function () { root.darkMode = false } },
+            { name: "打开官网下载页",   keys: ["download", "xiazai", "xz"], tip: "在浏览器里打开 www.245959623.xyz/download", run: function () { backend.openExternal("https://www.245959623.xyz/download") } }
+        ]
+    }
+
 
     function openOnly(which) {
         softwareDlg.close()
@@ -2012,5 +2055,27 @@ ApplicationWindow {
         } else if (d.a !== "") {
             backend.sendAction(d.a, {})
         }
+    }
+
+    // 广播：原来这段逻辑写死在控制页那题按钮的 onClicked 里，现在命令面板也要发广播，
+    // 抽到这儿两边共用（顺序保持原样：权限 → 内容 → 有没有设备 → 逐台下发）。
+    function broadcastAll(text) {
+        if (!backend.mayDo("broadcast")) {
+            hint("广播要给所有机器发，要管理员身份");
+            return
+        }
+        const content = (text || "").trim()
+        if (content === "") { hint("先填广播内容"); return }
+        const devs = backend.devices
+        if (!devs || devs.length === 0) { hint("没有在线设备"); return }
+        for (let i = 0; i < devs.length; ++i) {
+            backend.currentUid = devs[i].uid
+            backend.sendAction("notify", {
+                "title": "广播", "content": content,
+                "seconds": 10, "tts": false,
+                "flags": { "severity": "inform" }
+            })
+        }
+        hint("已广播给 " + devs.length + " 台设备")
     }
 }
