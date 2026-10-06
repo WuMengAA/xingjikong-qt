@@ -10,6 +10,20 @@
 
 #pragma once
 
+/**
+ * 站点首页地址（OAuth 授权页 / 取接入票都长在这台站点上）。
+ *
+ * 单一真源：ViewerBackend 与 OAuthLogin 都从这里取默认值 ——
+ * 两处各写一个字面量的话，改站点域名时必漏一处，界面上就表现成
+ * 「登录按钮没反应」和「取票 404」同时出现，很难归因。
+ *
+ * 为什么要有这个默认值：管理端是发给老师机装的用法，让对方去解压包再手填
+ * STE_SITE_URL 就是"半自动"。站点地址这是**公开信息**（下载中心本来就写着），
+ * 不该由用户配置。真正需要保密的东西（客户端密钥）反而不在这里 ——
+ * loopback 原生客户端按 RFC 8252 走公开客户端，压根不需要密钥。
+ */
+static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
+
 #include <QFile>
 #include <QImage>
 #include <QJsonArray>

@@ -51,8 +51,27 @@ const REQUIRED = [
 	// 2026-10-06：QML 改从磁盘加载，这份源码链路就是"界面本体"。
 	// 漏了它 = 装出来的管理端双击没反应（QML 加载失败只有一行日志，然后直接退出），
 	// 归到必需件里，让「漏带界面」在出包这一步就炸，而不是等装机现场才发现。
-	"qml/Stelarith/Main.qml"
+	"qml/Stelarith/Main.qml",
+	// 2026-10-06：配置与启动器。**0.6.3 的包里压根没有这两个文件** —— 见 EXTRA_FILES 的注释。
+	// 没有它们，用户双击出来的管理端连"站点地址"都没有，账户胶囊上就是一句"未配置站点地址"，
+	// 登录按钮点了只会在日志里留一行 FAIL。装机现场根本无从排查。
+	"viewer.env",
+	// ⚠️ 文件名必须保持 ASCII。原来叫「启动管理端.cmd」，检查一直报"缺必需件"，
+	//    但 zip 里明明有 —— 是 7z 的列表输出按系统 ACP（中文机是 GBK）给名字，
+	//    node 按 UTF-8 拼回来就成了乱码，必需件判定永远碰不上。内容里的中文提示
+	//    照旧（.cmd 第一行就 chcp 65001，UTF-8 文件读得出来），只有**文件名**用 ASCII。
+	"start-viewer.cmd"
 ];
+
+/**
+ * 根目录散文件里**必须跟着进包**的那几个。
+ *
+ * ⚠️ 下面拷贝循环原来只拷 .dll/.exe/.pak/.dat 后缀，于是 viewer.env（无后缀）
+ *    和 启动管理端.cmd 每次都被静默跳过 —— 0.6.3 那包就是这样"配置没带全"的。
+ *    这不是后缀白名单能覆盖的，点名列出更稳：以后新增一种必须配送的文件，
+ *    加到这份清单里，忘了加就会在 REQUIRED 那一步当场炸。
+ */
+const EXTRA_FILES = ["viewer.env", "start-viewer.cmd"];
 
 /** 要一并搬进包里的目录（windeployqt / QtWebEngine 产出的运行时目录）。 */
 const INCLUDE_DIRS = [
@@ -206,7 +225,10 @@ function make(fromDir, outDir) {
 			fs.cpSync(src, dst, { recursive: true });
 			copied.push(ent.name + "/");
 		} else if (ent.isFile()) {
-			if (ent.name.endsWith(".dll") || ent.name.endsWith(".exe") || ent.name.endsWith(".pak") || ent.name.endsWith(".dat")) {
+			const binaryish = ent.name.endsWith(".dll") || ent.name.endsWith(".exe")
+				|| ent.name.endsWith(".pak") || ent.name.endsWith(".dat");
+			// 配置/启动器这类文本文件没有常见后缀，靠 EXTRA_FILES 点名（见那份清单的注释）
+			if (binaryish || EXTRA_FILES.includes(ent.name)) {
 				fs.copyFileSync(src, dst);
 				copied.push(ent.name);
 			}

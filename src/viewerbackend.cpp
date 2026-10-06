@@ -468,8 +468,11 @@ void ViewerBackend::pickTicketOrToken(QJsonObject &p) const
 void ViewerBackend::loginWithSite()
 {
     if (m_accountBusy) return;
+    // 站点地址在 start() 里已经有默认值，这里兜的是"万一有人把它清掉"。
+    // 清掉就退回老路（静态令牌）并如实说明，不要弹一句"没配站点地址"让用户去翻配置 ——
+    // 站点地址是公开的，本来就不该让用户配。
     if (m_siteUrl.isEmpty()) {
-        logf("[account] FAIL 没配 STE_SITE_URL，先去 viewer.env 加上站点地址");
+        logf("[account] FAIL 站点地址为空，退回静态令牌（老机器未配 STE_SITE_URL）");
         m_accountFatal = true;
         refreshAccountText();
         return;
@@ -610,7 +613,9 @@ void ViewerBackend::start()
              "既没静态令牌也没接入票的话会被拒绝（不是网络问题，是没带凭据）");
     }
     m_siteUrl = qEnvironmentVariable("STE_SITE_URL", QString()).trimmed();
-    logf("[viewer] 云端地址 %s", m_url.toUtf8().constData());
+    if (m_siteUrl.isEmpty()) m_siteUrl = QString::fromUtf8(kDefaultSiteUrl);
+    logf("[viewer] 云端地址 %s / 站点 %s", m_url.toUtf8().constData(),
+         m_siteUrl.toUtf8().constData());
     emit cloudUrlChanged();
 
     // ── 站点账号（OAuth 一户通，2026-10-06）──

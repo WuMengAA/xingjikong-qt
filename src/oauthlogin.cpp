@@ -74,29 +74,27 @@ void OAuthLogin::begin()
         return;
     }
 
+    // 站点地址：环境变量能覆盖（本机联调自有站点），没配就用生产站点 ——
+    // 管理端是发下去给人装的东西，一上来就报"没配站点地址"等于逼用户去看文档。
     m_siteUrl = QString::fromLocal8Bit(qgetenv("STE_SITE_URL")).trimmed();
+    if (m_siteUrl.isEmpty()) m_siteUrl = QString::fromUtf8(kDefaultSiteUrl);
     m_clientId =
         QString::fromLocal8Bit(qgetenv("STE_OAUTH_CLIENT_ID")).trimmed().isEmpty()
             ? QStringLiteral("xingjikong_native")   // 站点里已登记的那台桌面端客户端
             : QString::fromLocal8Bit(qgetenv("STE_OAUTH_CLIENT_ID")).trimmed();
+    // 密钥**不是必需的**：xingjikong_native 是 loopback 原生客户端，站点按 RFC 8252
+    // 把它当公开客户端（validateClient 里的 PUBLIC 哨兵分支：要求对方「明确不带」密钥）。
+    // ⚠️ 这里一旦因为"密钥没配"直接失败，用户只会看到"绑定失败"，而真正的问题从来不在密钥上
+    //    —— 所以留空是正常状态，不是错误状态。
     m_clientSecret = QString::fromLocal8Bit(qgetenv("STE_OAUTH_CLIENT_SECRET")).trimmed();
     const QString redirectPath =
         QString::fromLocal8Bit(qgetenv("STE_OAUTH_REDIRECT_PATH")).trimmed().isEmpty()
             ? QStringLiteral("/oauth-callback")
             : QString::fromLocal8Bit(qgetenv("STE_OAUTH_REDIRECT_PATH")).trimmed();
 
-    if (m_siteUrl.isEmpty()) {
-        const QString why = QStringLiteral("没配站点地址（viewer.env 里加 STE_SITE_URL=https://<你的站点>）");
-        logf("[oauth] FAIL %s", why.toLocal8Bit().constData());
-        emit failed(why);
-        return;
-    }
-    if (m_clientSecret.isEmpty()) {
-        const QString why = QStringLiteral("没配 OAuth 客户端密钥（STE_OAUTH_CLIENT_SECRET）");
-        logf("[oauth] FAIL %s", why.toLocal8Bit().constData());
-        emit failed(why);
-        return;
-    }
+    logf("[oauth] 站点=%s 客户端=%s 密钥=%s", m_siteUrl.toLocal8Bit().constData(),
+         m_clientId.toLocal8Bit().constData(),
+         m_clientSecret.isEmpty() ? "不带（公开客户端）" : "带");
     // 站点只认 http:// 的 127.0.0.1 回拨，别把 https 或局域网地址塞进去 ——
     // 授权页会在 inspect() 那一步直接回 invalid_redirect_uri，用户只看得到"登录失败"。
     if (!m_siteUrl.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive)
@@ -220,12 +218,18 @@ void OAuthLogin::onReadyRead()
     logf("[oauth] 回拨接住，正在换网站会话令牌…");
 
     QUrl tokenUrl(QStringLiteral("%1/oauth/token").arg(m_siteUrl));
-    QByteArray body = QStringLiteral("grant_type=authorization_code&client_id=%1&client_secret=%2&code=%3&redirect_uri=%4")
-                          .arg(QUrl::toPercentEncoding(m_clientId),
-                               QUrl::toPercentEncoding(m_clientSecret),
-                               QUrl::toPercentEncoding(code),
-                               QUrl::toPercentEncoding(m_redirectUri))
-                          .toUtf8();
+    // 公开客户端（没配密钥）就**整个不带** client_secret —— 站点那条 PUBLIC 分支判的是
+    // "参数不存在"，不是 "参数为空字符串"。带着一个空的 client_secret 发过去反而会被判成
+    // 「带错 secret」，授权白走一遍还给一句看不懂的错。
+    QStringList form;
+    form << QStringLiteral("grant_type=authorization_code");
+    form << QStringLiteral("client_id=%1").arg(QUrl::toPercentEncoding(m_clientId));
+    if (!m_clientSecret.isEmpty()) {
+        form << QStringLiteral("client_secret=%1").arg(QUrl::toPercentEncoding(m_clientSecret));
+    }
+    form << QStringLiteral("code=%1").arg(QUrl::toPercentEncoding(code));
+    form << QStringLiteral("redirect_uri=%1").arg(QUrl::toPercentEncoding(m_redirectUri));
+    const QByteArray body = form.join(QLatin1Char('&')).toUtf8();
 
     QNetworkRequest req(tokenUrl);
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
