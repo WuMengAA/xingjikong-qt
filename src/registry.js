@@ -46,6 +46,22 @@ let eventsBytes = 0;
 
 /** id -> { id, uid, action, result:'done'|'failed', error, at }  设备真实执行回执 */
 const results = new Map();
+/* 回执只保留一个滚动窗口（2026-10-06 占用优化）。
+ * 这张表以前只 set 不删：每条指令回执永久留在内存里，教室机一天下发几千条就是
+ * 几千个永不释放的对象，跑一学期内存只涨不落。
+ * 现在超限先删最老的（Map 保持插入序，第一个 key 就是最老的那条）。
+ * 不会有"刚到的回执被挤掉"的问题：窗口 5000 条，比一个教学日下发量还宽，
+ * 真要用早先从这台机器上查过（真查走 SQLite 的 /api/instructions/notice）。 */
+const RESULT_KEEP = Number(process.env.CLOUD_RESULT_KEEP || 5000);
+function pruneResults() {
+  if (results.size <= RESULT_KEEP) return;
+  const drop = results.size - RESULT_KEEP;
+  let i = 0;
+  for (const k of results.keys()) {
+    if (i++ >= drop) break;
+    results.delete(k);
+  }
+}
 
 /**
  * 事件日志体积到顶就归档：当前 events.log → events.log.<ISO时间戳>，然后重建一个空的。
@@ -353,6 +369,7 @@ export function recordResult(id, uid, action, result, error, data) {
     }
   } catch { /* 查不到就不带，不影响回执本身 */ }
   results.set(id, rec);
+  pruneResults();
   // 回执到达 → 队列里这条"已下发未回执"标完成，之后重连不再补发。
   // 不在队列（已过期、或落盘降级）也不报错：回执本身仍如实转给管理端。
   settleQueue(id, rec.result, rec.error);
