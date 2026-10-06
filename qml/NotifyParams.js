@@ -58,6 +58,20 @@ function buildNotifyParams(input) {
         flags.severity = (SEVERITIES.indexOf(String(d.severity)) >= 0) ? String(d.severity) : "remind";
     }
     if (d.emergency === true) flags.emergency_confirm = true;
+    // 确认 + 快捷回复（2026-10-07 · 通知被控端确认快捷回复）：
+    //   confirm=true → 被控端显示「确认」按钮；replies=[...] → 快捷回复话术按钮行。
+    // 只收有限白名单话术（长度 ≤ 12，数量 ≤ 5），防止任意长串塞进被控端按钮。
+    if (d.confirm === true) {
+        flags.confirm = true;
+        var reps = [];
+        if (Array.isArray(d.replies)) {
+            for (var i = 0; i < d.replies.length && reps.length < 5; ++i) {
+                var s = String(d.replies[i] || "").trim();
+                if (s && s.length <= 12) reps.push(s);
+            }
+        }
+        if (reps.length) flags.replies = reps;
+    }
 
     var params = { kind: kind, title: title, content: String(d.content || ""), flags: flags };
 

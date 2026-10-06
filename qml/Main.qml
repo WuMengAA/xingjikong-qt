@@ -40,6 +40,19 @@ ApplicationWindow {
         root.hide()
     }
 
+    // ── 浮层宿主（账户菜单）──────────────────────────────────────────
+    // 2026-10-07 修「点右上角只出一层灰、菜单本体不出」：
+    //   旧实现是 Popup{modal:true}，Qt 会把「遮罩 + 菜单」一起 reparent 到
+    //   Overlay.overlay，谁压着谁由插进去的先后决定 —— 实测灰底盖住了菜单，
+    //   屏幕上就只剩一层透明度降低的灰，点什么都是它。
+    //   现在遮罩与菜单都挂在这一层：z 恒压所有页面之上，位置用 anchors 贴着胶囊算
+    //   （不碰 mapToGlobal、不手算坐标），既不会被盖住也不会飞出屏幕。
+    Item {
+        id: acctLayer
+        z: 9990
+        anchors.fill: parent
+    }
+
     // ── 主题令牌（黑白默认黑；浅色为备选）──
     // 页面里一律从 th 取色，不写死 —— 否则换主题必花。
     property bool darkMode: true
@@ -234,6 +247,7 @@ ApplicationWindow {
                     AccountMenu {
                         id: acctMenu
                         theme: root.th
+                        hostLayer: acctLayer
                         Layout.preferredWidth: 150
                         Layout.preferredHeight: 28
                     }
@@ -850,23 +864,60 @@ ApplicationWindow {
                         font.pixelSize: 12
                     }
 
+                    // ── 远控输入：绝对坐标「指哪打哪」─────────────────────────
+                    // ⚠️ 画面是 Image.PreserveAspectFit：窗口比例和被控端屏幕比例不一致时，
+                    //   画面上下/左右会留黑边。旧写法拿「鼠标位置 ÷ 画面区尺寸」当归一化坐标，
+                    //   等于把黑边也算进去了 —— 点黑边上的位置操作会整体落到机器边缘，
+                    //   越靠边偏得越离谱（这就是"我点这儿、光标跑那儿"）。
+                    //   现在先把画面区换算成**内接矩形**，只认矩形内的比例，矩形外夹到边界。
+                    //   坐标是绝对的（0~1 → 被控端屏幕像素），不做任何相对位移累积，
+                    //   所以拖到哪就到哪，不存在越用越飘。
+                    // 鼠标键 → 协议里的 button：以前只有左键，右键/中键远控过去被当左键按，
+                    //   右键菜单、中键自动滚全指望它。
+                    function btnOf(b) {
+                        if (b === Qt.RightButton) return "right"
+                        if (b === Qt.MiddleButton) return "middle"
+                        return "left"
+                    }
+                    readonly property rect fitRect: {
+                        var fw = backend.frame.width, fh = backend.frame.height
+                        var w = screenArea.width, h = screenArea.height
+                        if (fw <= 0 || fh <= 0 || w <= 0 || h <= 0)
+                            return Qt.rect(0, 0, w, h)
+                        var s = Math.min(w / fw, h / fh)
+                        var iw = fw * s, ih = fh * s
+                        return Qt.rect((w - iw) / 2, (h - ih) / 2, iw, ih)
+                    }
+                    // 画面内像素 → 被控端屏幕归一化坐标（0~1，绝对位置）
+                    function normOf(mx, my) {
+                        var r = fitRect
+                        return [Math.min(1, Math.max(0, (mx - r.x) / r.width)),
+                                Math.min(1, Math.max(0, (my - r.y) / r.height))]
+                    }
+
                     MouseArea {
                         id: screenArea
                         anchors.fill: parent
                         enabled: backend.frameCount > 0
+                        // 左 / 中 / 右键全收：这三键在教室机上都用得上
+                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                         cursorShape: pressed ? Qt.ClosedHandCursor : Qt.CrossCursor
 
                         onPressed: function (mouse) {
-                            backend.sendPointer("down", mouse.x / width, mouse.y / height)
+                            var n = normOf(mouse.x, mouse.y)
+                            backend.sendPointer("down", n[0], n[1], btnOf(mouse.button))
                         }
-                        // 只有**按住左键**才算拖动：悬停绝不能往教室机灌鼠标移动
+                        // 只在**按住时**才发移动：悬停绝不能往教室机灌鼠标移动
                         // （曾经用 hoverEnabled + 自记 dragging，结果悬停就发指令、把日志刷爆）
                         onPositionChanged: function (mouse) {
-                            if (mouse.buttons & Qt.LeftButton)
-                                backend.sendPointer("move", mouse.x / width, mouse.y / height)
+                            if (mouse.buttons & (Qt.LeftButton | Qt.MiddleButton | Qt.RightButton)) {
+                                var n = normOf(mouse.x, mouse.y)
+                                backend.sendPointer("move", n[0], n[1])
+                            }
                         }
                         onReleased: function (mouse) {
-                            backend.sendPointer("up", mouse.x / width, mouse.y / height)
+                            var n = normOf(mouse.x, mouse.y)
+                            backend.sendPointer("up", n[0], n[1], btnOf(mouse.button))
                         }
                     }
                 }
@@ -1002,6 +1053,18 @@ ApplicationWindow {
                 // 这个 Loader，没有 onClicked 信号，设置页一加载就报
                 // "Cannot assign to non-existent property onClicked"，整页白屏。
                 // 右栏这套自己用 ActBtn（Action 的缩写），和公共组件 Btn 各归各位。
+                // 右栏三组的组名：以前三组各写一遍 Text（字号/颜色/上间距都可能漂）。
+                // 抽成一个内联组件后，改一处三组一起变。
+                component GroupTitle: Text {
+                    leftPadding: 0
+                    topPadding: 0
+                    rightPadding: 0
+                    bottomPadding: 0
+                    text: ""
+                    color: th.fg4
+                    font.pixelSize: 12
+                }
+
                 component ActBtn: Loader {
                     id: ld
                     property var d: ({ l: "", a: "", t: false })
@@ -1023,7 +1086,7 @@ ApplicationWindow {
                 // ── 电源：这三个点下去就不可逆，所以独占整行、描边比别人重 ──
                 Column {
                     spacing: 6
-                    Text { text: "电源"; color: th.fg4; font.pixelSize: 12 }
+                    GroupTitle { text: "电源" }
                     Repeater {
                         model: [
                             { l: "锁屏", a: "lock",     t: false, p: "admin" },
@@ -1037,7 +1100,7 @@ ApplicationWindow {
                 // ── 看看：只读，不会动那台机器的状态 ──
                 Column {
                     spacing: 6
-                    Text { text: "看看"; color: th.fg4; font.pixelSize: 12 }
+                    GroupTitle { text: "看看" }
                     Grid {
                         columns: 2
                         columnSpacing: 7
@@ -1046,12 +1109,16 @@ ApplicationWindow {
                             model: [
                                 { l: "截图",   a: "screenshot",       t: false },
                                 { l: "拍一张", a: "camera_snapshot",  t: false },
-                                { l: "软件",   a: "process_list",     t: false },
+                                { l: "软件",   f: function () {
+                                    // 软件弹窗要两块数据：可打开（选自这台机器）+ 正在运行
+                                    backend.sendAction("list_shortcut_candidates")
+                                    backend.sendAction("process_list")
+                                } },
                                 { l: "日志",   a: "log_tail",         t: false },
-                                { l: "探活",   a: "",                 t: false },
+                                { l: "探活",   f: function () { backend.sendPing() } },
                                 { l: "摄像头", a: "camera_list",      t: false },
-                                { l: "音量",   a: "",                 t: false },
-                                { l: "文件",   a: "",                 t: false }
+                                { l: "音量",   f: function () { volumeDlg.open() } },
+                                { l: "文件",   f: function () { openOnly("file") } }
                             ]
                             delegate: ActBtn { d: modelData }
                         }
@@ -1062,20 +1129,24 @@ ApplicationWindow {
                 //    这样"这是一组互逆操作"一眼能看出来，而不是在两个位置各找一个 ──
                 Column {
                     spacing: 6
-                    Text { text: "让它做事"; color: th.fg4; font.pixelSize: 12 }
+                    GroupTitle { text: "让它做事" }
                     Grid {
                         columns: 2
                         columnSpacing: 7
                         rowSpacing: 7
                         Repeater {
                             model: [
-                                { l: "定时",   a: "list_schedules",       t: false },
+                                { l: "定时",   f: function () {
+                                    // 先拉一次，回执到了（onResultReceived）再开弹窗 —— 免得开出来是空的
+                                    backend.sendAction("list_schedules")
+                                    openOnly("sched")
+                                } },
                                 { l: "媒体",   a: "media_list",           t: false },
                                 { l: "开录",   a: "camera_record_start",  t: false },
                                 { l: "停录",   a: "camera_record_stop",   t: false },
                                 { l: "播放",   a: "media_session_start",  t: false },
                                 { l: "停播",   a: "media_session_stop",   t: false },
-                                { l: "远控开", a: "remote_control_start", t: false, p: "admin" },
+                                { l: "远控开", f: function () { backend.sendAction("remote_control_start", { "fps": 20 }) }, p: "admin" },
                                 { l: "远控关", a: "remote_control_stop",  t: false, p: "admin" }
                             ]
                             delegate: ActBtn { d: modelData }
@@ -1083,10 +1154,16 @@ ApplicationWindow {
                     }
                     // 通知：和上面那两列按钮不同，它要**凑内容**（形态/标题/正文/时长/播报/紧急），
                     // 所以给整行宽度单独摆一行，而不是挤进 2 列网格当第 9 个。
-                    ActBtn { d: ({ l: "通知", a: "", t: false }); wide: true }
+                    ActBtn { d: ({ l: "通知", f: function () {
+                                            // 通知不是"点一下就发"——它要凑形态/标题/正文/时长/播报，所以开弹窗再发。
+                                            openOnly("notify")
+                                        }, t: false }); wide: true }
                     // 远程终端：和通知一样单独占一行（full width）。它开着就是一条能跑任意命令的
                     // 通道，得和普通"点一下就发"的按钮区分开，别挤进 2 列网格里混过去。
-                    ActBtn { d: ({ l: "终端", a: "", t: false, p: "admin" }); wide: true }
+                    ActBtn { d: ({ l: "终端", f: function () {
+                                            // 开之前先把别的弹窗收掉：这条链路弹出的是全屏终端窗口，和画面弹窗叠着没法用
+                                            termDlg.open()
+                                        }, t: false, p: "admin" }); wide: true }
                 }
 
                 // （这里原先有个 t:true 的置灰「通知」——"没做出来的能力单独躺着，标明没做"。
@@ -1121,6 +1198,9 @@ ApplicationWindow {
                         Keys.onReturnPressed: {
                             if (text !== "") {
                                 backend.sendType(text)
+                                // 立刻给一条本地回执：等被控端回话要几百毫秒，
+                                // 界面上什么都不变的话，连打两行的人会以为第二行没发出去。
+                                pushReceipt("打字 " + text, true)
                                 text = ""
                             }
                         }
@@ -1232,6 +1312,8 @@ ApplicationWindow {
                                 property string ntSeverity: "remind"   // 只有全屏形态下被控端才读
                                 property bool ntSpeech: false          // flags.speech
                                 property bool ntEmergency: false       // flags.emergency_confirm：不自动关 + 置顶
+                                property bool ntConfirm: false         // flags.confirm：被控端需点「确认」+ 快捷回复
+                                property string ntReplies: ""          // 快捷回复话术（逗号分隔，发给被控端）
 
                                 Text { text: "通知下发"; color: th.fg3; font.pixelSize: 12 }
 
@@ -1330,6 +1412,32 @@ ApplicationWindow {
                                             onClicked: ntCol.ntEmergency = !ntCol.ntEmergency
                                         }
                                     }
+                                    // 需确认 + 快捷回复（2026-10-07）：被控端弹「确认」按钮 + 快捷话术，点后回执
+                                    Rectangle {
+                                        width: ntConfLab.width + 20; height: 28; radius: th.rCtrl
+                                        color: ntCol.ntConfirm ? th.inv : "transparent"
+                                        border.color: th.stroke; border.width: 1
+                                        Text {
+                                            id: ntConfLab
+                                            anchors.centerIn: parent
+                                            text: "需确认"
+                                            color: ntCol.ntConfirm ? th.win : th.fg3
+                                            font.pixelSize: 12
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: ntCol.ntConfirm = !ntCol.ntConfirm
+                                        }
+                                    }
+                                    InputField {
+                                        th: root.th
+                                        id: ntReplies
+                                        width: 220
+                                        placeholderText: "快捷回复（逗号分隔，如 收到,好的）"
+                                        enabled: ntCol.ntConfirm
+                                        opacity: ntCol.ntConfirm ? 1.0 : 0.4
+                                        color: th.fg
+                                    }
                                     InputField {
                                         th: root.th
                                         id: ntSeconds
@@ -1390,7 +1498,9 @@ ApplicationWindow {
                                                 seconds: ntSeconds.text,
                                                 speech: ntCol.ntSpeech,
                                                 severity: ntCol.ntSeverity,
-                                                emergency: ntCol.ntEmergency
+                                                emergency: ntCol.ntEmergency,
+                                                confirm: ntCol.ntConfirm,
+                                                replies: ntReplies.text.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s !== "" })
                                             })
                                             if (!r.ok) { root.toast(r.error); return }
                                             if (!root.permOk("notify")) { backend.reportDenied("通知"); return }
@@ -2536,6 +2646,16 @@ ApplicationWindow {
         return !p || backend.mayDo(p);
     }
 
+    // 回执流水：打字这类"点下去就知道在办"的动作也给它一条。
+    // 等被控端回话要几百毫秒，界面上什么都不变，用户会以为没发出去。
+    // ⚠️ property var 只有在**整体重新赋值**时才重绘 —— 往数组里 push 是不触发的，必须 slice 出新数组。
+    function pushReceipt(label, ok) {
+        var next = [{ ok: ok, uid: root.currentUid, action: label }]
+        for (var i = 0; i < root.results.length && next.length < 20; ++i)
+            next.push(root.results[i])
+        root.results = next
+    }
+
     function runAction(d) {
         if (d.t) return                      // 未实现的按钮：压根不该点得到
 
@@ -2551,31 +2671,17 @@ ApplicationWindow {
             return;
         }
 
-        if (d.l === "音量") {
-            volumeDlg.open()
-        } else if (d.l === "探活") {
-            backend.sendPing()
-        } else if (d.l === "软件") {
-            // 软件弹窗要两块数据：可打开（选自这台机器）+ 正在运行
-            backend.sendAction("list_shortcut_candidates")
-            backend.sendAction("process_list")
-        } else if (d.l === "定时") {
-            // 先拉一次，回执到了（onResultReceived）再开弹窗 —— 免得开出来是空的
-            backend.sendAction("list_schedules")
-            openOnly("sched")
-        } else if (d.l === "文件") {
-            openOnly("file")
-        } else if (d.l === "通知") {
-            // 通知不是"点一下就发"——它要凑形态/标题/正文/时长/播报，所以开弹窗再发。
-            openOnly("notify")
-        } else if (d.l === "远控开") {
-            backend.sendAction("remote_control_start", { "fps": 20 })
-        } else if (d.l === "终端") {
-            // 开之前先把别的弹窗收掉：这条链路弹出的是全屏终端窗口，和画面弹窗叠着没法用
-            termDlg.open()
-        } else if (d.a !== "") {
-            backend.sendAction(d.a, {})
-        }
+        // ⚠️ 判据一律按**动作名**（d.f 自定义 / d.a 一条指令），绝不按中文文案。
+        //   2026-10-07 改：这条链原来是 if (d.l === "音量") … 一串 ——
+        //   把按钮文案从「音量」改成「喇叭」，这条链就断了：点下去走 sendAction("") 空转，
+        //   界面上什么报错都没有（灰按钮永远点不到，只有从状态行 / 快捷键触发才露出来）。
+        if (typeof d.f === "function") { d.f(); return }
+        if (d.a !== "") { backend.sendAction(d.a, {}); return }
+
+        // 兜底：老调用点（命令面板 / 快捷键）只给了中文 label 的情况
+        const legacy = { "音量": "volume", "探活": "ping", "软件": "process_list", "定时": "list_schedules" }
+        if (legacy[d.l]) { backend.sendAction(legacy[d.l], {}); return }
+        backend.reportUnsupported(d.l, "这一条没有动作");
     }
 
     // 广播：原来这段逻辑写死在控制页那颗按钮的 onClicked 里，现在命令面板也要发广播，
