@@ -26,7 +26,9 @@ deploy/*.exe
 _archive/
 *.bak
 
-# 发版暂存副本：publish-release.mjs 要求文件名里带版本号（否则 assets/pkg 同名互相覆盖），
-# 所以打包完会先 cp 出一份 dist/stelarith-agent-setup-<ver>.exe 再发。
-# 正式件发布后就落在云端 assets/pkg/，这份暂存副本不必入库（dist 里只留 canonical 的 .exe）。
-dist/stelarith-agent-setup-*.exe
+# dist/ 是打出来的最终产物，不进版本库（2026-10-06 修：此前 67MB 的 stelarith-agent-setup.exe
+# 和 19MB 的 stelarith-agent-msi.msi 都躺在库里，每次克隆都要白拖 86MB）。
+#   装机 / 升级走的是云端 assets/pkg + OTA 清单，装机脚本从 /assets 取件 —— 不从 git。
+#   想拿包就本地跑 ./build-agent-installer.sh（产物在 dist/，工作区里还有）。
+dist/*.exe
+dist/*.msi
