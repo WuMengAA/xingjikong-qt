@@ -356,10 +356,13 @@ const server = http.createServer((req, res) => {
         return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` });
       }
       const { uid, action, params } = payload;
-      if (!uid || !action) return send(400, { ok: false, error: '缺 uid 或 action' });
+      if (!uid || !action) return send(400, { ok: false, ecode: 'CM1002', code: 'CMD_PARAM_INVALID', error: '缺 uid 或 action' });
       const r = sendInstruction(uid, String(action), params ?? {});
       if (r.state === 'sent') return send(200, { ok: true, state: 'sent', uid, action });
-      return send(409, { ok: false, state: r.state, uid, action, detail: r.detail });
+      // 错误码体系（2026-10-06）：设备离线/不存在 → DV3001；其余写失败 → DV3002
+      const ecode = r.state === 'offline' ? 'DV3001' : 'DV3002';
+      const code = r.state === 'offline' ? 'DEVICE_OFFLINE' : 'HEARTBEAT_TIMEOUT';
+      return send(409, { ok: false, state: r.state, uid, action, ecode, code, detail: r.detail });
     });
     return undefined;
   }
@@ -729,8 +732,12 @@ viewerWss.on('connection', (ws) => {
           pushEvent('info', '管理端主动关了远程终端', { uid, sid: params?.sid ?? null });
         }
         // 云端只说它发送成功与否；到没到机器、有没有真做，是设备回执的事
+        // 错误码体系（2026-10-06）：离线/不存在 → DV3001，其余写失败 → DV3002
+        const isOffline = r.state === 'offline';
         snd(ws, 'instruction-result', {
           ok: r.state === 'sent', state: r.state, uid, action,
+          ecode: isOffline ? 'DV3001' : 'DV3002',
+          code: isOffline ? 'DEVICE_OFFLINE' : 'HEARTBEAT_TIMEOUT',
           detail: r.detail || '云端已写入被控端连接',
         });
         return;
