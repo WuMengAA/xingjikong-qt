@@ -176,6 +176,13 @@ export function createAdminOAuthServer(log) {
     try {
       const session = await exchangeCode(code, redirectUri);
       const uid = await sessionUser(session);
+      // 票据里带 uid 是为了审计"谁在管这台云端"。uid 为 unknown 说明用户身份没
+      // 拿到（站点 /oauth/userinfo 挂了、超时、或返回体缺 username）—— 这种情况下
+      // 不能签票，否则管理台会被一个"无人认领"的会话用着，出了事查不到是谁。
+      // 注意：不能把 unknown 当成功放行，也不能让 fetch 失败静默吞掉（fail-silent 红线）。
+      if (!uid || uid === 'unknown') {
+        throw new Error('无法确认用户身份（站点 /oauth/userinfo 未返回用户名），请重试或检查站点日志');
+      }
       const ttlMs = Math.min(Math.max(Number(ADMIN_TICKET_TTL_MS) || 0, 60 * 1000), ADMIN_TICKET_TTL_MAX_MS);
       const r = mintViewerTicket(uid, ttlMs);
       if (!r.ok) {
