@@ -280,6 +280,7 @@ ApplicationWindow {
                     AccountMenu {
                         id: acctMenu
                         theme: root.th
+                        hostLayer: acctLayer
                         Layout.preferredWidth: 150
                         Layout.preferredHeight: 28
                     }
@@ -321,6 +322,39 @@ ApplicationWindow {
                                 Text {
                                     text: modelData.v
                                     color: th.fg; font.pixelSize: 20; font.weight: Font.Medium
+                                }
+                            }
+                        }
+                    }
+
+                    // ── 快捷操作（4.7 效率功能）──
+                    // 高频动作钉在概览页顶部，一个键直达（不翻菜单 / 不挨卡片）。
+                    Row {
+                        spacing: 8
+                        Repeater {
+                            model: [
+                                { l: "锁屏",       a: "lock" },
+                                { l: "发通知",     a: "notify" },
+                                { l: "广播",       a: "broadcast" },
+                                { l: "语音对讲",   a: "voice" },
+                                { l: "屏幕广播",   a: "screen" },
+                                { l: "考试模式",   a: "exam" },
+                                { l: "刷新多班墙", a: "multiband" }
+                            ]
+                            delegate: Rectangle {
+                                width: 76; height: 30; radius: th.rCtrl
+                                color: qhMa.containsMouse ? th.hover2 : th.panel
+                                border.color: th.stroke; border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData.l
+                                    color: th.fg
+                                    font.pixelSize: 12
+                                }
+                                MouseArea {
+                                    id: qhMa
+                                    anchors.fill: parent
+                                    onClicked: root.quickAction(modelData.a)
                                 }
                             }
                         }
@@ -2879,6 +2913,37 @@ ApplicationWindow {
         for (var i = 0; i < root.results.length && next.length < 20; ++i)
             next.push(root.results[i])
         root.results = next
+    }
+
+    // ── 概览页快捷操作分发（4.7 效率功能，2026-10-07）──
+    // 与命令面板同款调用（复用集控卡片/命令逻辑，不绕权限门控）。
+    // a ∈ lock | notify | broadcast | voice | screen | exam | multiband
+    function quickAction(a) {
+        if (a === "lock") {
+            if (!root.permOk("lock")) { backend.reportDenied("锁屏"); return }
+            root.runAction({ l: "锁屏", a: "lock", t: false, p: "admin" })
+        } else if (a === "notify") {
+            root.page = 2; root.toast("到集控页填标题/内容后发送")
+        } else if (a === "broadcast") {
+            root.page = 2; root.toast("到集控页填广播内容")
+        } else if (a === "voice") {
+            if (backend.speaking) { backend.stopSpeaking(); root.toast("语音已停止") }
+            else if (backend.startSpeaking()) { root.toast("🎤 正在讲话") }
+            else { root.toast("开麦失败：" + backend.speakError) }
+            root.refreshIsland()
+        } else if (a === "screen") {
+            if (backend.broadcasting) { backend.stopBroadcast(); root.toast("屏幕广播已停止") }
+            else if (backend.startBroadcast()) { root.toast("📺 正在屏幕广播") }
+            else { root.toast("广播启动失败") }
+            root.refreshIsland()
+        } else if (a === "exam") {
+            const uid = backend.currentUid
+            if (!uid) { root.toast("先在控制页选中一台设备"); return }
+            backend.sendAction("exam_mode", { "minutes": 0, "whitelist": [] })
+            root.toast("考试模式已下发 → " + uid)
+        } else if (a === "multiband") {
+            root.page = 2; if (multiThumb) multiThumb.watch(); root.toast("正在订阅多班缩略图")
+        }
     }
 
     function runAction(d) {
