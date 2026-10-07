@@ -24,6 +24,7 @@ CLOUD_WS_PORT=8095 CLOUD_WS_HOST=127.0.0.1 \
 # 2) 另开一个终端跑回归（脚本会连 8095）
 node tests/regression-confirm-receipt.cjs 8095   # 通知确认回执链路（8/8）
 node tests/regression-recordings.cjs 8095         # 班级监控 recordings（6/6，自清理）
+node tests/regression-broadcast.cjs 8095          # 屏幕广播链路（8/8）
 ```
 
 `npm test` = 只跑单元测试（不依赖云端，最常用）。
@@ -35,6 +36,7 @@ node tests/regression-recordings.cjs 8095         # 班级监控 recordings（6/
 | `unit-ecodes.mjs` | 单元 | ECODES 格式（模块2+4位数字、25键含 sem/msg）、关键映射（DV3001/DV3002/CM4001/AU1003）、errorPayload 归一化、未编号旧码兼容、errPayload 旧接口、双向自洽 | 14 |
 | `regression-confirm-receipt.cjs` | 集成 | 被控端 register → 收 notify(confirm+replies) → 二次回执 confirmed → 云端 recordResult 放行（不记 failed）→ 管理端收转发 | 8 |
 | `regression-recordings.cjs` | 集成 | 设备令牌上传 → 401 边界（无/错令牌）→ 管理端列表 → 静态下载 video/mp4 → 自清理 | 6 |
+| `regression-broadcast.cjs` | 集成 | 管理端 broadcast.start → 云端进广播态 + 通知被控端 → JPEG 帧含 v1 帧头不截断 → stop 后帧丢弃 | 8 |
 
 ## 安全约定
 
