@@ -6,7 +6,11 @@
   "description": "星集控云端（被控端最小可用后端）：设备注册鉴权 / 在线表 / 指令下发 / 事件流水",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "npm run test:unit",
+    "test:unit": "node tests/unit-ecodes.mjs",
+    "test:confirm": "node tests/regression-confirm-receipt.cjs 8095",
+    "test:recordings": "node tests/regression-recordings.cjs 8095"
   },
   "dependencies": {
     "ws": "^8.22.0"
