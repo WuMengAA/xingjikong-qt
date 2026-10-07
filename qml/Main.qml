@@ -94,6 +94,9 @@ ApplicationWindow {
     property int remoteVolume: -1
     property var results: []          // 概览页的「最近回执」流水（最多 20 条，只收真回执）
     property var candidates: []       // 软件弹窗的「可打开」候选（来自被控端 list_shortcut_candidates）
+    // 通知确认汇总（2026-10-07）：当前会话内「需确认」通知的学生确认统计。
+    // 由 onResultReceived 收 notify+confirmed 回执累加；{count, replies[]}。
+    property var confirmStats: ({ count: 0, replies: [] })
 
     // ── 灵动岛的状态源（设计文档 3.8）────────────────────────────────
     // 状态归主界面算：设备表、回执、文件读数都在 C++ 那边，组件不该猜。
@@ -143,6 +146,21 @@ ApplicationWindow {
             var arr = root.results.slice()
             arr.unshift(row)
             root.results = arr.slice(0, 20)
+
+            // 通知确认汇总（2026-10-07）：result=confirmed 是学生点了「确认/快捷回复」的
+            // 二次回执（云端 recordResult 已放行，见 c1bd8f2）。在这里累加统计，
+            // 通知卡片显示「已确认 N / 最近回复」，让老师不用翻回执流水数。
+            if (action === "notify" && result === "confirmed" && data) {
+                var cs = root.confirmStats
+                cs.count = (cs.count || 0) + 1
+                var rep = String(data.reply || "").trim()
+                if (rep) {
+                    var ls = (cs.replies || []).slice()
+                    ls.unshift(rep)
+                    cs.replies = ls.slice(0, 8)   // 只留最近 8 条
+                }
+                root.confirmStats = cs
+            }
 
             if (action === "list_shortcut_candidates" && data) {
                 root.candidates = (data.apps || []).concat(data.desktop || [])
@@ -1316,6 +1334,28 @@ ApplicationWindow {
                                 property string ntReplies: ""          // 快捷回复话术（逗号分隔，发给被控端）
 
                                 Text { text: "通知下发"; color: th.fg3; font.pixelSize: 12 }
+                                // 已确认汇总（2026-10-07）：学生点「确认/快捷回复」的实时统计
+                                Row {
+                                    width: parent.width
+                                    spacing: 6
+                                    Text {
+                                        text: root.confirmStats.count > 0
+                                              ? ("已确认 " + root.confirmStats.count + " 台")
+                                              : "尚未收到确认"
+                                        // 黑白稿规范：不加彩色，用「亮 = 有内容 / 暗 = 空」表达状态
+                                        color: root.confirmStats.count > 0 ? th.fg : th.fg4
+                                        font.pixelSize: 11
+                                    }
+                                    Text {
+                                        text: root.confirmStats.replies.length > 0
+                                              ? ("最近回复：" + root.confirmStats.replies.slice(0, 3).join("、"))
+                                              : "（发「需确认」通知后，学生确认会显示在这里）"
+                                        color: th.fg4
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                        width: parent.width - 200
+                                    }
+                                }
 
                                 Row {
                                     width: parent.width
