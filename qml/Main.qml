@@ -97,6 +97,21 @@ ApplicationWindow {
     // 通知确认汇总（2026-10-07）：当前会话内「需确认」通知的学生确认统计。
     // 由 onResultReceived 收 notify+confirmed 回执累加；{count, replies[]}。
     property var confirmStats: ({ count: 0, replies: [] })
+    // 设备分组视图（4.4）：全部 / 在线 / 离线 三段筛选（Repeater 用 filteredDevices）
+    property string deviceFilter: "all"   // all / online / offline
+    readonly property var filteredDevices: (function () {
+        var arr = []
+        var devs = backend.devices || []
+        for (var i = 0; i < devs.length; ++i) {
+            var d = devs[i]
+            if (!d) continue
+            var on = (d.online !== false)
+            if (root.deviceFilter === "online" && !on) continue
+            if (root.deviceFilter === "offline" && on) continue
+            arr.push(d)
+        }
+        return arr
+    })()
 
     // ── 灵动岛的状态源（设计文档 3.8）────────────────────────────────
     // 状态归主界面算：设备表、回执、文件读数都在 C++ 那边，组件不该猜。
@@ -578,8 +593,43 @@ ApplicationWindow {
                     bottomPadding: 8
                 }
 
+                // 分组视图（4.4）：全部 / 在线 / 离线 三段筛选
+                Row {
+                    width: 168
+                    spacing: 4
+                    leftPadding: 10
+                    bottomPadding: 4
+                    Repeater {
+                        model: [ { k: "all", l: "全部" }, { k: "online", l: "在线" }, { k: "offline", l: "离线" } ]
+                        delegate: Rectangle {
+                            width: 42; height: 22; radius: th.rCtrl
+                            color: (root.deviceFilter === modelData.k) ? th.inv : "transparent"
+                            border.color: th.stroke; border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData.l
+                                color: (root.deviceFilter === modelData.k) ? th.win : th.fg3
+                                font.pixelSize: 11
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: root.deviceFilter = modelData.k
+                            }
+                        }
+                    }
+                    // 计数（放在筛选右边，一眼看到每组多少台）
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (root.deviceFilter === "all")
+                              ? (root.devices.length + " 台")
+                              : (root.filteredDevices.length + " 台")
+                        color: th.fg4
+                        font.pixelSize: 11
+                    }
+                }
+
                 Repeater {
-                    model: root.devices
+                    model: root.filteredDevices
                     delegate: Rectangle {
                         width: 168
                         height: 36
@@ -2988,14 +3038,16 @@ ApplicationWindow {
                 root.picked = root.picked.concat([uid])
             root.pickAnchor = idx
         } else if (mods & Qt.ShiftModifier) {
-            if (root.pickAnchor < 0 || root.pickAnchor >= root.devices.length) {
+            // 范围选择走当前显示的过滤后列表（界面显示的就是它，anchor/索引才对齐）
+            const list = (root.deviceFilter !== "all") ? root.filteredDevices : root.devices
+            if (root.pickAnchor < 0 || root.pickAnchor >= list.length) {
                 root.picked = [uid]
                 root.pickAnchor = idx
                 return
             }
             const a = Math.min(root.pickAnchor, idx), b = Math.max(root.pickAnchor, idx)
             const s2 = []
-            for (let i = a; i <= b; ++i) s2.push(root.devices[i].uid)
+            for (let i = a; i <= b; ++i) s2.push(list[i].uid)
             root.picked = s2
         } else {
             root.picked = [uid]
