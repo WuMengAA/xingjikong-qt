@@ -24,10 +24,19 @@ Rectangle {
 
     default property alias content: inner        // 直接写子组件即可，不用再包一层 Column
 
+    // ⚠️ 2026-10-08 内容区顶部让出标题/副标题的空间 —— 原来 inner 从 pad 起，
+    // titleText 也从 pad 起，有标题时内容直接盖在标题上。
+    readonly property int headH: (titleText.text !== "" ? titleText.implicitHeight : 0)
+                              + (hintText.text !== "" ? (hintText.implicitHeight + 2) : 0)
+    readonly property int topPad: card.pad + (headH > 0 ? headH + 6 : 0)
+
     Column {
         id: inner
         anchors.fill: parent
-        anchors.margins: card.pad
+        anchors.leftMargin: card.pad
+        anchors.rightMargin: card.pad
+        anchors.bottomMargin: card.pad
+        anchors.topMargin: card.topPad
         spacing: 10
     }
 
