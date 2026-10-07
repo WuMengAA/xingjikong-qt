@@ -25,12 +25,14 @@
 static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 
 #include <QFile>
+#include <QHash>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 
 class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向声明，避免引入 mmsystem）
 
@@ -68,6 +70,8 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QStringList capActions READ capActions NOTIFY capActionsChanged)
     Q_PROPERTY(QImage frame READ frame NOTIFY frameChanged)
     Q_PROPERTY(QJsonObject recordings READ recordings NOTIFY recordingsChanged)
+    /** 订阅列表快照：把多台设备的最新帧按 uid 缓存（多班面板缩略图墙，3.2.2）。 */
+    Q_INVOKABLE void subscribeThumbnails(const QVariantList &uids);
     /** 画面进入「静态区」（连续多帧像素一致）→ 界面停止重绘。见 applyFrameBytes 的注释。 */
     Q_PROPERTY(bool screenStatic READ screenStatic NOTIFY statsChanged)
     Q_PROPERTY(double fps READ fps NOTIFY statsChanged)
@@ -272,6 +276,10 @@ public:
     Q_INVOKABLE void fetchRecordings();
     /** 录制列表（QML 读，QJsonObject：uid → 文件数组）。 */
     QJsonObject recordings() const { return m_recordings; }
+    /** 取某台设备的缩略图帧（多班面板；无则空图）。 */
+    QImage thumbFrame(const QString &uid) const { return m_thumbFrames.value(uid); }
+    /** 当前订阅了缩略图的多台设备 uid 列表。 */
+    QStringList thumbUids() const { return m_thumbUids; }
 
     /**
      * 推一个本机文件给当前选中的教室机。
@@ -338,6 +346,8 @@ signals:
     void statsChanged();
     void cloudUrlChanged();
     void recordingsChanged();
+    /** 某台设备的缩略图帧更新了（多班面板缩略图墙）。uid 为空表示全部。 */
+    void thumbnailChanged(const QString &uid = QString());
     /** 站点账号状态/文本变化（登录成功、失败、票换了、用户点了忘记）。 */
     void accountChanged();
     /** 文件推送进度：状态/文件名/已推字节/百分比/失败原因/落盘路径，全走这一个信号。 */
@@ -578,4 +588,8 @@ private:
 
     // ── 班级监控（2026-10-07）──
     QJsonObject m_recordings;                 // recordings/<uid>/[文件] 分组缓存
+
+    // ── 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）──
+    QStringList m_thumbUids;                  // 当前订阅缩略图的设备 uid 列表
+    QHash<QString, QImage> m_thumbFrames;     // uid → 缩略图帧缓存
 };

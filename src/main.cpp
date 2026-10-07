@@ -208,7 +208,8 @@ int loadEnvFile(const QString &path)
     return n;
 }
 
-/** 画面帧给 QML：Image.source ＝ "image://frames/f?<递增号>"（换个号即重新取帧）。 */
+/** 画面帧给 QML：Image.source ＝ "image://frames/f?<递增号>"（主画面），
+ *  多班缩略图用 "image://frames/<uid>?<递增号>"（按 uid 取那台设备的缩略图帧）。 */
 class FrameImageProvider : public QQuickImageProvider
 {
 public:
@@ -217,9 +218,15 @@ public:
 
     QImage requestImage(const QString &id, QSize *size, const QSize &requested) override
     {
-        Q_UNUSED(id);
         Q_UNUSED(requested);
-        const QImage img = m_backend->frame();
+        // id 形如 "f"（主画面）或 "<uid>"（多班缩略图）：去掉 query 部分（tick）
+        const QString base = id.section(QLatin1Char('?'), 0, 0);
+        QImage img;
+        if (base == QLatin1String("f") || base.isEmpty()) {
+            img = m_backend->frame();
+        } else {
+            img = m_backend->thumbFrame(base);
+        }
         if (size) *size = img.size();
         return img;
     }

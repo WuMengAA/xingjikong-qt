@@ -1329,6 +1329,38 @@ void ViewerBackend::setCurrentUid(const QString &uid)
     sendEnvelope(QStringLiteral("subscribe"), sp);
 }
 
+// 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）：
+// 订阅一批设备的画面（不切当前选中，只收缩略图帧），QML 网格 3×3 展示。
+// 与主画面共用一条 WS 订阅（云端按 uid 推帧，帧头带 uid → 按 uid 分槽存）
+void ViewerBackend::subscribeThumbnails(const QVariantList &uids)
+{
+    QStringList want;
+    for (const QVariant &v : uids) {
+        const QString uid = v.toString().trimmed();
+        if (!uid.isEmpty() && !want.contains(uid)) want.append(uid);
+    }
+    // 之前的订阅不再需要 → 退订（保留当前选中那台：它走主画面，不算缩略图需求）
+    for (const QString &uid : m_thumbUids) {
+        if (want.contains(uid)) continue;
+        if (uid == m_currentUid) continue;
+        QJsonObject sp;
+        sp.insert(QStringLiteral("uid"), uid);
+        sendEnvelope(QStringLiteral("unsubscribe"), sp);
+    }
+    // 新订阅
+    for (const QString &uid : want) {
+        if (m_thumbUids.contains(uid)) continue;
+        if (uid == m_currentUid) continue;   // 主画面重点保障，不入缩略图再抢一条
+        QJsonObject sp;
+        sp.insert(QStringLiteral("uid"), uid);
+        sendEnvelope(QStringLiteral("subscribe"), sp);
+    }
+    m_thumbUids = want;
+    emit thumbnailChanged();
+    logf("[viewer] 多班缩略图订阅 %d 台：%s", want.size(),
+         want.join(QLatin1String(",")).toUtf8().constData());
+}
+
 void ViewerBackend::onTextMessage(const QString &text)
 {
     const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
@@ -1701,6 +1733,19 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
     }
     // 不在这里缩放：缩放是界面的事（QML 有自己的 Image 缩放与填充策略）
     m_frame = img;
+
+    // ── 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）──
+    // 帧头带 uid（云端 makeFrame 按 uid 推帧）。若这台的 uid 正在被缩略图订阅，
+    // 按 uid 分槽缓存一份（**小尺寸**，缩略图 160 宽足够；不占主画面内存）。
+    const QString fuid = header.value(QStringLiteral("uid")).toString();
+    if (!fuid.isEmpty() && m_thumbUids.contains(fuid)) {
+        const QImage thumb = (img.width() > 160)
+            ? img.scaledToWidth(160, Qt::SmoothTransformation) : img;
+        if (m_thumbFrames.value(fuid) != thumb) {
+            m_thumbFrames.insert(fuid, thumb);
+            emit thumbnailChanged(fuid);
+        }
+    }
 
     // ── 静态区：画面连续 kStaticStreak 帧一模一样 → 不再 emit frameChanged，
     //    界面就不换 tick，等于"这张已经画出过了，别再画一遍"。

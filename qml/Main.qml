@@ -1871,6 +1871,133 @@ ApplicationWindow {
                 }
             }
 
+            // ── 多班监控缩略图墙（2026-10-07，设计文档 3.2.2）──
+            // 一屏看多个教室画面（3×3 网格），点格子切换到那台看大画面。
+            // 订阅前 9 台在线设备；帧头 uid → backend 按 uid 分槽缓存缩略图。
+            Rectangle {
+                width: parent.width
+                height: thumbCol.height + 32
+                radius: th.rCard
+                color: th.panel
+                border.color: th.card
+                border.width: 1
+                Column {
+                    id: thumbCol
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.topMargin: 16
+                    spacing: 10
+
+                    Row {
+                        width: parent.width
+                        spacing: 8
+                        Text { text: "多班监控（缩略图墙）"; color: th.fg3; font.pixelSize: 11 }
+                        Button {
+                            text: "刷新"
+                            onClicked: {
+                                multiThumb.watch()
+                                hint("正在订阅多班缩略图…")
+                            }
+                        }
+                    }
+
+                    // 网格：最多 9 台（在线优先），每格一个设备的缩略图
+                    GridLayout {
+                        id: multiThumb
+                        width: parent.width
+                        columns: 3
+                        columnSpacing: 6
+                        rowSpacing: 6
+
+                        property var watched: []   // 已订阅的设备 uid
+
+                        function watch() {
+                            // 收集在线的设备 uid（最多 9 台），保持设备表顺序
+                            var uids = []
+                            var devs = backend.devices || []
+                            for (var i = 0; i < devs.length && uids.length < 9; ++i) {
+                                if (devs[i] && devs[i].online && devs[i].uid
+                                        && uids.indexOf(devs[i].uid) < 0)
+                                    uids.push(devs[i].uid)
+                            }
+                            watched = uids
+                            backend.subscribeThumbnails(uids)
+                        }
+
+                        Component.onCompleted: watch()
+
+                        Repeater {
+                            model: multiThumb.watched
+                            delegate: Rectangle {
+                                id: cell
+                                width: (multiThumb.width - 12) / 3
+                                height: 96
+                                radius: th.rCtrl
+                                color: th.canvas
+                                border.color: th.stroke
+                                border.width: 1
+                                clip: true
+
+                                // 缩略图：帧更新时 tick++ 换缓存键
+                                Image {
+                                    anchors.fill: parent
+                                    fillMode: Image.PreserveAspectFit
+                                    cache: false
+                                    property int tick: 0
+                                    source: "image://frames/" + modelData + "?t" + tick
+                                    Connections {
+                                        target: backend
+                                        function onThumbnailChanged(uid) { if (uid === modelData || uid === "") cell.tick++ }
+                                    }
+                                }
+
+                                // uid 标签（底部小条，别盖住画面太多）
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 18
+                                    color: Qt.rgba(0, 0, 0, 0.55)
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: modelData
+                                        color: "#FAFAFA"
+                                        font.pixelSize: 9
+                                        elide: Text.ElideRight
+                                        width: parent.width - 8
+                                    }
+                                }
+
+                                // 点击 → 切到这台看大画面（控制页）
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        backend.setCurrentUid(modelData)
+                                        root.page = 1   // 控制页
+                                        hint("已切换查看 " + modelData)
+                                    }
+                                }
+
+                                // 空态：还没收到这台帧
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: cell.tick === 0
+                                    text: "等待画面…"
+                                    color: th.fg4
+                                    font.pixelSize: 10
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "最多展示 9 台在线设备；点格子切换到该教室大画面。离线设备不占格。"
+                        color: th.fg3; font.pixelSize: 10; wrapMode: Text.Wrap
+                    }
+                }
+            }
+
             // ══ 3 设置 ══
             // 稿 03：pad + 两列卡片（账户 / 连接 / 提醒 / 外观）+ 通栏「关于」。
             // 现在只有「连接」「外观」两张是真的：前者读运行时状态，后者深浅切换确实做了。
