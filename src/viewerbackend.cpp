@@ -1868,6 +1868,39 @@ bool ViewerBackend::broadcasting() const
     return m_broadcasting;
 }
 
+void ViewerBackend::fetchRecordings()
+{
+    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    // 云端地址：m_url 是 ws://host:port/ws/viewer，派生 http://host:port/api/recordings
+    QString httpUrl = m_url;
+    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
+           .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0) httpUrl.truncate(wsIdx);
+    httpUrl += QStringLiteral("/api/recordings");
+
+    QNetworkRequest req{ QUrl(httpUrl) };
+    // 云端令牌：票据优先（有 uid 可审计），否则静态令牌
+    const QByteArray token = !m_cloudTicket.isEmpty()
+        ? m_cloudTicket.toUtf8() : m_token.toUtf8();
+    if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
+
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 200) {
+            const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            if (doc.isObject()) {
+                m_recordings = doc.object().value(QStringLiteral("recordings")).toObject();
+                emit recordingsChanged();
+            }
+        } else {
+            logf("[rec] 拉录制列表失败（HTTP %d）", status);
+        }
+        reply->deleteLater();
+    });
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // 远程终端
 // ──────────────────────────────────────────────────────────────────────

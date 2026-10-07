@@ -67,6 +67,7 @@ class ViewerBackend : public QObject
      *  管端据此把不支持的按钮置灰，而不是让人点下去才吃到一句「未知指令」。 */
     Q_PROPERTY(QStringList capActions READ capActions NOTIFY capActionsChanged)
     Q_PROPERTY(QImage frame READ frame NOTIFY frameChanged)
+    Q_PROPERTY(QJsonObject recordings READ recordings NOTIFY recordingsChanged)
     /** 画面进入「静态区」（连续多帧像素一致）→ 界面停止重绘。见 applyFrameBytes 的注释。 */
     Q_PROPERTY(bool screenStatic READ screenStatic NOTIFY statsChanged)
     Q_PROPERTY(double fps READ fps NOTIFY statsChanged)
@@ -266,6 +267,12 @@ public:
     /** 是否正在广播。 */
     Q_INVOKABLE bool broadcasting() const;
 
+    // ── 班级监控（设计文档 3.6 第一版）──
+    /** 拉取云端录制列表（recordings/<uid>/ 分组），emit recordingsChanged。 */
+    Q_INVOKABLE void fetchRecordings();
+    /** 录制列表（QML 读，QJsonObject：uid → 文件数组）。 */
+    QJsonObject recordings() const { return m_recordings; }
+
     /**
      * 推一个本机文件给当前选中的教室机。
      *
@@ -330,6 +337,7 @@ signals:
     void frameChanged();
     void statsChanged();
     void cloudUrlChanged();
+    void recordingsChanged();
     /** 站点账号状态/文本变化（登录成功、失败、票换了、用户点了忘记）。 */
     void accountChanged();
     /** 文件推送进度：状态/文件名/已推字节/百分比/失败原因/落盘路径，全走这一个信号。 */
@@ -567,4 +575,7 @@ private:
     // ── 屏幕广播（2026-10-07）──
     QTimer *m_bcastTimer = nullptr;           // 抓屏节拍（3fps）
     bool m_broadcasting = false;              // 是否在广播
+
+    // ── 班级监控（2026-10-07）──
+    QJsonObject m_recordings;                 // recordings/<uid>/[文件] 分组缓存
 };
