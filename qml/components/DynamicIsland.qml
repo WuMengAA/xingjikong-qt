@@ -37,7 +37,8 @@ Item {
 
     // 状态键 → 符号（黑白稿里图标也只能是描边符号，不能上彩色）
     readonly property var glyph: ({
-        offline: "⊘", command: "◐", file: "▦", alert: "▲", monitor: "◉"
+        offline: "⊘", command: "◐", file: "▦", alert: "▲", monitor: "◉",
+        voice: "♪", broadcast: "▣"
     })
 
     // ── 胶囊本体 ───────────────────────────────────────────────────

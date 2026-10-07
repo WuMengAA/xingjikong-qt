@@ -1773,6 +1773,7 @@ ApplicationWindow {
                                                     hint("开麦失败：" + backend.speakError)
                                                 }
                                             }
+                                            root.refreshIsland()   // 灵动岛语音胶囊跟手开/关
                                         }
                                     }
                                 }
@@ -1811,6 +1812,7 @@ ApplicationWindow {
                                                     hint("广播启动失败")
                                                 }
                                             }
+                                            root.refreshIsland()   // 灵动岛广播胶囊跟手开/关
                                         }
                                     }
                                 }
@@ -2906,6 +2908,12 @@ ApplicationWindow {
             s.push({ k: "alert", t: alerts.length + " 条没处理", d: alerts[0].uid + " · " + alerts[0].action })
         if (backend.rtcState === "track")
             s.push({ k: "monitor", t: "正在看 " + backend.currentUid, d: "实时画面" })
+        // 语音对讲 / 屏幕广播：有真实状态源（backend.speaking / broadcasting）
+        // 才亮；没在讲/没在播就不出现（宁可不亮，不冒充聚合器）
+        if (backend.speaking)
+            s.push({ k: "voice", t: "正在语音对讲", d: "老师讲话，全班在听" })
+        if (backend.broadcasting)
+            s.push({ k: "broadcast", t: "正在屏幕广播", d: "老师屏幕推给全部在线设备" })
         islandStates = s
     }
 
