@@ -265,7 +265,6 @@ ApplicationWindow {
                     AccountMenu {
                         id: acctMenu
                         theme: root.th
-                        hostLayer: acctLayer
                         Layout.preferredWidth: 150
                         Layout.preferredHeight: 28
                     }
@@ -2744,6 +2743,13 @@ ApplicationWindow {
             { name: "切到集控",         keys: ["jikong", "jk"], tip: "集控面板", run: function () { root.page = 2 } },
             { name: "切到设置",         keys: ["settings", "shezhi", "sz"], tip: "账户 / 连接 / 提醒 / 外观", run: function () { root.page = 3 } },
             { name: "去广播给所有在线设备", keys: ["broadcast", "guangbo", "gb"], tip: "广播要填内容，去集控页下面填再点", run: function () { root.page = 2 } },
+            { name: "开始语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "老师讲话，全班在线设备可听（再次点停）", run: function () { if (backend.startSpeaking()) { root.refreshIsland(); root.toast("🎤 正在讲话") } else { root.toast("开麦失败：" + backend.speakError) } } },
+            { name: "停止语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "把语音广播收掉（静音）", run: function () { backend.stopSpeaking(); root.refreshIsland(); root.toast("语音已停止") } },
+            { name: "开始屏幕广播",     keys: ["screen", "guangbo2", "gb2"], tip: "老师屏幕推给全部在线设备（再次点停）", run: function () { if (backend.startBroadcast()) { root.refreshIsland(); root.toast("📺 正在屏幕广播") } else { root.toast("广播启动失败") } } },
+            { name: "停止屏幕广播",     keys: ["screen", "tingbo"], tip: "把屏幕广播收掉", run: function () { backend.stopBroadcast(); root.refreshIsland(); root.toast("屏幕广播已停止") } },
+            { name: "开始考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "全屏拦截 + 白名单（无时长=手动结束）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode", { "minutes": 0, "whitelist": [] }); root.toast("考试模式已下发 → " + uid) } },
+            { name: "结束考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "恢复教室机（全屏拦截收掉）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode_stop", {}); root.toast("已结束考试 → " + uid) } },
+            { name: "刷新多班监控墙",   keys: ["multiband", "duoban", "db"], tip: "重订阅多班缩略图（最多 9 台在线）", run: function () { root.page = 2; if (multiThumb) multiThumb.watch(); root.toast("正在订阅多班缩略图") } },
             // ── 系统 ───────────────────────────────────────────────────
             { name: "刷新设备列表",     keys: ["refresh", "shuaxin", "sx"], tip: "重新拉一遍云端下发（也可按 F5）", run: function () { backend.requestDevices() } },
             { name: "用网站账号登录",   keys: ["login", "denglu", "dl"], tip: "走星璃账号授权，不用填密钥", run: function () { backend.loginWithSite() } },
