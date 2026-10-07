@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLOUD_ROOT = join(__dirname, '..');
 const BACKUP_ROOT = join(CLOUD_ROOT, 'backups');
-const SOURCES = ['instruction-queue.db', 'events.log'];
+const SOURCES = ['instruction-queue.db', 'events.log', 'repairs.json'];
 
 const args = process.argv.slice(2);
 

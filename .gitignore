@@ -36,3 +36,6 @@ _archive/
 
 # OTA 清单是每次发布生成的部署产物（含域名/URL/sha256），不进版本库；只留 .example
 ota.json
+
+# 设备报修台账（运行时数据，由 scripts/backup.mjs 备份；不入库）
+repairs.json

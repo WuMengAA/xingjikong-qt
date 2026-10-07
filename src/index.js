@@ -108,7 +108,7 @@ function restartCloudTask() {
   child.unref();
   pushEvent('info', '已触发云端重启（2 秒后执行）');
 }
-import { verifyViewerTicket, mintViewerTicket, verifyAgentTicket, resolveTicketUid } from './ticket.js';
+import { verifyViewerTicket, mintViewerTicket, verifyAgentTicket } from './ticket.js';
 import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
 import { latestFor } from './ota.js';
@@ -141,6 +141,8 @@ import {
   broadcastAudioToAgents, setAudioBroadcasting, isAudioBroadcasting,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
 } from './registry.js';
+// 设备报修（2026-10-07，《设备报修-第一版设计》落地）：内存表 + repairs.json 落盘
+import { loadRepairs, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
 
 /**
  * 设备重连成功后，把它"已下发但没等到回执"的指令按原下发顺序补发。
@@ -169,6 +171,7 @@ function replayPending(ws, uid) {
 ensureEventsFile();
 initStore();                 // 打开指令队列（已下发未回执的落盘文件），重启后从这里恢复
 if (!storeReady()) pushEvent('error', '指令队列不可持久化：本次运行期间设备重连补发与重启不丢均失效');
+loadRepairs();               // 打开设备报修表（repairs.json），重启后从这里恢复
 
 // 启动先清一次：把上轮残留的过期未回执/已回执行处理掉，再开始收新指令
 {
@@ -318,7 +321,7 @@ const server = http.createServer((req, res) => {
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
     u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
-    u.pathname === '/api/ota/latest' || isAdminApi;
+    u.pathname === '/api/ota/latest' || u.pathname.startsWith('/api/repairs') || isAdminApi;
   if (isManageApi) {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -376,11 +379,16 @@ const server = http.createServer((req, res) => {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
     let uid = u.searchParams.get('uid') || '';
+    let ticketUid = '';
     if (token) {
       const at = verifyAgentTicket(token, String(u.searchParams.get('fp') || ''));
-      if (at.ok) uid = at.uid || uid;
+      if (at.ok) {
+        // uid 必须等于票里签的 uid（同 WS register）：票验通了就不能再自己报 uid。
+        uid = at.uid || uid;
+        ticketUid = at.uid || '';
+      }
     }
-    const okTok = token && (token === DEV_TOKEN || !!verifyAgentTicket(token, String(u.searchParams.get('fp') || '')).ok);
+    const okTok = token && (token === DEV_TOKEN || !!ticketUid);
     if (!okTok || !uid) {
       return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '上传录制需设备令牌' });
     }
@@ -428,6 +436,63 @@ const server = http.createServer((req, res) => {
       }
     }
     return send(200, { ok: true, recordings: out });
+  }
+
+  // 设备报修（2026-10-07，《设备报修-第一版设计》落地）：报修 CRUD。
+  //   GET    /api/repairs?status=open             列表（可按状态过滤；按时间倒序）
+  //   GET    /api/repairs/{id}                    单条
+  //   POST   /api/repairs {uid,symptom,severity}  新建（报修人 = 票据 uid 或 'admin'）
+  //   PATCH  /api/repairs/{id} {status,note}      处理中 / 已修复
+  //   DELETE /api/repairs/{id}                    关闭 / 删除
+  // 报修是资源类操作，不触碰设备控制权限；创建与状态变更都进 events.log（审计）。
+  if (req.method === 'GET' && u.pathname === '/api/repairs') {
+    const st = u.searchParams.get('status') || '';
+    return send(200, { ok: true, repairs: listRepairs(st) });
+  }
+  if (req.method === 'POST' && u.pathname === '/api/repairs') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let p;
+      try { p = JSON.parse(body || '{}'); }
+      catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+      const r = createRepair({ uid: p.uid, symptom: p.symptom, severity: p.severity, reporter: req.__ticketUid || 'admin' });
+      if (r.error) { pushEvent('warn', '报修被拒', { reason: r.error }); return send(r.http || 400, { ok: false, error: r.error }); }
+      pushEvent('info', '设备报修已提交', { id: r.ticket.id, uid: r.ticket.uid, severity: r.ticket.severity });
+      return send(201, { ok: true, ticket: r.ticket });
+    });
+    return undefined;
+  }
+  {
+    const m = /^\/api\/repairs\/([^/]+)$/.exec(u.pathname);
+    if (m) {
+      const rid = decodeURIComponent(m[1]);
+      if (req.method === 'GET') {
+        const t = listRepairs().find((x) => x.id === rid);
+        return t ? send(200, { ok: true, ticket: t }) : send(404, { ok: false, error: `报修单不存在：${rid}` });
+      }
+      if (req.method === 'PATCH') {
+        let body = '';
+        req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+        req.on('end', () => {
+          let p;
+          try { p = JSON.parse(body || '{}'); }
+          catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+          const r = updateRepair(rid, { status: p.status, note: p.note });
+          if (r.error) return send(r.http || 404, { ok: false, error: r.error });
+          pushEvent('info', '报修状态更新', { id: r.ticket.id, status: r.ticket.status });
+          return send(200, { ok: true, ticket: r.ticket });
+        });
+        return undefined;
+      }
+      if (req.method === 'DELETE') {
+        const r = deleteRepair(rid);
+        if (r.error) return send(r.http || 404, { ok: false, error: r.error });
+        pushEvent('info', '报修已删除', { id: rid });
+        return send(200, { ok: true });
+      }
+      return send(405, { ok: false, error: '不支持的方法' });
+    }
   }
 
   if (req.method === 'GET' && u.pathname === '/api/frame') {
@@ -970,7 +1035,30 @@ wss.on('connection', (ws) => {
         authedBy = 'static';
       }
 
-      uid = String(ruid || ticketUid || '').trim();
+      // uid 的归属由鉴权方式决定：
+      //  · 票验通 → uid **必须等于票里签的 uid**。票是"这张票授权这台设备"，
+      //    uid 由站点绑定流程签发；客户端改口报别的 uid 就是冒名，直接拒。
+      //    （旧写法 `ruid || ticketUid` 让载荷 uid 优先 ⇒ 持 A 机的票可注册成任意 uid。）
+      //  · 静态令牌 → 没有票可锚定，uid 只能取载荷。
+      if (authedBy === 'agent-ticket') {
+        const claimed = String(ruid || '').trim();
+        if (!ticketUid) {
+          finish();
+          pushEvent('error', '设备票里没有 uid，拒绝', { owner: ticketOwner });
+          sndErr(ws, 'BAD_TOKEN', '票据未包含设备 uid');
+          return;
+        }
+        if (claimed && claimed !== ticketUid) {
+          finish();
+          pushEvent('error', 'register 声明的 uid 与设备票不符，已拒绝',
+            { claimed, ticketUid: ticketUid, owner: ticketOwner });
+          sndErr(ws, 'BAD_PAYLOAD', 'register 的 uid 与设备票不一致');
+          return;
+        }
+        uid = ticketUid;
+      } else {
+        uid = String(ruid || '').trim();
+      }
       if (!uid) {
         finish();
         pushEvent('error', 'register 没带 uid，拒绝');

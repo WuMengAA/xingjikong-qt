@@ -9,8 +9,11 @@
     "start": "node src/index.js",
     "test": "npm run test:unit",
     "test:unit": "node tests/unit-ecodes.mjs",
+    "test:agent-ticket": "node tests/unit-agent-ticket.mjs",
     "test:confirm": "node tests/regression-confirm-receipt.cjs 8095",
-    "test:recordings": "node tests/regression-recordings.cjs 8095"
+    "test:recordings": "node tests/regression-recordings.cjs 8095",
+    "test:repairs": "node tests/regression-repairs.cjs 8095",
+    "test:agent-ws": "node tests/regression-agent-ticket.mjs 8095"
   },
   "dependencies": {
     "ws": "^8.22.0"
