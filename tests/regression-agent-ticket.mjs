@@ -24,9 +24,9 @@
 // 返回码：0 全过；非 0 有失败。
 //
 // 安全：只对隔离实例跑。不要指向生产端口。
-// 已观察但未在本脚本断言：绑定者 owner 目前只进控制台日志（index.js 注册处 console.log），
-//   未写进 events.log 审计——与站点设计注释「云端注册事件能查到哪台设备是谁绑进来的」有差。
-//   此处按现状写测试，不静默扩范围；是否补进审计由使用方决定。
+// 账号绑定通道的 owner（绑定者用户名）写进 events.log 审计，兑现站点 /api/device/bind 的
+//   设计承诺「云端注册事件能查到哪台设备是谁绑进来的」；否则该字段只进控制台、重启即丢。
+//   见 1d 断言。
 
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -170,14 +170,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('持票但不报 fp 被拒', r.ok === false && !!r.code, r.code || r.reason);
 
   // 1d) 注册进事件审计（设备上线类事件）。
-  //     ⚠️ 绑定者 owner 目前只进控制台日志（index.js 注册处 console.log），未 pushEvent——
-  //     与站点 /api/device/bind 设计注释「云端注册事件能查到哪台设备是谁绑进来的」有差。
-  //     此处按现状只断言设备 uid 入审计；owner 缺口记在文件头注释里，不静默扩范围。
+  //     账号绑定通道的 owner（绑定者用户名）也写进审计——兑现站点 /api/device/bind 的
+  //     设计承诺「云端注册事件能查到哪台设备是谁绑进来的」，否则该字段只进控制台、重启即丢。
   const ev = await listEvents();
   let evJson = null;
   try { evJson = JSON.parse(ev.body); } catch { /* 非 JSON */ }
   const evText = JSON.stringify(evJson?.events || []);
-  check('注册进事件审计（含设备 uid）', ev.status === 200 && evText.includes('it-dev-a'),
+  check('注册进事件审计（含设备 uid + 绑定者 owner）',
+    ev.status === 200 && evText.includes('it-dev-a') && evText.includes(OWNER),
     `events=${evJson?.events?.length || 0}`);
 
   // 2) 同一张票拷到 fp 不同的机器 → 票不认，也不退静态令牌 ⇒ 拒绝

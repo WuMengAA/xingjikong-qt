@@ -1068,8 +1068,15 @@ wss.on('connection', (ws) => {
       registered = true;
       finish();
       // 审计：记下这台机器是用哪条路接入的、谁绑的。
+      // 账号绑定通道把 owner（绑定者用户名）写进 events.log，兑现站点 /api/device/bind 的
+      // 设计承诺「云端注册事件能查到哪台设备是谁绑进来的」——否则这个字段只进控制台，
+      // 重启就丢，出问题时没法回溯是哪台设备、被谁绑进来的。
+      // 静态令牌路不额外记：markConnected 已记「设备已注册并连上」，这里没有 uid 之外的
+      // 新信息，再加一条只是噪音（每台设备上线会多一条重复事件）。
       if (authedBy === 'agent-ticket') {
         console.log(`[cloud] 设备 ${uid} 通过账号绑定接入（owner=${ticketOwner}）`);
+        pushEvent('info', '设备通过账号绑定接入',
+          { uid, owner: ticketOwner, auth: 'agent-ticket' });
       } else {
         console.log(`[cloud] 设备 ${uid} 通过静态令牌接入`);
       }
