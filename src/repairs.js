@@ -94,9 +94,13 @@ export function createRepair({ uid, symptom, severity, reporter }) {
 export function updateRepair(id, { status, note }) {
   const t = repairs.get(String(id));
   if (!t) return { error: `报修单不存在：${id}`, http: 404 };
-  const st = ['open', 'processing', 'fixed', 'closed'].includes(status) ? status : null;
+  // 先校验再改字段：无效输入不能留下半套变更或静默成功。
+  const hasStatus = status !== undefined && status !== null && status !== '';
   const hasNote = note !== undefined && note !== null;
+  const st = hasStatus ? (['open', 'processing', 'fixed', 'closed'].includes(status) ? status : null) : null;
+  if (hasStatus && !st) return { error: `无效状态：${status}（可选 open/processing/fixed/closed）`, http: 400 };
   if (hasNote && String(note).trim().length > 500) return { error: '备注过长（≤500 字）', http: 400 };
+  if (!hasStatus && !hasNote) return { error: '至少要提供 status 或 note', http: 400 };
   if (st) t.status = st;
   if (hasNote) t.note = String(note).trim();
   if (t.status === 'closed' && !t.closedAt) t.closedAt = new Date().toISOString();
