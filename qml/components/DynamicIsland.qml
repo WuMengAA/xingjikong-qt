@@ -104,10 +104,13 @@ Item {
                 }
             }
             // 进度条只在有进度的状态上出现
+            // ⚠️ 2026-10-08 补 anchors.right —— 原来缺了导致外层宽度由子元素 implicit width
+            // 决定，而内层 width 又依赖 parent.width，循环依赖解析为 0，进度条永远不可见。
             Rectangle {
                 visible: isl.st.p !== undefined && isl.st.p >= 0
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.leftMargin: 14
                 anchors.rightMargin: 14
                 height: 2
