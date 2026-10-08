@@ -39,19 +39,11 @@ function asciiHeaderName(name) {
 }
 
 /**
- * 版本号比较：返回 -1/0/1，语义与 scripts/publish-release.mjs 的 cmpVersion 完全一致。
- * 云端这里是唯一调用点（OTA 防倒退），两边必须同一套规则，否则"脚本能发、后台发了却被拦"，
- * 或者反过来（后台能发、脚本报错）。改一处就要改两处。
+ * 版本号比较已统一到 ota.js 的 cmpVersion（2026-10-08）：本文件不再保留本地副本。
+ * 曾有一份本地 split('.') 实现（不认 alpha/rc），与 ota.js 导入的同名函数在本模块
+ * 作用域内重复声明 → SyntaxError，云端进程启动即崩（10-08 重启 8788 实测）。
+ * 语义统一以 ota.js 为准：parseVersion 解析 x.y.z(-(alpha|rc).n)、解析失败返回 0（不比）。
  */
-function cmpVersion(a, b) {
-  const pa = String(a).split('.').map((x) => parseInt(x, 10) || 0);
-  const pb = String(b).split('.').map((x) => parseInt(x, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] || 0) - (pb[i] || 0);
-    if (d) return d > 0 ? 1 : -1;
-  }
-  return 0;
-}
 
 /* ---------- .env 读写（管理面板用）---------- */
 function readEnvFile() {
@@ -111,7 +103,7 @@ function restartCloudTask() {
 import { verifyViewerTicket, mintViewerTicket, verifyAgentTicket } from './ticket.js';
 import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
-import { latestFor } from './ota.js';
+import { latestFor, cmpVersion } from './ota.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 
 /** 发一条协议消息（自动按对端版本选格式），失败不静默。 */
@@ -140,9 +132,14 @@ import {
   rtcSignalToAgent, rtcRelayToViewers, rtcRelayToAgent,
   broadcastAudioToAgents, setAudioBroadcasting, isAudioBroadcasting,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
+  // 2026-10-08 分班制 + 已知设备表 + 云端存储信息
+  markConnected, markDisconnected, setDeviceMeta,
+  bindDeviceToClass, unbindDeviceFromClass, listClasses, getDevicesOfClass,
+  getStorageInfo, isClassCodeValid,
 } from './registry.js';
 // 设备报修（2026-10-07，《设备报修-第一版设计》落地）：内存表 + repairs.json 落盘
 import { loadRepairs, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
+import { expireTerminalHistory } from './store.js';
 
 /**
  * 设备重连成功后，把它"已下发但没等到回执"的指令按原下发顺序补发。
@@ -171,6 +168,13 @@ function replayPending(ws, uid) {
 ensureEventsFile();
 initStore();                 // 打开指令队列（已下发未回执的落盘文件），重启后从这里恢复
 if (!storeReady()) pushEvent('error', '指令队列不可持久化：本次运行期间设备重连补发与重启不丢均失效');
+// 止血：历史遗留的关机类未回执指令必须连根拔掉，否则重连补发会让机器反复重启（恶性BUG）
+{
+  const n = expireTerminalHistory();
+  if (n > 0) {
+    pushEvent('info', `已作废 ${n} 条历史「未回执的关机/重启/升级」指令（执行即终止进程，补发等于又关一次机）`, { purged: n });
+  }
+}
 loadRepairs();               // 打开设备报修表（repairs.json），重启后从这里恢复
 
 // 启动先清一次：把上轮残留的过期未回执/已回执行处理掉，再开始收新指令
@@ -266,13 +270,22 @@ const server = http.createServer((req, res) => {
   // 与 ota.json 同源 → 发版时只改一处，官网自动跟着变，不需要两处各写一套。
   if (req.method === 'GET' && u.pathname === '/api/public/ota') {
     const product = (u.searchParams.get('product') || 'agent').trim();
+    // current（可选）= 客户端自报的当前版本。带上它，服务端直接算出 hasUpdate ——
+    // 版本比较**只有这一份实现**（见 ota.js 的 cmpVersion 注释：两端各写一遍 C++ 比较
+    // 正是 0.6.23 之前"正式版被判成已是最新"那个静默 bug 的来源）。
+    // 不带 current 时 hasUpdate 恒 false：官网下载中心只要 version/url/sha256，
+    // 它不该因为少了这个参数就以为"有新版"。
+    const current = (u.searchParams.get('current') || '').trim();
     const ota = latestFor(product);
     // 没发布过就如实回 published:false —— 官网据此显示"暂未发布"，不假装有内容。
-    if (!ota || !ota.version) return send(200, { ok: true, product, published: false, latest: null });
+    if (!ota || !ota.version) {
+      return send(200, { ok: true, product, published: false, latest: null, hasUpdate: false });
+    }
     return send(200, {
       ok: true,
       product,
       published: true,
+      hasUpdate: current ? cmpVersion(current, ota.version) < 0 : false,
       latest: {
         version: ota.version,
         url: ota.url,
@@ -1084,7 +1097,12 @@ wss.on('connection', (ws) => {
       // 由管端按 action 名决定按钮置不置灰（2026-10-06 契合度改造）。
       const regCaps = (p.payload && typeof p.payload.caps === 'object' && p.payload.caps !== null)
         ? p.payload.caps : null;
-      markConnected(uid, String(version || ''), ws, regCaps);
+      // 2026-10-08：register 带 name / classCode → 落到已知设备表（重连沿用、离线保留）。
+      const regMeta = {
+        name: (p.payload && typeof p.payload.name === 'string' && p.payload.name.trim()) ? p.payload.name.trim().slice(0, 64) : null,
+        classCode: (p.payload && typeof p.payload.classCode === 'string' && p.payload.classCode.trim()) ? p.payload.classCode.trim() : null,
+      };
+      markConnected(uid, String(version || ''), ws, regCaps, regMeta);
       // 设备上线：把还没挑设备的管理端补上订阅（否则老师先开软件 → 永远黑屏）
       const auto = autoSubscribeViewers(uid);
       if (auto > 0) pushEvent('info', '已自动给管理端补上订阅', { uid, viewers: auto });
