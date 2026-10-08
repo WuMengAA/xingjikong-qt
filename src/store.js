@@ -17,6 +17,60 @@ import { QUEUE_DB_FILE, PENDING_TTL_MS, PENDING_MAX_PER_DEVICE, SETTLED_RETENTIO
 let db = null;
 
 /**
+ * 「执行即进程终止」的指令。这类动作一旦落地，被控端进程就死了，回执**物理上发不出来**。
+ *
+ * ⚠️ 2026-10-07 恶性BUG：它们原本照样进 pending 队列，于是每次设备重连都会被补发一次 ——
+ *    关机 → 进程死 → 回执收不到 → 重连补发 shutdown → 又关机 → 又死 ⇒ 机器反复重启，
+ *    现象就是「关机重启指令会一直发送，被控软件一连上就直接重启」。
+ * 修法：这些指令落库时打 no_resend=1，补发查询一律排除；回执如果真回来了（比如被控端
+ *      已去重并回了一个 skipped），照常 settle，不影响对账。
+ */
+const TERMINAL_ACTIONS = new Set(['shutdown', 'reboot', 'schedule_shutdown', 'schedule_reboot', 'self_update']);
+export function isTerminalAction(action) { return TERMINAL_ACTIONS.has(String(action)); }
+
+/**
+ * 止血：把加 no_resend 之前就已经躺在队列里的关机类未回执指令一次性作废。
+ *
+ * 不做的后果：线上那台正在循环重启的机器，云端一重启照样会把这些**历史** shutdown
+ * 补发出去 ⇒ 修了等于没修。改 schema 拦不住历史数据，只能把历史数据一起清干净。
+ * @returns {number} 作废条数
+ */
+export function expireTerminalHistory() {
+  if (!db) return 0;
+  const now = Date.now();
+  try {
+    const ids = db.prepare(
+      "SELECT id FROM instructions WHERE state = 'dispatched' AND no_resend = 0"
+      + ` AND action IN (${[...TERMINAL_ACTIONS].map(() => '?').join(',')})`,
+    ).all(...TERMINAL_ACTIONS);
+    if (!ids.length) return 0;
+    // ⚠️ 2026-10-08 修复：UPDATE 之前没有 WHERE，误把所有 dispatched 行（包括
+    //    screen_record_stop / notify 这类正常指令）一并标成 expired。
+    //    实测复刻（node:sqlite 内存库）：1 条旧 shutdown → 3 行被改，误杀 2 条非终端指令。
+    //    现在 UPDATE 只动 SELECT 挑中的那几条 id。
+    const idList = ids.map((r) => Number(r.id));
+    const r = db.prepare(
+      "UPDATE instructions SET state = 'expired', settled_at = ?, result = 'n/a',"
+      + " error = '执行即终止进程的指令（2026-10-07 恶性BUG 止血）：不再补发，避免反复关机'"
+      + ` WHERE id IN (${idList.map(() => '?').join(',')})`
+    ).run(now, ...idList);
+    return Number(r.changes || idList.length);
+  } catch (e) {
+    console.error(`[cloud] FAIL 历史关机类指令作废失败: ${e.message}`);
+    return 0;
+  }
+}
+
+/** 生产库里存量表是加这一列之前的版本，补一句 ALTER；重复列报错就当已迁移。 */
+function migrateTerminalColumn() {
+  try {
+    db.exec('ALTER TABLE instructions ADD COLUMN no_resend INTEGER NOT NULL DEFAULT 0');
+  } catch (e) {
+    if (!/duplicate column/i.test(e.message)) throw e;
+  }
+}
+
+/**
  * 打开（或新建）队列表。失败**不让云端整体死掉**（云端一挂等于整个星集控全断），
  * 但必须大声报出来——失败时本功能退化为"不持久化"，重启会丢，这是要尽快修的降级态。
  */
@@ -36,9 +90,11 @@ export function initStore() {
       dispatched_at INTEGER NOT NULL,          -- 下发时间（ms）
       settled_at    INTEGER,                   -- 回执或作废时间（ms）
       result        TEXT,                      -- 设备回执 result：done / failed
-      error         TEXT
+      error         TEXT,
+      no_resend     INTEGER NOT NULL DEFAULT 0 -- 1 = 执行即终止进程的指令，禁止重连补发（见 TERMINAL_ACTIONS）
     )`);
     db.exec('CREATE INDEX IF NOT EXISTS idx_instr_uid_state ON instructions(uid, state, id)');
+    migrateTerminalColumn();
   } catch (e) {
     console.error(`[cloud] FAIL 指令队列不可持久化（${QUEUE_DB_FILE}）：${e.message} —— 本进程重启会丢未回执指令，请尽快修复`);
     db = null;
@@ -52,12 +108,14 @@ export function storeReady() { return db !== null; }
  * 落一条"已下发"记录，返回队列内稳定 id（设备回执按它配对；AUTOINCREMENT 保证重启后仍单调不重号）。
  * 失败返回 null：调用方仍照常下发，只是这条失去"重启不丢"的兜底。
  */
-export function enqueueDispatch(uid, action, params) {
+export function enqueueDispatch(uid, action, params, noResend) {
   if (!db) return null;
   try {
+    // noResend 不显式传就按动作自动判定；显式传 0 是为了能补录"加该列之前遗留的旧行"
+    const flag = noResend === undefined ? (isTerminalAction(action) ? 1 : 0) : (noResend ? 1 : 0);
     const info = db.prepare(
-      'INSERT INTO instructions (uid, action, params, state, dispatched_at) VALUES (?, ?, ?, ?, ?)',
-    ).run(String(uid), String(action), JSON.stringify(params ?? {}), 'dispatched', Date.now());
+      'INSERT INTO instructions (uid, action, params, state, dispatched_at, no_resend) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(String(uid), String(action), JSON.stringify(params ?? {}), 'dispatched', Date.now(), flag);
     return Number(info.lastInsertRowid);
   } catch (e) {
     console.error(`[cloud] FAIL 指令落盘失败: ${e.message}`);
@@ -125,7 +183,9 @@ export function pendingFor(uid) {
   if (!db) return [];
   try {
     const rows = db.prepare(
-      "SELECT id, action, params, dispatched_at FROM instructions WHERE uid = ? AND state = 'dispatched' ORDER BY id ASC",
+      // no_resend=0：关机/重启这类执行即终止进程的指令**不补发**——补发一次就是又关一次机器
+      "SELECT id, action, params, dispatched_at FROM instructions"
+      + " WHERE uid = ? AND state = 'dispatched' AND no_resend = 0 ORDER BY id ASC",
     ).all(String(uid));
     return rows.map((r) => ({ id: r.id, action: r.action, params: safeParse(r.params), dispatchedAt: r.dispatched_at }));
   } catch (e) {
@@ -139,7 +199,8 @@ export function listPendingAll() {
   if (!db) return {};
   try {
     const rows = db.prepare(
-      "SELECT id, uid, action, params, dispatched_at FROM instructions WHERE state = 'dispatched' ORDER BY id ASC",
+      "SELECT id, uid, action, params, dispatched_at FROM instructions"
+      + " WHERE state = 'dispatched' AND no_resend = 0 ORDER BY id ASC",
     ).all();
     const out = {};
     for (const r of rows) {
