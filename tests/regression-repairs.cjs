@@ -4,7 +4,7 @@
 //   1) POST 新建报修 → 201 {ok,ticket}，字段齐全（id/uid/symptom/severity/status=open）
 //   2) 无令牌 / 错误令牌写操作 → 401 AU1003（写路径必须鉴权，不谎报）
 //   3) GET 列表 + ?status=open 过滤 → 含新建票
-//   4) PATCH 更新为 processing（带 note）→ 200 字段更新；非法 status 静默忽略
+//   4) PATCH 更新为 processing（带 note）→ 200 字段更新；非法 status → 400（2026-10-08 起）
 //   5) PATCH 非法 id → 404
 //   6) 症状描述超 200 字 → 400；备注超 500 字 → 400
 //   7) DELETE 删除 → 200；再查 404
@@ -157,10 +157,13 @@ function req(method, p, token, obj, ctype) {
   check('备注已落库', r.json?.ticket?.note === '已派工程师', `note=${r.json?.ticket?.note}`);
   check('未关闭时 closedAt 为空', r.json?.ticket?.closedAt == null, `closedAt=${r.json?.ticket?.closedAt}`);
 
-  // 13) PATCH 非法 status 静默忽略（保留原状态，不报错不污染）
+  // 13) PATCH 非法 status → 400（2026-10-08 修正：旧行为"静默忽略"是 bug，
+  //     静默忽略会让调用方以为改成功了；现在显式 400 并保留原状态）
   r = await req('PATCH', ticketPath(id1), V, { status: 'zzz' });
-  check('非法 status 静默忽略', r.status === 200 && r.json?.ticket?.status === 'processing',
-    `status=${r.json?.ticket?.status}`);
+  check('非法 status 被拒 400', r.status === 400, `status=${r.status}`);
+  const afterReject = await req('GET', ticketPath(id1), V);
+  check('被拒后原状态保留', afterReject.status === 200 && afterReject.json?.ticket?.status === 'processing',
+    `status=${afterReject.json?.ticket?.status}`);
 
   // 14) PATCH 不存在的 id → 404
   r = await req('PATCH', ticketPath('tick-00000000-999'), V, { status: 'fixed' });
