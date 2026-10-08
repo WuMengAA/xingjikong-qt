@@ -675,7 +675,7 @@ export function broadcastAudioToAgents(buf, mime, seq) {
   for (const d of devices.values()) {
     if (!d.ws || d.ws.readyState !== 1) continue;
     // 复用 v1 二进制帧格式（makeFrame 用 uid 标记来源）：audio 帧 uid 用虚拟
-    // "audio:<viewer>" 来源，mime 标 audio/pcm，agent 端按 mime 区分语音帧与画面帧。
+    // "audio:<seq>" 来源（agent 端按 mime=audio/pcm 区分语音帧与画面帧，不读 uid）。
     try {
       d.ws.send(makeFrame(`audio:${seq}`, seq, mime, buf));
       hits++;
