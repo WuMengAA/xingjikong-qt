@@ -133,7 +133,7 @@ import {
   broadcastAudioToAgents, setAudioBroadcasting, isAudioBroadcasting,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
   // 2026-10-08 分班制 + 已知设备表 + 云端存储信息
-  markConnected, markDisconnected, setDeviceMeta,
+  setDeviceMeta,
   bindDeviceToClass, unbindDeviceFromClass, listClasses, getDevicesOfClass,
   getStorageInfo, isClassCodeValid,
 } from './registry.js';
@@ -218,7 +218,18 @@ const server = http.createServer((req, res) => {
   // /recordings/* 静态托管（2026-10-07 · 班级监控回放）：录制 mp4 只读下载/播放。
   // 与管理面鉴权同位置（在鉴权之前）——管理端播放器直接拉 mp4，不带令牌；
   // 文件本身已在 /api/recordings 列表里由管理端令牌保护（列表不可见=URL 不可知）。
+  // ⚠️ 2026-10-08 补鉴权：实测枚举 URL（rec-<ISO时间戳>.mp4 + 可猜 uid）可无令牌
+  //    直接下载任意班级监控录像，且 cache-control: public 一年 ——「URL 不可知」不成立。
+  //    现在回放下载与列表同鉴权（Bearer CLOUD_VIEWER_TOKEN 或票据），无令牌 401。
   if (u.pathname.startsWith('/recordings/')) {
+    const rauth = req.headers.authorization || '';
+    const rtoken = rauth.toLowerCase().startsWith('bearer ') ? rauth.slice(7).trim() : '';
+    const rStatic = !!rtoken && rtoken === VIEWER_TOKEN;
+    const rTicket = !!rtoken && !rStatic ? verifyViewerTicket(rtoken).ok : false;
+    if (!rtoken || (!rStatic && !rTicket)) {
+      pushEvent('warn', '录制回放下载被拒（未授权）', { path: u.pathname });
+      return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN> 或网站账号签发的票据' });
+    }
     const rel = u.pathname.replace(/^\/recordings\//, '');
     if (!/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.mp4$/.test(rel)) {
       return send(404, { ok: false, error: '路径不合法' });
@@ -334,7 +345,8 @@ const server = http.createServer((req, res) => {
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
     u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
-    u.pathname === '/api/ota/latest' || u.pathname.startsWith('/api/repairs') || isAdminApi;
+    u.pathname === '/api/ota/latest' || u.pathname.startsWith('/api/repairs') ||
+    u.pathname === '/api/recordings' || isAdminApi;
   if (isManageApi) {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -379,6 +391,41 @@ const server = http.createServer((req, res) => {
     const product = (u.searchParams.get('product') || 'agent').trim();
     const latest = latestFor(product);
     return send(200, { ok: true, product, latest });
+  }
+
+  // ── 班级监控 / 设备元数据 / 云端存储（2026-10-08）──
+  // 这三条都归管理面鉴权（与 /api/ota/latest 同级）：Bearer CLOUD_VIEWER_TOKEN。
+  const isViewerApi = u.pathname === '/api/storage' || u.pathname === '/api/classes'
+    || u.pathname === '/api/device/bind-class' || u.pathname === '/api/me/classes';
+  if (isViewerApi) {
+    const vauth = req.headers.authorization || '';
+    const vtoken = vauth.toLowerCase().startsWith('bearer ') ? vauth.slice(7).trim() : '';
+    if (vtoken !== VIEWER_TOKEN) {
+      return send(401, { ok: false, ecode: 'AU1001', code: 'TOKEN_INVALID', error: '未授权：需要管理端令牌' });
+    }
+  }
+  if (req.method === 'GET' && u.pathname === '/api/storage') {
+    return send(200, { ok: true, ...getStorageInfo() });
+  }
+  if (req.method === 'GET' && u.pathname === '/api/classes') {
+    return send(200, { ok: true, classes: listClasses() });
+  }
+  if (req.method === 'GET' && u.pathname === '/api/me/classes') {
+    // 管理端（登录账号）可见的班级列表 —— 第一版：云端不分账号，返回全部班级。
+    // 在线数现算（不落表，避免"不自刷新"老毛病），管理端按班下发时只发本班在线设备。
+    return send(200, { ok: true, classes: listClasses() });
+  }
+  if (req.method === 'POST' && u.pathname === '/api/device/bind-class') {
+    // 管理端把某设备绑到某班（或改绑）。body: { uid, classCode, className? }
+    let body = {};
+    try { body = JSON.parse(String(data)); } catch { /* 空 body 或非法 JSON → 走 query */ }
+    const uid = String(body.uid ?? u.searchParams.get('uid') ?? '').trim();
+    const classCode = String(body.classCode ?? u.searchParams.get('classCode') ?? '').trim();
+    const className = String(body.className ?? u.searchParams.get('className') ?? '').trim();
+    if (!uid) return send(400, { ok: false, error: '缺 uid' });
+    if (!isClassCodeValid(classCode)) return send(400, { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' });
+    const r = bindDeviceToClass(classCode, uid, className);
+    return send(r.ok ? 200 : 400, { ok: r.ok, ...r });
   }
 
   // ── 班级监控（设计文档 3.6 第一版，2026-10-07）──
