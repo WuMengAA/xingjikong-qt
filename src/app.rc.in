@@ -1,0 +1,49 @@
+#include <windows.h>
+
+/*
+  星集控管理端 · 版本资源 + 应用图标（2026-10-07 补）
+
+  与被控端的 app.rc.in 成对：两端都补上之后，任务管理器「应用程序」页、
+  右键属性、控制面板卸载项才会显示 公司/描述/版本，而不是一片空白。
+  管理端这一份的版本号直接用 CMakeLists.txt 里已有的 VIEWER_VERSION
+  （它本身又是靠 kViewerVersion 校验过的唯一真源，别在这里另写一份）。
+
+  编码：UTF-8 + code_page(65001)，否则中文描述在属性框里变乱码。
+*/
+
+#pragma code_page(65001)
+
+IDI_APPICON ICON "app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+    FILEVERSION    @RC_VERSION_QUAD@
+    PRODUCTVERSION @RC_VERSION_QUAD@
+    FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+    FILEFLAGS      VS_FF_DEBUG
+#else
+    FILEFLAGS      0x0L
+#endif
+    FILEOS         VOS_NT_WINDOWS32
+    FILETYPE       VFT_APP
+    FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404B0"          ; 0x0804 简体中文 + 1200 Unicode 编码
+        BEGIN
+            VALUE "CompanyName",      "Stelarith"
+            VALUE "FileDescription",  "星集控管理端"
+            VALUE "FileVersion",      "@VIEWER_VERSION@"
+            VALUE "InternalName",     "viewer-qt"
+            VALUE "LegalCopyright",   "Stelarith"
+            VALUE "OriginalFilename", "viewer-qt.exe"
+            VALUE "ProductName",      "星集控"
+            VALUE "ProductVersion",   "@VIEWER_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END
