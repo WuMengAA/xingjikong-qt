@@ -24,6 +24,11 @@ Item {
     property var theme: ({})
     required property var backend
 
+    // 高度语义：Column 里直接放可用（Column 按 implicitHeight 排）。
+    // 显式给高度（如嵌入固定卡）时以显式为准。
+    implicitHeight: 360
+    implicitWidth: 520
+
     // ── 绑定存储（与 CameraBindDialog 同 key，共用）──
     Settings {
         id: store
