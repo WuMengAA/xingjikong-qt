@@ -23,6 +23,7 @@
 #include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
 #include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 #include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
+#include "island.h"           // 2026-10-07：被控端灵动岛（顶部居中胶囊 + 缓动 + 交互穿透）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -42,12 +43,15 @@
 #include <QDir>
 #include <QFile>
 #include <QBuffer>
+#include <QSet>
+#include <cstdlib>   // rand()：重连退避抖动（2026-10-08）
+#include <QStandardPaths>
 #include <QElapsedTimer>
 #include <QUrl>
 #include <QWebSocket>
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
 #include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
-#include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 白名单轮询 + 计时）
+#include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
 #include "audio_player.h"      // 2026-10-07：语音对讲播放（waveOut）
 #include "broadcast_view.h"    // 2026-10-07：屏幕广播全屏显示
 #include <QHostInfo>
@@ -89,6 +93,8 @@
 #include <QUrlQuery>
 #include <QMouseEvent>   // 2026-10-05：紧急通知点击关闭
 #include <QPaintEvent>   // 2026-10-05：全屏通知背景色（setStyleSheet 对顶层 QWidget 无效）
+#include <QGraphicsOpacityEffect>   // 2026-10-07：通知窗淡入淡出（#98「要有过渡」）
+#include <QPropertyAnimation>
 #include <QPainter>
 #include <QPainterPath>
 #include <windows.h>
@@ -111,7 +117,8 @@ constexpr int kFrameIntervalMs = 2000;   // 2 秒一帧，与 D2 保持一致
 // 采集页回收延迟：rtc-stop 后留这么久，没人重新点开就真删（见 scheduleRtcViewReap）
 constexpr int kRtcReapDelayMs = 5000;
 constexpr int kHeartbeatIntervalMs = 10000; // 心跳缺省值（云端 registered 里给了就以云端为准）
-constexpr int kMaxBackoffMs = 15000;
+constexpr int kMaxBackoffMs = 8000;      // 退避上限（2026-10-08：从 15s 降到 8s，断网恢复更快）
+constexpr int kFirstBackoffMs = 500;     // 首连/未注册时的快速重试间隔（2026-10-08）
 constexpr int kProtocolVersion = 1;      // 协议 v1（《星集控-协议规范v1-2026-10-03.md》）
 constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust DEFAULT_LIMIT 同量级）
 
@@ -122,13 +129,26 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //   exe 报 0.4.0-v1、安装器写 0.5.0）。
 //   ⚠️ 2026-10-06 收敛到 0.6.0：此前这里写 0.5.0、installer.nsi 写 0.5.1，本文件自己的注释
 //      还写着"两者必须一致"却没做到 —— 不一致的代价是云端按 0.5.0 判断 OTA，装出来却是 0.5.1。
-constexpr const char *kAppVersion = "0.6.5";
+//     ⚠️ 2026-10-07：命名改 DeepSeek Harness 同款，正式 X.Y.Z / 候选 X.Y.Z-rc.N
+//     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
+//      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
+//     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
+constexpr const char *kAppVersion = "0.6.23-rc.2";
 
 QWebSocket *g_ws = nullptr;
-int g_backoffMs = 1000;
+int g_backoffMs = kFirstBackoffMs;
+// 2026-10-08：本机归属的班级码（OOBE 绑定后持久化，register 时带给云端 → 管理端按班分组）。
+QString g_classCode;
+// 2026-10-08：是否曾经注册成功过（决定首连用快速重试还是正常退避）。
+bool g_everRegistered = false;
 // 语音对讲（2026-10-07）：学生端播放器（waveOut，懒打开——只在收到音频帧时开）
 AudioPlayer g_audioPlayer;
 bool g_audioHintShown = false;   // "老师正在讲话"提示是否已显示（每会话一次）
+// 2026-10-08：断线灵动岛去重。退避重连期间每次 disconnected 都会再弹一条「连接中断」，
+// 首连快速重试（500ms）下等于每半秒闪一次，用户看到的就是"一直显示连接中断"。
+// 规则：同一段离线只弹第一条；云端回 registered（真的又连上了）才把闸门放开。
+static bool g_islandOfflineShown = false;
+static qint64 g_lastOfflineToastMs = 0;  // 2026-10-08：上一条"连接中断"灵动岛的时间戳（秒级冷却，防抖动时反复弹）
 int g_frameSeq = 0;
 qint64 g_frameBytes = 0;      // 累计发出的 JPEG 净荷（不含帧头）——与云端 bytesIn 对账用这个
 int g_instructionSeq = 0;
@@ -264,8 +284,15 @@ void connectNow()
 
 void scheduleReconnect()
 {
-    QTimer::singleShot(g_backoffMs, connectNow);
-    qInfo("[agent-qt] %d ms 后重试（退避上限 %d ms）", g_backoffMs, kMaxBackoffMs);
+    // 2026-10-08 根因修复：几十台教室机同时断网时，若都用同一退避序列会在同一时刻一起重连，
+    // 把云端瞬间打死 → 又一起断，恶性循环。加 ±20% 抖动，让重连时刻分散开。
+    // 首连（从未注册成功过）用快速重试，断网恢复更快。
+    const int base = g_everRegistered ? qMin(g_backoffMs, kMaxBackoffMs) : kFirstBackoffMs;
+    const double r = (double)rand() / (double)RAND_MAX;        // [0,1)
+    const int jitter = int(base * (0.8 + 0.4 * r));            // [0.8,1.2) × base
+    QTimer::singleShot(jitter, connectNow);
+    qInfo("[agent-qt] %d ms 后重试（退避上限 %d ms，含 ±20%% 抖动%s）",
+          jitter, kMaxBackoffMs, g_everRegistered ? "" : "，首连快速重试");
     g_backoffMs = qMin(g_backoffMs * 2, kMaxBackoffMs);
 }
 
@@ -288,7 +315,7 @@ static const char *kActionNames[] = {
     // 不报 = 管理端永远置灰，功能做完了看得见摸不着。
     // 顺序照旧按字母表末段排，方便以后和别的动作一起校对。
     "terminal_close", "terminal_input", "terminal_open",
-    // 考试模式（2026-10-06，设计文档 3.7 第一版）：全屏拦截 + 白名单轮询 + 计时。
+    // 考试模式（2026-10-06，设计文档 3.7 第一版）：全屏拦截 + 黑名单轮询 + 计时。
     "exam_mode", "exam_mode_stop",
 };
 static const int kActionCount = (int)(sizeof(kActionNames) / sizeof(kActionNames[0]));
@@ -321,21 +348,17 @@ void sendRegister()
     p.insert(QStringLiteral("token"), token);
     p.insert(QStringLiteral("version"), QString::fromLatin1(kAppVersion));
     p.insert(QStringLiteral("caps"), caps);
+    // 2026-10-08：设备展示名（默认电脑名，可用 STE_QT_NAME 覆盖；管理端据此显示「设备名」而非一串 uid）
+    p.insert(QStringLiteral("name"), envOr("STE_QT_NAME", QHostInfo::localHostName()));
+    // 2026-10-08：本机归属的班级码（OOBE 绑定后持久化）；云端据此把设备按班分组。
+    if (!g_classCode.isEmpty()) p.insert(QStringLiteral("classCode"), g_classCode);
 
     // 2026-10-06：设备指纹（账号绑定路径需要）。
     // 如果 token 是站点签的设备票（7 段 v1.…），云端验票时会拿这个 fp 比对；
     // 旧静态令牌路径不校验 fp，这个字段会被忽略。不填也不报错（兼容旧云端）。
-    // 指纹算法与 oauthbind.cpp 的 computeFingerprint() 保持一致。
-    {
-        const QString raw = QStringLiteral("%1|%2|%3|%4")
-            .arg(QHostInfo::localHostName(),
-                 QSysInfo::currentCpuArchitecture(),
-                 QSysInfo::kernelVersion(),
-                 QSysInfo::machineUniqueId().toHex());
-        const QByteArray hash = QCryptographicHash::hash(raw.toUtf8(), QCryptographicHash::Sha256)
-            .toHex().left(32);
-        p.insert(QStringLiteral("fp"), QString::fromLatin1(hash).toLower());
-    }
+    // 指纹统一由 oauthbind.cpp 的 computeFingerprint() 出：站点签设备票时算的是同一个值，
+    // 这里另抄一份（哪怕算法现在一样）迟早会漂移 —— 一漂移就是"绑定成功却连不上"。
+    p.insert(QStringLiteral("fp"), computeFingerprint());
 
     const QString hello = makeEnvelope(QStringLiteral("register"), p);
     g_ws->sendTextMessage(hello);
@@ -365,6 +388,70 @@ void sendHeartbeat()
 // 2026-10-03 批次 1：成功/失败统一成 "done"/"failed"，动作的语义化返回值放进 data
 // （协议规范第十节：加**可选字段**，老端忽略不报错）—— 这样三端"绿=done"的判据不用动。
 struct ExecOut { QString result; QString error; QJsonObject data; };
+
+/* ══ 2026-10-07 恶性BUG：关机/重启指令会一直发、机器一直重启 ══════════════════
+ *
+ * 原写法的顺序是「先 ExitWindowsEx 关机 → 再 sendActionReceipt 回执」。
+ * 机器一关进程就没了，**回执物理上发不出去** ⇒ 云端永远判这条"未回执" ⇒
+ * 下次设备重连时把 shutdown 补发一次 ⇒ 又关 ⇒ 又死 ⇒ 无限循环。
+ * 现象就是老师点一次关机，机器反复重启、"被控软件一连上就立刻重启"。
+ *
+ * 三层止血（缺一层都会在某个版本组合下复发）：
+ *   ① 回执先发、关机延后 2.5 秒（见 executeAction 的 shutdown/reboot 分支）——
+ *      否则"发了回执"和"真关了"中间那段是彻底黑洞，对账永远差一条；
+ *   ② 本机落盘记录"已执行过的破坏性指令 id"，重复下发直接跳过 ——
+ *      挡的是还没升级到 no_resend 那套逻辑的**老版本云端**补发过来的同一条；
+ *   ③ 云端 store.js 已把 shutdown / reboot / schedule_* / self_update 标 no_resend，
+ *      根本不进补发队列（regression-terminal-no-resend.mjs 11 项断言）。
+ *
+ * 只挡"已经执行过"的**同一条 id**，不挡新指令：老师想再关一次，下新单即可。
+ */
+static QSet<QString> g_terminalDone;   // 已执行过的破坏性指令 id（内存态，随开随读）
+static QString       g_terminalDoneFile;
+static QString       g_lastInstrId;    // 当前这条 instruction 的 id，executeAction 要用
+
+static QString terminalDonePath()
+{
+    if (g_terminalDoneFile.isEmpty()) {
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+        if (dir.isEmpty()) g_terminalDoneFile = QStringLiteral("./terminal-done.json");  // 兜底也别让关机卡住
+        else {
+            QDir().mkpath(dir);
+            g_terminalDoneFile = dir + QStringLiteral("/terminal-done.json");
+        }
+    }
+    return g_terminalDoneFile;
+}
+
+/** 读回上次记下的"已经执行过"的破坏性指令 id。读不了就当空 —— 绝不能因为它挡住关机。 */
+static void loadTerminalDone()
+{
+    QFile f(terminalDonePath());
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    f.close();
+    const QJsonArray arr = doc.isObject() ? doc.object().value(QStringLiteral("ids")).toArray()
+                                          : doc.array();
+    for (const QJsonValue &v : arr) if (v.isString()) g_terminalDone.insert(v.toString());
+}
+
+/** 记一笔并**立即**落盘：关机随时可能发生，缓冲区里的东西来不及写就白记了。 */
+static void markTerminalDone(const QString &id)
+{
+    if (id.isEmpty()) return;
+    g_terminalDone.insert(id);
+    QFile f(terminalDonePath());
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qInfo("[agent-qt] ⚠ 破坏性指令记录写不进（%s）—— 重复下发只能靠云端侧兜", qPrintable(f.errorString()));
+        return;
+    }
+    QJsonArray arr;
+    for (const QString &s : g_terminalDone) arr.append(s);
+    QJsonObject o;
+    o.insert(QStringLiteral("ids"), arr);
+    f.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
+    f.close();
+}
 
 /* ══════════ 批次 2：全量补齐的公共工具（ffmpeg / 调度持久化 / 路径规整） ══════════ */
 
@@ -642,7 +729,7 @@ void appendLogFile(const QString &line)
 }
 
 /**
- * 读 exe 同目录的 agent.env（格式：`set KEY=VALUE`，`rem`/`#` 为注释）。
+ * 读数据目录的 agent.env（格式：`set KEY=VALUE`，`rem`/`#` 为注释）。
  *
  * **为什么要程序自己读**：开机自启走的是「登录触发器计划任务」。2026-10-03 实测发现
  * 计划任务里再套一层 cmd/bat（`cmd /c start-agent.bat`）**会卡住不退**（任务永远 Running、
@@ -763,7 +850,7 @@ void notifyUnconfiguredOnce()
     g_unconfiguredNotified = true;
     g_tray->showMessage(
         QStringLiteral("星集控 · 未配置"),
-        QStringLiteral("本机尚未接入集控：%1。\n右键托盘图标 →「配置…」填写后即可接入（也可手改同目录 agent.env）。")
+        QStringLiteral("本机尚未接入集控：%1。\n右键托盘图标 →「配置…」填写后即可接入（也可手改 agent.env（配置目录，即数据目录））。")
             .arg(unconfiguredReason()),
         QSystemTrayIcon::Warning, 10000);
 }
@@ -779,7 +866,7 @@ void goUnconfigured()
         qWarning().noquote()
             << QStringLiteral("[agent-qt] FAIL: 未配置 —— %1；本机尚未接入集控，不连接云端、不重试。"
                               "右键托盘图标 →「配置…」填写 STE_QT_WS_URL / STE_QT_WS_TOKEN，"
-                              "或把 agent.env 放到程序同目录后重启。")
+                              "或把 agent.env 放到配置目录后重启。")
                    .arg(unconfiguredReason());
     }
     // 托盘可能尚未创建（启动早期调用）—— updateTray/notify 会在 g_tray 为空时安全跳过。
@@ -791,7 +878,7 @@ void goUnconfigured()
 /* ══════════ 首次运行配置窗（OOBE）（2026-10-04） ══════════
  * 背景：装完第一次打开时，老师面对的是一个托盘图标 + 一个要手改的 agent.env 文本文件，
  * 门槛太高（要认得 `set KEY=VALUE`、要找对目录、要知道令牌从哪来）。
- * 这里给一个界面：三个字段填完点「保存并连接」，写回 exe 同目录的 agent.env 并立即重连。
+ * 这里给一个界面：三个字段填完点「保存并连接」，写回数据目录的 agent.env 并立即重连。
  */
 
 // 单行清理：去掉可能被粘进来的换行（否则会污染配置文件、注入多余行）。
@@ -803,14 +890,50 @@ QString cleanLine(const QString &s)
     return t.trimmed();
 }
 
-// exe 同目录的 agent.env 路径（读、写都走这里，避免两处各拼一次字符串拼歪）
+// agent.env 的路径 —— **唯一真源**：读、写、备份、提示文案全从这里出，别处不许自己拼字符串。
+//
+// ⚠️ 2026-10-07 从「exe 同目录」改到「数据目录」。原先返回 applicationDirPath()，也就是
+// `C:\Program Files\Stelarith\agent.env` —— 那是**程序目录**，不是数据目录，两个后果：
+//   ① 教室机以老师/学生账户跑时，Program Files 对普通账户**没有写权限** ⇒ 配置向导点「保存」
+//      看着存了（QFile::write 返回 true 前就静默失败），重启又变回「未配置」；
+//   ② OTA 换包要决定"备份谁"，备份程序目录里的配置文件本身就是个错的位置。
+// 数据目录 %LOCALAPPDATA%\xingjikong\ 与日志/截图/调度/OTA 状态同根 —— 普通账户可写、
+// 升级天然保留、换包碰不到。老机器上已有的旧配置由 migrateAgentEnvFromInstallDir() 搬运。
 QString agentEnvPath()
 {
-    return QCoreApplication::applicationDirPath() + QStringLiteral("/agent.env");
+    static QString cached;                                    // 回退/迁移只算一次
+    if (!cached.isEmpty()) return cached;
+    const QString dir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
+    if (!QFileInfo::exists(dir) && !QDir().mkpath(dir)) {
+        // 连数据目录都建不出来（权限异常/只读盘）⇒ 回退老行为，宁可沿用装目录也别让程序连不上云端
+        cached = QCoreApplication::applicationDirPath() + QStringLiteral("/agent.env");
+        qWarning() << QStringLiteral("[agent-qt] 数据目录建不出来（%1）—— agent.env 回退到安装目录：%2").arg(dir, cached);
+        return cached;
+    }
+    cached = dir + QStringLiteral("/agent.env");
+    return cached;
 }
 
 /**
- * 把界面上的配置写回 exe 同目录的 agent.env，并**直接更新进程环境变量**。
+ * 老版本（≤0.6.22）把 agent.env 写在 exe 同目录，这里在**首次启动时**把它搬到数据目录。
+ * 三条硬规矩：
+ *   ① 幂等 —— 目标位置已经在（新装/已搬过）就直接返回，绝不重复搬；
+ *   ② **只复制、不删除**原文件 —— 装机面板生成的脚本、老师手改的副本可能还指着那个路径，
+ *      删掉就等于凭空制造一台"配置丢了"的机器；
+ *   ③ 搬不动就当没这回事（老位置照样读得到），绝不让迁移失败把启动挡在门外。
+ */
+void migrateAgentEnvFromInstallDir()
+{
+    const QString dst = agentEnvPath();
+    if (QFileInfo::exists(dst)) return;   // ① 幂等：已经是新位置
+    const QString src = QCoreApplication::applicationDirPath() + QStringLiteral("/agent.env");
+    if (!QFileInfo::exists(src)) return;  // 全新装机 / 本来就没配过：没什么可搬
+    if (!QFile::copy(src, dst)) return;   // ③ 失败不计，老位置仍可正常读到
+    qInfo().noquote() << QStringLiteral("[agent-qt] 已把旧的 agent.env 搬进数据目录 → %1（原文件保留不动）").arg(dst);
+}
+
+/**
+ * 把界面上的配置写回 agent.env（数据目录），并**直接更新进程环境变量**。
  *
  * ⚠️ 关键坑：写完**绝不能**指望 loadEnvFile() 把新值刷进进程。
  * loadEnvFile 的规则是"真环境变量优先、不覆盖"（`if (!qgetenv(key).isEmpty()) continue;`）。
@@ -847,6 +970,34 @@ bool saveAgentEnv(const QString &url, const QString &token, const QString &uid)
 
     qInfo().noquote() << QStringLiteral("[agent-qt] 已保存配置 → %1（4 行，UTF-8 无 BOM）").arg(agentEnvPath());
     return true;
+}
+
+// 2026-10-08：班级码持久化（独立于 agent.env 的 4 行格式，单独存一个文件，避免破坏既有解析）。
+static QString classCodePath()
+{
+    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/classcode.txt");
+}
+static void saveClassCode(const QString &code)
+{
+    if (code.isEmpty()) return;
+    g_classCode = code.trimmed();
+    QFile f(classCodePath());
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(g_classCode.toUtf8());
+        f.close();
+        qInfo().noquote() << QStringLiteral("[agent-qt] 已保存班级码 → %1").arg(classCodePath());
+    } else {
+        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法保存班级码：%1").arg(f.errorString());
+    }
+}
+static void loadClassCode()
+{
+    QFile f(classCodePath());
+    if (f.open(QIODevice::ReadOnly)) {
+        const QString code = QString::fromUtf8(f.readAll()).trimmed();
+        f.close();
+        if (!code.isEmpty()) { g_classCode = code; qInfo().noquote() << QStringLiteral("[agent-qt] 已载入班级码 %1").arg(code); }
+    }
 }
 
 /* ══════════ 班级绑定（2026-10-04：OOBE 里消费激活码，把本机绑到班级） ══════════
@@ -962,27 +1113,71 @@ bool g_updateMandatory = false;     // 2026-10-06：云端 ota.json 的 mandator
 qint64 g_lastOnlineAt = 0;          // 最近一次连上云端（强制升级回滚判定用：从没连通就不许误判成"新版本坏了"）
 QAction *g_actUpdate = nullptr;     // 托盘里"发现新版本…"那一条（无更新时隐藏）
 
-/** 比语义化版本（**逐段比数字**，不做字符串比）：
- *  a>b → 1，a<b → -1，相等或都比不出来 → 0。
- *  例：0.6.1 > 0.6.0；0.10.0 > 0.9.9（字符串比会得出相反结论）；
- *      0.4.0-v1 取到数字段 0/4/0，后缀不影响（历史上报过 "0.4.0-v1" 这种值）。 */
+/** 比版本号（semver 子集，2026-10-07 对齐 DeepSeek Harness 同款 X.Y.Z[-(alpha|rc).N]）：
+ *  a>b → 1，a<b → -1，相等 → 0。
+ *  ① 先比核心三段 X.Y.Z 的数字（缺段补 0 —— 0.10.0 > 0.9.9 这种字符串比会反的地方）；
+ *  ② 核心打平后，先比**阶段**："alpha" < "rc" < 正式版（跟 semver 的预发布标识符一致，
+ *     阶段名不同就不再比号 —— alpha.5 也小于 rc.1）；
+ *  ③ 同核心同阶段才比号（rc.2 > rc.1、alpha.3 > alpha.1）。
+ *  例：0.6.23-alpha.1 < 0.6.23-rc.1 < 0.6.23；0.6.23-rc.1 > 0.6.22；0.6.23 < 0.6.24-rc.1。
+ *  兼容：非本标准的老后缀（"0.4.0-v1"、"-beta"）照旧当空气，行为跟以前一致。
+ *  这套语义的参考实现和断言在 scripts/test-version-naming.mjs（工作区根）—— 改这里之前
+ *  先跑一遍那个脚本，它挂了就说明两边语义分叉了。
+ *
+ *  为什么必须认后缀：候选版也要能被 OTA 识别成「有更新」。旧实现把后缀当空气，
+ *  0.6.23 与 0.6.23-rc.1 会判成相等 ⇒ 托盘的「发现新版本」整段失灵。 */
 int compareVersion(const QString &a, const QString &b)
 {
-    auto seg = [](const QString &s, int i) -> int {
-        const QStringList parts = s.split(QLatin1Char('.'));
-        if (i >= parts.size()) return 0;            // 段数不够 → 补 0
+    // 拆成「核心段」+「阶段 + 阶段号」：阶段是 alpha / rc，号是 -(alpha|rc).N 里的 N；
+    // 没有合法后缀（含 -v1/-beta 这些老后缀）时 rank 保持 RANK_RELEASE、号 = -1，下面当"正式版"处理。
+    // rank：alpha=0 < rc=1 < 正式=2（同 semver 的 stage 序，正式版最大）。
+    enum { RANK_ALPHA = 0, RANK_RC = 1, RANK_RELEASE = 2 };
+    auto parse = [](const QString &s, int *rankOut, int *numOut) -> QStringList {
+        QString t = s.trimmed();
+        // ⚠️ 无阶段的初值必须是 RANK_RELEASE(2)，不能图省事写 0 —— 0 是 RANK_ALPHA。
+        // 踩过：初值 0 + parse 里写 -1 两套并存，核心打平后「正式版 < 候选版」，
+        // 于是 rc 转正发正式版时 compareVersion(云端, 本机) 判成 -1 ⇒ 托盘不提示升级（B1/B2/B17 三条断言抓的）。
+        *rankOut = RANK_RELEASE;
+        *numOut = -1;
+        const int dash = t.indexOf(QLatin1Char('-'));
+        if (dash > 0) {
+            const QString suf = t.mid(dash + 1);                 // 形如 "rc.3" / "alpha.2"
+            int dot = suf.indexOf(QLatin1Char('.'));
+            if (dot > 0) {
+                const QString name = suf.left(dot);
+                const QString num = suf.mid(dot + 1);
+                bool ok = false;
+                const int n = num.toInt(&ok);
+                if (ok && n >= 1) {
+                    if (name == QLatin1String("alpha")) *rankOut = RANK_ALPHA;
+                    else if (name == QLatin1String("rc")) *rankOut = RANK_RC;
+                    if (*rankOut >= 0) *numOut = n;
+                }
+            }
+            t = t.left(dash);                                    // 后缀摘掉，核心段交给下面比
+        }
+        return t.split(QLatin1Char('.'));
+    };
+    auto seg = [](const QStringList &parts, int i) -> int {
+        if (i >= parts.size()) return 0;                          // 段数不够 → 补 0
         int n = 0; bool got = false;
         for (const QChar c : parts.at(i)) {
             if (c.isDigit()) { n = n * 10 + c.digitValue(); got = true; }
-            else if (got) break;                    // 数字之后的东西（如 "-v1"、"-beta"）忽略
+            else if (got) break;                                  // 数字之后的东西（如 "-beta"）忽略
         }
         return got ? n : 0;
     };
-    for (int i = 0; i < 4; ++i) {
-        const int x = seg(a, i), y = seg(b, i);
+
+    int ra = RANK_RELEASE, rb = RANK_RELEASE, na = -1, nb = -1;
+    const QStringList sa = parse(a, &ra, &na), sb = parse(b, &rb, &nb);
+    for (int i = 0; i < 3; ++i) {
+        const int x = seg(sa, i), y = seg(sb, i);
         if (x != y) return x > y ? 1 : -1;
     }
-    return 0;
+    // 核心打平：先分阶段（alpha < rc < 正式），同阶段再分号。
+    if (ra != rb) return ra > rb ? 1 : -1;
+    if (na < 0 || nb < 0) return 0;
+    return na == nb ? 0 : (na > nb ? 1 : -1);
 }
 
 // 这两个定义在下文（强制升级段 / OTA 段）；这里提前声明好让"发现新版本"直接触发自动升级。
@@ -1493,7 +1688,7 @@ void openConfigDialog()
     // ── 「用星璃账号绑定」按钮（2026-10-06：零手填路径）──
     // 点了之后：开浏览器 → 登录授权 → 自动换设备票 → 写 agent.env → 重连。
     // 全程不用手填地址/令牌/设备名。
-    auto *bindBtn = new QPushButton(QStringLiteral("🔑 用星璃账号绑定（推荐）"));
+    auto *bindBtn = new QPushButton(QStringLiteral("用星璃账号绑定（推荐）"));
     bindBtn->setStyleSheet(QStringLiteral(
         "QPushButton{background:#5b8def;color:white;border:none;padding:10px 16px;"
         "border-radius:6px;font-size:14px;font-weight:600}"
@@ -1516,12 +1711,13 @@ void openConfigDialog()
         bindHint->setStyleSheet(QStringLiteral("color:#666;"));
         bindHint->setText(QStringLiteral("正在打开浏览器…登录完成后会自动回来。"));
         err->hide();
-        oauth->begin();
+        // 站点基址交给 OAuthBind（唯一真源是 siteBaseFromWsUrl，见它上面的注释）
+        oauth->begin(siteBaseFromWsUrl(qEnvironmentVariable("STE_QT_WS_URL")));
     });
 
     // 绑定成功：写 agent.env + 立即重连 + 关窗（与手动保存走同一条重连路）
     QObject::connect(oauth, &OAuthBind::succeeded, &dlg, [&, bindBtn](const QString &wsUrl, const QString &ticket, const QString &uid, const QString &owner) {
-        bindBtn->setText(QStringLiteral("✅ 已绑定（%1）").arg(owner));
+        bindBtn->setText(QStringLiteral("已绑定（%1）").arg(owner));
 
         // 把设备票写进 agent.env（token 字段放票，与旧静态令牌同字段、云端按段数区分）
         if (!saveAgentEnv(wsUrl, ticket, uid)) {
@@ -1550,7 +1746,7 @@ void openConfigDialog()
     // 绑定失败：恢复按钮 + 显示原因（不关窗，让用户可以再试或改用手动填）
     QObject::connect(oauth, &OAuthBind::failed, &dlg, [&, bindBtn, bindHint](const QString &reason) {
         bindBtn->setEnabled(true);
-        bindBtn->setText(QStringLiteral("🔑 用星璃账号绑定（重试）"));
+        bindBtn->setText(QStringLiteral("用星璃账号绑定（重试）"));
         bindHint->setStyleSheet(QStringLiteral("color:#c03030;"));
         bindHint->setText(QStringLiteral("绑定失败：%1").arg(reason));
     });
@@ -1568,9 +1764,15 @@ void openConfigDialog()
 
     // —— 云端地址 ——
     auto *urlEdit = new QLineEdit(qEnvironmentVariable("STE_QT_WS_URL").trimmed());
-    urlEdit->setPlaceholderText(QStringLiteral("例如 ws://10.0.0.5:8788/ws/agent"));
+    // ⚠️ 示例地址必须是**外网真正连得上**的那个（2026-10-09 修）：
+    //    这里原写 `ws://10.0.0.5:8788/ws/agent`，而 8788 **只在内网/本机可达**，
+    //    cloudflared 回源它、对外只暴露 443 ⇒ 外网机填 8788 必连不上，
+    //    装机的人会以为是令牌错了，在错误方向上排查半天。
+    urlEdit->setPlaceholderText(QStringLiteral("例如 wss://control.245959623.xyz/ws/agent"));
     form->addRow(QStringLiteral("云端地址"), urlEdit);
-    auto *urlHint = new QLabel(QStringLiteral("就是集控服务器在哪。管理员给你的一串 ws:// 开头的地址，照抄即可。"));
+    auto *urlHint = new QLabel(QStringLiteral(
+        "就是集控服务器在哪，管理员给你的一串地址，照抄即可。"
+        "走公网是 wss:// 开头、**不带端口**；只有在同一内网自建时才用 ws://<内网IP>:8788/ws/agent。"));
     urlHint->setWordWrap(true);
     urlHint->setStyleSheet(hintStyle);
     form->addRow(QString(), urlHint);
@@ -1713,6 +1915,7 @@ void openConfigDialog()
         // 填了班级接入码 → 消费绑定（异步，失败不阻断；结果记日志）
         const QString code = cleanLine(codeEdit->text());
         if (!code.isEmpty()) {
+            saveClassCode(code);   // 2026-10-08：持久化，register 时带给云端
             const QString siteBase = siteBaseFromWsUrl(url);
             if (!siteBase.isEmpty()) {
                 qInfo().noquote() << QStringLiteral("[agent-qt] 绑定接入码 → %1/api/device/activate (uid=%2)")
@@ -1771,6 +1974,41 @@ static void speakText(const QString &text)
     sp->Release();
 }
 
+// ── 灵动岛统一入口（2026-10-07 · #98）──────────────────────────────────
+// 用户 2026-10-07 定下："被控端一切通知都经过灵动岛显示，弹窗则居中，全屏则放大全屏，
+// 要有过渡。"
+// 以前被控端的"轻量提示"有三种写法（托盘气泡 / NotifyWindow 的 island 形态 / 直接弹窗），
+// 各弹各的、位置互相打架，教室大屏上还会叠成一摞。现在统一走 IslandOverlay：
+//   · 顶部居中胶囊、Collapsed(56)↔Expanded(168) 弹性缓动、出现/消失都带动画；
+//   · 默认鼠标穿透（WA_TransparentForMouseEvents）—— 不挡后面的课件/白板；
+//   · 需要"用户点一下"的（如收到文件想看清楚）才 setInteractive(true) 临时收走点击。
+// 需要真·弹窗的（要确认 / 要输入文本）仍然走 NotifyWindow，不硬塞进灵动岛。
+// form（#98）：Capsule=顶部胶囊（默认）；Centered=屏幕正中卡片；Fullscreen=铺满整屏。
+// 调用方按"这条内容要不要停下来看清"来选，别什么都往全屏上堆。
+static void islandShow(const QString &title, const QString &desc = QString(),
+                       const QString &icon = QString(), int ms = 5000, bool interactive = false,
+                       const QString &openPath = QString(),
+                       IslandOverlay::Form form = IslandOverlay::Form::Capsule)
+{
+    IslandOverlay *isl = IslandOverlay::instance();
+    if (openPath.isEmpty()) isl->clearOpenPath();
+    else                    isl->setOpenPath(openPath);
+    // 交互态（可点）清掉旧的 openPath，免得下一条提示点一下去翻上一份文件。
+    isl->setInteractive(interactive);
+    isl->showIsland(title, desc, icon, ms, form);
+}
+
+// 托盘气泡兜底：灵动岛是贴桌面顶层的胶囊，被控端缩进托盘 / 教室投影投在别处 /
+// 用户正在全屏课件里，那一小条容易整个漏掉。像"文件落到本机了"这种结果型事件，
+// 再往 Windows 通知中心推一条才兜得住（tray 没起来就静默跳过，不报错）。
+static void trayNotify(const QString &title, const QString &body,
+                       QSystemTrayIcon::MessageIcon icon = QSystemTrayIcon::Information,
+                       int ms = 8000)
+{
+    if (!g_tray) return;
+    g_tray->showMessage(title, body.isEmpty() ? title : body, icon, ms);
+}
+
 // 大屏通知窗口：无边框 + 置顶 + Tool（不进任务栏）。
 // 三种形态（用户 2026-10-04 拍板）：
 //   · popup     —— 居中弹窗（圆角卡片）；同时经托盘 showMessage 进 Windows 通知中心留存
@@ -1794,7 +2032,8 @@ public:
     {
         // 单例：先关掉旧的（同一时间只一个通知窗口）
         if (g_notify) {
-            g_notify->hide();
+            // 新通知顶掉旧的：旧的**淡出**再走（直接 hide() 会硬切，教室大屏上很扎眼）
+            g_notify->fadeOutClose();
             g_notify->deleteLater();
         }
         g_notify = new NotifyWindow(kind, title, content, seconds, tts, severity, emergency,
@@ -1813,7 +2052,11 @@ private:
     {
         // 所有通知统一置顶（Qt6 只有 WindowStaysOnTopHint 一种置顶标志，没有 Always 变体）。
         // 紧急通知的差异化靠"不自动关闭 + 点击才关"表达，不靠更强的置顶强度。
-        setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
+        // ⚠️ WindowDoesNotAcceptFocus（2026-10-09 加）：从窗口标志这一层就拒绝拿焦点，
+        //    光靠"不调 activateWindow()"不够 —— 置顶窗口在某些情况下仍会被系统聚焦。
+        //    Qt::Tool = 不进任务栏；StaysOnTop = 压在最上层。三者合起来才是"只展示不打扰"。
+        setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool
+                       | Qt::WindowDoesNotAcceptFocus);
         setAttribute(Qt::WA_DeleteOnClose);
         if (kind == Fullscreen) {
             // 全屏遮罩：palette 画纯色背景（WA_TranslucentBackground + paintEvent 在 Qt 6 不稳定）
@@ -1887,8 +2130,32 @@ private:
             lay->addLayout(btnLay);
         }
 
-        // 淡入：先透明再渐显（Qt 无内置透明度动画，用 QPropertyAnimation 要引动画模块——省了，
-        // 直接 opacity 立即显示即可，教室大屏场景不需要过度动画）
+        // 淡入（用户 2026-10-07："要有过渡"）。
+        // 以前这里是"直接显示"——教室大屏上通知是"啪"地砸出来，紧接着一颗弹窗又"啪"地消失，
+        // 讲台上的学生注意力全被这个硬切带走。QPropertyAnimation 在 QtCore 里（不用加依赖），
+        // 220ms 跟手、不拖沓。
+        auto *eff = new QGraphicsOpacityEffect(this);
+        setGraphicsEffect(eff);
+        auto *fin = new QPropertyAnimation(eff, "opacity", this);
+        fin->setDuration(220);
+        fin->setStartValue(0.0);
+        fin->setEndValue(1.0);
+        fin->start();
+    }
+
+    /** 带淡出的关窗（用户要求"要有过渡"）：动画放完再真关，避免"啪一下不见"。 */
+    void fadeOutClose()
+    {
+        if (!isVisible()) { close(); return; }
+        QGraphicsOpacityEffect *eff = qobject_cast<QGraphicsOpacityEffect *>(graphicsEffect());
+        if (!eff) { close(); return; }
+        auto *fout = new QPropertyAnimation(eff, "opacity", this);
+        fout->setDuration(220);
+        fout->setStartValue(1.0);
+        fout->setEndValue(0.0);
+        // 动画对象随窗一起析构；真关窗在 finished 里做（此时窗口还在，视觉连续）
+        QObject::connect(fout, &QPropertyAnimation::finished, this, [this]() { close(); });
+        fout->start();
     }
 
     ~NotifyWindow() { if (g_notify == this) g_notify = nullptr; }
@@ -1923,9 +2190,15 @@ private:
                 "background:rgba(30,30,30,215); border-radius:16px; border:1px solid #666;"));
         }
 
+        // ⚠️ 这里**绝不能 activateWindow()**（2026-10-09 修：老师反馈"每次弹通知桌面跳一下"）。
+        //    activateWindow() 会把**键盘焦点**从老师/学生正在用的程序上抢走 —— 讲课时弹一条
+        //    通知，正在打的字就断了、输入法上下文也跳掉，教室里看着就是"桌面抖一下"。
+        //    通知是**展示性**的：WindowStaysOnTopHint 已经保证它压在最上层看得见，
+        //    raise() 再保证 Z 序在顶 —— 焦点必须留在用户当前正在操作的窗口上。
+        //    ⚠️ WindowDoesNotAcceptFocus 只挡键盘焦点，**不挡鼠标点击**：
+        //       紧急通知"点一下才关"（mousePressEvent）照常工作，所以可以放心加。
         show();
         raise();
-        activateWindow();
 
         // TTS 朗读（调用方要求时）：读截断后的完整内容（标题：正文），与显示一致
         if (m_tts) speakText(m_combined);
@@ -1935,7 +2208,7 @@ private:
                               ? qMin(m_seconds, 3600) * 1000
                               : qMax(5000.0, 2500.0 + m_combined.length() * 120.0);
         if (m_emergency) return;   // 紧急通知不自动消失，点击才关（见 mousePressEvent）
-        QTimer::singleShot(durMs, this, &QWidget::close);
+        QTimer::singleShot(durMs, this, &NotifyWindow::fadeOutClose);
     }
 
     // fullscreen 遮罩底色：按严重度映射（仅这三档白名单 + 黑底回落）。
@@ -1996,7 +2269,8 @@ protected:
     // 紧急通知：必须人工确认 —— 点击任意处手动关闭（不自动消失）。
     void mousePressEvent(QMouseEvent *ev) override
     {
-        if (m_emergency) { ev->accept(); close(); return; }
+        // 紧急通知点哪都能关，但同样走淡出（用户 2026-10-07："要有过渡"）
+        if (m_emergency) { ev->accept(); fadeOutClose(); return; }
         QWidget::mousePressEvent(ev);
     }
 };
@@ -2060,6 +2334,28 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
             d.insert(QStringLiteral("reply"), reply);
             sendActionReceipt(id, QStringLiteral("notify"), QStringLiteral("confirmed"), QString(), d);
         };
+    }
+
+    // ── #98：形态分流（2026-10-09）────────────────────────────────────────
+    // 用户要的是"弹窗则居中，全屏则放大全屏"。所以**纯展示类**的通知走灵动岛：
+    //   popup      → 灵动岛 Centered（屏幕正中卡片）
+    //   fullscreen → 灵动岛 Fullscreen（铺满整屏，带放大过渡）
+    //   island     → 灵动岛 Capsule（顶部胶囊）
+    // ⚠️ 需要交互的（要确认 / 有快捷回复 / 紧急"点一下才关"）**仍走 NotifyWindow**：
+    //    灵动岛现在没有按钮，硬塞过去等于把"确认"这个能力悄悄砍掉 —— 那是功能倒退。
+    //    等灵动岛支持按钮了再整体迁过来。
+    const bool needsInteraction = needConfirm || emergency;
+    if (!needsInteraction) {
+        IslandOverlay::Form f = IslandOverlay::Form::Capsule;
+        if (k == NotifyWindow::Fullscreen)     f = IslandOverlay::Form::Fullscreen;
+        else if (k == NotifyWindow::Popup)     f = IslandOverlay::Form::Centered;
+        islandShow(title, content, QStringLiteral("bell"), seconds * 1000, false, QString(), f);
+        // 同样进 Windows 通知中心留存（popup 的既有行为，不能因为换了呈现就丢掉）
+        if (g_tray) {
+            g_tray->showMessage(title, content.trimmed().isEmpty() ? title : content,
+                                QSystemTrayIcon::Information, 10000);
+        }
+        return QString();
     }
 
     NotifyWindow::showNotice(k, title, content, seconds, tts, severity, emergency,
@@ -2379,14 +2675,38 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     }
 
     if (action == QStringLiteral("shutdown") || action == QStringLiteral("reboot")) {
-        enableShutdownPriv();
+        // ① 去重：老版本云端（还没有 no_resend 那套逻辑）重连时会把同一条再补发一次，
+        //    照单全收就是"关了又关、重启了又重启"。命中就直接跳过、如实回执，不重复执行。
+        if (g_terminalDone.contains(g_lastInstrId)) {
+            const QString dup = QStringLiteral("本机已执行过该指令（指令 id %1），按重复下发保护跳过%2")
+                                    .arg(g_lastInstrId,
+                                         action == QStringLiteral("reboot") ? QStringLiteral("重启") : QStringLiteral("关机"));
+            qInfo("[agent-qt] ⛔ %s", qPrintable(dup));
+            out.result = QStringLiteral("failed");
+            out.error  = dup;
+            return out;
+        }
+
+        // ② 先落记录：这条 id 就算机器马上关了，下次（老版云端补发）也认。
+        markTerminalDone(g_lastInstrId);
+
+        // ③ 回执由调用方在本函数返回后发出（第 4206 行附近），所以这里**只排期、不执行**，
+        //    留 2.5 秒给回执把 socket 写出去 —— 顺序反了回执就永远发不出去（恶性BUG 根因）。
         const DWORD flags = (action == QStringLiteral("reboot") ? EWX_REBOOT : EWX_SHUTDOWN) | EWX_FORCE;
-        // 真关机/重启。这是破坏性指令，只在 TEST1 上点；本机测试不触发。
-        if (ExitWindowsEx(flags, SHTDN_REASON_FLAG_PLANNED))
-            out.result = QStringLiteral("done");
-        else
-            out.result = QStringLiteral("failed"),
-            out.error = QStringLiteral("ExitWindowsEx 失败，错误码 %1").arg((int)GetLastError());
+        const bool isReboot = (action == QStringLiteral("reboot"));
+        out.result = QStringLiteral("done");
+        out.error.clear();
+        out.data.insert(QStringLiteral("shutting_down"), true);
+        out.data.insert(QStringLiteral("action"), action);
+        QTimer::singleShot(2500, [flags, isReboot]() {
+            enableShutdownPriv();
+            if (ExitWindowsEx(flags, SHTDN_REASON_FLAG_PLANNED))
+                qInfo("[agent-qt] ⏻ 已执行%s（EWX 返回 TRUE）", isReboot ? "重启" : "关机");
+            else
+                // 失败要带系统原话：只写"关机失败"会把四种病藏成一个样，误判过一次
+                qWarning("[agent-qt] ⏻ %s 失败（ExitWindowsEx 错误码 %u）—— 多半是没开关机权限或不是管理员起的",
+                         isReboot ? "重启" : "关机", (unsigned)GetLastError());
+        });
         return out;
     }
 
@@ -3244,9 +3564,10 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         const int oldFps = g_currentFps;
         g_currentFps = want;
         // 学生端知情（设计文档 6.5 隐私边界）：远控=屏幕正被老师查看，学生必须知道。
-        // 用 Island 形态（灵动岛小条）非打扰式提示 3 秒，不遮操作。
-        NotifyWindow::showNotice(NotifyWindow::Island, QStringLiteral("屏幕正在被查看"),
-                                  QStringLiteral("老师正在远程查看这台电脑的屏幕"), 3, false);
+        // 灵动岛形态非打扰式提示（#98：统一走灵动岛），不遮操作。
+        // 时长给的比原来的 3 秒长一些：远控一整节课都在，学生错过前 3 秒就再没提示了。
+        islandShow(QStringLiteral("屏幕正在被查看"),
+                   QStringLiteral("老师正在远程查看这台电脑的屏幕"), QStringLiteral("eye"), 8000);
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("active"), true);
         out.data.insert(QStringLiteral("fps"), want);
@@ -3442,12 +3763,23 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.data.insert(QStringLiteral("target"), QDir::toNativeSeparators(alt));
             out.data.insert(QStringLiteral("totalBytes"), total);
             out.data.insert(QStringLiteral("ready"), true);
+            // #92：接收端提醒。以前文件推送下来是**静默落盘**——学生根本不知道下了什么，
+            // 老师问"作业收到了吗"还得去翻收件目录。这里在灵动岛上点一句，
+            // 并且开交互（可点开看清楚文件名），而不是每次都弹窗打断上课。
+            islandShow(QStringLiteral("收到文件"), QDir::toNativeSeparators(alt),
+                       QStringLiteral("download"), 6000, true, QDir::toNativeSeparators(alt));
+            trayNotify(QStringLiteral("收到文件"),
+                       QFileInfo(alt).fileName(), QSystemTrayIcon::Information, 10000);
             return out;
         }
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("target"), QDir::toNativeSeparators(target));
         out.data.insert(QStringLiteral("totalBytes"), total);
         out.data.insert(QStringLiteral("ready"), true);
+        islandShow(QStringLiteral("收到文件"), QDir::toNativeSeparators(target),
+                   QStringLiteral("download"), 6000, true, QDir::toNativeSeparators(target));
+        trayNotify(QStringLiteral("收到文件"), QFileInfo(target).fileName(),
+                   QSystemTrayIcon::Information, 10000);
         return out;
     }
 
@@ -3957,6 +4289,9 @@ void handleControlText(const QString &text)
 
     if (type == QStringLiteral("registered") || type == QStringLiteral("registration-ok")) {
         g_registered = true;
+        g_everRegistered = true;            // 2026-10-08：注册成功 → 退避重置为快速重试，且后续走正常退避
+        g_backoffMs = kFirstBackoffMs;
+        g_islandOfflineShown = false;       // 2026-10-08：真的又连上了，断线提示的闸门放开（下一次断线再弹一条）
         const int hb = pay.value(QStringLiteral("heartbeatMs")).toInt(0);
         const int to = pay.value(QStringLiteral("timeoutMs")).toInt(0);
         if (hb > 0 && hb != g_heartbeatMs) {
@@ -4056,6 +4391,9 @@ void handleControlText(const QString &text)
 
     if (type == QStringLiteral("instruction")) {
         g_instructionSeq++;
+        g_lastInstrId = id;
+        // 破坏性指令的去重名单懒加载：不依赖启动顺序，读失败也照样能收到指令
+        if (g_terminalDoneFile.isEmpty()) loadTerminalDone();
         const QString action = pay.value(QStringLiteral("action")).toString();
         const QJsonObject params = pay.value(QStringLiteral("params")).toObject();
         qInfo("[agent-qt] 📥 收到指令 id=%s action=%s（D5 真执行）", qPrintable(id), qPrintable(action));
@@ -4095,24 +4433,37 @@ void handleControlText(const QString &text)
             return;
         }
 
-        // ── 考试模式（2026-10-06，设计文档 3.7 第一版）──
-        // 异步动作：启动全屏拦截窗口 + 白名单轮询 + 倒计时；回执"started"。
+        // 考试模式（2026-10-06，设计文档 3.7 第一版；2026-10-09 进程管控改黑名单）：
+        // 全屏拦截 + 只对黑名单进程下手 + 计时。
         // exam_mode_stop 手动结束（管理员收卷）。到点自动结束由 ExamMode 内部触发。
+        // ⚠️ exam_mode 是**破坏性**动作，这里是全校/全班级的一次性影响面。
+        //    2026-10-09 事故后务必保留 ExamMode 内部那三重内核闸门，
+        //    别为了"更严"把黑名单改回白名单 —— 白名单杀到 critical 进程就是蓝屏重启。
         if (action == QStringLiteral("exam_mode")) {
             const int minutes = params.value(QStringLiteral("minutes")).toInt();
-            QStringList whitelist;
-            const QJsonArray arr = params.value(QStringLiteral("whitelist")).toArray();
-            for (const QJsonValue &v : arr) whitelist.append(v.toString());
-            // ⚠️ 2026-10-07 蓝屏事故后：start() 会**拒绝**在"白名单为空"时启用进程终止
-            //    （空白名单⇒无差别杀进程⇒杀掉 critical 的 svchost⇒内核 0xEF 蓝屏）。
-            //    这里必须如实把原因带进回执 —— 报"started 一切正常"就是骗老师。
-            const bool enforcing = ExamMode::inst().start(minutes, whitelist);
+            // ── 2026-10-09 改黑名单（学校机房"反复重启"事故后的纠偏）──
+            // 语义反转：只杀黑名单里点名的进程，其余一概不碰。
+            //   旧字段名叫 whitelist 时，被控端会把"名单之外"的全部杀掉 ⇒ 杀到 critical 的
+            //   svchost ⇒ CRITICAL_PROCESS_DIED(0xEF) 蓝屏 ⇒ 重启 ⇒ 自启 ⇒ 再杀 ⇒ 反复重启。
+            // 这里**只读 blacklist**：万一还有老版本管理端在发 whitelist，
+            // 被控端会读到空黑名单 ⇒ 完全不杀任何进程（fail-safe 的降级，不会把机器再弄崩）。
+            QStringList blacklist;
+            const QJsonArray arr = params.value(QStringLiteral("blacklist")).toArray();
+            for (const QJsonValue &v : arr) blacklist.append(v.toString());
+            const bool enforcing = ExamMode::inst().start(minutes, blacklist);
+            // #98：考试模式也走灵动岛（顶部一条，考试期间不摊一个窗在桌面上）
+            islandShow(QStringLiteral("考试模式已开始"),
+                       QStringLiteral("倒计时 %1 分钟").arg(minutes)
+                       + (enforcing ? QString() : QStringLiteral("（未启用进程终止）")),
+                       QStringLiteral("pencil"), 6000);
             sendActionReceipt(id, action, QStringLiteral("started"),
                               enforcing ? QString() : ExamMode::inst().reason());
             return;
         }
         if (action == QStringLiteral("exam_mode_stop")) {
             const bool was = ExamMode::inst().stop(QStringLiteral("manual"));
+            islandShow(QStringLiteral("考试模式已结束"), QStringLiteral("已恢复操作"),
+                       QStringLiteral("pencil"), 3000);
             sendActionReceipt(id, action, was ? QStringLiteral("done") : QStringLiteral("not_active"));
             return;
         }
@@ -4276,11 +4627,13 @@ int main(int argc, char *argv[])
     // （dataDir / g_shotDir / g_logPath 的初始化**已移到 main() 最前面** —— 必须早于单例守卫，
     //   否则守卫拦下第二次启动时那行"为什么被拦"的日志会被 appendLogFile 静默丢弃。见上面那段。）
 
-    // 自启时计划任务**直接拉 exe**（不再经 bat）→ 配置得由自己从同目录的 agent.env 读。
+    // 自启时计划任务**直接拉 exe**（不再经 bat）→ 配置得由自己从 agentEnvPath()（数据目录）读。
     // 2026-10-03 实测：计划任务里套一层 `cmd /c start-agent.bat` 会**卡住不退出**，
     // 任务永远 Running、被控端根本没被拉起。
-    const int envN = loadEnvFile(QCoreApplication::applicationDirPath() + QStringLiteral("/agent.env"));
-    if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（exe 同目录）", envN);
+    migrateAgentEnvFromInstallDir();   // 老机器：把安装目录里的旧配置搬进数据目录（幂等，无则不动）
+    const int envN = loadEnvFile(agentEnvPath());
+    if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（%s）", envN, qPrintable(agentEnvPath()));
+    loadClassCode();   // 2026-10-08：载入持久化的班级码，register 时带给云端
 
     // ── 配置校验（2026-10-04）：缺 URL 或 TOKEN = 未配置，必须可见地报出来（图标+日志+气泡），
     //    不再"进程在跑、静默重试"让老师误以为装好了。此刻托盘还没建，goUnconfigured 只负责落盘告警；
@@ -4316,7 +4669,7 @@ int main(int argc, char *argv[])
         g_actStatus = menu->addAction(QStringLiteral("状态：正在启动…"));
         g_actStatus->setEnabled(false);      // 只显示，不可点
         menu->addSeparator();
-        // 首次运行配置窗的入口：老师在界面里填云端地址/令牌/设备名，写回同目录 agent.env。
+        // 首次运行配置窗的入口：老师在界面里填云端地址/令牌/设备名，写回数据目录的 agent.env。
         auto *actConfig = menu->addAction(QStringLiteral("配置…"));
         QObject::connect(actConfig, &QAction::triggered, &app, [] { openConfigDialog(); });
         // 设置与信息（2026-10-06）：一眼看清 版本 / uid / 云端地址 / 连接状态 / 能不能升级
@@ -4338,10 +4691,10 @@ int main(int argc, char *argv[])
         g_actUpdate = menu->addAction(QStringLiteral("发现新版本…"));
         g_actUpdate->setVisible(false);
         QObject::connect(g_actUpdate, &QAction::triggered, &app, [] { openInfoDialog(); });
-        // 未配置时"去哪儿配"的落点：直接打开 exe 同目录（agent.env 就放这儿）
-        auto *actEnv = menu->addAction(QStringLiteral("打开 agent.env 所在目录"));
+        // 未配置时"去哪儿配"的落点：直接打开数据目录（agent.env 就在那儿，2026-10-07 起不再放 exe 同目录）
+        auto *actEnv = menu->addAction(QStringLiteral("打开配置目录"));
         QObject::connect(actEnv, &QAction::triggered, &app, [] {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(QCoreApplication::applicationDirPath()));
+            QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(agentEnvPath()).absolutePath()));
         });
         auto *actData = menu->addAction(QStringLiteral("打开数据目录"));
         QObject::connect(actData, &QAction::triggered, &app, [] {
@@ -4366,6 +4719,15 @@ int main(int argc, char *argv[])
         g_tray->show();             // 先设图标再 show，避免 "No Icon set" 警告
         notifyUnconfiguredOnce();   // show 之后再弹气泡（托盘可见才弹得出来）
         qInfo("[agent-qt] 托盘已就绪");
+
+        // ── 灵动岛空闲态常驻（2026-10-07 用户要求）──
+        // 「无任务、通知则收回顶部，显示半胶囊+横杠箭头」：那条半胶囊本身就是入口，
+        // 所以开机就挂上 —— 否则得等第一条通知出现过才见得到它，等于没有。
+        // 放在托盘块里：有托盘 = 有桌面会话，Session0 那种无界面环境不摆窗口。
+        // 想要回"用完即隐"的老样子，设 STE_QT_ISLAND_IDLE=0。
+        IslandOverlay *isl = IslandOverlay::instance();
+        isl->setIdleEnabled(envOr("STE_QT_ISLAND_IDLE", QStringLiteral("1")) != QStringLiteral("0"));
+        isl->ensureIdle();
     } else {
         fprintf(stderr, "[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口\n");
     }
@@ -4397,6 +4759,16 @@ int main(int argc, char *argv[])
             return;
         }
         updateTray(TrayState::Disconnected, QStringLiteral("未连接（重试中）"));
+        // 断线是运维最需要立刻看见的一件事（机器明明开着却没人管）。
+        // 走灵动岛：顶部胶囊一条，3 秒后自己淡掉，不打断正在讲课的人。
+        // 2026-10-08 去重：退避重连期间这一段离线只弹第一条；且与上一条离线提示间隔 < 20s
+        // 不重弹，避免断线抖动（连上→又断）时胶囊反复出现、看着像"一直显示连接中断"。
+        const qint64 nowOffline = QDateTime::currentMSecsSinceEpoch();
+        if (!g_islandOfflineShown && nowOffline - g_lastOfflineToastMs > 20000) {
+            g_islandOfflineShown = true;
+            g_lastOfflineToastMs = nowOffline;
+            islandShow(QStringLiteral("连接中断"), QStringLiteral("正在自动重连…"), QStringLiteral("triangle-alert"), 3000);
+        }
         fprintf(stderr, "[agent-qt] FAIL: 云端断开（%lld 帧已发）\n", g_frameBytes);
         if (!g_registered) {   // 连上了却从没拿到 registered 就被断开 = 握手/令牌没过
             fprintf(stderr, "[agent-qt]   └ 本轮 register 未通过云端校验 —— 先查令牌（STE_QT_WS_TOKEN）与云端 CLOUD_WS_TOKEN 是否一致，再看云端 events.log\n");
@@ -4432,8 +4804,9 @@ int main(int argc, char *argv[])
             // 语音对讲（设计文档 3.3.6）：老师讲话学生可见（每会话一次，不刷屏）
             if (!g_audioHintShown) {
                 g_audioHintShown = true;
-                NotifyWindow::showNotice(NotifyWindow::Island, QStringLiteral("老师正在讲话"),
-                                         QStringLiteral("老师正在通过语音对讲广播"), 4, false);
+                // #98：同样改走灵动岛（顶部胶囊，不摊在桌面正中挡课件）
+                islandShow(QStringLiteral("老师正在讲话"),
+                           QStringLiteral("老师正在通过语音对讲广播"), QStringLiteral("mic"), 4000);
             }
             if (!g_audioPlayer.isOpen()) g_audioPlayer.open();
             g_audioPlayer.write(payload);

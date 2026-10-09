@@ -46,6 +46,26 @@ if [ ! -f "$NSIS_EXE" ]; then
     exit 3
 fi
 
+# ---- 1.5) 版本常量（installer.nsi 用 !include "build\version.nsh" 吃它）----
+#       2026-10-07 起版本号唯一真源是 CMakeLists.txt 的 set(AGENT_VERSION ...)，
+#       installer.nsi 不再手抄一份 —— 代价是这个文件必须先由 cmake 生成出来。
+#       不查就编译，makensis 只会含糊地报 "Can't open build\version.nsh"，再白跑两分钟。
+if [ ! -f build/version.nsh ]; then
+    echo "[FATAL] build/version.nsh 不存在 —— 先跑一次 cmake 生成版本常量："
+    echo "        cmake -G Ninja -B build -S .       （或完整构建一次 build-agent.sh）"
+    exit 3
+fi
+
+#       ⚠️ 只查「存在」不够：改了 CMakeLists.txt 的 set(AGENT_VERSION ...) 却没重跑 cmake，
+#          build/version.nsh 会留着旧值，makensis 不报错、直接把旧版本号编进安装包 ——
+#          装完版本号跟 OTA 对不上，比「文件缺失」难查得多。所以再比一次 mtime。
+if [ build/version.nsh -ot CMakeLists.txt ]; then
+    echo "[FATAL] build/version.nsh 已过期（早于 CMakeLists.txt 的修改时间）"
+    echo "        说明改过 set(AGENT_VERSION ...) 却没重新 configure —— 现在里面还是旧版本号。"
+    echo "        重跑一次： cmake -G Ninja -B build -S ."
+    exit 3
+fi
+
 # ---- 1) a temp folder that exists and is writable ----
 TEMP_DIR="${USERPROFILE:-}/AppData/Local/Temp"
 TEMP_DIR="${TEMP_DIR#/}"                 # USERPROFILE is already Windows-style

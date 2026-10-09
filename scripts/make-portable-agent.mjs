@@ -78,8 +78,13 @@ const REQUIRED = [
 /**
  * 这些目录**只在 build/ 里**（windeployqt 产出），deploy/ 素材库没有。
  * 手工拼包漏掉它们，就是这个脚本存在的理由 —— 所以从 build/ 显式取。
+ *
+ * ⚠️ `position` 是 2026-10-08 补进来的：REQUIRED 里一直列着
+ *    `position/qtposition_nmea.dll`，但素材库 deploy/ 从没放过 position/，
+ *    于是**每次出包都会失败在自检这一步**（这脚本的清单抓对了，取件列表却漏了）。
+ *    和 resources/translations 同一性质：只在 build/ 有。
  */
-const FROM_BUILD = ["resources", "translations"];
+const FROM_BUILD = ["resources", "translations", "position"];
 
 /**
  * 绝不进发布包：

@@ -34,12 +34,33 @@ public:
     // 单例：被控端全局唯一（同时间只显示一个灵动岛，新状态顶掉旧的）
     static IslandOverlay *instance();
 
-    enum Shape { Collapsed = 56, Expanded = 168 };
+    // Idle = 空闲时的矮胶囊（2026-10-07 用户要求"无任务、通知则收回顶部，显示半胶囊+横杠箭头"）。
+    // 空闲态不隐藏、不消失：收成顶部一条常驻的半胶囊，中间一根横杠+箭头，
+    // 点一下 / 往下一拉（触屏）就展开看最近那条活动。
+    enum Shape { Idle = 36, Collapsed = 56, Expanded = 168 };
 
-    // 显示一条（icon 为 emoji/单字符；title 主文案，desc 次文案）
+    // ── 呈现形态（2026-10-09 · #98 ClassIsland 式）──────────────────────────
+    // 用户原话："弹窗则居中，全屏则放大全屏，要有过渡。"
+    //   Capsule    顶部居中胶囊（Idle/Collapsed/Expanded 三档都归它）—— 绝大多数瞬态提示
+    //   Centered   屏幕正中的卡片（通知这类"要停下来看清"的内容）
+    //   Fullscreen 铺满整屏（紧急广播/强制提示，压住整个桌面）
+    // ⚠️ 与 Shape 正交：Shape 只描述**胶囊那三档高度**，Form 描述"这条提示摆在哪、多大"。
+    //    把两者混成一个枚举会让"全屏"被迫带一个高度值，是错的。
+    enum class Form { Capsule, Centered, Fullscreen };
+
+    // 显示一条（icon 为 lucide 图标名；title 主文案，desc 次文案）
     void showIsland(const QString &title, const QString &desc = QString(),
                     const QString &icon = QString(),
-                    int durationMs = 5000);
+                    int durationMs = 5000, Form form = Form::Capsule);
+    Form form() const { return m_form; }
+
+    // 空闲态：没有任务/通知时收回顶部显示半胶囊（默认 true）。
+    void setIdleEnabled(bool on);
+    bool idleEnabled() const { return m_idleEnabled; }
+    bool isIdle() const { return m_idle; }
+    // 开机就让空闲胶囊常驻（不等第一条通知先出现过）
+    void ensureIdle();
+
     // 切换展开（点击展开看详情）/ 收起
     void setExpanded(bool on);
     bool isExpanded() const { return m_expanded; }
@@ -52,7 +73,16 @@ public:
     void setInteractive(bool on);
     bool interactive() const { return m_interactive; }
 
-    // 立即隐藏（不再等自动收起）
+    // 点击后要打开的本地路径（收文件那类"可点开看清楚"的提示）。
+    // 设了它，鼠标按下就直接打开所在文件夹并选中该文件，不再只是展开/收起。
+    // 注意：只支持打开**文件夹并选中文件**（explorer /select），绝不 ShellExecute 打开
+    // 文件本身 —— 被控端是学生机，远程下发的是 docx/pdf 也可能是别的东西，
+    // 直接"打开"等于替老师/系统决定运行什么，风险不可控。
+    void setOpenPath(const QString &path);
+    void clearOpenPath();
+    QString openPath() const { return m_openPath; }
+
+    // 立即隐藏（不再等自动收起）。空闲态开启时改为"收回成半胶囊"而非彻底消失。
     void dismiss();
 
 signals:
@@ -61,24 +91,53 @@ signals:
 protected:
     void paintEvent(QPaintEvent *) override;
     void mousePressEvent(QMouseEvent *) override;
+    void mouseMoveEvent(QMouseEvent *) override;    // 触控：下拉展开 / 上推收起
+    void mouseReleaseEvent(QMouseEvent *) override; // 触控：拖动过就不算点击
 
 private:
     explicit IslandOverlay(QWidget *parent = nullptr);
     ~IslandOverlay() override;
 
-    void applyTheme();         // 按深浅色换算 QSS 背景/前景
+    void onFadeFinished();     // 淡入/淡出共用 finished：只有"正在淡出"才 hide（见 .cpp 注释）
+
+    void openInShell();        // 按 m_openPath 打开所在文件夹并选中该文件
+    bool hitOpenButton(const QPoint &pt) const;   // 「▸ 打开」按钮命中区
+    void enterIdle();          // 收回成空闲半胶囊
+    void paintBigForm();       // Centered / Fullscreen 的独立绘制（与胶囊绘制分开，互不干扰）
+    QRect geometryForIdle() const;
+    QRect geometryForContent(int shapeHeight) const;
+    QRect geometryForForm(Form f) const;   // 按形态算目标几何
     void animateGeometry(const QRect &target);   // 弹性缓动改位置/大小
-    void positionForCurrent(); // 顶部居中（含安全区偏移）
+    // （原 positionForCurrent()/applyTheme() 只有声明、全工程无定义，按"不留看起来有能力其实没有的接口"删掉）
 
     QString m_title;
     QString m_desc;
     QString m_icon;
     int m_durationMs = 5000;
     bool m_expanded = false;
+    Form m_form = Form::Capsule;
     bool m_light = false;
     bool m_interactive = false;   // 默认穿透
+    bool m_idle = true;           // 空闲与否（无任务/通知）
+    bool m_idleEnabled = true;    // 空闲半胶囊开关
+    bool m_hadContent = false;    // 从来没显示过内容 ⇒ 展开时给"暂无通知"
+    bool m_contentActive = false; // 这条内容还在活动期（决定收起是回"标题胶囊"还是直接回空闲半胶囊）
+    // 淡出中：m_fadeAnim 的 finished 被淡入/淡出共用，只有这个为真时 finished 才 hide。
+    // ⚠️ 少了它，dismiss 建立的 finished→hide 会在**下一次淡入结束**时把新提示灭掉
+    //（STE_QT_ISLAND_IDLE=0 下表现为"第一条之后每条提示只闪 220ms"）。
+    bool m_closing = false;
+    // 触控手势：按下点（**全局坐标**）+ 是否按下 + 是否已判定为拖拽
+    // ⚠️ 用全局坐标：拖拽会同时触发几何动画，窗口自己会位移（空闲 y=10 → 展开 y=24），
+    //    局部坐标 ev->pos() 会被窗口位移污染，同一屏幕位置算出的 dy 会漂。
+    QPointF m_pressGlobal;
+    bool m_pressed = false;       // ⚠️ 不能用 m_pressGlobal.isNull() 当哨兵：(0,0) 是合法按下点
+    bool m_dragged = false;
+
+    QString m_openPath;           // 非空 = 这条提示可点击打开（explorer /select）
 
     QTimer *m_autoClose = nullptr;
+    QTimer *m_dismissGuard = nullptr;   // dismiss 淡出的兜底：动画没走完也强制 hide
+    QTimer *m_expandGuard = nullptr;    // 展开态硬回收：交互态展开不能被 m_autoClose 的守卫永远吞掉
     QPropertyAnimation *m_geoAnim = nullptr;
     QPropertyAnimation *m_fadeAnim = nullptr;
 

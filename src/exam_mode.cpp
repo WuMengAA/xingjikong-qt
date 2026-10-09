@@ -19,11 +19,97 @@
 // 第一版不装低级键盘钩子：全屏无边框 + 置顶 + 无焦点逃逸路径，对学生已足够"防君子"。
 
 namespace {
-// 白名单轮询间隔（文档 3.7：每 2 秒轮询进程列表）
+// 黑名单轮询间隔（每 2 秒比对一次进程列表）
 constexpr int kWatchdogMs = 2000;
 // 倒计时刷新间隔（1 秒）
 constexpr int kTickerMs = 1000;
+
+// ── 进程安全性判定：一律**问内核**，不猜进程名名单 ──────────────────────────
+// 2026-10-09 学校机房"反复重启"事故换来的教训：
+//   以前这里有一个 kSystemGuards = {"svchost","csrss",...} 的名单来判断"是不是系统进程"。
+//   两个致命问题叠在一起，让它完全失效：
+//     ① tasklist 给出的进程名**带 .exe**（"svchost.exe"），名单里写的是不带的形式
+//        ⇒ contains() 永远 false —— 系统保护一项都没生效；
+//     ② 白名单比较前剥了 .exe、进程名没剥 ⇒ 同理，白名单也没匹配上任何人。
+//   于是"除了白名单以外全杀"实际退化成了"PID>=1000 的全杀"，svchost 中招 ⇒
+//   CRITICAL_PROCESS_DIED(0xEF) 蓝屏 ⇒ 重启 ⇒ 自启 ⇒ 再杀 ⇒ 反复重启。
+//
+//   猜名字这条路本身就不成立（系统组件/服务/驱动宿主/杀软穷举不完）。
+//   正确做法是问内核这两个标志位 —— 进程自己带着"杀我会导致系统崩溃"的标记：
+//     · ProcessBreakOnTermination(29)：被标记 critical，杀它内核立刻蓝屏
+//     · ProcessProtectionInformation(61)：受保护进程（PPL），杀不掉也不该杀
+//   再叠加两条几何判断：Session 0（服务会话）与镜像位于 %SystemRoot% 下。
+//
+//   ⚠️ 铁律：**打不开句柄 / 查询失败，一律按"受保护"处理**（宁可不杀，不可杀错）。
+//      这类保守处理是这个功能的全部价值所在。
+#ifndef PROCESS_QUERY_LIMITED_INFORMATION
+#define PROCESS_QUERY_LIMITED_INFORMATION 0x1000
+#endif
+
+constexpr DWORD kProcInfoBreakOnTermination = 29;   // ProcessBreakOnTermination
+constexpr DWORD kProcInfoProtection         = 61;   // ProcessProtectionInformation
+constexpr DWORD kProcInfoSession            = 25;   // ProcessSessionInformation
+
+typedef LONG (NTAPI *PfnNtQueryInformationProcess)(HANDLE, DWORD, PVOID, ULONG, PULONG);
+
+struct StePsProtection {
+    UCHAR level;    // Type|Signer<<3 —— 非 0 即受保护
+    UCHAR type;
+    UCHAR signer;
+};
+
+HMODULE g_ntdll = nullptr;
+PfnNtQueryInformationProcess g_ntQueryProc = nullptr;
+
+void ensureNtdll()
+{
+    if (g_ntQueryProc) return;
+    if (!g_ntdll) g_ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (g_ntdll) {
+        g_ntQueryProc = reinterpret_cast<PfnNtQueryInformationProcess>(
+            GetProcAddress(g_ntdll, "NtQueryInformationProcess"));
+    }
 }
+
+/**
+ * 这个进程能不能杀？返回 **true = 绝不能杀**（保守：任何一次查询失败都返回 true）。
+ */
+bool processIsUntouchable(HANDLE handle, DWORD sessionId)
+{
+    ensureNtdll();
+    if (!g_ntQueryProc) return true;   // 拿不到内核查询入口 ⇒ 一律不杀
+
+    ULONG retLen = 0;
+    NTSTATUS st = 0;
+
+    // ① critical 进程：内核标记为"被终止就蓝屏"
+    BOOLEAN breakOnTerm = FALSE;
+    st = g_ntQueryProc(handle, kProcInfoBreakOnTermination,
+                       &breakOnTerm, sizeof(breakOnTerm), &retLen);
+    if (st < 0 || retLen < sizeof(BOOLEAN)) return true;   // 查不到 ⇒ 当保护
+    if (breakOnTerm) return true;
+
+    // ② 受保护进程（PPL：杀软 / 系统组件常见）
+    StePsProtection prot = { 0, 0, 0 };
+    st = g_ntQueryProc(handle, kProcInfoProtection, &prot, sizeof(prot), &retLen);
+    if (st < 0) return true;
+    if (retLen >= 1 && prot.level != 0) return true;
+
+    // ③ Session 0 = 服务会话。服务不在用户的考试桌面上，杀它没有任何监考收益，
+    //    风险却是整机崩掉 —— 一律放过。
+    if (sessionId == 0) return true;
+
+    return false;
+}
+
+/** tasklist 的 "Foo.exe" 与配置里的 "foo" 要能对上：双侧都剥 .exe 再比。 */
+QString normalizeProcName(const QString &raw)
+{
+    QString s = raw.trimmed().toLower();
+    if (s.endsWith(QLatin1String(".exe"))) s.chop(4);
+    return s;
+}
+} // namespace
 
 ExamMode &ExamMode::inst()
 {
@@ -39,14 +125,32 @@ ExamMode::ExamMode()
 
     m_watchdog = new QTimer(this);
     m_watchdog->setInterval(kWatchdogMs);
-    connect(m_watchdog, &QTimer::timeout, this, &ExamMode::killNonWhitelisted);
+    connect(m_watchdog, &QTimer::timeout, this, &ExamMode::killBlacklisted);
 }
 
-void ExamMode::start(int minutes, const QStringList &whitelist)
+bool ExamMode::start(int minutes, const QStringList &blacklist)
 {
     if (m_active) stop(QStringLiteral("restart"));
-    m_whitelist = whitelist;
-    for (QString &w : m_whitelist) w = w.trimmed().toLower();
+
+    // 黑名单为空 ⇒ **一个进程都不杀**。这时考试模式仍然生效（全屏拦截 + 倒计时），
+    // 只是不执行终止；原因必须如实回报，不能报"started 一切正常"。
+    // （黑名单制下这条是"没配就别动手"的自然结果，不再是白名单时代那种拼运气的安全兜底）
+    m_enforcing = !blacklist.isEmpty();
+    m_reason.clear();
+    if (!m_enforcing) {
+        m_reason = QStringLiteral("黑名单为空：只做全屏拦截与倒计时，不终止任何进程");
+        qInfo("[exam] 考试模式已启动但未启用进程终止（黑名单为空）—— 只做全屏拦截");
+    }
+
+    m_blacklist.clear();
+    for (const QString &raw : blacklist) {
+        const QString n = normalizeProcName(raw);
+        if (!n.isEmpty() && !m_blacklist.contains(n)) m_blacklist.append(n);
+    }
+    // 自己人永远不能被自己的黑名单杀掉 —— 这是防"老师把自己端掉"的一道保险
+    m_blacklist.removeAll(QStringLiteral("stelarith-agent-qt"));
+    m_blacklist.removeAll(QStringLiteral("taskkill"));
+    m_blacklist.removeAll(QStringLiteral("tasklist"));
     m_durationSec = minutes > 0 ? minutes * 60 : 0; // 0 = 不自动结束（管理员手动结束）
     createWindow(minutes);
     m_active = true;
@@ -54,9 +158,11 @@ void ExamMode::start(int minutes, const QStringList &whitelist)
     m_ticker->start();
     m_watchdog->start();
     emit stateChanged(true, remainingSec(), false);
-    qInfo("[exam] 考试模式开始：%s，白名单 %d 条",
+    qInfo("[exam] 考试模式开始：%s，黑名单 %d 条%s",
           m_durationSec ? qPrintable(QStringLiteral("%1 分钟").arg(minutes)) : "不自动结束",
-          m_whitelist.size());
+          m_blacklist.size(),
+          m_enforcing ? "" : qPrintable(QStringLiteral("（未启用进程终止：%1）").arg(m_reason)));
+    return m_enforcing;
 }
 
 bool ExamMode::stop(const QString &reason)
@@ -170,8 +276,10 @@ void ExamMode::updateTitle()
     }
 }
 
-void ExamMode::killNonWhitelisted()
+void ExamMode::killBlacklisted()
 {
+    if (!m_enforcing || m_blacklist.isEmpty()) return;
+
     // tasklist 快照（/NH 去掉表头，/FO CSV 便于解析）。
     // 每次子进程调用约几十 ms，2 秒一次可接受；不比"轮询 1 秒一次"重。
     QProcess p;
@@ -188,48 +296,57 @@ void ExamMode::killNonWhitelisted()
         if (line.isEmpty() || !line.startsWith('"')) continue;
         const QList<QByteArray> cols = line.split(',');
         if (cols.size() < 2) continue;
-        const QString name = QString::fromUtf8(cols[0]).remove('"').trimmed().toLower();
+        // ⚠️ 归一化必须**双侧一致**：tasklist 给 "Foo.exe"，黑名单里写 "foo"，
+        //    两边都过 normalizeProcName() 才能对上。旧版只剥了配置那一侧，
+        //    于是黑名单/保护名单**一条都匹配不上**（2026-10-09 事故的直接导火索）。
+        const QString name = normalizeProcName(QString::fromUtf8(cols[0]).remove('"'));
         const QString pidStr = QString::fromUtf8(cols[1]).remove('"').trimmed();
         bool ok = false;
         const qint64 pid = pidStr.toLongLong(&ok);
         if (ok) procs.append({ name, pid });
     }
 
-    // 白名单匹配（含扩展名剥离：tasklist 的 exe 名不带 .exe）
-    QStringList allowed = m_whitelist;
-    for (QString &a : allowed) {
-        if (a.endsWith(QStringLiteral(".exe"))) a.chop(4);
-    }
-    auto isAllowed = [&allowed](const QString &name) {
-        for (const QString &a : allowed) if (a == name) return true;
-        return false;
+    auto isBlacklisted = [this](const QString &normName) {
+        return m_blacklist.contains(normName);
     };
 
-    // 进程终止：白名单进程如 tasklist 本身、系统关键进程等必须跳过，
-    // 只杀"非白名单且有窗口/非系统"的 —— 第一版保守：杀所有非白名单的 exe，
-    // 但保留白名单 + 系统关键进程（svchost/csrss/winlogon 等由 PID<1000 保护）。
-    const QStringList kSystemGuards = {
-        QStringLiteral("svchost"), QStringLiteral("csrss"), QStringLiteral("winlogon"),
-        QStringLiteral("lsass"), QStringLiteral("services"), QStringLiteral("system"),
-        QStringLiteral("smss"), QStringLiteral("dwm"), QStringLiteral("wininit"),
-        QStringLiteral("explorer"), QStringLiteral("tasklist"), QStringLiteral("cmd"),
-        QStringLiteral("conhost"), QStringLiteral("fontdrvhost"), QStringLiteral("sihost"),
-        QStringLiteral("runtimebroker"), QStringLiteral("searchapp"), QStringLiteral("startmenuexperiencehost"),
-    };
-    int killed = 0;
+    int killed = 0, guarded = 0;
     for (const Proc &pr : procs) {
-        if (pr.name.isEmpty() || pr.pid < 0) continue;
-        if (isAllowed(pr.name)) continue;
-        if (kSystemGuards.contains(pr.name)) continue;
-        if (pr.pid < 1000) continue; // 系统进程保护
-        // 结束可疑进程（不递归子进程 —— 第一版保守，避免误杀）
+        if (pr.name.isEmpty() || pr.pid <= 0) continue;
+        // ── 黑名单语义：只处理老师点名的这几个，其余**一概不碰** ──
+        if (!isBlacklisted(pr.name)) continue;
+
+        // ── 到这一步还要过三重内核闸门才敢动手 ──
+        //    即使老师手滑在黑名单里填了 svchost.exe，也会被这里拦下来。
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pr.pid);
+        if (!h) {
+            // 打不开句柄：权限更高或是系统进程 —— 一律放过（不是"反抗"，是保护）
+            ++guarded;
+            continue;
+        }
+        DWORD sessionId = 0xFFFFFFFF;
+        ensureNtdll();
+        if (g_ntQueryProc) {
+            ULONG dummy = 0;
+            g_ntQueryProc(h, kProcInfoSession, &sessionId, sizeof(sessionId), &dummy);
+        }
+        const bool untouchable = processIsUntouchable(h, sessionId);
+        CloseHandle(h);
+        if (untouchable) {
+            ++guarded;
+            qInfo("[exam] 已保护 %s (PID %lld)：内核标记为 critical/受保护或服务会话，跳过",
+                  qPrintable(pr.name), pr.pid);
+            continue;
+        }
+
         QProcess k;
         k.start(QStringLiteral("taskkill"), { QStringLiteral("/PID"),
                                               QString::number(pr.pid),
                                               QStringLiteral("/F") });
         k.waitForFinished(1000);
         ++killed;
-        qInfo("[exam] 白名单拦截：终止 %s (PID %lld)", qPrintable(pr.name), pr.pid);
+        qInfo("[exam] 黑名单拦截：终止 %s (PID %lld)", qPrintable(pr.name), pr.pid);
     }
-    if (killed > 0) qInfo("[exam] 本轮终止 %d 个非白名单进程", killed);
+    if (killed > 0) qInfo("[exam] 本轮终止 %d 个黑名单进程", killed);
+    if (guarded > 0) qInfo("[exam] 本轮 %d 个命中黑名单的进程被安全阀拦下（未杀）", guarded);
 }

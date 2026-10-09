@@ -1,0 +1,58 @@
+#include <windows.h>
+
+/*
+  星集控被控端 · 版本资源 + 应用图标（2026-10-07 补）
+
+  为什么补：以前编出来的 exe 是「无版本资源」的裸 PE ——
+    ① 任务管理器细节页看不到 文件版本/产品版本，只能看到文件名；
+    ② 文件属性里「描述」「公司」全是空的，「产品版本」位显示 0.0.0.0，
+       装机后老师一点属性就觉得这软件没正经做过；
+    ③ 快捷方式没有专属图标，任务栏/资源管理器全用 exe 默认图标。
+  补上 .rc 之后，任务管理器、右键「属性」、控制面板卸载项读的都是这里。
+
+  版本号的来路：
+    **不手写**。CMakeLists.txt 会读 src/main.cpp 里的 kAppVersion，
+    校验一致后用 @AGENT_VERSION@ 灌进来，再拼成 FILEVERSION 需要的四段。
+    （这里手写一个数，很快就和 kAppVersion 漂移 —— 管理端 0.6.3 那次
+     就是 "CMake 写 0.6.3、main.cpp 写 0.6.2" 才逼出 FATAL_ERROR 守卫的。）
+
+  编码：文件是 UTF-8，靠下一行 code_page 告诉 rc.exe 按 UTF-8 读，
+    否则中文的 "星集控被控端" 会被按 ANSI 解成乱码。
+*/
+
+#pragma code_page(65001)
+
+IDI_APPICON ICON "app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+    FILEVERSION    @RC_VERSION_QUAD@
+    PRODUCTVERSION @RC_VERSION_QUAD@
+    FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+    FILEFLAGS      VS_FF_DEBUG
+#else
+    FILEFLAGS      0x0L
+#endif
+    FILEOS         VOS_NT_WINDOWS32
+    FILETYPE       VFT_APP
+    FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404B0"          ; 0x0804 简体中文 + 1200 Unicode 编码
+        BEGIN
+            VALUE "CompanyName",      "Stelarith"
+            VALUE "FileDescription",  "星集控被控端"
+            VALUE "FileVersion",      "@AGENT_VERSION@"
+            VALUE "InternalName",     "stelarith-agent-qt"
+            VALUE "LegalCopyright",   "Stelarith"
+            VALUE "OriginalFilename", "stelarith-agent-qt.exe"
+            VALUE "ProductName",      "星集控"
+            VALUE "ProductVersion",   "@AGENT_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END

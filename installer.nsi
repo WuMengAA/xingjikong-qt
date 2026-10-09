@@ -1,4 +1,4 @@
-; 星集控被控端 · 安装程序（NSIS 3）
+﻿; 星集控被控端 · 安装程序（NSIS 3）
 ;
 ; 三个设计要点：
 ;   1. **装机参数因机器而异**（云端地址 / 设备令牌 / 设备 uid）→ 放在安装向导里输入，
@@ -27,7 +27,11 @@ Unicode true
 
 !define APPNAME "星集控被控端"
 !define APPID   "StelarithAgentQt"
-!define VER     "0.6.5"
+; ⚠️ VER 由 CMakeLists.txt 生成到 build\version.nsh —— 工程里版本号只有一个真源
+;    （set(AGENT_VERSION ...)，2026-10-07 起同 DeepSeek Harness 标准：X.Y.Z / X.Y.Z-rc.N）。
+;    这里以前手抄一份 "0.6.5"，跟 kAppVersion 各写一份，漂移过一次（exe 0.4.0-v1 /
+;    安装器 0.5.0，云端按旧号判断 OTA）。别把手写值抄回来。
+!include "build\version.nsh"
 
 Name "${APPNAME}"
 OutFile "dist\stelarith-agent-setup.exe"
@@ -132,8 +136,45 @@ Section "install"
 	nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process -Name stelarith-agent-qt -ErrorAction SilentlyContinue | Stop-Process -Force"'
 	Sleep 800
 
-	; 装机包全部内容（exe + Qt 运行时 + styles + 脚本 + 说明）
-	File /r "deploy\*.*"
+	; ══ 装机包内容：分来源点名取件，**不通杀 deploy/** ══════════════════════════
+	; 原来这里是一句 `File /r "deploy\*.*"`，问题有三个（2026-10-09 实测）：
+	;   ① deploy/stelarith-agent-qt.exe 是**旧快照**（10-06），改的功能全不带；
+	;   ② deploy/ 里从来没有 resources/ translations/ position/（windeployqt 产出，
+	;      只在 build/）⇒ 装完照常启动、照常连云端，**只在有人订阅画面时崩**；
+	;   ③ **🔒 会把 deploy/agent.env 打进包** —— 那是构建机自己的**真实设备令牌**，
+	;      任何人 7z 解开安装包就能冒充该设备连云端（Delete 只在安装时删，包里仍有）。
+	;   所以改成：运行时一律从 build/ 取，deploy/ 只点名取"构建不产出"的那几样。
+	;
+	; ⚠️ 目录一律写 `File /r "build\xxx"` **不带 `\*.*`**：带了通配符 NSIS 会把目录内容
+	;    平铺到安装根，而 Qt 按 platforms\ 这种固定相对路径找插件 ⇒ 插件都在却找不到。
+
+	; ── 运行时（build/：刚编出来的 exe + windeployqt 补全的 Qt）──
+	File "build\stelarith-agent-qt.exe"
+	File "build\Qt6*.dll"
+	File "build\QtWebEngineProcess.exe"
+	File /r "build\platforms"
+	File /r "build\imageformats"
+	File /r "build\iconengines"
+	File /r "build\generic"
+	File /r "build\networkinformation"
+	File /r "build\styles"
+	File /r "build\tls"
+	File /r "build\resources"
+	File /r "build\translations"
+	File /r "build\position"
+	; ⚠️ 不拷 build\qml：被控端不用 QML（灵动岛是 Widgets 画的），这个目录是空的，
+	;    写进来 makensis 会直接报 "no files found" 而中止。
+
+	; ── 这两个 build/ 里没有（windeployqt 不拷），只在 deploy/ 素材库 ──
+	;    QtWebEngine 的 DirectX/软件渲染回退栈，缺了在没独显的教室机上会黑屏。
+	File "deploy\D3Dcompiler_47.dll"
+	File "deploy\opengl32sw.dll"
+
+	; ── deploy/ 独有的脚本与配置（构建从不产出这些）──
+	File "deploy\install-autostart.ps1"
+	File "deploy\agent.env.example"
+	File "deploy\start-agent.bat"
+	File "deploy\msi-post-install.cmd"
 
 	; 写 agent.env —— 让 exe 直接可用，装机的人不用手改文件。
 	; 兜底：静默安装（/S）不走向导页，这三个变量可能从未被赋值 —— 别把空值写进配置文件
@@ -165,6 +206,21 @@ Section "install"
 	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPID}" "Publisher"       "Stelarith"
 	WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPID}" "UninstallString" "$INSTDIR\uninstall.exe"
 	WriteUninstaller "$INSTDIR\uninstall.exe"
+
+	; ── 桌面 / 开始菜单快捷方式（2026-10-07 补）────────────────────────────
+	; 为什么补：原先安装器压根没有 CreateShortCut，现存的「星集控被控端.lnk」是手工建的
+	;   ——没有出处、卸载时删不掉、重装还会叠出第二份。快捷方式必须与安装器同生同死。
+	; SetShellVarContext all ⇒ 下面的 $DESKTOP / $SMPROGRAMS 指向**所有用户**那一份
+	;   （公共桌面 C:\Users\Public\Desktop、公共开始菜单 ProgramData\...\Programs）：
+	;   教室机装完是直接切到学生账户用的，若只建当前用户的，换账户后桌面是空的。
+	; 用完立刻切回 current —— NSIS 的注册表上下文也会跟着变，不还原后面的
+	;   WriteRegStr 会写到 HKLM\Software\<APPID> 之外的分支去，卸载键就对不上了。
+	SetShellVarContext all
+	CreateDirectory "$SMPROGRAMS\${APPNAME}"
+	CreateShortCut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\stelarith-agent-qt.exe" "" "$INSTDIR\stelarith-agent-qt.exe" 0
+	CreateShortCut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\stelarith-agent-qt.exe" "" "$INSTDIR\stelarith-agent-qt.exe" 0
+	CreateShortCut "$SMPROGRAMS\${APPNAME}\卸载 ${APPNAME}.lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
+	SetShellVarContext current
 SectionEnd
 
 Section "un.install"
@@ -173,6 +229,16 @@ Section "un.install"
 	; 同样用 Stop-Process，不用 taskkill
 	nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process -Name stelarith-agent-qt -ErrorAction SilentlyContinue | Stop-Process -Force"'
 	Sleep 800
+
+	; ── 删快捷方式（2026-10-07 补）────────────────────────────────────────
+	; 安装段建的就得由卸载段收回去，否则公共桌面上会留下一枚点了没反应的孤儿 lnk。
+	; 同样要回到 all 上下文：安装时建的是所有用户那份，用 current 删只会删空。
+	SetShellVarContext all
+	Delete "$DESKTOP\${APPNAME}.lnk"
+	Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
+	Delete "$SMPROGRAMS\${APPNAME}\卸载 ${APPNAME}.lnk"
+	RMDir "$SMPROGRAMS\${APPNAME}"
+	SetShellVarContext current
 
 	Delete "$INSTDIR\uninstall.exe"
 

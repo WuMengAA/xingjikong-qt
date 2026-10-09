@@ -1,0 +1,15 @@
+; 星集控被控端 · 安装器版本常量
+;
+; ⚠️ 本文件由 CMakeLists.txt 用 configure_file 自动生成，**不要手改**——
+;    手改会在下次 cmake configure 时被覆盖，而且那正是历史上出岔子的形式：
+;    以前 installer.nsi 里手写一份 !define VER，和 kAppVersion 漂移过
+;    （exe 报 0.4.0-v1、安装器写 0.5.0 → 云端按旧号判断 OTA）。
+;
+; 唯一真源：CMakeLists.txt 的 set(AGENT_VERSION ...)，
+; 变化规则：正式 X.Y.Z / 候选 X.Y.Z-rc.N，见 ../../docs/版本号命名规范-2026-10-07.md。
+;
+; 编译安装器（工作目录＝本文件所在目录）：
+;     makensis installer.nsi      ← 会 !include "build\version.nsh"
+;     scripts/build-agent-installer.sh   ← 已带前置检查（缺文件会直接 FATAL）
+
+!define VER "@AGENT_VERSION@"

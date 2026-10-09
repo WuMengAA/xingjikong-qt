@@ -36,3 +36,11 @@ dist/*.msi
 dist/*.zip
 dist/agent-portable-*/
 dist/_share/
+
+# 调试/构建中间产物（2026-10-09 统一 git 时补）
+vc140.idb
+vc140.pdb
+# 一次性调试/探针脚本（非构建基础设施），不进版本库
+scripts/_*.py
+scripts/_*.mjs
+!scripts/_build_agent.py
