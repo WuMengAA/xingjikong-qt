@@ -131,6 +131,7 @@ import {
   touchHeartbeat, sweepStale,
   rtcSignalToAgent, rtcRelayToViewers, rtcRelayToAgent,
   broadcastAudioToAgents, setAudioBroadcasting, isAudioBroadcasting,
+  duplexActive, sendAudioToTeacher,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
   // 2026-10-08 分班制 + 已知设备表 + 云端存储信息
   setDeviceMeta,
@@ -956,15 +957,20 @@ viewerWss.on('connection', (ws) => {
       // 语音对讲（2026-10-07，设计文档 3.3）：老师开始/停止讲话。
       // 开始后云端接受该管理端的二进制音频帧并 fan-out；停止后拒绝新帧。
       // 第一版目标 = 全部在线设备（班级映射在站点侧）。
-      case 'audio.start':
-        setAudioBroadcasting(true);
-        snd(ws, 'audio.started', { ok: true, targets: 'all-online' });
-        pushEvent('info', '管理端开始语音对讲（老师讲话，全班听）');
+      // 2026-10-09：params.duplex=true → 语音通话（双向）——记录发起者 ws，
+      //   学生上行音频单播回它（sendAudioToTeacher），不 fan-out 全教室。
+      case 'audio.start': {
+        const duplex = !!p.payload.duplex;
+        setAudioBroadcasting(true, duplex ? ws : null);
+        snd(ws, 'audio.started', { ok: true, targets: 'all-online', duplex });
+        pushEvent('info', duplex ? '管理端开始语音通话（双向，学生可回话）'
+                                 : '管理端开始语音对讲（老师讲话，全班听）');
         return;
+      }
       case 'audio.stop':
         setAudioBroadcasting(false);
         snd(ws, 'audio.stopped', { ok: true });
-        pushEvent('info', '管理端结束语音对讲');
+        pushEvent('info', '管理端结束语音对讲/通话');
         return;
       // 屏幕广播（2026-10-07，设计文档《屏幕广播-第一版设计》）
       case 'broadcast.start':
@@ -1185,6 +1191,15 @@ wss.on('connection', (ws) => {
       const f = parseFrame(Buffer.from(data));
       if (!f.ok) { sndErr(ws, f.code, f.detail); return; }
       const seq = f.header?.seq ?? 0;
+      // ── 语音通话上行（2026-10-09）：学生 mic 音频帧 → 单播回发起老师 ──
+      // 帧头 mime=audio/pcm 时走 duplex 通道，不走画面帧的 broadcastFrame。
+      if (f.header?.mime === 'audio/pcm') {
+        const r = sendAudioToTeacher(f.payload, seq, uid);
+        if (r.hits === 0) {
+          pushEvent('warn', '学生上行音频未送达（非 duplex 会话）', { uid, bytes: f.payload.length });
+        }
+        return;
+      }
       const info = addFrame(uid, f.payload.length);
       if (!info) {
         pushEvent('error', '收到帧但设备不在表里（异常状态）', { uid });

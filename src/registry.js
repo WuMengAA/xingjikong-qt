@@ -802,9 +802,12 @@ export function ensureEventsFile() {
 
 /** 当前是否有老师正在讲话（音频会话状态，管理端 start/stop 控制）。 */
 let g_audioBroadcasting = false;
+/** 语音通话（duplex）的发起管理端 ws —— 学生上行音频只单播回它，不外泄（2026-10-09）。 */
+let g_audioTeacherWs = null;
 export function isAudioBroadcasting() { return g_audioBroadcasting; }
-export function setAudioBroadcasting(on) {
+export function setAudioBroadcasting(on, teacherWs = null) {
   g_audioBroadcasting = on;
+  g_audioTeacherWs = on ? teacherWs : null;
   pushEvent('info', `语音对讲${on ? '开始' : '结束'}`);
   // 通知所有在线被控端：老师开始/结束讲话（学生端"正在讲话"提示用）
   for (const d of devices.values()) {
@@ -843,6 +846,28 @@ export function broadcastAudioToAgents(buf, mime, seq) {
   }
   if (hits > 0) pushEvent('info', '语音帧已推给被控端', { hits, bytes: buf.length, seq });
   return { hits, bytes: buf.length };
+}
+
+/* ---------- 语音通话上行（2026-10-09 · 语音通话功能设计 §4.2）----------
+ * 学生端 mic 采集的 audio/pcm 上行帧：单播回「发起 duplex 对讲的管理端」，
+ * 不 fan-out 全教室（学生只对老师说话，隐私边界）。无发起者或非 duplex
+ * 会话 → 丢弃并留事件流水。
+ */
+export function duplexActive() { return g_audioBroadcasting && g_audioTeacherWs != null; }
+export function sendAudioToTeacher(buf, seq, fromUid) {
+  if (!duplexActive() || !g_audioTeacherWs || g_audioTeacherWs.readyState !== 1) {
+    pushEvent('warn', '学生上行音频被丢弃（无 duplex 会话或发起者已离线）', { from: fromUid });
+    return { hits: 0 };
+  }
+  try {
+    // 复用 v1 二进制帧格式；来源标记 student:<uid>:<seq>，管理端按 mime=audio/pcm 播放
+    g_audioTeacherWs.send(makeFrame(`student:${fromUid}:${seq}`, seq, 'audio/pcm', buf));
+    pushEvent('info', '学生上行语音已单播回老师', { from: fromUid, bytes: buf.length, seq });
+    return { hits: 1, bytes: buf.length };
+  } catch (e) {
+    pushEvent('error', '学生上行语音写给管理端失败', { from: fromUid, error: e.message });
+    return { hits: 0 };
+  }
 }
 
 /* ---------- 屏幕广播（设计文档《屏幕广播-第一版设计》2026-10-07）----------
