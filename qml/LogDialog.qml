@@ -45,13 +45,14 @@ Popup {
                 color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
                 font.pixelSize: 11
             }
-            Text {
+            SvgIcon {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.right: parent.right
                 anchors.rightMargin: 18
-                text: "✕"
-                color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
-                font.pixelSize: 13
+                name: "x"
+                tint: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                width: 14
+                height: 14
                 MouseArea {
                     anchors.fill: parent
                     anchors.margins: -10

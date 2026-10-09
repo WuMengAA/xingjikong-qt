@@ -9,6 +9,7 @@
 
 #include "singleinstance.h"
 #include "viewerbackend.h"
+#include "updater.h"
 
 // ── 课表编辑器模块（从 schedule-qt 并入，2026-10-06）──
 #include "schedule/profile.h"
@@ -25,11 +26,14 @@
                           // Qt6Widgets 本来就链了（styles/Qt6Widgets.dll 也在绿色包里），
                           // 所以换 app 类型不增加任何打包负担。
 #include <QWindow>        // 2026-10-06：托盘点击切换主窗口显示/隐藏
+#include <QScreen>        // 2026-10-08：把窗口夹进屏幕可用区（见 fitWindowToScreen）
+#include <QGuiApplication>
 #include <QImage>
 #include <QMessageBox>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickImageProvider>
+#include "svgiconprovider.h"
 #include <QTimer>
 #include <QDir>          // 2026-10-06 SPIKE：从磁盘加载 QML 需要定位 qml 目录
 #include <QFile>
@@ -38,6 +42,8 @@
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
+#include <QQuickWindow>   // 2026-10-08：窗口上屏后再夹一次（frameSwapped）
+#include <memory>
 #include <QIcon>
 #include <QPainter>
 #include <QPen>
@@ -255,7 +261,75 @@ void stelarithNotifyTray(const QString &title, const QString &msg)
 // CMakeLists.txt 在配置阶段会读这一行来校验两处一致，不一致直接 FATAL_ERROR ——
 // 别靠人记着同步，靠构建卡住（上面就是没卡住才漂到的）。
 // ⚠️ 保持这一行**单行**：跨行写（#ifdef 套宏）会让 CMake 的正则匹配不到，校验就白做了。
-static constexpr const char *kViewerVersion = "0.6.14";
+// ⚠️ 命名标准为 DeepSeek Harness 同款：正式 X.Y.Z / 候选 X.Y.Z-rc.N（rc 号同核心递增、
+//    换核心归零、转正剥离后缀）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
+//    这一行是 CMake 校验用的回落值 —— 正常构建下由 CMakeLists.txt 的真源强制对齐。
+static constexpr const char *kViewerVersion = "0.6.23-rc.2";
+
+/**
+ * 把窗口拉回屏幕内（2026-10-08）。
+ *
+ * 为什么必须有：管理端的默认尺寸是 1180x700、最小 940x600，而 1280x720 这类
+ * 教室屏/投影很常见 —— 标题栏 + 任务栏吃掉 70px 之后，**窗口比可用区还高**。
+ * 不改的话表现有两种，都会被用户说成"界面不在屏幕里"：
+ *   ① 窗口底部的标签栏被切在屏幕外（永远看不到完整界面）；
+ *   ② 之前插过投影/副屏，窗口坐标留在那块已经不存在的屏幕上 ⇒ 整窗一次性跑到屏幕外，
+ *      从托盘点也点不回来（hide/show 只是把"看不见"重新显示成"还是看不见"）。
+ *
+ * 做法顺序不能反：**先把最小尺寸降到装得下**，否则 setGeometry 会被 minimumSize
+ * 顶回去，看起来像"夹了个寂寞"。
+ */
+static void fitWindowToScreen(QWindow *win)
+{
+    if (!win) {
+        logf("[viewer] fitWindowToScreen：拿不到窗口对象（rootObjects().first() 不是 QWindow？）");
+        return;
+    }
+    QScreen *scr = win->screen();
+    if (!scr) scr = QGuiApplication::primaryScreen();
+    if (!scr) { logf("[viewer] fitWindowToScreen：拿不到屏幕对象"); return; }
+    const QRect avail = scr->availableGeometry();
+    if (avail.isEmpty()) return;
+    {
+        const QRect g0 = win->geometry();
+        logf("[viewer] 夹屏检查：窗口 (%d,%d %dx%d) 屏幕可用区 (%d,%d %dx%d)",
+             g0.left(), g0.top(), g0.width(), g0.height(),
+             avail.left(), avail.top(), avail.width(), avail.height());
+    }
+
+    // ① 最小尺寸先降（留 24px 余量给窗口边框/阴影）
+    QSize minSz = win->minimumSize();
+    bool minChanged = false;
+    if (minSz.height() > avail.height() - 24) {
+        minSz.setHeight(qMax(360, avail.height() - 24));
+        minChanged = true;
+    }
+    if (minSz.width() > avail.width() - 24) {
+        minSz.setWidth(qMax(480, avail.width() - 24));
+        minChanged = true;
+    }
+    if (minChanged) {
+        logf("[viewer] 屏幕可用区 %dx%d 装不下窗口最小尺寸 → 已放宽为 %dx%d",
+             avail.width(), avail.height(), minSz.width(), minSz.height());
+        win->setMinimumSize(minSz);
+    }
+
+    // ② 尺寸超了就缩到可用区
+    QRect g = win->geometry();
+    const int w = qMin(g.width(), avail.width());
+    const int h = qMin(g.height(), avail.height());
+    // ③ 位置夹进可用区（原来可能整块在屏幕外，qBound 保证夹回来）
+    const int x = qBound(avail.left(), g.left(), qMax(avail.left(), avail.right() - w + 1));
+    const int y = qBound(avail.top(), g.top(), qMax(avail.top(), avail.bottom() - h + 1));
+    const QRect target(x, y, w, h);
+    if (target != g) {
+        logf("[viewer] 窗口 (%d,%d %dx%d) 不在屏幕可用区 %d,%d %dx%d 内 → 已夹回 (%d,%d %dx%d)",
+             g.left(), g.top(), g.width(), g.height(),
+             avail.left(), avail.top(), avail.width(), avail.height(),
+             x, y, w, h);
+        win->setGeometry(target);
+    }
+}
 
 int main(int argc, char *argv[])
 {
@@ -297,6 +371,15 @@ int main(int argc, char *argv[])
     if (envN > 0) logf("[viewer] 已从 viewer.env 读入 %d 项配置（exe 同目录）", envN);
 
     ViewerBackend backend;
+
+    // ── 自更新（2026-10-08）────────────────────────────────────────────
+    // 界面「设置 → 关于」里的「检查更新 / 立即更新」走它（QML 里的 `updater`）。
+    // ⚠️ 必须在这里（engine.load 之前）就把地址定下来：QML 一加载就要绑 updater.state，
+    //    那时 backend.start() 还没跑、backend.cloudUrl() 还是空串。
+    // 取值口径与 start() 完全一致：先 STE_VIEWER_URL（viewer.env 上面已读入），空了才回落默认。
+    QString updaterUrl = qEnvironmentVariable("STE_VIEWER_URL", ViewerBackend::defaultCloudUrl()).trimmed();
+    if (updaterUrl.isEmpty()) updaterUrl = ViewerBackend::defaultCloudUrl();
+    Updater updater(updaterUrl);
 
     // ── 课表编辑器模型（2026-10-06 并入）──────────────────────────────
     // 加载 ClassIsland 档案（默认 %LOCALAPPDATA%/ClassIsland/data/Profiles/Default.json），
@@ -382,7 +465,11 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
+    // 2026-10-08 lucide(morphicons 同款) SVG 图标：image://svgicon/<name>?color=<tint>
+    engine.addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider);
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    // 自更新（2026-10-08）：QML 里 `updater.state / updater.checkForUpdate()`。
+    engine.rootContext()->setContextProperty(QStringLiteral("updater"), &updater);
     // 课表编辑器 context property（2026-10-06 并入）
     engine.rootContext()->setContextProperty(QStringLiteral("scheduleModel"), &schedModel);
     engine.rootContext()->setContextProperty(QStringLiteral("timeSlotModel"), &schedTimeSlotModel);
@@ -408,6 +495,27 @@ int main(int argc, char *argv[])
         logf("[viewer] FAIL QML 没能加载（qml/Main.qml 有问题？）—— 退出");
         return 1;
     }
+    // QML 里 `visible: true` ⇒ 加载完就已经上屏了，这里补一次"夹进屏幕"：
+    // 小屏（1280x720 教室机）上窗口比可用区还高，底部标签栏会被切在屏幕外。
+    //
+    // ⚠️ 只在这儿夹一次**不够**：实测这一行执行时 Qt 还没把 QML 里请求的
+    //    1180x700 应用到窗口上（窗口还是默认尺寸、位置也不在最终位置），
+    //    于是"看起来不用夹"，紧接着窗口才被撑到超过屏幕 —— 日志里一次都没触发过。
+    //    所以再加两次"上屏之后"的兜底：首次渲染完成（frameSwapped）时、
+    //    以及 700ms 后各夹一次。fitWindowToScreen 是幂等的（只在越界时才动）。
+    QWindow *mainWin = qobject_cast<QWindow *>(engine.rootObjects().first());
+    fitWindowToScreen(mainWin);
+    if (auto *qw = qobject_cast<QQuickWindow *>(mainWin)) {
+        auto fired = std::make_shared<bool>(false);
+        QObject::connect(qw, &QQuickWindow::frameSwapped, qw, [qw, fired] {
+            if (*fired) return;
+            *fired = true;
+            fitWindowToScreen(qw);
+        });
+    }
+    QTimer::singleShot(700, mainWin ? mainWin : nullptr, [mainWin] {
+        fitWindowToScreen(mainWin);
+    });
 
     backend.start();
 
@@ -479,6 +587,9 @@ int main(int argc, char *argv[])
             if (win->isVisible()) {
                 win->hide();
             } else {
+                // 从托盘唤回时也夹一次：窗口藏着的时候分辨率和显示器都可能变过
+                // （插/拔投影最常见），不夹就会出现"点了托盘图标，窗口还是不见"。
+                fitWindowToScreen(win);
                 win->show();
                 win->raise();
                 win->requestActivate();

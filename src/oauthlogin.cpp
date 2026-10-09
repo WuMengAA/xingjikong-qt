@@ -40,6 +40,13 @@ constexpr qint64 kDefaultSessionSec = 30 * 24 * 60 * 60;
 /** 登录成功后，内嵌窗口停留多久再自动关（让人看一眼"登录成功"）。 */
 constexpr int kCloseAfterSuccessMs = 1200;
 
+/**
+ * 一次登录的总超时（毫秒）。从打开授权页算起，到站点回拨为止。
+ * 3 分钟：够用户走完"登录站点点同意"（含第一次注册/找回密码），又不至于让人干等。
+ * 超时必须收口，否则就是"永远卡在正在登录"（详见 begin() 里的说明）。
+ */
+constexpr int kLoginTimeoutMs = 3 * 60 * 1000;
+
 /** 随机串（state 用）。state 必须不可猜，否则别人能伪造回拨把 code 骗走。 */
 QString randomHex(int bytes)
 {
@@ -82,6 +89,11 @@ OAuthLogin::~OAuthLogin()
 
 void OAuthLogin::begin()
 {
+    // ⚠️ 开局先把回拨缓冲清空：它是**成员**（不是函数内 static，见 :257 那段修复），
+    //    上一次登录半途取消/超时留下的半截请求行会污染这一次的回拨解析，
+    //    症状是"回拨被拒：state 匹配=否"这种看不懂的失败。
+    m_pending.clear();
+
     if (m_busy) {
         // ⚠️ 以前失败路径没复位 m_busy，第二次点登录就卡在这儿：既不继续、也不报错，
         // 用户只看到按钮没反应。现在所有退出路径都复位了，这句正常情况下不该再出现；
@@ -140,6 +152,30 @@ void OAuthLogin::begin()
     const int port = m_server->serverPort();
     m_redirectUri = QStringLiteral("http://127.0.0.1:%1%2").arg(port).arg(redirectPath);
     m_busy = true;
+
+    // ⚠️ 登录总超时（2026-10-08 补）：授权页开出去之后，用户可能一直不点"同意"、
+    //    浏览器被安全软件拦掉、或者站点回拨根本到不了本机（防火墙/端口被占）。
+    //    没有这条收口，就会出现"卡死在登录中"：
+    //      · m_busy 永远为 true ⇒ 再点登录只会命中上面那句"上一次还没走完"（=点了没反应）
+    //      · 127.0.0.1 上的临时监听端口一直开着，谁都不收
+    //      · 界面上既不报错、也没有重试入口
+    //    到点必须把状态全部复位，并把原因说人话。
+    if (!m_timeout) {
+        m_timeout = new QTimer(this);
+        m_timeout->setSingleShot(true);
+        QObject::connect(m_timeout, &QTimer::timeout, this, [this]() {
+            if (!m_busy) return;                 // 已经正常收尾过了
+            m_busy = false;
+            stopServer();
+            closeLoginWindow();
+            logf("[oauth] FAIL 登录超时：等网站回拨 %d 秒没等到，已收口（可重新登录）",
+                 kLoginTimeoutMs / 1000);
+            emit failed(QStringLiteral("登录超时：没等到网站回拨。"
+                                       "如果在浏览器/登录窗口里还没点「同意」，请重试一次；"
+                                       "若反复超时，多半是回拨被安全软件拦了。"));
+        });
+    }
+    m_timeout->start(kLoginTimeoutMs);
 
     QUrl authUrl(QStringLiteral("%1/oauth/authorize").arg(m_siteUrl));
     {
@@ -349,18 +385,32 @@ void OAuthLogin::onTokenFinished()
     reply->deleteLater();
 
     if (status != 200) {
+        // 站点出错回的是整张 HTML 错误页，原因在 <title> 里（见 viewerbackend.cpp 的同名处理）。
+        // 日志留原文便于排查，但给用户的必须是那句人话 —— 否则界面只有"HTTP 401"。
+        QString why = QString::fromUtf8(raw);
+        const int t1 = why.indexOf(QLatin1String("<title>"));
+        if (t1 >= 0) {
+            const int t2 = why.indexOf(QLatin1String("</title>"), t1);
+            if (t2 > t1) why = why.mid(t1 + 7, t2 - t1 - 7).trimmed();
+        } else {
+            why = QString::fromUtf8(raw).left(200).simplified();
+        }
         logf("[oauth] FAIL 换令牌失败（HTTP %d）：%s", status, raw.left(512).constData());
         m_busy = false;
         closeLoginWindow();
-        emit failed(QStringLiteral("换网站会话令牌失败（站点返回 HTTP %d）").arg(status));
+        emit failed(QStringLiteral("换网站会话令牌失败（站点返回 HTTP %1%2）")
+                        .arg(status)
+                        .arg(why.isEmpty() ? QString() : QStringLiteral("：%1").arg(why)));
         return;
     }
 
     const QJsonDocument doc = QJsonDocument::fromJson(raw);
     const QJsonObject obj = doc.object();
-    // 站点故意同时给 access_token 与 token 两个键（同一张票，为兼容早已发出的桌面端），
-    // 这里两个都认，谁有用谁。
-    const QString sessionToken = obj.value(QStringLiteral("token")).toString();
+    // 站点故意同时给 access_token 与 token 两个键（同一张票，为兼容早已发出的桌面端）。
+    // ⚠️ 两个都认，且**以标准键优先**：以前只读 token，站点哪天回归标准 OAuth2
+    //    只发 access_token，管理端就会当场判"没拿到令牌"——登录全流程走完却登不进去。
+    QString sessionToken = obj.value(QStringLiteral("token")).toString();
+    if (sessionToken.isEmpty()) sessionToken = obj.value(QStringLiteral("access_token")).toString();
     if (sessionToken.isEmpty()) {
         const QString why = QStringLiteral("换回来的响应里没有 token（站点改了 /oauth/token 的返回？）");
         logf("[oauth] FAIL %s：%s", why.toUtf8().constData(), raw.left(512).constData());
@@ -399,6 +449,9 @@ void OAuthLogin::servePage(QTcpSocket *sock, int code, const QByteArray &body)
 
 void OAuthLogin::stopServer()
 {
+    // 收口一律连带停超时器：stopServer() 是所有成功/失败路径的必经之地，
+    // 挂在这儿就不会出现"已经登录完了、超时器还在跑，3 分钟后突然报一句超时"。
+    if (m_timeout) m_timeout->stop();
     if (m_server) {
         m_server->close();
         m_server->deleteLater();

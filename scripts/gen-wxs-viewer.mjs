@@ -11,7 +11,7 @@
 //    配置 viewer.env 已作为普通文件打进包里，不需要脚本生成。
 // （deploy/ 下 1289 个文件含 qml 插件树，手写 wxs 不可维护，必须生成）
 
-import { readdirSync, statSync, readFileSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -21,6 +21,9 @@ const DEPLOY = join(__dirname, '..', 'deploy');
 
 // 版本号单一真源（2026-10-05）：从 src/main.cpp 的 kViewerVersion 读，
 // 保证 MSI 版本与应用内版本一致（不必再手改这里）。
+// ⚠️ 2026-10-08 修：kViewerVersion 是 semver（如 "0.6.23-rc.2"），WiX 的 Package Version
+//    只认纯数字 a.b.c.d，直接塞 "-rc.2" 会让 `wix build` 报非法版本。这里收敛成 4 段数字
+//    （"0.6.23-rc.2" → "0.6.23.2"），原始串另存 VERSION_RAW 给 NSIS 展示用。
 let APP_VER = '0.0.0';
 try {
   const m = readFileSync(join(__dirname, '..', 'src', 'main.cpp'), 'utf8')
@@ -30,6 +33,22 @@ try {
 } catch (e) {
   console.error(`[gen-wxs-viewer] WARN 读不到 src/main.cpp（${e.message}），回落到 0.0.0`);
 }
+function wxVer(v) {
+  const s = v.replace(/[^0-9.]/g, '.').replace(/\.+/g, '.').replace(/^\.|\.$/g, '');
+  const parts = s.split('.').filter(Boolean);
+  while (parts.length < 4) parts.push('0');
+  return parts.slice(0, 4).join('.');
+}
+const WX_VER = wxVer(APP_VER);
+
+// 同一份版本号也喂给 NSIS 安装器（scripts/make-installer.nsi 通过 build/version.nsh 读取），
+// 保证 exe 安装包 / msi 安装包 / 应用内版本三处同源。
+mkdirSync(join(__dirname, '..', 'build'), { recursive: true });
+writeFileSync(
+  join(__dirname, '..', 'build', 'version.nsh'),
+  `!define VERSION "${WX_VER}"\n!define VERSION_RAW "${APP_VER}"\n`
+);
+console.error(`[gen-wxs-viewer] 版本 ${APP_VER} → WiX ${WX_VER}（已写 build/version.nsh）`);
 
 function walk(dir) {
   const out = [];
@@ -94,7 +113,7 @@ let wxs = `<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
       Name="星集控管理端"
       Manufacturer="Stelarith"
-      Version="${APP_VER}"
+      Version="${WX_VER}"
       UpgradeCode="7A3E9D21-5B84-4F6C-8D10-2E9C4A7B1F53"
       Scope="perMachine"
       Language="2052">

@@ -8,6 +8,7 @@
 
 import QtQuick
 import QtQuick.Controls
+import "components"
 
 Popup {
     id: dlg
@@ -93,19 +94,21 @@ Popup {
         Rectangle { width: parent.width; height: 1; color: dlg.theme ? dlg.theme.stroke : "#242424" }
 
         // ── 输入行 ──
+        // ⚠️ 输入行必须用 InputField：原来这里是裸 QQC `TextField`，它自带系统调色板
+        // 的浅灰底（实测截图中是 #D0D0D0 那段白条），暗色外观下就成了"白底灰字"，
+        // 看着跟 #94 一个病 —— 暗色下敲命令看不见自己在打什么。
         Rectangle {
             width: parent.width
             height: 42
             color: dlg.theme ? dlg.theme.win : "#1A1A1A"
-            TextField {
+            InputField {
                 id: input
+                th: dlg.theme
                 anchors.fill: parent
                 anchors.leftMargin: 14
                 anchors.rightMargin: 14
                 enabled: backend.termState === 2          // TermOpen
                 placeholderText: enabled ? "" : "先开终端才能敲"
-                color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
-                font.pixelSize: 13
                 font.family: "Consolas"
                 onAccepted: {
                     const line = text
@@ -145,13 +148,18 @@ Popup {
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
-                    text: (backend.termState === 0) ? "开终端" : "关终端"
+                    // Pending 显示「…」：那会儿按钮按了也不会有别的反应（见下面 MouseArea）
+                    text: (backend.termState === 0) ? "开终端" : (backend.termState === 1 ? "…" : "关终端")
                     color: (backend.termState === 1) ? (dlg.theme ? dlg.theme.op : "#BBBBBB")
                                                      : (dlg.theme ? dlg.theme.win : "#141414")
                     font.pixelSize: 13
                 }
                 MouseArea {
                     anchors.fill: parent
+                    // 等回话（Pending）时别让人连点 —— 每点一次就多发一条 terminal_close，
+                    // 而状态不会变（setTermState 值相同直接 return），看着就是"按了没反应"。
+                    // 等不及就等 20 秒：到点 C++ 自己回 Idle，按钮自动变回「开终端」。
+                    enabled: backend.termState !== 1
                     onClicked: {
                         if (backend.termState === 0) doOpen()
                         else doClose()
@@ -216,10 +224,16 @@ Popup {
     }
 
     function tipText() {
-        if (backend.termState === 1) return "机器在问本机「允许吗」，等着就行"
+        // Pending 时直接把 C++ 那句原话顶上去（"等本机点头…" / "正在关…"），
+        // 超时复位后那边会换成"…超时（本机没允许…）"，一并让用户看见 ——
+        // 否则按钮自己变回「开终端」，人不知道刚才为什么没连上。
+        if (backend.termState === 1) return backend.termNote || "机器在问本机「允许吗」，等着就行"
         if (backend.termState === 2)
             return "回车执行一条，30 秒不回自动断；敲 exit 或点关终端"
-        return "开一条命令行（本机要手动允许）"
+        // Idle：只有"上次没成"的时候才带原因（刚被拒绝 / 刚超时 / 刚被本机拒绝），
+        // 没原因（第一次打开）就给开场的那句。
+        return backend.termNote !== "" ? ("上次：" + backend.termNote)
+                                       : "开一条命令行（本机要手动允许）"
     }
 
     function doOpen() {

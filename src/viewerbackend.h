@@ -64,19 +64,38 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
     Q_PROPERTY(bool statusWarn READ statusWarn NOTIFY statusTextChanged)
     Q_PROPERTY(QJsonArray devices READ devices NOTIFY devicesChanged)
+    /**
+     * 设备表里现在有几台是"真在线"的（顶栏那句「N 台在线」用）。
+     *
+     * 为什么不用 devices.length：devices 现在含**离线**设备（见下面的台账说明），
+     * 长度是"我知道的机器数"，不是"在线机器数"，拿它当在线数会虚高。
+     */
+    Q_PROPERTY(int onlineCount READ onlineCount NOTIFY devicesChanged)
     Q_PROPERTY(QString currentUid READ currentUid WRITE setCurrentUid NOTIFY currentUidChanged)
     /** 当前选中设备上报的指令能力全集（老版本被控端没这字段 → 空）。
      *  管端据此把不支持的按钮置灰，而不是让人点下去才吃到一句「未知指令」。 */
     Q_PROPERTY(QStringList capActions READ capActions NOTIFY capActionsChanged)
     Q_PROPERTY(QImage frame READ frame NOTIFY frameChanged)
     Q_PROPERTY(QJsonObject recordings READ recordings NOTIFY recordingsChanged)
-    /** 订阅列表快照：把多台设备的最新帧按 uid 缓存（多班面板缩略图墙，3.2.2）。 */
-    Q_INVOKABLE void subscribeThumbnails(const QVariantList &uids);
+    // ⚠️ subscribeThumbnails 已挪进下面的 public: 段 —— 原来它写在这儿的**无访问说明符**位置，
+    //    class 默认 private ⇒ QML 调不到（报 "Property 'subscribeThumbnails' of object
+    //    ViewerBackend is not a function"），多班缩略图墙点一下就 TypeError。
+    //    Q_PROPERTY 不受影响（元属性），但 Q_INVOKABLE 必须 public 才让 QML 调得着。
     /** 画面进入「静态区」（连续多帧像素一致）→ 界面停止重绘。见 applyFrameBytes 的注释。 */
     Q_PROPERTY(bool screenStatic READ screenStatic NOTIFY statsChanged)
     Q_PROPERTY(double fps READ fps NOTIFY statsChanged)
     Q_PROPERTY(int frameCount READ frameCount NOTIFY statsChanged)
     Q_PROPERTY(int lastFrameBytes READ lastFrameBytes NOTIFY statsChanged)
+    /**
+     * 现在屏幕上这张画面**属于哪台设备**（帧头里的 uid；旧格式裸帧没有 uid 时按
+     * "当时正在看的那台"记）。
+     *
+     * 为什么要它：切换设备后，上一台的帧还会在路上（云端订阅不是瞬时的，被控端
+     * 也可能还在发），这些帧落进同一个 m_frame 就会让屏幕继续显示上一台的桌面 ——
+     * 老师照着旧画面去操作新机器，在教室大屏上属于事故。
+     * 界面拿它和 currentUid 比：不相等就不上屏，显示"正在接通"。
+     */
+    Q_PROPERTY(QString frameUid READ frameUid NOTIFY frameChanged)
     Q_PROPERTY(QString cloudUrl READ cloudUrl NOTIFY cloudUrlChanged)
     // ── 站点账号（OAuth 一户通，2026-10-06）──
     // 界面直接显示这一行就够了，别让它在"已登录"和"没登录"之间猜：
@@ -109,6 +128,18 @@ class ViewerBackend : public QObject
     Q_PROPERTY(int filePercent READ filePercent NOTIFY fileProgressChanged)
     Q_PROPERTY(QString fileError READ fileError NOTIFY fileProgressChanged)
     Q_PROPERTY(QString fileTarget READ fileTarget NOTIFY fileProgressChanged)
+    // ── 分班制（2026-10-08）──
+    // 云端 /api/classes 返回的全部班级（含每台在线数），管理端据此在设备列表上做「按班分组/筛选」。
+    // 云端算好结论推下来（requestClasses 拉 + 设备上下线时随 devices 刷新），界面只消费。
+    Q_PROPERTY(QJsonArray classes READ classes NOTIFY classesChanged)
+    /** 当前选中的班级筛选（空串 = 全部）。界面切班时写它，设备列表按它过滤。 */
+    Q_PROPERTY(QString currentClass READ currentClass WRITE setCurrentClass NOTIFY classesChanged)
+    /** 首启引导：false = 还没走完引导（主窗应叠 WelcomeOverlay）；true = 已走过。 */
+    Q_PROPERTY(bool firstRunDone READ firstRunDone NOTIFY firstRunDoneChanged)
+    // ── 云端存储概况（2026-10-08，对应需求 #2「没有云端存储信息」）──
+    // 管理端概览页展示：已知设备数 / 在线 / 离线 / 班级数 / 待执行指令 / 事件落盘量 / 最近活跃时刻。
+    // 数据面由云端 getStorageInfo 算好推下来，界面只消费，不许前端自己再数一遍（避免两端口径不一致）。
+    Q_PROPERTY(QJsonObject storage READ storage NOTIFY storageChanged)
 
     // ── WebRTC 收流（T-3，2026-10-04）──
     // 管理端做 answer 侧：被控端 captureStream 推 video track → 云端中继 →
@@ -129,6 +160,11 @@ class ViewerBackend : public QObject
     Q_PROPERTY(bool termBusy READ termBusy NOTIFY termStateChanged)
 
 public:
+    /** 订阅一批设备的画面（不切当前选中，只收缩略图帧），QML 网格 3×3 展示。
+     *  多班面板缩略图墙（设计文档 3.2.2）：与主画面共用一条 WS 订阅，云端按 uid 推帧，
+     *  帧头带 uid → 按 uid 分槽存。 */
+    Q_INVOKABLE void subscribeThumbnails(const QVariantList &uids);
+
     // 帧的来源。以前两路都调同一个 applyFrameBytes 且不区分来源，结果被控端的 JPEG
     // 轮询帧和 WebRTC 抽出来的帧互相覆盖同一张 m_frame —— 画面在两个源之间来回跳、
     // 帧率虚高一倍，而日志上看起来一切正常。
@@ -157,7 +193,14 @@ public:
     QString statusText() const { return m_statusText; }
     bool statusWarn() const { return m_statusWarn; }
     QJsonArray devices() const { return m_devices; }
+    /** 设备表里真在线的台数（离线的不算）。 */
+    int onlineCount() const;
     QString currentUid() const { return m_currentUid; }
+
+    QJsonArray classes() const { return m_classes; }
+    QString currentClass() const { return m_currentClass; }
+    void setCurrentClass(const QString &c) { if (m_currentClass != c) { m_currentClass = c; emit classesChanged(); } }
+    QJsonObject storage() const { return m_storage; }
 
     /**
      * 只给自检用：退订 → 重订，逼被控端把 WebRTC 连接重建一次（重新 offer）。
@@ -168,12 +211,24 @@ public:
      */
     Q_INVOKABLE void rtcRenegotiate(const QString &uid);
     QImage frame() const { return m_frame; }
+    /** 现在这张画面属于哪台设备（见 frameUid 属性的注释）。 */
+    QString frameUid() const { return m_frameUid; }
     bool screenStatic() const { return m_screenStatic; }
     double fps() const { return m_fps; }
     int frameCount() const { return m_frameCount; }
     int lastFrameBytes() const { return m_lastFrameBytes; }
     /** 云端地址（设置页要显示；它是启动时从环境变量读的，不是用户填的）。 */
     QString cloudUrl() const { return m_url; }
+
+    /**
+     * 管理端默认云端地址（没设 STE_VIEWER_URL 时用它）。
+     *
+     * 为什么要外露：Updater（自更新）是在 engine.load() **之前**构造的，那时 backend.start()
+     * 还没跑、cloudUrl() 还是空串；而自更新要拿这个地址去问云端"有没有新版"。
+     * 与其在 main.cpp 里再抄一份默认地址字面量（抄了就一定会漂），不如从这里取。
+     * start() 自己也用它 —— 单一真源。
+     */
+    static QString defaultCloudUrl();
 
     // ── 站点账号（OAuth 一户通）──
     /** 账号那一行该显示什么（见 accountText 属性）。 */
@@ -193,6 +248,9 @@ public:
      * 已在登录中时会被忽略（不然点两下就是两个浏览器窗口）。
      */
     Q_INVOKABLE void loginWithSite();
+    /** 首启引导：读取 / 写入「是否已走完引导」标记（QSettings prefs/firstRunDone）。 */
+    Q_INVOKABLE bool firstRunDone() const;
+    Q_INVOKABLE void markFirstRunDone();
     /** 忘记本机上的账号（删本地凭据，下次要重新走一次授权）。 */
     Q_INVOKABLE void forgetAccount();
     /** 打开本机浏览器去站点注册新账号（注册页，不是授权页）。 */
@@ -236,6 +294,9 @@ public:
 
     /** 切到某台设备 → 向云端订阅它的画面。 */
     void setCurrentUid(const QString &uid);
+    /** 2026-10-08 修复「不在带画面页也无限拉流」：页面离开集控（带画面主页）时置 false，
+     *  退订当前设备画面、清掉本地帧；回到该页置 true 重新订阅。云端按订阅发帧，退订即停流。 */
+    Q_INVOKABLE void setScreenActive(bool on);
     // 契合度（2026-10-06）：能力门控。QML 里问"这台机器认不认这条指令"。
     // 见 refreshCapActions / deviceSupports 的说明，别在 QML 里自己判。
     QStringList capActions() const { return m_capActions; }
@@ -248,6 +309,8 @@ public:
     Q_INVOKABLE void reportDenied(const QString &label);
 
     Q_INVOKABLE void requestDevices();
+    Q_INVOKABLE void requestClasses();   // 2026-10-08 拉班级列表
+    Q_INVOKABLE void requestStorage();   // 2026-10-08 拉云端存储概况
     Q_INVOKABLE void sendAction(const QString &action, const QJsonObject &params = QJsonObject());
     Q_INVOKABLE void sendPing();
     Q_INVOKABLE void sendPointer(const QString &kind, double nx, double ny);
@@ -255,21 +318,43 @@ public:
 
     // ── 语音对讲（设计文档 3.3，2026-10-07）──
     /** 开始讲话：开麦克风采集 → 通知云端 audio.start → 每帧 PCM 二进制发出。 */
+    // ⚠️ speaking / broadcasting / speakError / *LeftSec 必须是 **Q_PROPERTY**，不能是 Q_INVOKABLE：
+    //    QML 里写的是 `backend.speaking`（不带括号），Q_INVOKABLE 不带括号取到的是**函数对象**，
+    //    恒为 true —— 冷启动、一个按钮都没点，界面就写着"停止讲话"，灵动岛也永远挂着
+    //    "正在语音对讲 / 正在屏幕广播"。2026-10-07 截图 b1-page1.png 拍下了这个（见改动归档）。
+    Q_PROPERTY(bool speaking READ isSpeaking NOTIFY speakingChanged)
+    Q_PROPERTY(int speakLeftSec READ speakLeftSec NOTIFY limitsChanged)
+    Q_PROPERTY(bool broadcasting READ isBroadcasting NOTIFY broadcastingChanged)
+    Q_PROPERTY(int bcastLeftSec READ bcastLeftSec NOTIFY limitsChanged)
+    /** 自动停止（到时长上限 / 断线）时说人话的那句；空 = 没有新提示（QML 收到非空就弹一次）。 */
+    Q_PROPERTY(QString autoNote READ autoNote NOTIFY autoNoteChanged)
+
+    /** 开始讲话：开麦克风采集 → 通知云端 audio.start → 每帧 PCM 二进制发出。
+     *  带时长上限（m_speakMaxMs），到点自动停 —— 见 stopSpeaking 的 why 参数。 */
     Q_INVOKABLE bool startSpeaking();
-    /** 停止讲话：关麦 → audio.stop。 */
-    Q_INVOKABLE void stopSpeaking();
+    /** 停止讲话：关麦 → audio.stop。why 非空 = 自动停（到点 / 断线），会多说一句人话。 */
+    Q_INVOKABLE void stopSpeaking(QString why = QString());
     /** 是否正在讲话。 */
-    Q_INVOKABLE bool speaking() const;
+    bool isSpeaking() const;
+    /** 讲话还剩几秒（到 0 自动停）。 */
+    int speakLeftSec() const;
+    /** 自动停那句话的原文（m_autoNote 的 READ）。
+     *  ⚠️ 这行不能少：Q_PROPERTY 的 READ 指向它，moc 会生成 autoNote() 调用，
+     *     只有 .cpp 定义、头文件不声明 ⇒ C2039 "autoNote": 不是成员（2026-10-07 编译事故）。 */
+    QString autoNote() const;
     /** 最后一次开麦失败原因（QML 提示用）。 */
+    Q_PROPERTY(QString speakError READ speakError NOTIFY speakErrorChanged)
     Q_INVOKABLE QString speakError() const;
 
     // ── 屏幕广播（设计文档《屏幕广播-第一版设计》，2026-10-07）──
     /** 开始屏幕广播：抓屏 QTimer → 每帧 JPEG 二进制发云端 → broadcast.start。 */
     Q_INVOKABLE bool startBroadcast();
-    /** 停止屏幕广播。 */
-    Q_INVOKABLE void stopBroadcast();
+    /** 停止屏幕广播。why 非空 = 自动停（到点 / 断线），会多说一句人话。 */
+    Q_INVOKABLE void stopBroadcast(QString why = QString());
     /** 是否正在广播。 */
-    Q_INVOKABLE bool broadcasting() const;
+    bool isBroadcasting() const;
+    /** 广播还剩几秒（到 0 自动停）。 */
+    int bcastLeftSec() const;
 
     // ── 班级监控（设计文档 3.6 第一版）──
     /** 拉取云端录制列表（recordings/<uid>/ 分组），emit recordingsChanged。 */
@@ -339,6 +424,8 @@ signals:
     void authedChanged();
     void statusTextChanged();
     void devicesChanged();
+    void classesChanged();
+    void storageChanged();
     void currentUidChanged();
     /** 当前选中设备的能力清单（actions）变了 —— 按钮门控要跟着刷。 */
     void capActionsChanged();
@@ -350,6 +437,14 @@ signals:
     void thumbnailChanged(const QString &uid = QString());
     /** 站点账号状态/文本变化（登录成功、失败、票换了、用户点了忘记）。 */
     void accountChanged();
+    // 语音对讲 / 屏幕广播的状态与时长上限（2026-10-07）：对应 Q_PROPERTY
+    // speaking / broadcasting / speakLeftSec / bcastLeftSec / autoNote。
+    // limitsChanged 每"剩余 1 秒"跳一次，界面写 ≥ 剩余秒数就能跟着自动进。
+    void speakingChanged();
+    void broadcastingChanged();
+    void speakErrorChanged();
+    void limitsChanged();
+    void autoNoteChanged();
     /** 文件推送进度：状态/文件名/已推字节/百分比/失败原因/落盘路径，全走这一个信号。 */
     void fileProgressChanged();
     /** WebRTC 收流链路状态变化（ready / negotiating / failed / idle）。 */
@@ -366,6 +461,10 @@ signals:
     void roleChanged();
     /** 提醒开关变了（设置页那两个开关）。 */
     void notifyPrefChanged();
+    /** 云端状态通知（断线重连 / 指令完成）：统一走灵动岛瞬态提示，不再弹系统托盘气泡。 */
+    void islandNote(const QString &title, const QString &desc, const QString &icon);
+    /** 首启引导是否已完成（标记位从 QSettings 读回；完成写标记后界面据此收起引导层）。 */
+    void firstRunDoneChanged();
     /**
      * 指令结果。state: "sent"（云端已写进连接）/ "executed"（机器真做了）/ 其它=没发成。
      * result: "done" / "failed"（仅 executed 时有意义）。data: 动作附加数据（可选）。
@@ -407,6 +506,8 @@ private:
     void setStatic(bool s);
     void tickFps();
     void sendEnvelope(const QString &type, const QJsonObject &payload);
+    /** 断线 / 退出时把语音和广播一起收掉，why 直接显示成状态行那句话。 */
+    void stopAllLive(const QString &why);
 
     // ── 远程终端 ──
     /** 改状态并通知界面（状态四件套共用一个信号，省得四个 NOTIFY 各写一遍）。 */
@@ -492,6 +593,13 @@ private:
     QString m_termSid;
     QString m_termNote;
     int m_termSidSeq = 0;
+    // 终端的两个"等回话"都必须有收口（2026-10-07 修 #95）：
+    // 下发 terminal_open 后本地是 Pending，若本机一直不点头、或被控端根本没回 terminal_closed，
+    // 状态就永远卡在 Pending —— 界面上按钮永远显示"关终端"、输入框永远灰、再点"开终端"又被
+    // "已经有会话了"拒掉。两条定时器就是给这两段等待兜底的，到点一律回 Idle 并把原因说出来。
+    QTimer *m_termWait = nullptr;      // 等本机确认 terminal_open（默认 20s）
+    QTimer *m_termCloseWait = nullptr; // 等 terminal_close 回话（默认 2.5s）
+    bool m_termClosing = false;        // 关闭请求已下发、还没拿到 terminal_closed（去重用）
     QTimer *m_fpsTimer = nullptr;
     QTimer *m_rtcReap = nullptr;          // 收流页延迟回收（scheduleRtcViewReap）
     // 抽帧节拍与 RTC 诊断心跳：必须是成员，不能在建页的加载回调里 new。
@@ -505,6 +613,7 @@ private:
     QString m_token;
 
     QString m_currentUid;
+    bool m_screenActive = true;   // 2026-10-08：带画面页是否可见（不可见则暂停单台拉流）
     QStringList m_capActions;              // 当前设备的指令能力全集（空=没上报过）
     bool m_connected = false;
     bool m_authed = false;
@@ -519,6 +628,7 @@ private:
 
     // ── 身份 / 提醒偏好（落在 QSettings，界面改完重启也还在）──
     QString m_role = QStringLiteral("admin");   // "admin" / "teacher"，默认管理员（单机自用）
+    bool m_firstRunDone = false;                // 首启引导是否已完成（QSettings prefs/firstRunDone）
     bool m_notifyOnDone = true;
     bool m_notifyOnOffline = true;
 
@@ -566,7 +676,28 @@ private:
     static const qint64 kRtcStaleMs = 1500;
 
     QJsonArray m_devices;
+    QJsonArray m_classes;            // 2026-10-08 分班制：云端返回的全部班级
+    QString m_currentClass;          // 2026-10-08 当前班级筛选（空=全部）
+    QTimer *m_refreshTimer = nullptr; // 2026-10-08 设备表兜底轮询（15s，云端推送之外的保险）
+    QJsonObject m_storage;            // 2026-10-08 云端存储概况（/api/storage 返回）
+    /**
+     * 设备台账（uid → 最后一次见到的设备对象）。
+     *
+     * 为什么要有：云端 listDevices() 只列**当前连着**的设备，`online` 还写死 true；
+     * 机器一掉电就从表里消失。而界面早就按"有台账"写好了 —— 左栏有「离线」筛选、
+     * 状态点分在线/离线、集控批量下发还会把离线机器直接判失败（见 Main.qml 的
+     * isOnline / offlineDevices / 批量明细）。少了台账，这些全都恒等于空，
+     * 用户看到的就是"离线显示不对"。
+     *
+     * 所以这里自己记一笔：设备从云端表里消失 = 记为离线（保留 kLedgerKeepMs），
+     * 重新出现 = 记回在线。放进 m_devices 一起下发给界面（在线在前，离线在后）。
+     */
+    QHash<QString, QJsonObject> m_devLedger;
+    static const qint64 kLedgerKeepMs = 24LL * 60 * 60 * 1000;   // 离线台账保留 24 小时
     QImage m_frame;
+    // m_frame 属于哪台设备（frameUid 属性的本体）。空 = 手上这张画面不属于当前选中那台
+    // （刚切换完、还没收到新设备的第一帧）→ 界面不许把它当"当前设备的画面"画出来。
+    QString m_frameUid;
     quint64 m_frameHash = 0;         // 上一帧的稀疏指纹（0 表示还没见过帧）
     int m_sameFrameStreak = 0;       // 连续多少帧指纹一致
     bool m_screenStatic = false;     // 静态区：画面没在动，界面别浪费重绘
@@ -578,13 +709,24 @@ private:
     qint64 m_pingSentMs = 0;
 
     // ── 语音对讲（2026-10-07）──
+    // ── 语音对讲（2026-10-07）──
     AudioCapture *m_audioCapture = nullptr;   // 麦克风采集（懒创建）
     bool m_speaking = false;                  // 当前是否在讲话
     QString m_speakError;
+    QTimer *m_speakLimit = nullptr;           // 讲话时长上限（到点自动停）
+    int m_speakMaxMs = 3 * 60 * 1000;         // 讲话最长时长（默认 3 分钟，STE_MAX_SPEAK_MS 可覆盖）
+    int m_speakLeftMs = 0;                    // 还剩多少毫秒
+    int m_speakLeftSec = 0;                   // 界面显示的剩余秒数（1s 跳动）
+    QString m_autoNote;                       // 自动停的人话说明（QML 收到非空就弹一次）
 
     // ── 屏幕广播（2026-10-07）──
     QTimer *m_bcastTimer = nullptr;           // 抓屏节拍（3fps）
     bool m_broadcasting = false;              // 是否在广播
+    QTimer *m_bcastLimit = nullptr;           // 广播时长上限（到点自动停）
+    int m_bcastMaxMs = 10 * 60 * 1000;        // 广播最长时长（默认 10 分钟，STE_MAX_BCAST_MS 可覆盖）
+    int m_bcastLeftMs = 0;
+    int m_bcastLeftSec = 0;
+    QTimer *m_leftTick = nullptr;             // 剩余秒数跳动（1s，两个上限共用一个）
 
     // ── 班级监控（2026-10-07）──
     QJsonObject m_recordings;                 // recordings/<uid>/[文件] 分组缓存

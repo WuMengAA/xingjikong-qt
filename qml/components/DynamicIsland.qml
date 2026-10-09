@@ -21,13 +21,40 @@ Item {
     property var theme: ({ })      // 主题令牌，由主界面给（和 Card / CommandPalette 同名）
     property var states: ([])      // [{ k, t, d, p }]：k 状态键 / t 标题 / d 详情 / p 进度 0..1
 
+    // ── 瞬态提示（2026-10-09 · 一切通知统一走灵动岛）──────────────────────
+    // notifyPref（云端状态通知）/ toast / hint 都经 showNote 在此显示，
+    // 几秒后自动收起；与 states（常驻状态聚合）正交：note 激活时胶囊显示 note，
+    // states 照常重算、互不干扰。被控端侧也是灵动岛统一接管各类瞬态提示。
+    property string noteTitle: ""
+    property string noteDesc: ""
+    property string noteIcon: ""
+    property bool noteActive: false
+    Timer {
+        id: noteTimer
+        onTriggered: isl.noteActive = false
+    }
+
     readonly property int n: isl.states ? isl.states.length : 0
-    readonly property var st: (isl.n > 0 ? isl.states[0] : { k: "", t: "", d: "", p: -1 })
+    // note 优先：激活时把 note 当主状态（图标用 lucide 名，不走状态键映射）
+    readonly property var st: (isl.noteActive
+        ? { k: isl.noteIcon || "bell", t: isl.noteTitle, d: isl.noteDesc, p: -1 }
+        : (isl.n > 0 ? isl.states[0] : { k: "", t: "", d: "", p: -1 }))
     // 收起态角标：主状态之外还有几项没做完（"锁屏 42/60 +2 🔔" 里的那个 +2）
     readonly property int rest: Math.max(0, isl.n - 1)
-    readonly property string mode: (isl.n === 0 ? "hidden" : (isl.expanded ? "expanded" : "collapsed"))
+    readonly property string mode: ((isl.n === 0 && !isl.noteActive) ? "hidden"
+        : (isl.expanded && !isl.noteActive ? "expanded" : "collapsed"))
 
     property bool expanded: false
+
+    // ── 视觉对齐被控端灵动岛（2026-10-09）──────────────────────────
+    // 被控端 IslandOverlay 胶囊配色（半透明浮层，深浅两套）与果冻动画，
+    // 这里把管理端胶囊的色相 / 圆角 / 缓动对齐，不改形态逻辑（无通知仍消失）。
+    readonly property string islandFg3: isl.theme.dark ? "#C8C8C8" : "#6E6E6E"
+    readonly property string islandFg4: isl.theme.dark ? "#909090" : "#8A8A8A"
+
+    // 几何弹性：对齐被控端 QPropertyAnimation(geometry, OutBack, 380ms)
+    Behavior on width  { NumberAnimation { duration: 380; easing.type: Easing.OutBack } }
+    Behavior on height { NumberAnimation { duration: 380; easing.type: Easing.OutBack } }
 
     // 尺寸：hidden 彻底消失（不是"看不见"，是真的不占地方）
     width:  isl.mode === "hidden" ? 0 : (isl.mode === "expanded" ? 400 : isl.capW)
@@ -35,10 +62,10 @@ Item {
     readonly property int capW: 268
     readonly property int bodyH: Math.min(300, 44 + Math.max(1, isl.n) * 34 + 30)
 
-    // 状态键 → 符号（黑白稿里图标也只能是描边符号，不能上彩色）
+    // 状态键 → 图标名（lucide/morphicons 同款 24×24 stroke SVG，见 components/SvgIcon.qml）
     readonly property var glyph: ({
-        offline: "⊘", command: "◐", file: "▦", alert: "▲", monitor: "◉",
-        voice: "♪", broadcast: "▣"
+        offline: "ban", command: "circle-dashed", file: "layout-grid", alert: "triangle", monitor: "circle",
+        voice: "music", broadcast: "square", bell: "bell"
     })
 
     // ── 胶囊本体 ───────────────────────────────────────────────────
@@ -47,16 +74,18 @@ Item {
         anchors.centerIn: parent
         width: isl.width
         height: isl.height
-        radius: (isl.mode === "expanded" ? 14 : 18)
+        radius: 24
         // 悬浮层：深色用边框、浅色才需要阴影（5.4「浅色模式用阴影，深色模式用边框」）
-        color: isl.theme.cream || "#141414"
-        border.color: isl.theme.card || "#242424"
+        // 对齐被控端胶囊底/边框（深浅两套，半透明浮层质感）
+        color: isl.theme.dark ? "#141414E6" : "#FAFAFAEB"
+        border.color: isl.theme.dark ? "#3A3A3A" : "#C8C8C8"
         border.width: 1
         opacity: isl.mode === "hidden" ? 0 : 1
         scale: isl.mode === "hidden" ? 0.86 : 1
 
-        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-        Behavior on scale   { NumberAnimation { duration: 300; easing.type: Easing.OutBack; easing.overshoot: 1.05 } }
+        // 对齐被控端 fade(220ms, 默认线性) / 几何 scale(OutBack, 380ms)
+        Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.Linear } }
+        Behavior on scale   { NumberAnimation { duration: 380; easing.type: Easing.OutBack } }
 
         // 收起态：一个符号 + 一句话；点一下展开
         Item {
@@ -76,17 +105,18 @@ Item {
                 anchors.leftMargin: 14
                 anchors.rightMargin: 14
                 spacing: 10
-                Text {
+                SvgIcon {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: isl.glyph[isl.st.k] || "•"
-                    color: isl.theme.fg3 || "#8A8A8A"
-                    font.pixelSize: 14
+                    name: isl.noteActive ? (isl.noteIcon || "bell") : (isl.glyph[isl.st.k] || "circle")
+                    tint: isl.theme.fg
+                    width: 16
+                    height: 16
                 }
                 Text {
                     id: capText
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width - 78
-                    text: (isl.n > 1 ? (isl.n + " 项：") : "") + isl.st.t
+                    text: (isl.noteActive ? "" : (isl.n > 1 ? (isl.n + " 项：") : "")) + isl.st.t
                     color: isl.theme.fg || "#FAFAFA"
                     font.pixelSize: 13
                     elide: Text.ElideRight
@@ -99,7 +129,7 @@ Item {
                     // 横向位置交给 Row 自己排；"展开"本来就是这一行的最后一个，删掉也一样在末尾。
                     anchors.verticalCenter: parent.verticalCenter
                     text: isl.n > 0 ? "展开" : ""
-                    color: isl.theme.fg4 || "#707070"
+                    color: isl.islandFg4
                     font.pixelSize: 12
                 }
             }
@@ -120,7 +150,7 @@ Item {
                     width: parent.width * (isl.st.p >= 0 ? isl.st.p : 0)
                     height: parent.height
                     radius: 1
-                    color: isl.theme.fg3 || "#8A8A8A"
+                    color: isl.islandFg3
                     Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
                 }
             }
@@ -176,7 +206,7 @@ Item {
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: isl.glyph[modelData.k] || "•"
-                                color: (index === 0) ? (isl.theme.win || "#0A0A0A") : (isl.theme.fg4 || "#707070")
+                                color: (index === 0) ? (isl.theme.win || "#0A0A0A") : isl.islandFg4
                                 font.pixelSize: 14
                             }
                             Column {
@@ -190,7 +220,7 @@ Item {
                                 Text {
                                     visible: (modelData.d || "") !== ""
                                     text: modelData.d || ""
-                                    color: (index === 0) ? (isl.theme.win || "#0A0A0A") : (isl.theme.fg3 || "#8A8A8A")
+                                    color: (index === 0) ? (isl.theme.win || "#0A0A0A") : isl.islandFg3
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
                                     width: parent.width - 34
@@ -201,6 +231,16 @@ Item {
                 }
             }
         }
+    }
+
+    // 瞬态提示：一切通知（云端状态 / toast / hint）统一走这 —— 顶部胶囊、自动收起。
+    function showNote(title, desc, icon, ms) {
+        isl.noteTitle = title || ""
+        isl.noteDesc = desc || ""
+        isl.noteIcon = icon || "bell"
+        isl.noteActive = true
+        noteTimer.interval = (ms > 0 ? ms : 3000)
+        noteTimer.restart()
     }
 
     // 点按钮/别处操作时，主动收回去（别让它赖在屏幕上挡画面）

@@ -29,3 +29,10 @@ _archive/*.prev
 *.bak
 *.prev
 *.out
+
+# 一次性调试/探针脚本（非构建基础设施），不进版本库
+scripts/_*.py
+scripts/_*.mjs
+scripts/_*.ps1
+!scripts/_build_viewer.py
+!scripts/_linknew.py

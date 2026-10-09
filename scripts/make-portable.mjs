@@ -73,6 +73,36 @@ const REQUIRED = [
  */
 const EXTRA_FILES = ["viewer.env", "start-viewer.cmd"];
 
+/**
+ * 桌面快捷方式（2026-10-07 补）
+ *
+ * 管理端是**绿色包**（zip，没有 NSIS 安装器），所以快捷方式没有"安装器建/卸载器删"
+ * 这层归属。以前的 lnk 是手工建的 —— 谁建、建在哪个账户下、卸载了要不要删，
+ * 全都说不清，换台机器又得来一遍。现在两条路都从出包脚本出：
+ *   ① 包根放一枚 `make-desktop-shortcut.cmd`（文件名保持 ASCII，跟 start-viewer.cmd
+ *      一个道理：中文名在 GBK/UTF-8 之间来回解码必然出岔子，内容里的中文不受影响）；
+ *   ② `--desktop` 开关直接在构建机上建好桌面 + 开始菜单项，构建者自己马上能用。
+ *
+ * ⚠️ WScript.Shell 是建 .lnk 最省事的路子（没有它得手工拼 lnk 二进制格式），
+ *    它在本沙箱里被安全策略拦 —— 所以自动建失败要**降级+告警**，绝不能让出包中断。
+ */
+const SHORTCUT_CMD = [
+	"@echo off",
+	"chcp 65001 >nul",
+	"rem 星集控管理端 · 创建桌面快捷方式（由 make-portable.mjs 生成，别手工改）",
+	"powershell -NoProfile -ExecutionPolicy Bypass -NoProfile -Command ^",
+	'  "$s=New-Object -ComObject WScript.Shell; $d=$s.SpecialFolders(0);" ^',
+	'  "$k=$s.CreateShortcut(\\"$d\\\\星集控管理端.lnk\\");" ^',
+	'  "$k.TargetPath=\\"%~dp0viewer-qt.exe\\"; $k.WorkingDirectory=\\"%~dp0\\";" ^',
+	'  "$k.Description=\\"星集控管理端（星璃集控）\\"; $k.IconLocation=\\"%~dp0viewer-qt.exe,0\\";" ^',
+	'  "$k.Save(); Write-Host (\\"已创建桌面快捷方式：\\" + $d + \\"\\\\星集控管理端.lnk\\")"',
+	"if %errorlevel% neq 0 (",
+	'  echo 建快捷方式失败：本机禁用了 WScript.Shell / 脚本执行策略。',
+	'  echo 可以手工从资源管理器把 viewer-qt.exe 拖到桌面代替。',
+	")",
+	"pause",
+].join("\r\n") + "\r\n";
+
 /** 要一并搬进包里的目录（windeployqt / QtWebEngine 产出的运行时目录）。 */
 const INCLUDE_DIRS = [
 	// 2026-10-06：我们自己的 QML 源码在 qml/Stelarith/（qml/ 根是 windeployqt 的 Qt 插件），
@@ -281,7 +311,13 @@ function make(fromDir, outDir) {
 		}
 	}
 
-	// 5) 压缩：**从包目录里面**压内容，让 zip 根层就是应用目录（不嵌套一层）
+	// 5) 绿色包没有安装器 ⇒ 快捷方式没有"安装器建 / 卸载器删"这层归属，
+	//    就在包根放一枚建快捷方式的启动器（使用者解压双击即得桌面图标）。
+	//    ⚠️ 这不是 lnk 本身：包是要拷给别人机器跑的，里面不能写死构建机的绝对路径。
+	fs.writeFileSync(path.join(pkg, "make-desktop-shortcut.cmd"), SHORTCUT_CMD);
+	log("  附加启动器：make-desktop-shortcut.cmd（双击即在桌面建「星集控管理端」图标）");
+
+	// 6) 压缩：**从包目录里面**压内容，让 zip 根层就是应用目录（不嵌套一层）
 	fs.mkdirSync(outDir, { recursive: true });
 	const zip = path.join(outDir, `stelarith-viewer-portable-${version}.zip`);
 	fs.rmSync(zip, { force: true });

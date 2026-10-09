@@ -12,20 +12,21 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
-import "components"        // 通用组件：Card / Btn / EmptyState / ToggleRow（2026-10-06 打磨抽出）
+import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
 import "NotifyParams.js" as NotifyParams
 
 ApplicationWindow {
     id: root
     width: 1180
-    height: 760
+    // 2026-10-08：760 → 700，最小 680 → 600。原因不是审美，是**装不下**：
+    // 1280x720 这类教室屏/投影很常见，再把标题栏(≈31) 和任务栏(≈40) 算进去，
+    // 能用的高度只有 649 —— 原来"默认 760 / 最小 680"在这类机器上必然被切掉底部，
+    // 表现就是用户说的"界面不在屏幕内"。
+    // 现在右栏动作区已经改成可滚动（Flickable，见控制页那段的说明），
+    // 所以窗口可以压到 600 而不丢内容。main.cpp 那边还会把窗口夹进屏幕可用区兜底。
+    height: 700
     minimumWidth: 940
-    // 2026-10-06：620 → 680。右栏动作区是**固定高度**的一列（ColumnLayout，子项都是固定高），
-    // 空间不够时不会被压缩，只会溢出到窗口外压住底部标签栏。
-    // 加了「通知」整行（+36px）后，右栏内容约 543px，而 620 高时可用只有约 520px —— 会溢出。
-    // ⚠️ 右栏高度预算已经很紧：**下次再往右栏加按钮，应该先把它改成可滚动（Flickable）
-    //    而不是继续抬最小高度**。见 docs/管理端功能一览.md 的动作栏说明。
-    minimumHeight: 680
+    minimumHeight: 600
     visible: true
     title: "星集控"
     color: th.win
@@ -57,36 +58,30 @@ ApplicationWindow {
     // 页面里一律从 th 取色，不写死 —— 否则换主题必花。
     property bool darkMode: true
 
-    readonly property var darkTh: ({
-        // ⚠️ 字号/对比度按 WCAG 定的：正文类文字对底色的对比度必须 ≥ 4.5:1（WCAG AA），
-        //    弱化文字（fg4）也不低于 4:1 —— 它是"次要"，不是"看不清"。
-        //    2026-10-07 实测旧值：fg3 #5A5A5A 只有 2.87:1、fg4 #3A3A3A 只有 1.74:1
-        //    （一个低于 AA、一个连大字号 3:1 都不到）⇒ 小字在暗底上基本糊掉。
-        win: "#0A0A0A", body: "#080808", panel: "#101010",
-        cream: "#141414", hover: "#1E1E1E", seg: "#121212",
-        hover2: "#111111", line: "#202020", canvas: "#1A1A1A",
-        stroke: "#333333", stroke2: "#2A2A2A", todo: "#191919",
-        card: "#242424", sepline: "#1E1E1E",
-        fg: "#FAFAFA", op: "#C8C8C8", fg3: "#8A8A8A",
-        fg4: "#707070", inv: "#F0F0F0", ph: "#6E6E6E",
-        rWin: 16, rCard: 12, rCtrl: 8
-    })
-
-    readonly property var lightTh: ({
-        win: "#F6F6F6", body: "#FFFFFF", panel: "#FFFFFF",
-        cream: "#EDEDED", hover: "#E6E6E6", seg: "#E9E9E9",
-        hover2: "#EFEFEF", line: "#D4D4D4", canvas: "#DCDCDC",
-        stroke: "#B4B4B4", stroke2: "#ACACAC", todo: "#CCCCCC",
-        card: "#CCCCCC", sepline: "#D0D0D0",
-        fg: "#161616", op: "#3C3C3C", fg3: "#6E6E6E",
-        fg4: "#808080", inv: "#1A1A1A", ph: "#8A8A8A",
-        rWin: 16, rCard: 12, rCtrl: 8
-    })
+    // 主题 Token 单一真源：qml/components/Theme.qml（深 / 浅两套由 dark 切换）。
+    // 2026-10-09 把原来内联的 darkTh / lightTh 两个 JS 对象抽到 Theme 组件，
+    // 行为与旧版逐字一致，token 改一处即全局生效。
+    readonly property var darkTh:  Theme { dark: true }
+    readonly property var lightTh: Theme { dark: false }
 
     readonly property var th: darkMode ? darkTh : lightTh
 
     // 界面自身的状态（只跟显示有关的东西）
-    property int page: 1                 // 0 概览 / 1 控制 / 2 集控 / 3 设置
+    property int page: 1                 // 0 概览 / 1 集控（带画面主页面）/ 2 批量管控 / 3 设置
+
+    // 2026-10-08 修复「选中设备却不在带画面页 → 无限拉流」：
+    // 切到其它页就退订当前设备画面 / 多班缩略图墙，云端按订阅发帧，退订即停流。
+    // 回到对应页再恢复订阅。两个订阅互不干扰（退订缩略图会跳过当前选中那台）。
+    onPageChanged: {
+        backend.setScreenActive(root.page === 1)   // 单台大画面只在集控（带画面主页）拉
+        if (root.page === 2) multiThumb.watch()    // 多班墙只在批量管控页拉
+        else backend.subscribeThumbnails([])
+    }
+    function syncPageLive() {
+        backend.setScreenActive(root.page === 1)
+        if (root.page === 2) multiThumb.watch()
+        else backend.subscribeThumbnails([])
+    }
     property int volumeValue: 30
     // 远端确认过的音量（set_volume 回执里的 data.volume）。-1 = 还没拿到，就别往界面上写。
     // 刻意不用滑块那个值：root.volumeValue 只是本机拖动出来的数字，被控端根本没确认过，
@@ -97,17 +92,57 @@ ApplicationWindow {
     // 通知确认汇总（2026-10-07）：当前会话内「需确认」通知的学生确认统计。
     // 由 onResultReceived 收 notify+confirmed 回执累加；{count, replies[]}。
     property var confirmStats: ({ count: 0, replies: [] })
+    // 更新日志（需求 #7：把官网已有的「版本历史」能力搬进管理端）。
+    // 数据面是静态文案，与官网 content/changelog.json 同源；这里内嵌一份只读镜像，离线也能看。
+    // 官网那份是发布归档的唯一真源，这里绝不覆盖官网的更新历史（只追加以保持完整）。
+    readonly property var changelogModel: [
+        {
+            version: "2026.10.08", date: "2026-10-08",
+            title: "星集控：分班制与离线设备可见",
+            highlight: "管理端现在能按班级筛选设备、看到离线教室机，概览页也多了云端存储概况。",
+            items: [
+                { kind: "feat", text: "设备列表支持按班级筛选（分班制）：按班级维度管理设备与分组" },
+                { kind: "feat", text: "离线设备不再从列表消失：云端持久「已知设备表」，在线状态由连接派生" },
+                { kind: "feat", text: "概览页新增「云端存储概况」卡：已知/在线/离线设备数、班级数、待执行指令、事件落盘量" },
+                { kind: "feat", text: "管理端新增「更新日志」与「帮助」（与官网一致）" },
+                { kind: "change", text: "底部导航「控制」更名「集控」，原集控批量页并入主页后改叫「批量管控」" }
+            ]
+        },
+        {
+            version: "2026.10.06", date: "2026-10-06",
+            title: "星集控 0.6.2：管理端「集控」页上线",
+            highlight: "管理端把网页控制台的核心功能搬进桌面端：通知下发、定时任务、广播一条龙，课表编辑器也补全了撤销与导入导出。",
+            items: [
+                { kind: "feat", text: "管理端新增「集控」页：通知下发（普通/重要/紧急）、定时任务、广播" },
+                { kind: "feat", text: "课表编辑器补全：撤销/重做、CSV 导入导出、学期起点可配置" },
+                { kind: "fix", text: "管理端托盘常驻：关窗只隐藏到托盘，不再整程序退出" }
+            ]
+        },
+        {
+            version: "2026.10.06", date: "2026-10-06",
+            title: "星集控 0.6.0：被控端能自己升级，官网有了下载中心",
+            highlight: "教室机装上后就不必再一台台手动换包；下载页的版本号和校验值自动跟着云端走，不会再写错。",
+            items: [
+                { kind: "feat", text: "官网新增「下载中心」：版本号/体积/sha256 直接读云端发布清单" },
+                { kind: "feat", text: "被控端支持自更新（OTA）：托盘发现新版本点一下升级，先校验 sha256" },
+                { kind: "fix", text: "被控端只允许开一个：重复启动直接提示已在运行并退出" }
+            ]
+        }
+    ]
     // 设备分组视图（4.4）：全部 / 在线 / 离线 三段筛选（Repeater 用 filteredDevices）
     property string deviceFilter: "all"   // all / online / offline
     readonly property var filteredDevices: (function () {
         var arr = []
         var devs = backend.devices || []
+        var cls = backend.currentClass || ""
         for (var i = 0; i < devs.length; ++i) {
             var d = devs[i]
             if (!d) continue
             var on = (d.online !== false)
             if (root.deviceFilter === "online" && !on) continue
             if (root.deviceFilter === "offline" && on) continue
+            // 2026-10-08 分班制：选了某班就只显示该班设备
+            if (cls && d.classCode !== cls) continue
             arr.push(d)
         }
         return arr
@@ -123,9 +158,6 @@ ApplicationWindow {
     property var batch: ({ label: "", total: 0, done: 0, ok: 0, fail: 0, active: false })
     // 没处理的告警（4.3 场景四）：回执失败、文件没推成都算，攒起来给灵动岛。
     property var alerts: []
-    // 全局提示（5.6 Toast）。见 toast() 上的注释：原来只有集控页内一份 hint。
-    property string toastText: ""
-    property int toastTick: 0
     // 多选的设备 uid（4.4）。和 currentUid 是两套东西：那个管"看哪台"，
     // 这个管"给哪些台发" —— 混在一处会互相踢（台数变了不知道该信哪个）。
     property var picked: []
@@ -134,6 +166,12 @@ ApplicationWindow {
     // 云端回来的东西：一切以它为准
     readonly property var devices: backend.devices
     readonly property string currentUid: backend.currentUid
+    // 屏幕上这张画面**确实是当前选中那台**的吗？
+    // ⚠️ 2026-10-08 修「切了设备画面还是第一台」：光看 frameCount 不够 —— 上一台的帧
+    //    还在路上（云端退订不是瞬时的），落进同一张 frame 就会继续冒充新设备。
+    //    后端现在给每帧记了 frameUid（这帧属于谁），这里必须两边对齐才上屏。
+    readonly property bool frameReady: backend.frameCount > 0
+                                        && backend.frameUid === backend.currentUid
     // 「正在接通」：选了某台机器、画面还没出第一帧，且 RTC 链路确实在建
     // （rtcState 由 backend 维护：idle → waiting → track）。
     // 只写"还没出帧"会把"被控端根本没推流"也误报成在忙，让用户空等。
@@ -199,7 +237,15 @@ ApplicationWindow {
 
             // 批量进度 / 告警 / 灵动岛：都挂在最后，别嵌进上面那些分支里 ——
             // 一条回执可能既是"批量的一台"又是"软件列表"，分着走才不会互相踩。
-            if (batch.active) root.batchStep(uid, result === "done", error || "")
+            if (batch.active) {
+                // 「确认 / 快捷回复」是**同一条通知的第二次回执**，不是"又一台设备完成了"。
+                // 回馈必须按设备算（4.5）：只有每台设备的第一次回执参与进度，
+                // 确认只落进这台设备的明细行 —— 否则 30 台通知里只要 1 台确认，
+                // 进度就 1/30 直接顶满，收口文案报出假的"30 台都成了"，
+                // 老师看到的"只有一次反馈"就是这么来的。
+                if (action === "notify" && result === "confirmed") root.batchNote(uid)
+                else root.batchStep(uid, result === "done", error || "")
+            }
             if (result !== "done") root.pushAlert(uid, action, error || detail || "")
             root.refreshIsland()
         }
@@ -256,7 +302,7 @@ ApplicationWindow {
                         }
                         Text {
                             text: backend.connected
-                                  ? (devices.length + " 台在线")
+                                  ? (backend.onlineCount + " 台在线")
                                   : (backend.accountBusy ? "正在登录…"
                                      : (backend.loggedIn ? "没连上云端" : "没登录"))
                             color: th.fg3
@@ -313,7 +359,7 @@ ApplicationWindow {
                         spacing: 32
                         Repeater {
                             model: [
-                                { k: "在线",   v: root.devices.length },
+                                { k: "在线",   v: backend.onlineCount },
                                 { k: "已收帧", v: backend.frameCount }
                             ]
                             delegate: Row {
@@ -421,6 +467,58 @@ ApplicationWindow {
                         }
                     }
 
+                    // ── 云端存储概况（需求 #2：概览页要展示云端存储信息）──
+                    // 数据面来自 backend.storage（/api/storage 返回），界面只消费，不自己再数一遍。
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 124
+                        radius: th.rCard
+                        color: th.panel
+                        border.color: th.card
+                        border.width: 1
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 14
+                            spacing: 10
+                            Item {
+                                width: parent.width; height: 16
+                                Text { text: "云端存储概况"; color: th.fg; font.pixelSize: 13; font.weight: Font.Medium }
+                                Text {
+                                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                    text: (backend.storage.at ? ("更新于 " + backend.storage.at) : "")
+                                    color: th.fg3; font.pixelSize: 12
+                                }
+                            }
+                            Flow {
+                                width: parent.width
+                                spacing: 18
+                                Repeater {
+                                    model: [
+                                        { k: "已知设备",   v: backend.storage.knownDevices },
+                                        { k: "在线",       v: backend.storage.onlineDevices },
+                                        { k: "离线",       v: backend.storage.offlineDevices },
+                                        { k: "班级",       v: backend.storage.classes },
+                                        { k: "待执行指令", v: backend.storage.pendingInstructions },
+                                        { k: "事件落盘",   v: backend.storage.eventsFiles }
+                                    ]
+                                    delegate: Column {
+                                        spacing: 2
+                                        Text { text: modelData.k; color: th.fg3; font.pixelSize: 12 }
+                                        Text {
+                                            text: (modelData.v === undefined || modelData.v === null) ? "—" : String(modelData.v)
+                                            color: th.fg; font.pixelSize: 16; font.weight: Font.Medium
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                visible: (backend.storage.at === undefined)
+                                text: "尚未从云端取到存储概况（连上后会自动拉取）"
+                                color: th.fg4; font.pixelSize: 12
+                            }
+                        }
+                    }
+
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -452,12 +550,16 @@ ApplicationWindow {
                                     Text {
                                         anchors.right: parent.right
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: root.devices.length + " 台"
+                                        text: backend.onlineCount + " 台在线"
                                         color: th.fg3; font.pixelSize: 12
                                     }
                                 }
+                                // 2026-10-09：这张卡叫「在线设备」，只列 true 在线的；
+                                // 离线机器留到控制页（那里按班分组、离线画灰，便于看哪些教室掉了）。
+                                // refreshDevices 现在把离线也留在台账里，所以这里要自己滤一遍，
+                                // 否则离线机也会顶着亮点和「在线设备」的标题混进来。
                                 Repeater {
-                                    model: root.devices
+                                    model: root.devices.filter(function (d) { return d.online !== false })
                                     delegate: Rectangle {
                                         width: parent.width
                                         height: 38
@@ -475,7 +577,10 @@ ApplicationWindow {
                                             }
                                             Text {
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                text: modelData.uid
+                                                // 2026-10-09：优先显示设备名（云端 register 带上来），没有才回退 uid，
+                                                // 与控制页设备列表保持一致，不再只裸一个 uid。
+                                                text: (modelData.name !== undefined && modelData.name !== null && modelData.name !== "")
+                                                      ? modelData.name : modelData.uid
                                                 color: th.fg; font.pixelSize: 14
                                             }
                                             Text {
@@ -503,7 +608,7 @@ ApplicationWindow {
                                 Item {
                                     width: parent.width
                                     height: 96
-                                    visible: root.devices.length === 0
+                                    visible: (root.devices.filter(function (d) { return d.online !== false })).length === 0
                                     Column {
                                         anchors.centerIn: parent
                                         spacing: 6
@@ -553,11 +658,12 @@ ApplicationWindow {
                                             font.pixelSize: 12
                                             width: 42
                                         }
-                                        Text {
-                                            text: modelData.ok ? "✓" : "✕"
-                                            color: th.fg
-                                            font.pixelSize: 13
-                                            width: 12
+                                        SvgIcon {
+                                            name: modelData.ok ? "check" : "x"
+                                            tint: th.fg
+                                            width: 13
+                                            height: 13
+                                            anchors.verticalCenter: parent.verticalCenter
                                         }
                                         Text {
                                             width: parent.width - 76
@@ -662,6 +768,52 @@ ApplicationWindow {
                     }
                 }
 
+                // 分班制（需求 #4）：按班级维度筛选设备。班级来自云端 /api/classes（界面只消费
+                // backend.classes），当前选中写 backend.currentClass，filteredDevices 已按它过滤。
+                // 班级可能不止几个，用 Flickable 兜住横向滚动，不挤占下面的设备列表宽度。
+                Flickable {
+                    width: 168
+                    height: 26
+                    contentWidth: clsRow.width
+                    clip: true
+                    Row {
+                        id: clsRow
+                        spacing: 4
+                        leftPadding: 10
+                        Repeater {
+                            model: (function () {
+                                var arr = [{ code: "", name: "全部班级" }]
+                                var cs = backend.classes || []
+                                for (var i = 0; i < cs.length; ++i) {
+                                    arr.push({ code: cs[i].code, name: (cs[i].name || cs[i].code) })
+                                }
+                                return arr
+                            })()
+                            delegate: Item {
+                                height: 22
+                                width: clsLbl.width + 16
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: th.rCtrl
+                                    color: (backend.currentClass === modelData.code) ? th.inv : "transparent"
+                                    border.color: th.stroke; border.width: 1
+                                }
+                                Text {
+                                    id: clsLbl
+                                    anchors.centerIn: parent
+                                    text: modelData.name
+                                    color: (backend.currentClass === modelData.code) ? th.win : th.fg3
+                                    font.pixelSize: 11
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: backend.setCurrentClass(modelData.code)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Repeater {
                     model: root.filteredDevices
                     delegate: Rectangle {
@@ -688,7 +840,9 @@ ApplicationWindow {
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.uid
+                                // 2026-10-08：优先显示设备名（云端 register 带上来），没有才回退 uid
+                                text: (modelData.name !== undefined && modelData.name !== null && modelData.name !== "")
+                                      ? modelData.name : modelData.uid
                                 color: cur ? th.fg : (devOnline ? th.op : th.fg4)
                                 font.pixelSize: 14
                                 font.weight: cur ? Font.Medium : Font.Normal
@@ -910,7 +1064,7 @@ ApplicationWindow {
                         fillMode: Image.PreserveAspectFit
                         cache: false
                         property int tick: 0
-                        source: backend.frameCount > 0 ? ("image://frames/f?" + tick) : ""
+                        source: root.frameReady ? ("image://frames/f?" + tick) : ""
 
                         Connections {
                             target: backend
@@ -923,20 +1077,24 @@ ApplicationWindow {
                     // 用户看不出是"正在办"还是"没人理"。
                     Column {
                         anchors.centerIn: parent
-                        visible: backend.frameCount === 0
+                        visible: !root.frameReady
                         spacing: 6
 
                         BusyIndicator {
-                            visible: root.linkBusy
+                            visible: root.linkBusy || (root.currentUid !== "" && backend.frameCount > 0)
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 28
                             height: 28
-                            running: root.linkBusy
+                            running: root.linkBusy || (root.currentUid !== "" && backend.frameCount > 0)
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: root.currentUid === "" ? "还没选机器"
                                 : root.linkBusy ? "正在接通"
+                                // 切设备时旧画面已经作废、新机器的第一帧还没到 ——
+                                // 以前这里什么都不显示（frameCount 非 0 ⇒ 走不到空态），
+                                // 屏幕上是上一台的残影，看着像"切了没用"。
+                                : backend.frameCount > 0 ? "正在接入这台机器"
                                 : "等画面"
                             color: th.op
                             font.pixelSize: 13
@@ -945,6 +1103,7 @@ ApplicationWindow {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: root.currentUid === "" ? "在左边选一台"
                                 : root.linkBusy ? "连上就有画面"
+                                : backend.frameCount > 0 ? "第一帧马上就到"
                                 : "这台机器还没发来第一帧"
                             color: th.fg3
                             font.pixelSize: 12
@@ -957,7 +1116,7 @@ ApplicationWindow {
                         anchors.top: parent.top
                         anchors.right: parent.right
                         anchors.margins: 9
-                        visible: backend.screenStatic && backend.frameCount > 0
+                        visible: backend.screenStatic && root.frameReady
                         text: "画面未变化 · 已暂停刷新"
                         // 固定灰，刻意不跟主题走：这行浮在**远程画面**上，底色是对方的桌面（不可控），
                         // 用主题色反而可能在浅色画面上消失。
@@ -1055,12 +1214,27 @@ ApplicationWindow {
             // 而它旁边就坐着"截图"——误点代价和它完全不在一个量级。
             // 现在按「点了会怎样」分三组：**电源**（不可逆，独占整行、视觉更重）
             // / **看看**（只读，安全）/ **让它做事**（会改远端状态，成对的一左一右）。
-            ColumnLayout {
-                // 2 列按钮（120+10+120=250）＋输入框＋回执条，280 够、300 封顶。
-                // 实测这栏曾被内容顶到 657，画面被压成 299 宽的竖条 —— 就是"留给画面的区域太少"。
+            //
+            // ⚠️ 2026-10-08 改成**可滚动**（Flickable 包一层）。原因：这栏是固定高度的一列，
+            //    而 1280x720 这类教室屏/投影很常见 —— 窗口根本放不下 680 的最小高度
+            //    （再加标题栏和任务栏），窗口底部的标签栏被切在屏幕外，
+            //    表现就是"界面跑到屏幕外面去了"。改成可滚之后窗口能压到更矮，
+            //    内容放不下就滚，而不是顶出去。
+            //    内层 ColumnLayout 的 Layout.* 一律失效（它现在的父是 Flickable，不是定位器），
+            //    所以宽高都写在它自己身上 —— 别再往它身上加 Layout.xxx。
+            Flickable {
                 Layout.preferredWidth: 280
                 Layout.maximumWidth: 300
                 Layout.fillHeight: true
+                contentWidth: width
+                contentHeight: rightCol.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                ColumnLayout {
+                id: rightCol
+                width: parent.width
                 spacing: 10
 
                 // 按钮外观只有这一份：以前"文件"是描边加粗、"音量"没特殊处理、
@@ -1326,10 +1500,12 @@ ApplicationWindow {
                         delegate: Row {
                             spacing: 9
                             width: parent.width
-                            Text {
-                                text: modelData.ok ? "✓" : "✕"
-                                color: modelData.ok ? th.inv : th.op
-                                font.pixelSize: 12
+                            SvgIcon {
+                                name: modelData.ok ? "check" : "x"
+                                tint: modelData.ok ? th.inv : th.op
+                                width: 12
+                                height: 12
+                                anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
                                 width: parent.width - 30
@@ -1348,7 +1524,8 @@ ApplicationWindow {
                         font.pixelSize: 12
                     }
                 }   // 回执流水（logbox）
-            }       // 右栏动作（ColumnLayout）
+            }       // 右栏动作（ColumnLayout，装在 Flickable 里，见上面的说明）
+            }       // 右栏 Flickable
             }       // 三栏 RowLayout
             }       // 控制页 Item
 
@@ -1361,7 +1538,7 @@ ApplicationWindow {
                 // 操作结果提示（简单 toast）
                 property string hintText: ""
                 Timer { id: hintTimer; interval: 2500; onTriggered: consolePage.hintText = "" }
-                function hint(s) { consolePage.hintText = s; hintTimer.restart() }
+                function hint(s) { island.showNote(s, "", "bell", 3000) }
                 Text {
                     anchors.top: parent.top; anchors.topMargin: 6
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -1632,7 +1809,7 @@ ApplicationWindow {
                                                          ? root.picked.slice()
                                                          : (backend.currentUid ? [backend.currentUid] : [])
                                             if (list.length === 0) { root.toast("先在控制页选中一台设备"); return }
-                                            root.batchStart("通知", list.length)
+                                            root.batchStart("通知", list)
                                             const dead = []
                                             for (let i = 0; i < list.length; ++i) {
                                                 if (!root.isDevOnline(list[i])) { dead.push(list[i]); continue }
@@ -1754,8 +1931,11 @@ ApplicationWindow {
                         }
 
                         // ── 考试模式（2026-10-06，设计文档 3.7 第一版）──
-                        // 对当前选中设备下发 exam_mode（全屏拦截 + 白名单轮询 + 倒计时）。
-                        // 参数：minutes 时长（0 = 不自动结束）、whitelist 允许保留的程序名列表。
+                        // 2026-10-09 改**黑名单**：语义从"名单之外全杀"反转为"只杀名单里的"。
+                        //   起因是学校机房反复重启 —— 白名单制下没列全的系统进程会被杀，
+                        //   杀到 critical 的 svchost 就是 CRITICAL_PROCESS_DIED(0xEF) 蓝屏。
+                        //   黑名单的好处是"配错了最多没杀干净，绝不把机器弄崩"。
+                        // ⚠️ 别为了"更严格"把这里改回白名单，也别给默认黑名单塞进程名。
                         Rectangle {
                             width: parent.width
                             height: examCol.height + 32
@@ -1770,7 +1950,7 @@ ApplicationWindow {
                                 anchors.top: parent.top
                                 anchors.topMargin: 16
                                 spacing: 10
-                                Text { text: "考试模式（全屏拦截 + 白名单进程）"; color: th.fg3; font.pixelSize: 12 }
+                                Text { text: "考试模式（全屏拦截 + 黑名单进程）"; color: th.fg3; font.pixelSize: 12 }
                                 Row {
                                     spacing: 8
                                     InputField {
@@ -1782,9 +1962,9 @@ ApplicationWindow {
                                     }
                                     InputField {
                                         th: root.th
-                                        id: examWhitelist
+                                        id: examBlacklist
                                         width: 200
-                                        placeholderText: "白名单(逗号分隔，如 examclient,notepad)"
+                                        placeholderText: "黑名单(逗号分隔，如 chrome,steam)"
                                     }
                                 }
                                 Row {
@@ -1796,14 +1976,14 @@ ApplicationWindow {
                                         onClicked: {
                                             const uid = backend.currentUid
                                             if (!uid) { hint("先在控制页选中一台设备"); return }
-                                            var whitelist = []
-                                            examWhitelist.text.split(",").forEach(function(s) {
+                                            var blacklist = []
+                                            examBlacklist.text.split(",").forEach(function(s) {
                                                 var t = s.trim()
-                                                if (t) whitelist.push(t)
+                                                if (t) blacklist.push(t)
                                             })
                                             backend.sendAction("exam_mode", {
                                                 "minutes": parseInt(examMinutes.text, 10) || 0,
-                                                "whitelist": whitelist
+                                                "blacklist": blacklist
                                             })
                                             hint("考试模式已下发 → " + uid)
                                         }
@@ -1840,18 +2020,19 @@ ApplicationWindow {
                                 anchors.top: parent.top
                                 anchors.topMargin: 16
                                 spacing: 10
-                                Text { text: "语音对讲（老师讲话，全班听）"; color: th.fg3; font.pixelSize: 11 }
+                                Text { text: "语音对讲（老师讲话，全班听）"; color: th.fg3; font.pixelSize: 12 }
+                                Text { text: "默认关闭；到点自动停（按钮上显示剩余秒）"; color: th.fg4; font.pixelSize: 12 }
                                 Row {
                                     spacing: 8
                                     Button {
-                                        text: backend.speaking ? "停止讲话" : "开始讲话"
+                                        text: backend.speaking ? ("停止讲话（剩 " + backend.speakLeftSec + " 秒）") : "开始讲话"
                                         onClicked: {
                                             if (backend.speaking) {
                                                 backend.stopSpeaking()
                                                 hint("语音已停止（静音）")
                                             } else {
                                                 if (backend.startSpeaking()) {
-                                                    hint("🎤 正在讲话，全班可听；再次点击停止")
+                                                    hint("正在讲话，全班可听；再次点击停止")
                                                 } else {
                                                     hint("开麦失败：" + backend.speakError)
                                                 }
@@ -1879,18 +2060,19 @@ ApplicationWindow {
                                 anchors.top: parent.top
                                 anchors.topMargin: 16
                                 spacing: 10
-                                Text { text: "屏幕广播（老师屏幕 → 全部在线设备）"; color: th.fg3; font.pixelSize: 11 }
+                                Text { text: "屏幕广播（老师屏幕 → 全部在线设备）"; color: th.fg3; font.pixelSize: 12 }
+                                Text { text: "默认关闭；到点自动停（按钮上显示剩余秒）"; color: th.fg4; font.pixelSize: 12 }
                                 Row {
                                     spacing: 8
                                     Button {
-                                        text: backend.broadcasting ? "停止广播" : "开始广播"
+                                        text: backend.broadcasting ? ("停止广播（剩 " + backend.bcastLeftSec + " 秒）") : "开始广播"
                                         onClicked: {
                                             if (backend.broadcasting) {
                                                 backend.stopBroadcast()
                                                 hint("屏幕广播已停止")
                                             } else {
                                                 if (backend.startBroadcast()) {
-                                                    hint("📺 正在屏幕广播；再次点击停止")
+                                                    hint("正在屏幕广播；再次点击停止")
                                                 } else {
                                                     hint("广播启动失败")
                                                 }
@@ -1929,6 +2111,10 @@ ApplicationWindow {
                                             hint("正在拉取录制列表…")
                                         }
                                     }
+                                    Button {
+                                        text: "摄像头监控"
+                                        onClicked: camCenterDlg.open()
+                                    }
                                 }
                                 // 按设备分组列出录制
                                 Repeater {
@@ -1952,136 +2138,137 @@ ApplicationWindow {
                                 }
                             }
                         }
-                    }
-                }
-            }
+                        // ── 多班监控缩略图墙（2026-10-07，设计文档 3.2.2）──
+                        // 一屏看多个教室画面（3×3 网格），点格子切换到那台看大画面。
+                        // 订阅前 9 台在线设备；帧头 uid → backend 按 uid 分槽缓存缩略图。
+                        Rectangle {
+                            width: parent.width
+                            height: thumbCol.height + 32
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: thumbCol
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.topMargin: 16
+                                spacing: 10
 
-            // ── 多班监控缩略图墙（2026-10-07，设计文档 3.2.2）──
-            // 一屏看多个教室画面（3×3 网格），点格子切换到那台看大画面。
-            // 订阅前 9 台在线设备；帧头 uid → backend 按 uid 分槽缓存缩略图。
-            Rectangle {
-                width: parent.width
-                height: thumbCol.height + 32
-                radius: th.rCard
-                color: th.panel
-                border.color: th.card
-                border.width: 1
-                Column {
-                    id: thumbCol
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.topMargin: 16
-                    spacing: 10
-
-                    Row {
-                        width: parent.width
-                        spacing: 8
-                        Text { text: "多班监控（缩略图墙）"; color: th.fg3; font.pixelSize: 11 }
-                        Button {
-                            text: "刷新"
-                            onClicked: {
-                                multiThumb.watch()
-                                hint("正在订阅多班缩略图…")
-                            }
-                        }
-                    }
-
-                    // 网格：最多 9 台（在线优先），每格一个设备的缩略图
-                    GridLayout {
-                        id: multiThumb
-                        width: parent.width
-                        columns: 3
-                        columnSpacing: 6
-                        rowSpacing: 6
-
-                        property var watched: []   // 已订阅的设备 uid
-
-                        function watch() {
-                            // 收集在线的设备 uid（最多 9 台），保持设备表顺序
-                            var uids = []
-                            var devs = backend.devices || []
-                            for (var i = 0; i < devs.length && uids.length < 9; ++i) {
-                                if (devs[i] && devs[i].online && devs[i].uid
-                                        && uids.indexOf(devs[i].uid) < 0)
-                                    uids.push(devs[i].uid)
-                            }
-                            watched = uids
-                            backend.subscribeThumbnails(uids)
-                        }
-
-                        Component.onCompleted: watch()
-
-                        Repeater {
-                            model: multiThumb.watched
-                            delegate: Rectangle {
-                                id: cell
-                                width: (multiThumb.width - 12) / 3
-                                height: 96
-                                radius: th.rCtrl
-                                color: th.canvas
-                                border.color: th.stroke
-                                border.width: 1
-                                clip: true
-
-                                // 缩略图：帧更新时 tick++ 换缓存键
-                                Image {
-                                    anchors.fill: parent
-                                    fillMode: Image.PreserveAspectFit
-                                    cache: false
-                                    property int tick: 0
-                                    source: "image://frames/" + modelData + "?t" + tick
-                                    Connections {
-                                        target: backend
-                                        function onThumbnailChanged(uid) { if (uid === modelData || uid === "") cell.tick++ }
+                                Row {
+                                    width: parent.width
+                                    spacing: 8
+                                    Text { text: "多班监控（缩略图墙）"; color: th.fg3; font.pixelSize: 11 }
+                                    Button {
+                                        text: "刷新"
+                                        onClicked: {
+                                            multiThumb.watch()
+                                            hint("正在订阅多班缩略图…")
+                                        }
                                     }
                                 }
 
-                                // uid 标签（底部小条，别盖住画面太多）
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.bottom: parent.bottom
-                                    height: 18
-                                    color: Qt.rgba(0, 0, 0, 0.55)
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: modelData
-                                        color: "#FAFAFA"
-                                        font.pixelSize: 9
-                                        elide: Text.ElideRight
-                                        width: parent.width - 8
+                                // 网格：最多 9 台（在线优先），每格一个设备的缩略图
+                                GridLayout {
+                                    id: multiThumb
+                                    width: parent.width
+                                    columns: 3
+                                    columnSpacing: 6
+                                    rowSpacing: 6
+
+                                    property var watched: []   // 已订阅的设备 uid
+
+                                    function watch() {
+                                        if (root.page !== 2) return;   // 2026-10-08：只在批量管控页订阅；别的页不拉多班墙
+                                        // 收集在线的设备 uid（最多 9 台），保持设备表顺序
+                                        var uids = []
+                                        var devs = backend.devices || []
+                                        for (var i = 0; i < devs.length && uids.length < 9; ++i) {
+                                            if (devs[i] && devs[i].online && devs[i].uid
+                                                    && uids.indexOf(devs[i].uid) < 0)
+                                                uids.push(devs[i].uid)
+                                        }
+                                        watched = uids
+                                        backend.subscribeThumbnails(uids)
+                                    }
+
+                                    Component.onCompleted: watch()
+
+                                    Repeater {
+                                        model: multiThumb.watched
+                                        delegate: Rectangle {
+                                            id: cell
+                                            width: (multiThumb.width - 12) / 3
+                                            height: 96
+                                            radius: th.rCtrl
+                                            color: th.canvas
+                                            border.color: th.stroke
+                                            border.width: 1
+                                            clip: true
+
+                                            // 缩略图：帧更新时 tick++ 换缓存键
+                                            Image {
+                                                anchors.fill: parent
+                                                fillMode: Image.PreserveAspectFit
+                                                cache: false
+                                                property int tick: 0
+                                                source: "image://frames/" + modelData + "?t" + tick
+                                                Connections {
+                                                    target: backend
+                                                    function onThumbnailChanged(uid) { if (uid === modelData || uid === "") cell.tick++ }
+                                                }
+                                            }
+
+                                            // uid 标签（底部小条，别盖住画面太多）
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.bottom: parent.bottom
+                                                height: 18
+                                                color: Qt.rgba(0, 0, 0, 0.55)
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: modelData
+                                                    color: "#FAFAFA"
+                                                    font.pixelSize: 9
+                                                    elide: Text.ElideRight
+                                                    width: parent.width - 8
+                                                }
+                                            }
+
+                                            // 点击 → 切到这台看大画面（控制页）
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: {
+                                                    backend.setCurrentUid(modelData)
+                                                    root.page = 1   // 控制页
+                                                    hint("已切换查看 " + modelData)
+                                                }
+                                            }
+
+                                            // 空态：还没收到这台帧
+                                            Text {
+                                                anchors.centerIn: parent
+                                                visible: cell.tick === 0
+                                                text: "等待画面…"
+                                                color: th.fg4
+                                                font.pixelSize: 10
+                                            }
+                                        }
                                     }
                                 }
 
-                                // 点击 → 切到这台看大画面（控制页）
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        backend.setCurrentUid(modelData)
-                                        root.page = 1   // 控制页
-                                        hint("已切换查看 " + modelData)
-                                    }
-                                }
-
-                                // 空态：还没收到这台帧
                                 Text {
-                                    anchors.centerIn: parent
-                                    visible: cell.tick === 0
-                                    text: "等待画面…"
-                                    color: th.fg4
-                                    font.pixelSize: 10
+                                    text: "最多展示 9 台在线设备；点格子切换到该教室大画面。离线设备不占格。"
+                                    color: th.fg3; font.pixelSize: 10; wrapMode: Text.Wrap
                                 }
                             }
                         }
                     }
-
-                    Text {
-                        text: "最多展示 9 台在线设备；点格子切换到该教室大画面。离线设备不占格。"
-                        color: th.fg3; font.pixelSize: 10; wrapMode: Text.Wrap
-                    }
                 }
             }
+
 
             // ══ 3 设置 ══
             // 稿 03：pad + 两列卡片（账户 / 连接 / 提醒 / 外观）+ 通栏「关于」。
@@ -2091,382 +2278,495 @@ ApplicationWindow {
             Item {
                 Rectangle { anchors.fill: parent; color: th.body }
 
-                GridLayout {
+                // ⚠️ 2026-10-08：这里**必须可滚动**。设置页内容本来就超过一屏（六张卡），
+                //    1280×720 的教室机上更紧。以前 GridLayout 直接 anchors.fill —— 内容一超
+                //    就把最后几行挤成零高，「关于」整张卡（含「检查更新」）在屏幕上根本点不到
+                //    （有截图实证）。改成 Flickable + 内容高度：卡片按内容撑开，超出的滚动看。
+                //    注：下面各卡的 Layout.fillHeight 在这个「按内容定高」的网格里是惰性的，
+                //    同一行的等高等由 GridLayout 本身保证，留着只是万一以后又改回填充式。
+                Flickable {
+                    id: settingsFlick
                     anchors.fill: parent
                     anchors.margins: 18
-                    columns: 2
-                    columnSpacing: 14
-                    rowSpacing: 14
+                    contentWidth: width
+                    contentHeight: settingsGrid.implicitHeight
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        width: 6
+                    }
 
-                    // ── 账户（真：OAuth 一户通，2026-10-06 打磨）──
-                    // 以前这张卡是空的：一行"还没有账户 / 登录后显示"，既不能登录也不能注册，
-                    // 用户看到的是"这功能没做完"而不是"我该点哪儿"。现在按状态给出口：
-                    //   没登录 → 登录 / 注册 两颗按钮（没登录就是没凭据，连云端也连不上，要说清）
-                    //   登录中 → 一句进度
-                    //   已登录 → 账号 + 角色 + 换身份
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        radius: th.rCard
-                        color: th.panel
-                        border.color: th.card
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 14
-                            Text { text: "账户"; color: th.fg3; font.pixelSize: 12 }
+                    GridLayout {
+                        id: settingsGrid
+                        width: parent.width
+                        columns: 2
+                        columnSpacing: 14
+                        rowSpacing: 14
 
-                            // 没登录：两颗按钮 + 一句话说清"登录之后会发生什么"
+                        // ── 账户（真：OAuth 一户通，2026-10-06 打磨）──
+                        // 以前这张卡是空的：一行"还没有账户 / 登录后显示"，既不能登录也不能注册，
+                        // 用户看到的是"这功能没做完"而不是"我该点哪儿"。现在按状态给出口：
+                        //   没登录 → 登录 / 注册 两颗按钮（没登录就是没凭据，连云端也连不上，要说清）
+                        //   登录中 → 一句进度
+                        //   已登录 → 账号 + 角色 + 换身份
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: colSettings1.implicitHeight + 32
+                            Layout.fillHeight: true
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
                             Column {
-                                visible: !backend.loggedIn
-                                width: parent.width
-                                spacing: 10
-                                Text {
-                                    width: parent.width
-                                    wrapMode: Text.Wrap
-                                    text: backend.accountBusy
-                                          ? "正在等浏览器里授权…（授权完会自动接上教室机）"
-                                          : "还没登录。点登录会用星璃账号授权，" +
-                                            "之后这台机器自动拿到接入票，不用填密钥。"
-                                    color: th.op; font.pixelSize: 13
-                                }
-                                RowLayout {
+                                id: colSettings1
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 16
+                                spacing: 14
+                                Text { text: "账户"; color: th.fg3; font.pixelSize: 12 }
+
+                                // 没登录：两颗按钮 + 一句话说清"登录之后会发生什么"
+                                Column {
+                                    visible: !backend.loggedIn
                                     width: parent.width
                                     spacing: 10
-                                    Btn {
-                                        Layout.preferredWidth: 120
-                                        theme: th
-                                        text: "登录"
-                                        strong: true
-                                        enabled: !backend.accountBusy
-                                        onClicked: backend.loginWithSite()
-                                    }
-                                    Btn {
-                                        Layout.preferredWidth: 120
-                                        theme: th
-                                        text: "注册新账号"
-                                        enabled: !backend.accountBusy
-                                        onClicked: backend.openRegisterPage()
-                                    }
-                                }
-                            }
-
-                            // 已登录：账号 + 角色
-                            Column {
-                                visible: backend.loggedIn
-                                width: parent.width
-                                spacing: 10
-                                RowLayout {
-                                    width: parent.width
                                     Text {
-                                        text: backend.accountName === "" ? "星璃账号" : backend.accountName
-                                        color: th.fg; font.pixelSize: 15
-                                        font.weight: Font.Medium
+                                        width: parent.width
+                                        wrapMode: Text.Wrap
+                                        text: backend.accountBusy
+                                              ? "正在等浏览器里授权…（授权完会自动接上教室机）"
+                                              : "还没登录。点登录会用星璃账号授权，" +
+                                                "之后这台机器自动拿到接入票，不用填密钥。"
+                                        color: th.op; font.pixelSize: 13
                                     }
-                                    Rectangle {
-                                        height: 20
-                                        width: roleTxt.implicitWidth + 14
-                                        radius: 10
-                                        color: th.cream
-                                        border.color: th.stroke; border.width: 1
-                                        Text {
-                                            id: roleTxt
-                                            anchors.centerIn: parent
-                                            anchors.leftMargin: 7
-                                            anchors.rightMargin: 7
-                                            text: backend.role === "admin" ? "管理员" : "教师"
-                                            color: th.op; font.pixelSize: 12
+                                    RowLayout {
+                                        width: parent.width
+                                        spacing: 10
+                                        Btn {
+                                            Layout.preferredWidth: 120
+                                            theme: th
+                                            text: "登录"
+                                            strong: true
+                                            enabled: !backend.accountBusy
+                                            onClicked: backend.loginWithSite()
+                                        }
+                                        Btn {
+                                            Layout.preferredWidth: 120
+                                            theme: th
+                                            text: "注册新账号"
+                                            enabled: !backend.accountBusy
+                                            onClicked: backend.openRegisterPage()
                                         }
                                     }
                                 }
+
+                                // 已登录：账号 + 角色
+                                Column {
+                                    visible: backend.loggedIn
+                                    width: parent.width
+                                    spacing: 10
+                                    RowLayout {
+                                        width: parent.width
+                                        Text {
+                                            text: backend.accountName === "" ? "星璃账号" : backend.accountName
+                                            color: th.fg; font.pixelSize: 15
+                                            font.weight: Font.Medium
+                                        }
+                                        Rectangle {
+                                            height: 20
+                                            width: roleTxt.implicitWidth + 14
+                                            radius: 10
+                                            color: th.cream
+                                            border.color: th.stroke; border.width: 1
+                                            Text {
+                                                id: roleTxt
+                                                anchors.centerIn: parent
+                                                anchors.leftMargin: 7
+                                                anchors.rightMargin: 7
+                                                text: backend.role === "admin" ? "管理员" : "教师"
+                                                color: th.op; font.pixelSize: 12
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        wrapMode: Text.Wrap
+                                        text: backend.role === "admin"
+                                              ? "管理员：能看画面，也能操作教室机（电源 / 远控 / 终端 / 广播）。"
+                                                + "右边看得到但点不动的按钮，就是这个身份之外的事。"
+                                              : "教师：能看画面、发通知、推文件；电源、远控、终端、广播这类动作要管理员。"
+                                        color: th.fg3; font.pixelSize: 12
+                                    }
+                                    RowLayout {
+                                        width: parent.width
+                                        spacing: 10
+                                        Text { text: "这一台的身份"; color: th.fg3; font.pixelSize: 12 }
+                                        Item { Layout.fillWidth: true }
+                                        Btn {
+                                            Layout.preferredWidth: 96
+                                            Layout.preferredHeight: 26
+                                            theme: th
+                                            text: "换成管理员"
+                                            strong: backend.role !== "admin"
+                                            enabled: backend.role !== "admin"
+                                            tip: "切到管理员后，操作类按钮（电源/远控/终端/广播）才能点"
+                                            onClicked: backend.setRole("admin")
+                                        }
+                                        Btn {
+                                            Layout.preferredWidth: 96
+                                            Layout.preferredHeight: 26
+                                            theme: th
+                                            text: "换成教师"
+                                            strong: backend.role === "admin"
+                                            enabled: backend.role === "admin"
+                                            tip: "切成教师后，操作类按钮会置灰，避免误点教室机"
+                                            onClicked: backend.setRole("teacher")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 连接（真数据：运行时读，不写硬可能存在编造的值）──
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: colSettings2.implicitHeight + 32
+                            Layout.fillHeight: true
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: colSettings2
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 16
+                                spacing: 14
+                                Text { text: "连接"; color: th.fg3; font.pixelSize: 12 }
+                                // 稿 .kv：键 70px 辅助色，值 12px 操作色
+                                Column {
+                                    width: parent.width
+                                    spacing: 6
+                                    Row {
+                                        Text { text: "云端"; color: th.fg3; font.pixelSize: 13; width: 70 }
+                                        Text { text: backend.cloudUrl; color: th.op; font.pixelSize: 13 }
+                                    }
+                                    Row {
+                                        Text { text: "状态"; color: th.fg3; font.pixelSize: 13; width: 70 }
+                                        Text {
+                                            // 术语换日常词：不说"已连接/未连接"以外的协议词（规则 2）
+                                            text: backend.connected ? "连接正常" : "连不上云端"
+                                            color: th.op; font.pixelSize: 13
+                                        }
+                                    }
+                                    // 网站账号（2026-10-06，OAuth 一户通）：账号过期/没登录时要能看见原因，
+                                    // 并且能当场点一下重新登录 —— 不能让用户去翻日志才知道"票过期了"。
+                                    Row {
+                                        Text { text: "账号"; color: th.fg3; font.pixelSize: 13; width: 70 }
+                                        Text {
+                                            id: acctText
+                                            text: backend.accountText
+                                            color: backend.accountBusy ? th.fg3 : th.op
+                                            font.pixelSize: 13
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                        }
+                                    }
+                                    // 只在"没登录 / 失败了"这个可点的时候才出现，已登录时界面不该多一个按钮
+                                    MouseArea {
+                                        visible: !backend.accountBusy && backend.accountText.indexOf("未登录") === 0
+                                        height: visible ? 26 : 0
+                                        width: parent.width
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.loginWithSite()
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "点这里用网站账号登录"; color: th.op; font.pixelSize: 13
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 提醒（2026-10-06：以前是画着玩的假开关，现在是真的）──
+                        // 两个开关都在后端接了真事件：操作完成（机器真做了才提示）、
+                        // 与云端断开。状态落在 QSettings，重开程序还在。
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: colSettings3.implicitHeight + 32
+                            Layout.fillHeight: true
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: colSettings3
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 16
+                                spacing: 14
+                                Text { text: "提醒"; color: th.fg3; font.pixelSize: 12 }
+                                Column {
+                                    width: parent.width
+                                    spacing: 4
+                                    ToggleRow {
+                                        width: parent.width
+                                        theme: th
+                                        text: "操作完成时提示"
+                                        note: "机器上真的做完了才说一句（云端收下不算）"
+                                        checked: backend.notifyOnDone
+                                        onToggled: function (on) { backend.notifyOnDone = on }
+                                    }
+                                    ToggleRow {
+                                        width: parent.width
+                                        theme: th
+                                        text: "设备离线时提醒"
+                                        note: "与云端断开时弹一条（后台也能看见）"
+                                        checked: backend.notifyOnOffline
+                                        onToggled: function (on) { backend.notifyOnOffline = on }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 外观（真：深浅切换在这版已经可用）──
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: colSettings4.implicitHeight + 32
+                            Layout.fillHeight: true
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: colSettings4
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 16
+                                spacing: 14
+                                Text { text: "外观"; color: th.fg3; font.pixelSize: 12 }
+                                // 稿 .pick：等宽两块，选中的那块边框走反白
+                                RowLayout {
+                                    width: parent.width
+                                    spacing: 10
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 34
+                                        radius: th.rCtrl
+                                        color: "transparent"
+                                        border.color: root.darkMode ? th.inv : th.stroke
+                                        border.width: 1
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "黑白"
+                                            color: root.darkMode ? th.fg : th.fg3
+                                            font.pixelSize: 13
+                                            font.weight: root.darkMode ? Font.Medium : Font.Normal
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.darkMode = true
+                                        }
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 34
+                                        radius: th.rCtrl
+                                        color: "transparent"
+                                        border.color: root.darkMode ? th.stroke : th.inv
+                                        border.width: 1
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "浅色"
+                                            color: root.darkMode ? th.fg3 : th.fg
+                                            font.pixelSize: 13
+                                            font.weight: root.darkMode ? Font.Normal : Font.Medium
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.darkMode = false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 课表编辑器（2026-10-06 并入）──
+                        // 风格与「外观」等卡片一致：黑白、自绘按钮（不用 QtQuick.Controls 默认 Button，
+                        // 那个默认蓝会把黑白界面破掉）。
+                        Rectangle {
+                            Layout.columnSpan: 2
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: colSettings5.implicitHeight + 32
+                            Layout.fillHeight: true
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: colSettings5
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 16
+                                spacing: 10
+                                Text { text: "课表编辑器"; color: th.fg3; font.pixelSize: 12 }
+                                Text {
+                                    text: "排课、时间轴、科目管理与多周轮换（数据格式兼容 ClassIsland）"
+                                    color: th.op; font.pixelSize: 13
+                                    wrapMode: Text.Wrap
+                                    width: parent.width
+                                }
+                                // 自绘按钮：反白风格与稿稿一致
+                                Rectangle {
+                                    width: 132
+                                    height: 32
+                                    radius: th.rCtrl
+                                    color: hovered ? th.hover : th.cream
+                                    border.color: th.stroke
+                                    border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "打开课表编辑器"
+                                        color: th.fg
+                                        font.pixelSize: 13
+                                    }
+                                    MouseArea {
+                                        id: hovered
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: schedEditor.show()
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 关于（通栏）──
+                        // 版本以前写「—」（等于没做），现在读编译期注入的 backend.version。
+                        // 「被控端是什么」以前在顶栏那个死开关上没地方讲 —— 挪到这儿，
+                        // 一句话说清两台程序的关系 + 上哪儿拿被控端。
+                        Rectangle {
+                            Layout.columnSpan: 2
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: colSettings6.implicitHeight + 32
+                            Layout.fillHeight: true
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: colSettings6
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 16
+                                spacing: 6
+                                Text { text: "关于"; color: th.fg3; font.pixelSize: 12 }
+                                Text { text: "星集控 · 管理端"; color: th.fg; font.pixelSize: 13 }
+                                Row {
+                                    spacing: 0
+                                    Text { text: "版本"; color: th.fg3; font.pixelSize: 12; width: 70 }
+                                    Text { text: backend.version; color: th.op; font.pixelSize: 12 }
+                                }
                                 Text {
                                     width: parent.width
                                     wrapMode: Text.Wrap
-                                    text: backend.role === "admin"
-                                          ? "管理员：能看画面，也能操作教室机（电源 / 远控 / 终端 / 广播）。"
-                                            + "右边看得到但点不动的按钮，就是这个身份之外的事。"
-                                          : "教师：能看画面、发通知、推文件；电源、远控、终端、广播这类动作要管理员。"
+                                    text: "被控端是另一台机器上的另一个程序（星集控被控端 / 绿色包），" +
+                                          "装到教室机上、登录同一个星璃账号之后，这台管理端就能看到它。" +
+                                          "这里切不出被控端 —— 要看哪台机器，就在控制页左边选。"
+                                    color: th.fg3; font.pixelSize: 12
+                                }
+                                // 更新日志 / 帮助：把官网已有的「版本历史」与「帮助」能力搬进管理端（需求 #7）。
+                                // 之前管理端缺这两块、也没有替代，老师想看更新了什么只能去翻网页。
+                                Row {
+                                    spacing: 8
+                                    Rectangle {
+                                        width: 96; height: 30; radius: th.rCtrl
+                                        color: clHover.containsMouse ? th.hover : th.panel
+                                        border.color: th.stroke; border.width: 1
+                                        Text { anchors.centerIn: parent; text: "更新日志"; color: th.fg; font.pixelSize: 13 }
+                                        MouseArea { id: clHover; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: openOnly("changelog") }
+                                    }
+                                    Rectangle {
+                                        width: 80; height: 30; radius: th.rCtrl
+                                        color: hpHover.containsMouse ? th.hover : th.panel
+                                        border.color: th.stroke; border.width: 1
+                                        Text { anchors.centerIn: parent; text: "帮助"; color: th.fg; font.pixelSize: 13 }
+                                        MouseArea { id: hpHover; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: openOnly("help") }
+                                    }
+                                }
+                                // ── 更新（2026-10-08）──
+                                // 状态机在 C++ 的 Updater 里，界面只做三件事：把 updater.message 原样显示、
+                                // 按状态决定按钮文案与灰否、把更新说明摊开。「有没有新版」是云端算的
+                                // （客户端只把本地版本号发过去），界面不自己比版本。
+                                // ⚠️ 行数都封顶：这张卡在 GridLayout 里，涨太高会把上面的卡挤扁。
+                                Text {
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                    visible: updater.message !== ""
+                                    text: updater.message
+                                    color: updater.state === "failed" ? th.fg : th.fg3
+                                    font.pixelSize: 12
+                                    font.bold: updater.state === "failed"
+                                }
+                                Text {
+                                    width: parent.width
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 3
+                                    elide: Text.ElideRight
+                                    visible: updater.state === "available" && updater.notes !== ""
+                                    text: updater.sizeBytes > 0
+                                          ? ("更新说明：" + updater.notes +
+                                             "（" + (updater.sizeBytes / 1048576).toFixed(1) + " MB）")
+                                          : ("更新说明：" + updater.notes)
                                     color: th.fg3; font.pixelSize: 12
                                 }
                                 RowLayout {
                                     width: parent.width
                                     spacing: 10
-                                    Text { text: "这一台的身份"; color: th.fg3; font.pixelSize: 12 }
-                                    Item { Layout.fillWidth: true }
                                     Btn {
-                                        Layout.preferredWidth: 96
+                                        Layout.preferredWidth: 118
                                         Layout.preferredHeight: 26
                                         theme: th
-                                        text: "换成管理员"
-                                        strong: backend.role !== "admin"
-                                        enabled: backend.role !== "admin"
-                                        tip: "切到管理员后，操作类按钮（电源/远控/终端/广播）才能点"
-                                        onClicked: backend.setRole("admin")
+                                        text: updater.busy ? "处理中…" : "检查更新"
+                                        tip: "向云端问一下有没有新版本"
+                                        disabled: updater.busy
+                                        onClicked: updater.checkForUpdate()
                                     }
+                                    // 只在"确实有新版本"时出现 —— 常驻一颗不能点的按钮只会让人犯嘀咕。
                                     Btn {
-                                        Layout.preferredWidth: 96
+                                        Layout.preferredWidth: 118
                                         Layout.preferredHeight: 26
                                         theme: th
-                                        text: "换成教师"
-                                        strong: backend.role === "admin"
-                                        enabled: backend.role === "admin"
-                                        tip: "切成教师后，操作类按钮会置灰，避免误点教室机"
-                                        onClicked: backend.setRole("teacher")
+                                        visible: updater.state === "available"
+                                        strong: true
+                                        text: updater.mandatory ? "必须更新" : "立即更新"
+                                        tip: "下载 → sha256 校验 → 解压 → 自动重启完成更新，不用手动覆盖"
+                                        disabled: updater.busy
+                                        onClicked: updater.installUpdate()
+                                    }
+                                    Btn {
+                                        Layout.preferredWidth: 118
+                                        Layout.preferredHeight: 26
+                                        theme: th
+                                        text: "去官网下载页"
+                                        tip: "在浏览器里打开 www.245959623.xyz/download"
+                                        onClicked: backend.openExternal("https://www.245959623.xyz/download")
                                     }
                                 }
-                            }
-                        }
-                    }
-
-                    // ── 连接（真数据：运行时读，不写硬可能存在编造的值）──
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        radius: th.rCard
-                        color: th.panel
-                        border.color: th.card
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 14
-                            Text { text: "连接"; color: th.fg3; font.pixelSize: 12 }
-                            // 稿 .kv：键 70px 辅助色，值 12px 操作色
-                            Column {
-                                width: parent.width
-                                spacing: 6
-                                Row {
-                                    Text { text: "云端"; color: th.fg3; font.pixelSize: 13; width: 70 }
-                                    Text { text: backend.cloudUrl; color: th.op; font.pixelSize: 13 }
-                                }
-                                Row {
-                                    Text { text: "状态"; color: th.fg3; font.pixelSize: 13; width: 70 }
-                                    Text {
-                                        // 术语换日常词：不说"已连接/未连接"以外的协议词（规则 2）
-                                        text: backend.connected ? "连接正常" : "连不上云端"
-                                        color: th.op; font.pixelSize: 13
-                                    }
-                                }
-                                // 网站账号（2026-10-06，OAuth 一户通）：账号过期/没登录时要能看见原因，
-                                // 并且能当场点一下重新登录 —— 不能让用户去翻日志才知道"票过期了"。
-                                Row {
-                                    Text { text: "账号"; color: th.fg3; font.pixelSize: 13; width: 70 }
-                                    Text {
-                                        id: acctText
-                                        text: backend.accountText
-                                        color: backend.accountBusy ? th.fg3 : th.op
-                                        font.pixelSize: 13
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.Wrap
-                                    }
-                                }
-                                // 只在"没登录 / 失败了"这个可点的时候才出现，已登录时界面不该多一个按钮
-                                MouseArea {
-                                    visible: !backend.accountBusy && backend.accountText.indexOf("未登录") === 0
-                                    height: visible ? 26 : 0
-                                    width: parent.width
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: backend.loginWithSite()
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "点这里用网站账号登录"; color: th.op; font.pixelSize: 13
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── 提醒（2026-10-06：以前是画着玩的假开关，现在是真的）──
-                    // 两个开关都在后端接了真事件：操作完成（机器真做了才提示）、
-                    // 与云端断开。状态落在 QSettings，重开程序还在。
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        radius: th.rCard
-                        color: th.panel
-                        border.color: th.card
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 14
-                            Text { text: "提醒"; color: th.fg3; font.pixelSize: 12 }
-                            Column {
-                                width: parent.width
-                                spacing: 4
-                                ToggleRow {
-                                    width: parent.width
-                                    theme: th
-                                    text: "操作完成时提示"
-                                    note: "机器上真的做完了才说一句（云端收下不算）"
-                                    checked: backend.notifyOnDone
-                                    onToggled: function (on) { backend.notifyOnDone = on }
-                                }
-                                ToggleRow {
-                                    width: parent.width
-                                    theme: th
-                                    text: "设备离线时提醒"
-                                    note: "与云端断开时弹一条（后台也能看见）"
-                                    checked: backend.notifyOnOffline
-                                    onToggled: function (on) { backend.notifyOnOffline = on }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── 外观（真：深浅切换在这版已经可用）──
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        radius: th.rCard
-                        color: th.panel
-                        border.color: th.card
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 14
-                            Text { text: "外观"; color: th.fg3; font.pixelSize: 12 }
-                            // 稿 .pick：等宽两块，选中的那块边框走反白
-                            RowLayout {
-                                width: parent.width
-                                spacing: 10
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 34
-                                    radius: th.rCtrl
-                                    color: "transparent"
-                                    border.color: root.darkMode ? th.inv : th.stroke
-                                    border.width: 1
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "黑白"
-                                        color: root.darkMode ? th.fg : th.fg3
-                                        font.pixelSize: 13
-                                        font.weight: root.darkMode ? Font.Medium : Font.Normal
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.darkMode = true
-                                    }
-                                }
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 34
-                                    radius: th.rCtrl
-                                    color: "transparent"
-                                    border.color: root.darkMode ? th.stroke : th.inv
-                                    border.width: 1
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "浅色"
-                                        color: root.darkMode ? th.fg3 : th.fg
-                                        font.pixelSize: 13
-                                        font.weight: root.darkMode ? Font.Normal : Font.Medium
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.darkMode = false
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── 课表编辑器（2026-10-06 并入）──
-                    // 风格与「外观」等卡片一致：黑白、自绘按钮（不用 QtQuick.Controls 默认 Button，
-                    // 那个默认蓝会把黑白界面破掉）。
-                    Rectangle {
-                        Layout.columnSpan: 2
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 108
-                        radius: th.rCard
-                        color: th.panel
-                        border.color: th.card
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 10
-                            Text { text: "课表编辑器"; color: th.fg3; font.pixelSize: 12 }
-                            Text {
-                                text: "排课、时间轴、科目管理与多周轮换（数据格式兼容 ClassIsland）"
-                                color: th.op; font.pixelSize: 13
-                                wrapMode: Text.Wrap
-                                width: parent.width
-                            }
-                            // 自绘按钮：反白风格与稿稿一致
-                            Rectangle {
-                                width: 132
-                                height: 32
-                                radius: th.rCtrl
-                                color: hovered ? th.hover : th.cream
-                                border.color: th.stroke
-                                border.width: 1
                                 Text {
-                                    anchors.centerIn: parent
-                                    text: "打开课表编辑器"
-                                    color: th.fg
-                                    font.pixelSize: 13
+                                    text: "日志 stelarith-viewer-qt/viewer.log"
+                                    color: th.fg3; font.pixelSize: 12
                                 }
-                                MouseArea {
-                                    id: hovered
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: schedEditor.show()
-                                }
-                            }
-                        }
-                    }
-
-                    // ── 关于（通栏）──
-                    // 版本以前写「—」（等于没做），现在读编译期注入的 backend.version。
-                    // 「被控端是什么」以前在顶栏那个死开关上没地方讲 —— 挪到这儿，
-                    // 一句话说清两台程序的关系 + 上哪儿拿被控端。
-                    Rectangle {
-                        Layout.columnSpan: 2
-                        Layout.fillWidth: true
-                        radius: th.rCard
-                        color: th.panel
-                        border.color: th.card
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 6
-                            Text { text: "关于"; color: th.fg3; font.pixelSize: 12 }
-                            Text { text: "星集控 · 管理端"; color: th.fg; font.pixelSize: 13 }
-                            Row {
-                                spacing: 0
-                                Text { text: "版本"; color: th.fg3; font.pixelSize: 12; width: 70 }
-                                Text { text: backend.version; color: th.op; font.pixelSize: 12 }
-                            }
-                            Text {
-                                width: parent.width
-                                wrapMode: Text.Wrap
-                                text: "被控端是另一台机器上的另一个程序（星集控被控端 / 绿色包），" +
-                                      "装到教室机上、登录同一个星璃账号之后，这台管理端就能看到它。" +
-                                      "这里切不出被控端 —— 要看哪台机器，就在控制页左边选。"
-                                color: th.fg3; font.pixelSize: 12
-                            }
-                            RowLayout {
-                                width: parent.width
-                                spacing: 10
-                                Btn {
-                                    Layout.preferredWidth: 118
-                                    Layout.preferredHeight: 26
-                                    theme: th
-                                    text: "去官网下载页"
-                                    tip: "在浏览器里打开 www.245959623.xyz/download"
-                                    onClicked: backend.openExternal("https://www.245959623.xyz/download")
-                                }
-                            }
-                            Text {
-                                text: "日志 stelarith-viewer-qt/viewer.log"
-                                color: th.fg3; font.pixelSize: 12
                             }
                         }
                     }
@@ -2488,7 +2788,9 @@ ApplicationWindow {
                 spacing: 0
 
                 Repeater {
-                    model: [ "概览", "控制", "集控", "设置" ]
+                    // 2026-10-08 命名调整：原「控制」页就是带画面的主页面，改名「集控」；
+                    // 原「集控」批量页并入主页面功能后，这里改叫「批量管控」避免两个「集控」重名。
+                    model: [ "概览", "集控", "批量管控", "设置" ]
                     delegate: Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -2707,6 +3009,44 @@ ApplicationWindow {
     // 选文件对话框，两个 FileDialog 撞名 qml 编译期就冲突了，所以弹窗这侧改名（2026-10-03）
     FilePushDialog { id: fileDlg; theme: root.th }
 
+    // #93 监控＋摄像头绑定：把写好的 CameraCenter 组件真正挂进界面（此前只建未挂，
+    // 所以「摄像头监控」功能在界面上完全够不着）。由监控区「摄像头监控」按钮打开。
+    // 摄像头枚举 / 拍照回执经 backend.resultReceived 转发给 CameraCenter。
+    Popup {
+        id: camCenterDlg
+        anchors.centerIn: parent
+        width: 560
+        height: 440
+        modal: true
+        padding: 0
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle {
+            color: th.panel
+            radius: th.rCard
+            border.color: th.card
+            border.width: 1
+        }
+        CameraCenter {
+            id: camCenter
+            theme: root.th
+            backend: backend
+            anchors.fill: parent
+            anchors.margins: 12
+        }
+    }
+
+    // #93：摄像头枚举 / 拍照回执 → CameraCenter（与云端 instruction-result 路由对齐）
+    Connections {
+        target: backend
+        function onResultReceived(uid, action, state, result, err, detail, data) {
+            if (action === "camera_list") {
+                camCenter.onCams((data && data.cameras) ? data.cameras : [])
+            } else if (action === "camera_snapshot") {
+                camCenter.onShotResult(result === "done", detail || err)
+            }
+        }
+    }
+
     // 课表编辑器独立窗口（2026-10-06 并入）：设置页按钮 schedEditor.show() 打开
     ScheduleEditor { id: schedEditor; visible: false }
 
@@ -2730,6 +3070,26 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         width: island.width
         height: island.height
+
+        // 不许让状态只走"记得手动刷一次"这条路：
+        //  · 自动停（到点 / 断线）必须让老师看见 —— 按钮会自己变回"开始讲话"，
+        //    但不弹一句，老师只觉得"怎么自己断了，也没提示"。所以 autoNote 非空就弹一次。
+        //  · 语音 / 广播状态变了（含被自动停掉），灵动岛要跟着重算一次。
+        Connections {
+            target: backend
+            onAutoNoteChanged: { if (backend.autoNote !== "") root.toast(backend.autoNote); root.refreshIsland() }
+            onSpeakingChanged: root.refreshIsland()
+            onBroadcastingChanged: root.refreshIsland()
+            // 设备表一变（有人掉线 / 新机上线 / 掉线重连）就重算：
+            // 掉线是教室里最高频的异常，之前灵动岛对它是瞎的。
+            onDevicesChanged: root.refreshIsland()
+            // 云端状态通知（断线重连 / 指令执行完成）统一走灵动岛，不再弹系统托盘气泡
+            onIslandNote: island.showNote(title, desc, icon, 3000)
+        }
+        // 启动时没有任何输入进来，灵动岛从来没被刷过一次（一直是空的）。
+        // 这里补一次：空的也得是"真的空"。
+        Component.onCompleted: root.refreshIsland()
+
         DynamicIsland { id: island; theme: root.th; states: root.islandStates }
     }
 
@@ -2738,32 +3098,6 @@ ApplicationWindow {
         id: batchTimeout
         repeat: false
         onTriggered: root.batchTimeoutClose()
-    }
-
-    // Toast（5.6 组件规范）：底部居中、距底 32px、3 秒消失、上移淡入 200ms。
-    // 放在窗口层，所以任何一页都够得着（集控页那颗 hint 留着，它贴着卡片更好使）。
-    Rectangle {
-        id: toastw
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 32
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: toastwText.width + 28
-        height: 30
-        radius: th.rCtrl
-        color: th.cream
-        border.color: th.stroke
-        border.width: 1
-        opacity: root.toastText === "" ? 0 : 1
-        z: 40
-        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-        Text {
-            id: toastwText
-            anchors.centerIn: parent
-            text: root.toastText
-            color: th.fg
-            font.pixelSize: 13
-        }
-        Timer { id: toastTimer; interval: 3000; onTriggered: root.toastText = "" }
     }
 
     CommandPalette {
@@ -2789,6 +3123,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+L"; onActivated: { root.runOnPicked("") } }
 
     Component.onCompleted: {
+        syncPageLive()   // 2026-10-08：启动即按当前页归一化拉流（默认 page=1，缩略图墙不预订阅）
         acctMenu.goSettings = function () { root.page = 3 }
         pal.cmds = [
             // ── 教室机动作 ─────────────────────────────────────────────
@@ -2827,11 +3162,11 @@ ApplicationWindow {
             { name: "切到集控",         keys: ["jikong", "jk"], tip: "集控面板", run: function () { root.page = 2 } },
             { name: "切到设置",         keys: ["settings", "shezhi", "sz"], tip: "账户 / 连接 / 提醒 / 外观", run: function () { root.page = 3 } },
             { name: "去广播给所有在线设备", keys: ["broadcast", "guangbo", "gb"], tip: "广播要填内容，去集控页下面填再点", run: function () { root.page = 2 } },
-            { name: "开始语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "老师讲话，全班在线设备可听（再次点停）", run: function () { if (backend.startSpeaking()) { root.refreshIsland(); root.toast("🎤 正在讲话") } else { root.toast("开麦失败：" + backend.speakError) } } },
+            { name: "开始语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "老师讲话，全班在线设备可听（再次点停）", run: function () { if (backend.startSpeaking()) { root.refreshIsland(); root.toast("正在讲话") } else { root.toast("开麦失败：" + backend.speakError) } } },
             { name: "停止语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "把语音广播收掉（静音）", run: function () { backend.stopSpeaking(); root.refreshIsland(); root.toast("语音已停止") } },
-            { name: "开始屏幕广播",     keys: ["screen", "guangbo2", "gb2"], tip: "老师屏幕推给全部在线设备（再次点停）", run: function () { if (backend.startBroadcast()) { root.refreshIsland(); root.toast("📺 正在屏幕广播") } else { root.toast("广播启动失败") } } },
+            { name: "开始屏幕广播",     keys: ["screen", "guangbo2", "gb2"], tip: "老师屏幕推给全部在线设备（再次点停）", run: function () { if (backend.startBroadcast()) { root.refreshIsland(); root.toast("正在屏幕广播") } else { root.toast("广播启动失败") } } },
             { name: "停止屏幕广播",     keys: ["screen", "tingbo"], tip: "把屏幕广播收掉", run: function () { backend.stopBroadcast(); root.refreshIsland(); root.toast("屏幕广播已停止") } },
-            { name: "开始考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "全屏拦截 + 白名单（无时长=手动结束）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode", { "minutes": 0, "whitelist": [] }); root.toast("考试模式已下发 → " + uid) } },
+            { name: "开始考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "全屏拦截 + 黑名单（无时长=手动结束）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode", { "minutes": 0, "blacklist": [] }); root.toast("考试模式已下发 → " + uid) } },
             { name: "结束考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "恢复教室机（全屏拦截收掉）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode_stop", {}); root.toast("已结束考试 → " + uid) } },
             { name: "刷新多班监控墙",   keys: ["multiband", "duoban", "db"], tip: "重订阅多班缩略图（最多 9 台在线）", run: function () { root.page = 2; if (multiThumb) multiThumb.watch(); root.toast("正在订阅多班缩略图") } },
             // ── 系统 ───────────────────────────────────────────────────
@@ -2854,6 +3189,8 @@ ApplicationWindow {
         fileDlg.close()
         notifyDlg.close()
         termDlg.close()
+        changelogDlg.close()
+        helpDlg.close()
         if      (which === "software") softwareDlg.open()
         else if (which === "log")      logDlg.open()
         else if (which === "media")    mediaDlg.open()
@@ -2861,6 +3198,8 @@ ApplicationWindow {
         else if (which === "file")     fileDlg.open()
         else if (which === "notify")   notifyDlg.open()
         else if (which === "term")     termDlg.open()
+        else if (which === "changelog") changelogDlg.open()   // 需求 #7
+        else if (which === "help")       helpDlg.open()        // 需求 #7
     }
 
     // 右侧所有动作按钮的统一入口。以前这段分支散在 Repeater 的 onClicked 里，
@@ -2928,18 +3267,18 @@ ApplicationWindow {
             root.page = 2; root.toast("到集控页填广播内容")
         } else if (a === "voice") {
             if (backend.speaking) { backend.stopSpeaking(); root.toast("语音已停止") }
-            else if (backend.startSpeaking()) { root.toast("🎤 正在讲话") }
+            else if (backend.startSpeaking()) { root.toast("正在讲话") }
             else { root.toast("开麦失败：" + backend.speakError) }
             root.refreshIsland()
         } else if (a === "screen") {
             if (backend.broadcasting) { backend.stopBroadcast(); root.toast("屏幕广播已停止") }
-            else if (backend.startBroadcast()) { root.toast("📺 正在屏幕广播") }
+            else if (backend.startBroadcast()) { root.toast("正在屏幕广播") }
             else { root.toast("广播启动失败") }
             root.refreshIsland()
         } else if (a === "exam") {
             const uid = backend.currentUid
             if (!uid) { root.toast("先在控制页选中一台设备"); return }
-            backend.sendAction("exam_mode", { "minutes": 0, "whitelist": [] })
+            backend.sendAction("exam_mode", { "minutes": 0, "blacklist": [] })
             root.toast("考试模式已下发 → " + uid)
         } else if (a === "multiband") {
             root.page = 2; if (multiThumb) multiThumb.watch(); root.toast("正在订阅多班缩略图")
@@ -3002,9 +3341,7 @@ ApplicationWindow {
     //    广播发出去了、一句回话没有，看着跟"点了没反应"一模一样（4.6 点名的头号体验杀手）。
     // 一律走 root.toast()；集控页那颗旧的保留（它贴着卡片、就在手边，换掉反而别扭）。
     function toast(s) {
-        root.toastText = s || ""
-        root.toastTick = root.toastTick + 1
-        toastTimer.restart()
+        island.showNote(s, "", "bell", 3000)
     }
 
     // 灵动岛：把"正在进行 / 需要处理"的事聚成一条（3.8）。
@@ -3032,10 +3369,32 @@ ApplicationWindow {
         // 语音对讲 / 屏幕广播：有真实状态源（backend.speaking / broadcasting）
         // 才亮；没在讲/没在播就不出现（宁可不亮，不冒充聚合器）
         if (backend.speaking)
-            s.push({ k: "voice", t: "正在语音对讲", d: "老师讲话，全班在听" })
+            s.push({ k: "voice", t: "正在语音对讲 " + backend.speakLeftSec + " 秒",
+                     d: "老师讲话，全班在听；到点自动停" })
+
         if (backend.broadcasting)
-            s.push({ k: "broadcast", t: "正在屏幕广播", d: "老师屏幕推给全部在线设备" })
+            s.push({ k: "broadcast", t: "正在屏幕广播 " + backend.bcastLeftSec + " 秒",
+                     d: "老师屏幕推给全部在线设备；到点自动停" })
+        // 设备离线（3.8 的"告警"档）：这是教室里最高频的异常 —— 有人拔了网线、
+        // 机器睡了、被控端被杀。之前这一档只有"批量下发失败"会亮，
+        // 于是设备表那边掉线一片，灵动岛却纹丝不动 = 看着像没接上。
+        // 认云端给的 online 字段，老版本云端不带这个键时按在线处理（和设备表同口径）。
+        const off = root.offlineDevices()
+        if (off.length > 0)
+            s.push({ k: "alert", t: off.length + " 台设备离线",
+                     d: deviceLabel(off[0].uid) + (off.length > 1 ? " 等 " + off.length + " 台" : ""),
+                     p: -1 })
+
         islandStates = s
+    }
+
+    // 设备表里"没在线"的那几台（online === false 才算离线；字段缺失按在线）。
+    function offlineDevices() {
+        const arr = root.devices || []
+        const off = []
+        for (let i = 0; i < arr.length; ++i)
+            if (arr[i] && arr[i].online === false) off.push(arr[i])
+        return off
     }
 
     function pushAlert(uid, action, why) {
@@ -3048,13 +3407,28 @@ ApplicationWindow {
     }
 
     // ── 批量三段式：发之前说清几台、发之中看得见走到哪、发完了报结果（4.5）──
-    function batchStart(label, total) {
-        batch = { label: label, total: total, done: 0, ok: 0, fail: 0, active: true }
+    // ⚠️ 记账单位是**设备**，不是回执条数（2026-10-07 修）：一屋子 30 台，
+    // 通知每条都会回两条（先 done、学生再确认回一条 confirmed），
+    // 按条数计 → 第 2 台确认就把 2/30 顶到 2/30、第 3 台…收口文案直接报"30 台都成了"。
+    // 改成 rows：每台一个格子，一台只有第一次回执能落账，回馈才是"按设备逐个发出"。
+    function batchStart(label, list) {
+        const total = (list && list.length) ? list.length : 0
+        batch = { label: label, total: total, done: 0, ok: 0, fail: 0, active: true, rows: [] }
+        // 先把名单铺成明细行（st：0 待回话 / 1 成功 / 2 失败），离线那几台随后直接判失败
+        for (let i = 0; i < total; ++i)
+            batch.rows.push({ uid: list[i], st: 0, why: "", late: false })
         // 收口兜底：设备掉线、云端不回执时，不能让这句话永远挂在灵动岛上。
         // 台数越多给的时间越长（每台 4 秒），卡在 10s ~ 60s 之间。
         batchTimeout.interval = Math.max(10000, Math.min(60000, total * 4000))
         batchTimeout.restart()
         refreshIsland()
+    }
+
+    // 取某台设备在这批里的明细行（找不到就补一个"非本批"行，绝不丢回馈）
+    function batchRowOf(uid) {
+        for (let i = 0; i < batch.rows.length; ++i)
+            if (batch.rows[i].uid === uid) return batch.rows[i]
+        return null
     }
 
     // 某台设备现在在不在线（认云端给的 online；老云端不带这个键就按在线处理）
@@ -3064,19 +3438,74 @@ ApplicationWindow {
         return false
     }
 
+    // 设备显示名：明细点名要用（没有就退回 uid，好过显示 undefined）
+    function deviceLabel(uid) {
+        for (let i = 0; i < root.devices.length; ++i)
+            if (root.devices[i].uid === uid) return (root.devices[i].name || root.devices[i].uid || uid)
+        return (uid || "未知设备")
+    }
+
+    // 二次回执（通知确认）：只写明细，不参与进度 —— 一台设备 = 一份回馈
+    function batchNote(uid) {
+        if (!batch.active) return
+        let row = batchRowOf(uid)
+        if (!row) { row = { uid: uid, st: batch.done >= batch.total ? 1 : 0, why: "", late: false }; batch.rows.push(row) }
+        row.late = true
+        refreshIsland()
+    }
+
     // 超时收口：没回话的按"没成"结账，并且说出来 —— 不假装成功
     function batchTimeoutClose() {
         if (!batch.active) return
         const left = Math.max(0, batch.total - batch.done)
         batch.done = batch.total
         batch.fail = batch.fail + left
+        for (let i = 0; i < batch.rows.length; ++i)
+            if (batch.rows[i].st === 0) batch.rows[i].st = 2
         batch.active = false
         toast(batch.label + "：等超时了，" + batch.ok + " 台确认"
               + (left > 0 ? "，" + left + " 台没回话（多半是掉线）" : ""))
         refreshIsland()
     }
+
+    // 收尾文案按设备逐条点名：只说"29 成 1 败"，老师还得一台台猜是谁；
+    // 把没成的直接点出来（最多 6 台，剩下的补一句"…等 N 台"）。
+    function batchSummary() {
+        const bad = []
+        for (let i = 0; i < batch.rows.length; ++i)
+            if (batch.rows[i].st === 2) bad.push(batch.rows[i])
+        let s = batch.label + "：完了 " + batch.ok + " 台"
+        if (bad.length > 0) {
+            s += "，" + bad.length + " 台没成："
+            for (let i = 0; i < bad.length && i < 6; ++i) {
+                const r = bad[i]
+                s += (i > 0 ? "、" : "") + deviceLabel(r.uid) + (r.why ? "（" + r.why + "）" : "")
+            }
+            if (bad.length > 6) s += " 等 " + bad.length + " 台"
+        }
+        return s
+    }
+
     function batchStep(uid, ok, why) {
         if (!batch.active) return
+        let row = batchRowOf(uid)
+        if (!row) {
+            // 单台下发时这条回执可能先于批量名单落账 —— 补行并把它算进去，别让这台凭空消失
+            row = { uid: uid, st: 0, why: "", late: false }
+            batch.rows.push(row)
+            batch.total = batch.total + 1
+        }
+        if (row.st !== 0) {
+            // 这台已经结过账（离线直判失败 / 已经报过成功），后面回来的都是同一台的二次回执。
+            // 只把最新状态补进明细，绝不重复计数 —— 这是"按设备"而不是"按回执"的关键一句。
+            row.late = true
+            if (!ok) row.why = why || row.why
+            refreshIsland()
+            return
+        }
+        row.st = ok ? 1 : 2
+        row.why = why || ""
+        row.late = false
         batch.done = batch.done + 1
         if (ok) batch.ok = batch.ok + 1
         else batch.fail = batch.fail + 1
@@ -3085,7 +3514,7 @@ ApplicationWindow {
             // 全成了也得说一句（4.5）："没消息"不该被当成"都成了"
             batch.active = false
             batchTimeout.stop()
-            toast(batch.label + "：完了 " + batch.ok + " 台" + (batch.fail > 0 ? "，" + batch.fail + " 台没成" : ""))
+            toast(batchSummary())
         } else {
             batchTimeout.restart()      // 还有台在等，把超时往后推
         }
@@ -3121,8 +3550,12 @@ ApplicationWindow {
         }
     }
     function selectAll() {
+        // 只选**在线**的：设备表现在含离线台账（见 backend 的说明），把离线的一起选上，
+        // 批量下发会给它们记一串注定失败的账，看着像"发失败了"，其实是机器没开。
         const s2 = []
-        for (let i = 0; i < root.devices.length; ++i) s2.push(root.devices[i].uid)
+        for (let i = 0; i < root.devices.length; ++i) {
+            if (root.devices[i].online !== false) s2.push(root.devices[i].uid)
+        }
         root.picked = s2
         root.pickAnchor = -1
         toast("已选 " + root.picked.length + " 台")
@@ -3141,7 +3574,11 @@ ApplicationWindow {
         }
         const list = []
         if (a === "") {
-            for (let i = 0; i < root.devices.length; ++i) list.push(root.devices[i].uid)
+            // 「全部在线」就真的是全部在线：设备表含离线台账，把离线的一起发过去
+            // 只会换来一串注定失败的回执（机器没开），账面上像"下发失败"。
+            for (let i = 0; i < root.devices.length; ++i) {
+                if (root.devices[i].online !== false) list.push(root.devices[i].uid)
+            }
         } else {
             for (let i = 0; i < root.picked.length; ++i) list.push(root.picked[i])
         }
@@ -3150,7 +3587,7 @@ ApplicationWindow {
             return
         }
         const label = (a === "lock" ? "锁屏" : a === "shutdown" ? "关机" : a)
-        root.batchStart(label + " " + list.length + " 台", list.length)
+        root.batchStart(label + (list.length > 1 ? " " + list.length + " 台" : ""), list)
         const dead = []
         let sent = 0
         for (let i = 0; i < list.length; ++i) {
@@ -3163,6 +3600,247 @@ ApplicationWindow {
         for (let j = 0; j < dead.length; ++j) root.batchStep(dead[j], false, "设备不在线")
         toast(label + "已下发 " + sent + " 台" + (dead.length > 0 ? "，" + dead.length + " 台不在线" : ""))
         root.picked = []
+    }
+
+    // ── 更新日志（需求 #7：把官网已有的「版本历史」能力搬进管理端）──
+    // 数据面是 changelogModel（内嵌、与官网同源），离线也能看；官网那份是发布归档唯一真源，这里只读镜像。
+    Popup {
+        id: changelogDlg
+        anchors.centerIn: Overlay.overlay
+        width: 560; height: 460
+        modal: true; focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { color: th.win; radius: th.rCard; border.color: th.card; border.width: 1 }
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 18
+            spacing: 12
+            Text { text: "更新日志"; color: th.fg; font.pixelSize: 16; font.weight: Font.Medium }
+            ScrollView {
+                Layout.fillWidth: true; Layout.fillHeight: true
+                clip: true
+                Column {
+                    spacing: 18
+                    Repeater {
+                        model: root.changelogModel
+                        delegate: Column {
+                            spacing: 6
+                            width: changelogDlg.width - 36
+                            Row { spacing: 8
+                                Text { text: modelData.version; color: th.inv; font.pixelSize: 13; font.weight: Font.Medium }
+                                Rectangle { width: 2; height: 12; color: th.stroke }
+                                Text { text: modelData.date; color: th.fg3; font.pixelSize: 12 }
+                            }
+                            Text { width: parent.width; wrapMode: Text.Wrap; text: modelData.title; color: th.fg; font.pixelSize: 14; font.weight: Font.Medium }
+                            Text { width: parent.width; wrapMode: Text.Wrap; text: modelData.highlight; color: th.fg3; font.pixelSize: 12 }
+                            Repeater {
+                                model: modelData.items
+                                delegate: Row { spacing: 7; width: parent.width
+                                    Text { text: ({ feat: "新增", fix: "修复", change: "调整" })[modelData.kind] || "·"; color: th.fg3; font.pixelSize: 12; width: 36 }
+                                    Text { width: parent.width - 43; wrapMode: Text.Wrap; text: modelData.text; color: th.op; font.pixelSize: 13 }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                Layout.fillWidth: true; Layout.preferredHeight: 30; radius: th.rCtrl
+                color: th.hover; border.color: th.stroke; border.width: 1
+                Text { anchors.centerIn: parent; text: "关闭"; color: th.fg; font.pixelSize: 13 }
+                MouseArea { anchors.fill: parent; onClicked: changelogDlg.close() }
+            }
+        }
+    }
+
+    // ── 帮助（需求 #7：把官网帮助能力搬进管理端）──
+    Popup {
+        id: helpDlg
+        anchors.centerIn: Overlay.overlay
+        width: 480; height: 420
+        modal: true; focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { color: th.win; radius: th.rCard; border.color: th.card; border.width: 1 }
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 18
+            spacing: 12
+            Text { text: "帮助"; color: th.fg; font.pixelSize: 16; font.weight: Font.Medium }
+            ScrollView {
+                Layout.fillWidth: true; Layout.fillHeight: true
+                clip: true
+                Column {
+                    spacing: 12
+                    width: helpDlg.width - 36
+                    Text { width: parent.width; wrapMode: Text.Wrap; text: "星集控管理端用来统一管教室里的被控端（教室机）。下面是常见操作："; color: th.fg3; font.pixelSize: 13 }
+                    Repeater {
+                        model: [
+                            { t: "看某台教室机的画面", d: "控制页（集控）左边选设备，画面出现在中间。" },
+                            { t: "给全班发通知 / 广播", d: "控制页右侧或集控页，发通知可选普通/重要/紧急，广播一次发全员。" },
+                            { t: "按班级筛选设备", d: "设备列表上方点「全部班级」切换班级，只显示该班机器。" },
+                            { t: "锁屏 / 重启 / 关机", d: "控制页右侧「电源」分组，需管理员身份。" },
+                            { t: "看版本更新历史", d: "设置页「更新日志」。" },
+                            { t: "快速跳页与触发动作", d: "用顶部的命令入口（或快捷键）直接跳到概览/集控/批量管控/设置，并触发常用动作。" }
+                        ]
+                        delegate: Column {
+                            spacing: 3
+                            width: parent.width
+                            Text { text: modelData.t; color: th.fg; font.pixelSize: 13; font.weight: Font.Medium }
+                            Text { width: parent.width; wrapMode: Text.Wrap; text: modelData.d; color: th.fg3; font.pixelSize: 12 }
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                Layout.fillWidth: true; Layout.preferredHeight: 30; radius: th.rCtrl
+                color: th.hover; border.color: th.stroke; border.width: 1
+                Text { anchors.centerIn: parent; text: "关闭"; color: th.fg; font.pixelSize: 13 }
+                MouseArea { anchors.fill: parent; onClicked: helpDlg.close() }
+            }
+        }
+    }
+
+    // ── 首启引导（批次6：应用感；方案 §2.1）──
+    // 未完成（backend.firstRunDone == false）时主窗叠这一层；走完三步点「完成」、或任意步点「跳过」都写标记收起。
+    // 内联而非独立 WelcomePage.qml：th 目前是 root 属性、不是单例（批次7 待抽），独立文件够不到 th。
+    Item {
+        id: welcomeLayer
+        z: 9995                       // 压在页面与账户菜单之上
+        anchors.fill: parent
+        visible: !backend.firstRunDone
+        property int step: 0          // 0 选班级 / 1 登录绑定 / 2 完成
+        function finish() { backend.markFirstRunDone() }
+
+        Rectangle { anchors.fill: parent; color: th.win }   // 整屏遮底：首启不让人看到后面空窗
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 560; height: 388
+            radius: th.rWin
+            color: th.body
+            border.color: th.card; border.width: 1
+
+            // 跳过（任意步都能跳过，写标记收起）
+            Text {
+                anchors.top: parent.top; anchors.right: parent.right
+                anchors.topMargin: 14; anchors.rightMargin: 16
+                text: "跳过"; color: th.fg4; font.pixelSize: 12
+                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: welcomeLayer.finish() }
+            }
+
+            Column {
+                anchors.fill: parent
+                anchors.margins: 28
+                anchors.topMargin: 46
+                spacing: 14
+
+                Text {
+                    text: ["① 选班级", "② 登录绑定", "③ 完成"][welcomeLayer.step]
+                    color: th.fg; font.pixelSize: 16; font.weight: Font.Medium
+                }
+
+                // 步骤 0：选班级
+                Column {
+                    visible: welcomeLayer.step === 0
+                    width: parent.width; spacing: 12
+                    Text { width: parent.width; wrapMode: Text.Wrap
+                        text: "先选你管的班级，后面设备列表默认只显示这个班。"; color: th.fg3; font.pixelSize: 13 }
+                    Flickable {
+                        width: parent.width; height: 30
+                        contentWidth: wClsRow.width; clip: true
+                        Row {
+                            id: wClsRow; spacing: 6
+                            Repeater {
+                                model: (function () {
+                                    var arr = [{ code: "", name: "全部班级" }]
+                                    var cs = backend.classes || []
+                                    for (var i = 0; i < cs.length; ++i) arr.push({ code: cs[i].code, name: (cs[i].name || cs[i].code) })
+                                    return arr
+                                })()
+                                delegate: Item {
+                                    height: 26; width: wLbl.width + 16
+                                    Rectangle {
+                                        anchors.fill: parent; radius: th.rCtrl
+                                        color: (backend.currentClass === modelData.code) ? th.inv : "transparent"
+                                        border.color: th.stroke; border.width: 1
+                                    }
+                                    Text {
+                                        id: wLbl; anchors.centerIn: parent
+                                        text: modelData.name
+                                        color: (backend.currentClass === modelData.code) ? th.win : th.fg3
+                                        font.pixelSize: 12
+                                    }
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: backend.setCurrentClass(modelData.code) }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 步骤 1：登录绑定
+                Column {
+                    visible: welcomeLayer.step === 1
+                    width: parent.width; spacing: 12
+                    Text { width: parent.width; wrapMode: Text.Wrap
+                        text: "登录网站账号，才能用云端票连设备（也可用 viewer.env 里的静态令牌，跳过这步）。"; color: th.fg3; font.pixelSize: 13 }
+                    Rectangle {
+                        width: 200; height: 32; radius: th.rCtrl; color: th.inv
+                        Text { anchors.centerIn: parent; text: "登录网站账号"; color: th.win; font.pixelSize: 13 }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: backend.loginWithSite() }
+                    }
+                    Text { width: parent.width; wrapMode: Text.Wrap
+                        text: backend.accountText; color: th.fg4; font.pixelSize: 12; visible: backend.accountText !== "" }
+                }
+
+                // 步骤 2：完成
+                Column {
+                    visible: welcomeLayer.step === 2
+                    width: parent.width; spacing: 12
+                    Text { width: parent.width; wrapMode: Text.Wrap
+                        text: "都好了。以后想改，去设置页或右下角账户菜单。"; color: th.fg3; font.pixelSize: 13 }
+                    Text {
+                        width: parent.width; wrapMode: Text.Wrap; color: th.fg; font.pixelSize: 13
+                        text: "当前班级：" + (function () {
+                            if (!backend.currentClass) return "全部班级"
+                            var cs = backend.classes || []
+                            for (var i = 0; i < cs.length; ++i) if (cs[i].code === backend.currentClass) return (cs[i].name || cs[i].code)
+                            return backend.currentClass
+                        })()
+                    }
+                }
+
+                Item { width: 1; height: 8 }
+
+                // 底部：上一步 / 下一步 / 完成
+                Row {
+                    width: parent.width; spacing: 10
+                    Rectangle {
+                        visible: welcomeLayer.step > 0
+                        width: 96; height: 32; radius: th.rCtrl
+                        color: th.hover; border.color: th.stroke; border.width: 1
+                        Text { anchors.centerIn: parent; text: "上一步"; color: th.fg; font.pixelSize: 13 }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: welcomeLayer.step = Math.max(0, welcomeLayer.step - 1) }
+                    }
+                    Item { width: Math.max(0, parent.width - (welcomeLayer.step > 0 ? 106 : 0)
+                            - (welcomeLayer.step < 2 ? 96 : 110)); height: 1 }
+                    Rectangle {
+                        visible: welcomeLayer.step < 2
+                        width: 96; height: 32; radius: th.rCtrl; color: th.inv
+                        Text { anchors.centerIn: parent; text: "下一步"; color: th.win; font.pixelSize: 13 }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: welcomeLayer.step = Math.min(2, welcomeLayer.step + 1) }
+                    }
+                    Rectangle {
+                        visible: welcomeLayer.step === 2
+                        width: 110; height: 32; radius: th.rCtrl; color: th.inv
+                        Text { anchors.centerIn: parent; text: "完成"; color: th.win; font.pixelSize: 13 }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: welcomeLayer.finish() }
+                    }
+                }
+            }
+        }
     }
 }
 

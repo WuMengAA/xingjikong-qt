@@ -1,10 +1,7 @@
 // 星集控 · 管理端后端实现（从 main.cpp 原样搬过来，行为保持一致）
-
 #include "viewerbackend.h"
-
 #include "oauthlogin.h"
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
-
 #include <QAbstractSocket>
 #include <QDateTime>
 #include <QCoreApplication>
@@ -33,8 +30,28 @@
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
 
+#include <algorithm>   // std::sort（离线台账清理与排序，见 refreshDevices）
+// ── 语音对讲 / 屏幕广播的时长上限（2026-10-07，用户点名："没有时长限制"）──
+// 开麦采集和抓屏推流都是**持续吃资源**的 —— 没人关就一直占着输入设备、一直 3fps 烧 CPU
+// 和上行带宽。以前只有"再点一次"才停，老师切去改作业、下课后忘了关就一路开着到关机。
+// 所以两处都上硬上限，到点自动停，并且**如实说一句**（不静默，也不说成"还在讲"）。
+static constexpr int kDefaultSpeakMaxMs = 3 * 60 * 1000;    // 讲话 3 分钟
+static constexpr int kDefaultBcastMaxMs = 10 * 60 * 1000;   // 广播 10 分钟
+// 两个 helper 都写成文件作用域 static：文件里本来已经有**另一个**匿名命名空间（分片常量
+// 那一簇），再开一个等于白白多一层 —— 内部链接的函数在文件作用域 static 是等价的。
+/** 把时长上限说成人话：≥1 分钟按分钟、不足 1 分钟按秒（压测上限只有几秒，别显示"0 分钟"）。 */
+static QString fmtLimit(int ms)
+{
+    if (ms >= 60000) return QStringLiteral("%1 分钟").arg(ms / 60000);
+    return QStringLiteral("%1 秒").arg(qMax(1, ms / 1000));
+}
+/** 读时长上限环境变量（毫秒）：只在 0 < v ≤ 1 小时时才认，写错按默认走（不因此开不起来）。 */
+static int envMaxMs(const char *key, int fallback)
+{
+    const qint64 v = qEnvironmentVariableIntValue(key);
+    return (v > 0 && v <= 3600 * 1000) ? static_cast<int>(v) : fallback;
+}
 namespace {
-
 /**
  * 一片多大（**二进制**字节）。base64 之后约再膨胀 1/3，也就是一条 ~87KB。
  *
@@ -43,7 +60,6 @@ namespace {
  * 卡在第几片、卡在哪一条能直接看出来，整发的话失败了你不知道是哪一步断的。
  */
 constexpr qint64 kFileChunkBytes = 64 * 1024;
-
 /**
  * 协议 v1 信封：{"v":1,"type":...,"id":...,"ts":...,"payload":{...}}
  * 文本消息统一走它；二进制帧（画面）另走 [1B 版本][2B 大端 headerLen][header][JPEG]。 */
@@ -57,15 +73,12 @@ QString makeEnvelope(const QString &type, const QJsonObject &payload)
     o.insert(QStringLiteral("payload"), payload);
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
-
 constexpr int kFrameHeaderMax = 4096;
 constexpr int kReconnectMs = 5000;
-
 // 管理端默认连的生产云端（2026-10-06：从本机 dev 的 127.0.0.1:8788 改过来）。
 // ⚠️ 只有"没设 STE_VIEWER_URL"时才用；本机联调请显式设 STE_VIEWER_URL=ws://127.0.0.1:8788/ws/viewer。
 // 一律 wss（走 443 的公网域名），别抄 ws —— 明文 ws 连公网会被中间人直投。
 static const QString kDefaultViewerUrl = QStringLiteral("wss://control.245959623.xyz/ws/viewer");
-
 /**
  * 只有管理员才做得了的操作（2026-10-06 打磨：权限门控）。
  *
@@ -93,7 +106,6 @@ const QStringList &adminOnlyActions()
     };
     return kAdmin;
 }
-
 /* ── 静态区判定（UU 远程同款思路的轻量版）─────────────────────────────
  * 被控端画面没在动的时候，收到多少帧都是同一张图 —— 解码 + 重绘一遍纯属白烧 CPU。
  * 判定办法：给每帧算一个**稀疏指纹**（隔 7919 字节抽一个点，4096 个点，比整图遍历便宜得多，
@@ -106,7 +118,6 @@ const QStringList &adminOnlyActions()
  * 为什么不用定时器降帧率：降帧率只是从 15fps 变 5fps，带宽和解码照样在跑；
  * 这里是"真不动就不画"，跟画面里有没有东西动无关。 */
 constexpr int kStaticStreak = 8;          // 约 0.5 秒（被控端 15fps）——太短会误判、太长画面发僵
-
 /** 画面指纹：宽高 + 整块缓冲里的伪随机采样和。同尺寸同画面 → 同指纹。 */
 quint64 frameFingerprint(const QImage &img)
 {
@@ -121,7 +132,6 @@ quint64 frameFingerprint(const QImage &img)
     }
     return h;
 }
-
 /**
  * 把 QString 转成 **带双引号的合法 JSON 字符串字面量**（即 "\"...\""，含外层引号）。
  *
@@ -141,15 +151,12 @@ QString jsonStringLiteral(const QString &s)
     // mid 之后正好是带双引号的字面量本体
     return QString::fromUtf8(full.mid(full.lastIndexOf(':') + 1));
 }
-
 } // namespace
-
 ViewerBackend::ViewerBackend(QObject *parent)
     : QObject(parent)
 {
     // 身份与提醒开关先落下来（QSettings），后面所有门控判断都基于它。
     loadPrefs();
-
     // 文件推送的"发下一片"由回执驱动：收到一片 done 才发下一片。
     // 不这样写就只能靠定时器盲发，一旦被控端拒收一片，后面全乱序、越堆越多。
     QObject::connect(this, &ViewerBackend::resultReceived, this,
@@ -162,7 +169,6 @@ ViewerBackend::ViewerBackend(QObject *parent)
                          if (m_fileState == QStringLiteral("idle")
                                  || m_fileState == QStringLiteral("done")
                                  || m_fileState == QStringLiteral("failed")) return;
-
                          // 分两档看回执：state=sent 只是"云端收下了、机器还没轮到"，
                          // 这时 result 还是空的，拿它判成败会把"正在推"误报成"推失败"。
                          // 只有 executed（机器真做了）之后，result != done 才算失败。
@@ -175,7 +181,6 @@ ViewerBackend::ViewerBackend(QObject *parent)
                                              : error);
                              return;
                          }
-
                          if (action == QStringLiteral("file_push")) {
                              logf("[viewer] file_push 会话已开，开始分片（总 %lld 字节）",
                                   (long long)m_fileTotal);
@@ -213,8 +218,73 @@ ViewerBackend::ViewerBackend(QObject *parent)
                              emit fileProgressChanged();
                          }
                      });
+    // ── 语音 / 广播的时长上限（2026-10-07）──
+    // 见文件头那条注释：两处都是"开着不关"的持续资源，必须有硬上限。
+    m_speakMaxMs = envMaxMs("STE_MAX_SPEAK_MS", kDefaultSpeakMaxMs);
+    m_bcastMaxMs = envMaxMs("STE_MAX_BCAST_MS", kDefaultBcastMaxMs);
+    m_speakLimit = new QTimer(this);
+    m_speakLimit->setSingleShot(true);
+    m_bcastLimit = new QTimer(this);
+    m_bcastLimit->setSingleShot(true);
+    m_leftTick = new QTimer(this);
+    m_leftTick->setInterval(1000);   // 驱动界面上的"还剩几秒"
+    QObject::connect(m_speakLimit, &QTimer::timeout, this, [this] {
+        stopSpeaking(QStringLiteral("讲话到 %1，已自动停（麦克风已关）").arg(fmtLimit(m_speakMaxMs)));
+    });
+    QObject::connect(m_bcastLimit, &QTimer::timeout, this, [this] {
+        stopBroadcast(QStringLiteral("屏幕广播到 %1，已自动停").arg(fmtLimit(m_bcastMaxMs)));
+    });
+    QObject::connect(m_leftTick, &QTimer::timeout, this, [this] {
+        auto tick = [](int &leftMs, int &leftSec) {
+            if (leftMs <= 0) return 0;
+            leftMs = qMax(0, leftMs - 1000);
+            const int s = (leftMs + 999) / 1000;
+            if (s != leftSec) { leftSec = s; return 1; }
+            return 0;
+        };
+        int dirty = 0;
+        if (m_speaking) dirty |= tick(m_speakLeftMs, m_speakLeftSec);
+        if (m_broadcasting) dirty |= tick(m_bcastLeftMs, m_bcastLeftSec);
+        if (dirty) emit limitsChanged();
+        if (!m_speaking && !m_broadcasting) m_leftTick->stop();
+    });
+    qInfo("[viewer] 语音对讲上限 %lld 秒 / 屏幕广播上限 %lld 秒",
+          (long long)m_speakMaxMs / 1000, (long long)m_bcastMaxMs / 1000);
+    // ── 远程终端的两次"等回话"收口（2026-10-07 修 #95）──
+    // 下发 terminal_open / terminal_close 之后本地状态都是 Pending（**关的时候也是 Pending，
+    // 不是 Idle**）。被控端/本机不回话时，**原来没有任何东西把状态放下来** ⇒ 界面永远卡在
+    // "等本机确认…"或"正在关…"，按钮永远是"关终端"、输入框永远灰，再点"开终端"又被
+    // "这台已经有终端会话了"拒掉 —— 就是用户说的"终端打开后关不掉、也连不上"。
+    // 两条定时器到点一律回 Idle，并且把原因说出来（不假装成功，也不是静默超时）。
+    m_termWait = new QTimer(this);
+    m_termWait->setSingleShot(true);
+    m_termWait->setInterval(envMaxMs("STE_TERM_WAIT_MS", 20000));   // 等本机点头 20 秒
+    m_termCloseWait = new QTimer(this);
+    m_termCloseWait->setSingleShot(true);
+    m_termCloseWait->setInterval(2500);                              // 等关断回话 2.5 秒
+    QObject::connect(m_termWait, &QTimer::timeout, this, [this]() {
+        if (m_termState != TermPending) return;   // 已经通了/已经关了，别乱动
+        const QString sid = m_termSid;
+        m_termClosing = false;
+        setTermState(TermIdle, sid, QStringLiteral("等本机点头超时（本机没允许，会话没开）"));
+        emit terminalClosed(sid, QStringLiteral("等本机点头超时"));
+        logf("[viewer] TERM 等本机点头超时（%d ms），已回 Idle",
+             (int)m_termWait->interval());
+    });
+    QObject::connect(m_termCloseWait, &QTimer::timeout, this, [this]() {
+        if (m_termState != TermPending) return;
+        const QString sid = m_termSid;
+        m_termClosing = false;
+        setTermState(TermIdle, sid, QStringLiteral("关断没回话（按已关处理，可以重开）"));
+        emit terminalClosed(sid, QStringLiteral("关断没回话"));
+        logf("[viewer] TERM 关断没回话，按已关处理并回 Idle");
+    });
+    // 启动时把两条兜底时长打出来：终端连不上这类病，排障第一眼就要看"是不是被人改短/改没了"，
+    // 日志里有数就不用猜（等本机点头那一条可用 STE_TERM_WAIT_MS 调）。
+    qInfo("[viewer] 终端兜底：等本机点头 %lld 秒 / 等关断回话 %lld 秒",
+          (long long)m_termWait->interval() / 1000,
+          (long long)m_termCloseWait->interval() / 1000);
 }
-
 // QWebEngineView 必须在 event loop 停止**之后**销毁：主线程一停转，Chromium 就要求 view
 // 已被释放，否则是 use-after-free 直接崩。这里用 deferDelete 把销毁推到事件循环之后。
 ViewerBackend::~ViewerBackend()
@@ -228,11 +298,9 @@ ViewerBackend::~ViewerBackend()
         m_rtcView = nullptr;
     }
 }
-
 // ───────────────────────────────────────────────────────────────────────────
 // 版本 / 身份 / 角色 / 提醒偏好
 // ───────────────────────────────────────────────────────────────────────────
-
 /**
  * 编译期注入的版本号（Windows 上带三个部分才显示版本号属性，只给两个的话
  * Qt 会写 "8.0.0.0" 这种被当成文件的怪东西 —— 前面三段拼够三段就行）。
@@ -240,14 +308,22 @@ ViewerBackend::~ViewerBackend()
 #ifndef STELARITH_VIEWER_VERSION_STRING
 #  define STELARITH_VIEWER_VERSION_STRING "0.0.0"
 #endif
-#define STELARITH_MAKE_VERSION(a, b, c) #a "." #b "." #c
-
+/**
+ * 界面「关于」那张卡显示的版本号。
+ *
+ * ⚠️ 2026-10-08 修：这里原来写的是
+ *      STELARITH_MAKE_VERSION(STELARITH_VIEWER_VERSION_STRING)
+ *    而那个宏的签名是 (a, b, c)（`#a "." #b "." #c`）。只喂一个参数 ⇒ MSVC 报 C4003
+ *    「宏的实际参数不足」，并且因为 `#` 不做宏展开，展开结果是把**形参名字符串化**：
+ *      "STELARITH_VIEWER_VERSION_STRING" "." "."
+ *    ——「关于」页上的版本行显示的是宏名而不是版本号（有截图实证）。
+ *    这个 bug 一直存在，只是那张卡此前高度塌成 0、根本看不见，没人发现。
+ *    CMake 侧给的本来就是**完整版本串**（含 -rc.2），不需要再拼三段，直接取用。
+ */
 QString ViewerBackend::version() const
 {
-    return QString::fromLatin1(STELARITH_MAKE_VERSION(
-        STELARITH_VIEWER_VERSION_STRING));
+    return QString::fromLatin1(STELARITH_VIEWER_VERSION_STRING);
 }
-
 /**
  * 是否处在"已经登录"的状态。
  *
@@ -257,19 +333,20 @@ QString ViewerBackend::version() const
  */
 bool ViewerBackend::loggedIn() const
 {
-    return !m_cloudTicket.isEmpty() || !m_token.isEmpty();
+    // ⚠️ 判据必须和 refreshAccountText() 一致（那边用的是 ticketUsable()）。
+    //    只看"票/令牌非空"的话：接入票 30 天到期后这里仍返回 true，
+    //    界面显示"已登录"、实际连不上云端，用户看到的是"登录着但用不了"，
+    //    而且找不到重新登录的入口 —— 正是"登录有问题"最容易被误报的形态。
+    if (!m_cloudTicket.isEmpty()) return ticketUsable();
+    return !m_token.isEmpty();   // 老路子的静态令牌没有时效，非空即算有凭据
 }
-
 QString ViewerBackend::accountName() const { return m_accountUser; }
-
 QString ViewerBackend::role() const { return m_role; }
-
 bool ViewerBackend::mayDo(const QString &perm) const
 {
     if (m_role != QStringLiteral("admin")) return adminOnlyActions().contains(perm);
     return true;
 }
-
 bool ViewerBackend::setRole(const QString &role)
 {
     const QString r = role.trimmed().toLower();
@@ -286,7 +363,6 @@ bool ViewerBackend::setRole(const QString &role)
     refreshGateState();
     return true;
 }
-
 void ViewerBackend::openRegisterPage()
 {
     if (m_siteUrl.isEmpty()) {
@@ -297,13 +373,11 @@ void ViewerBackend::openRegisterPage()
     logf("[viewer] 打开站点注册页 %s", u.toString().toUtf8().constData());
     QDesktopServices::openUrl(u);
 }
-
 void ViewerBackend::openExternal(const QString &url)
 {
     if (url.isEmpty()) return;
     QDesktopServices::openUrl(QUrl(url));
 }
-
 void ViewerBackend::setNotifyOnDone(bool on)
 {
     if (m_notifyOnDone == on) return;
@@ -312,7 +386,6 @@ void ViewerBackend::setNotifyOnDone(bool on)
     s.setValue(QStringLiteral("prefs/notifyOnDone"), on);
     emit notifyPrefChanged();
 }
-
 void ViewerBackend::setNotifyOnOffline(bool on)
 {
     if (m_notifyOnOffline == on) return;
@@ -321,7 +394,6 @@ void ViewerBackend::setNotifyOnOffline(bool on)
     s.setValue(QStringLiteral("prefs/notifyOnOffline"), on);
     emit notifyPrefChanged();
 }
-
 /**
  * 弹一条本机提示（状态行 + 可选桌面气泡）。
  *
@@ -331,11 +403,10 @@ void ViewerBackend::setNotifyOnOffline(bool on)
 void ViewerBackend::notifyPref(const QString &text)
 {
     setStatus(text, false);
-    // 桌面气泡走 main.cpp 登记的那个常驻托盘（Qt 6.8 没有 find() 可拿，靠这个钩子），
-    // 状态行那一行无论如何都写 —— 就算没有托盘（比如远程会话），提示也不该消失。
-    stelarithNotifyTray(QStringLiteral("星集控"), text);
+    // 2026-10-09：一切通知统一走灵动岛（DynamicIsland.showNote），不再弹系统托盘气泡。
+    // 状态行那一行仍写（setStatus）—— 就算窗口最小化了，状态也不会丢。
+    emit islandNote(text, QString(), QStringLiteral("bell"));
 }
-
 /**
  * 身份变了之后统一刷一遍：顶栏徽标、按钮置灰、连接区那行账号文案全挂着这些读数，
  * 一个一个 emit 容易漏（漏了就是"切了身份但按钮还是能点"）。
@@ -346,7 +417,6 @@ void ViewerBackend::refreshGateState()
     emit accountChanged();
     refreshAccountText();
 }
-
 /** 提醒开关从 QSettings 读回来（构造时调用一次）。 */
 void ViewerBackend::loadPrefs()
 {
@@ -358,8 +428,20 @@ void ViewerBackend::loadPrefs()
                                                       : QStringLiteral("admin");
     m_notifyOnDone = s.value(QStringLiteral("prefs/notifyOnDone"), true).toBool();
     m_notifyOnOffline = s.value(QStringLiteral("prefs/notifyOnOffline"), true).toBool();
+    // 首启引导标记：默认 false（没走过引导）。写盘走 markFirstRunDone()，这里只负责读回。
+    m_firstRunDone = s.value(QStringLiteral("prefs/firstRunDone"), false).toBool();
 }
 
+bool ViewerBackend::firstRunDone() const { return m_firstRunDone; }
+
+void ViewerBackend::markFirstRunDone()
+{
+    if (m_firstRunDone) return;
+    m_firstRunDone = true;
+    QSettings s;
+    s.setValue(QStringLiteral("prefs/firstRunDone"), true);
+    emit firstRunDoneChanged();
+}
 // ───────────────────────────────────────────────────────────────────────────
 // 站点账号（OAuth 一户通）
 // ───────────────────────────────────────────────────────────────────────────
@@ -368,10 +450,8 @@ void ViewerBackend::loadPrefs()
 // 把令牌跟程序文件放一起还容易被整文件夹拷走）。
 // JSON 里只有四个字段：会话令牌、接入票、票到期时刻、登录账号。
 // 强度与原来 viewer.env 里的静态令牌**同档**（都是本机明文），但多一层"是谁在连"的账号。
-
 QString ViewerBackend::accountText() const { return m_accountText; }
 bool ViewerBackend::accountBusy() const { return m_accountBusy; }
-
 static QByteArray accountFilePath()
 {
     QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
@@ -379,7 +459,6 @@ static QByteArray accountFilePath()
     if (dir.isEmpty()) dir = QDir::currentPath();
     return (dir + QStringLiteral("/account.json")).toLocal8Bit();
 }
-
 void ViewerBackend::loadAccount()
 {
     const QByteArray path = accountFilePath();
@@ -404,7 +483,6 @@ void ViewerBackend::loadAccount()
          m_accountUser.isEmpty() ? "(没记)" : m_accountUser.toUtf8().constData(),
          m_cloudTicket.size(), expTxt.constData());
 }
-
 void ViewerBackend::saveAccount()
 {
     // 凭据目录不存在就建一个：AppLocalDataLocation 在干净机器上可能还没生成过。
@@ -422,7 +500,6 @@ void ViewerBackend::saveAccount()
     }
     f.write(QJsonDocument(o).toJson(QJsonDocument::Indented));
 }
-
 void ViewerBackend::clearAccount()
 {
     m_sessionToken.clear();
@@ -432,7 +509,6 @@ void ViewerBackend::clearAccount()
     m_accountFatal = false;
     QFile::remove(QString::fromLocal8Bit(accountFilePath()));
 }
-
 void ViewerBackend::refreshAccountText()
 {
     QString s;
@@ -451,19 +527,21 @@ void ViewerBackend::refreshAccountText()
     } else {
         s = QStringLiteral("未登录：点这里用网站账号登录");
     }
-    if (s != m_accountText) {
-        m_accountText = s;
-        emit accountChanged();
-    }
+    // ⚠️ 2026-10-08：**无条件发信号**，不再"文案没变就不发"。
+    //    accountChanged 不只驱动这一行文案：loggedIn / accountName / 顶栏胶囊、
+    //    账户菜单里显示哪一组（登录组 / 退出组）全都挂在它身上。
+    //    以前那句 `if (s != m_accountText)` 会漏掉这种情形：**退出登录**后
+    //    文案恰好还是"未登录…"（没变），于是信号不发 ⇒ 菜单里的「退出登录」那组
+    //    不消失 —— 用户看到的就是"点了退出登录，还是登录着"。
+    m_accountText = s;
+    emit accountChanged();
 }
-
 bool ViewerBackend::ticketUsable(quint64 soonMs) const
 {
     if (m_cloudTicket.isEmpty() || m_ticketExp <= 0) return false;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     return now < m_ticketExp - (qint64)soonMs;
 }
-
 void ViewerBackend::pickTicketOrToken(QJsonObject &p) const
 {
     // 手里有一张没过期的票就发票（云端 authorizeViewer 认 ticket）；
@@ -475,7 +553,6 @@ void ViewerBackend::pickTicketOrToken(QJsonObject &p) const
     }
     p.insert(QStringLiteral("token"), m_token);
 }
-
 void ViewerBackend::loginWithSite()
 {
     if (m_accountBusy) return;
@@ -499,14 +576,46 @@ void ViewerBackend::loginWithSite()
     refreshAccountText();
     m_oauth->begin();
 }
-
 void ViewerBackend::forgetAccount()
 {
     clearAccount();
-    logf("[account] 已忘记本机账号（凭据已删）");
+    // ⚠️ 2026-10-08：退出登录**不能只删凭据**。以前只做 clearAccount()，剩下两件事没人收：
+    //   ① 云端连接还挂着（那张票虽然从本地删了，socket 还在）⇒ 界面继续显示设备表、
+    //      继续能下指令，用户看到的是"点了退出登录，可它还在用" —— 这是"无法退出登录"最常见的形态；
+    //   ② 重连逻辑还在转 ⇒ 过几秒又去敲门，日志里刷"鉴权失败"。
+    //   两件都收掉，并把状态如实写清（"退出了但还连着"最容易让人以为按钮坏了）。
+    m_retryStopped = true;
+    m_authFailed = false;
+    m_authFailReason.clear();
+    // 设备表清空 + 当前画面作废：这些都是"上一个账号看到的东西"，不该留给下一个人。
+    if (!m_devices.isEmpty()) {
+        m_devices = QJsonArray();
+        emit devicesChanged();
+    }
+    m_devLedger.clear();   // 离线台账也一起清（换账号后看到的应该是新账号的机器）
+    if (!m_currentUid.isEmpty() || !m_frameUid.isEmpty()) {
+        m_currentUid.clear();
+        m_frameUid.clear();
+        m_frame = QImage();
+        emit currentUidChanged();
+        emit frameChanged();
+    }
+    // 静态令牌（viewer.env 里的 STE_VIEWER_TOKEN）也一并作废 —— 否则"退出登录"之后
+    // hasAnyCredential() 仍为真、loggedIn() 仍为真，界面和菜单回到"已登录"那一组，
+    // 用户会觉得这个按钮压根没生效。重启程序会重新从 viewer.env 读回来，不会真的丢配置。
+    // ⚠️ 只在**配了站点地址**时才作废：老机器只靠静态令牌连云端，没有站点可登录；
+    //    把令牌清掉等于把程序弄成永久的"没登录"，那才是真事故。
+    const bool hadStaticToken = !m_token.isEmpty();
+    if (!m_siteUrl.isEmpty()) m_token.clear();
+    m_authed = false;
+    emit authedChanged();
+    if (m_ws) m_ws->close();
+    setStatus(QStringLiteral("已退出登录。点右上角账户 → 登录，可换一个网站账号"), false);
+    logf("[account] 已忘记本机账号（凭据已删、云端连接已断开%s）",
+         hadStaticToken ? "，静态令牌本次会话内一并作废（重启程序会从 viewer.env 读回）" : "");
     refreshAccountText();
+    refreshGateState();   // 角色门控也跟着变（没凭据就按最低权限看）
 }
-
 void ViewerBackend::onOAuthSucceeded(const QString &sessionToken, qint64 expiresInSec)
 {
     // 站点说这张会话 30 天；没给就按 30 天兜底，别签出无限期的会话。
@@ -516,7 +625,6 @@ void ViewerBackend::onOAuthSucceeded(const QString &sessionToken, qint64 expires
     logf("[account] 网站账号登录成功（会话 %lld 天）", expiresInSec / 86400);
     ensureCloudTicket(true);
 }
-
 void ViewerBackend::onOAuthFailed(const QString &reason)
 {
     m_accountBusy = false;
@@ -524,6 +632,34 @@ void ViewerBackend::onOAuthFailed(const QString &reason)
     m_accountText = QStringLiteral("登录失败：%1").arg(reason);
     logf("[account] FAIL %s", reason.toUtf8().constData());
     emit accountChanged();
+}
+/**
+ * 把站点返回的错误正文变成**人话**。
+ *
+ * 站点（SvelteKit）出错时回的是**整张 HTML 错误页**，真正的原因在 <title> 里，
+ * 例如「该账号没有查看集控的权限」「网站会话已失效，请在管理端重新登录」。
+ * 原来这里直接把 raw.left(256) 拼进界面 —— 用户看到的是一屏 <!doctype html>… 标签，
+ * 等于"登录失败，但不知道为什么、也不知道该找谁"。
+ *
+ * 取值顺序：HTML 的 <title> → JSON 的 message/error → 截断原文兜底。
+ */
+static QString humanizeSiteError(const QByteArray &raw)
+{
+    const QString txt = QString::fromUtf8(raw);
+    const int t1 = txt.indexOf(QLatin1String("<title>"));
+    if (t1 >= 0) {
+        const int t2 = txt.indexOf(QLatin1String("</title>"), t1);
+        if (t2 > t1) {
+            const QString t = txt.mid(t1 + 7, t2 - t1 - 7).trimmed();
+            if (!t.isEmpty()) return t;
+        }
+    }
+    const QJsonObject o = QJsonDocument::fromJson(raw).object();
+    for (const char *k : {"message", "error", "detail"}) {
+        const QString v = o.value(QLatin1String(k)).toString();
+        if (!v.isEmpty()) return v;
+    }
+    return txt.left(200).simplified();
 }
 
 void ViewerBackend::onSessionTicketFinished()
@@ -535,18 +671,27 @@ void ViewerBackend::onSessionTicketFinished()
     reply->deleteLater();
     m_sessionReply = nullptr;
     m_accountBusy = false;
-
     if (status != 200) {
-        const QString why = QString::fromUtf8(raw).left(256);
+        const QString why = humanizeSiteError(raw);
+        // 把"接下来该做什么"直接写在界面上：这三条是运维/老师现场唯一能自己解决的分叉，
+        // 否则拿到"HTTP 403"这类字样只能来问开发。
+        QString hint;
+        if (status == 403) {
+            hint = QStringLiteral("（该网站账号没有集控权限，请到站点后台给它授权，或改用有权限的账号）");
+        } else if (status == 401) {
+            hint = QStringLiteral("（网站会话已失效，请重新登录）");
+        } else if (status == 500) {
+            hint = QStringLiteral("（站点侧没配好云端接入票密钥，需运维处理）");
+        }
         m_accountFatal = true;
-        m_accountText = QStringLiteral("取云端接入票失败（HTTP %1%2）")
+        m_accountText = QStringLiteral("取云端接入票失败（HTTP %1%2）%3")
                             .arg(status)
-                            .arg(why.isEmpty() ? QString() : QStringLiteral("：%1").arg(why));
-        logf("[account] FAIL 换接入票失败（HTTP %d）：%s", status, raw.left(512).constData());
+                            .arg(why.isEmpty() ? QString() : QStringLiteral("：%1").arg(why))
+                            .arg(hint);
+        logf("[account] FAIL 换接入票失败（HTTP %d）：%s", status, why.toUtf8().constData());
         emit accountChanged();
         return;
     }
-
     const QJsonObject o = QJsonDocument::fromJson(raw).object();
     m_cloudTicket = o.value(QStringLiteral("ticket")).toString();
     m_ticketExp = (qint64)o.value(QStringLiteral("exp")).toDouble();
@@ -565,14 +710,11 @@ void ViewerBackend::onSessionTicketFinished()
     refreshAccountText();
     if (!m_cloudTicket.isEmpty()) connectToCloud();
 }
-
 void ViewerBackend::ensureCloudTicket(bool interactive)
 {
     if (!m_nam) m_nam = new QNetworkAccessManager(this);
     if (m_sessionReply) return;   // 换票请求在飞，别叠一个
-
     refreshAccountText();
-
     if (!m_cloudTicket.isEmpty() && ticketUsable()) {
         if (interactive) connectToCloud();
         return;
@@ -587,7 +729,6 @@ void ViewerBackend::ensureCloudTicket(bool interactive)
         loginWithSite();
         return;
     }
-
     // 有会话令牌 → 去站点换一张云端接入票
     m_accountBusy = true;
     m_accountFatal = false;
@@ -600,7 +741,6 @@ void ViewerBackend::ensureCloudTicket(bool interactive)
                      this, &ViewerBackend::onSessionTicketFinished);
     logf("[account] 正在向站点取云端接入票…");
 }
-
 void ViewerBackend::onAccountTimer()
 {
     // 票快到期（<6 小时）就提前换一张；换了成功则顺手重连一次，免得卡在"票刚过期"的空窗
@@ -608,7 +748,6 @@ void ViewerBackend::onAccountTimer()
         ensureCloudTicket(false);
     }
 }
-
 void ViewerBackend::start()
 {
     // ⚠️ 2026-10-06 改默认值：原来是 ws://127.0.0.1:8788/ws/viewer（本机 dev 云端）。
@@ -628,14 +767,12 @@ void ViewerBackend::start()
     logf("[viewer] 云端地址 %s / 站点 %s", m_url.toUtf8().constData(),
          m_siteUrl.toUtf8().constData());
     emit cloudUrlChanged();
-
     // ── 站点账号（OAuth 一户通，2026-10-06）──
     // 顺序：先读本机有没有存过的凭据 → 有就静默取票（取不到也不打扰）→ 没有就等用户点登录。
     // 没配 STE_SITE_URL 时完全按老路走（静态令牌），这条改动对老机器是零影响。
     m_oauth = new OAuthLogin(this);
     QObject::connect(m_oauth, &OAuthLogin::succeeded, this, &ViewerBackend::onOAuthSucceeded);
     QObject::connect(m_oauth, &OAuthLogin::failed, this, &ViewerBackend::onOAuthFailed);
-
     loadAccount();
     if (m_siteUrl.isEmpty()) {
         logf("[viewer] 没配 STE_SITE_URL：不走网站账号登录，仍用 viewer.env 里的静态令牌");
@@ -649,7 +786,6 @@ void ViewerBackend::start()
         refreshAccountText();
         ensureCloudTicket(false);   // 静默：有票直接用，没票也不弹浏览器
     }
-
     // Qt6 的 QWebSocket 构造是三参 (origin, version, parent)，只给 parent 会重载歧义；
     // 它是 QObject 子类但不收 QObject*，用 setParent 挂上来
     m_ws = new QWebSocket();
@@ -663,16 +799,13 @@ void ViewerBackend::start()
              m_ws->errorString().toUtf8().constData());
         setStatus(QStringLiteral("连不上云端：") + m_ws->errorString(), true);
     });
-
     // fps 统计：每秒算一次（当前画面是 2 秒一帧，别把 0.5fps 说成 200fps）
     m_fpsTimer = new QTimer(this);
     QObject::connect(m_fpsTimer, &QTimer::timeout, this, &ViewerBackend::tickFps);
     m_fpsTimer->start(1000);
-
     m_lastFpsCheckMs = QDateTime::currentMSecsSinceEpoch();
     connectToCloud();
 }
-
 // ────────────────────────────────────────────────────────────────────────────
 // WebRTC 收流（T-3，2026-10-04）
 //
@@ -688,7 +821,6 @@ void ViewerBackend::start()
 // 为什么只收不发：被控端已经建了 RTCPeerConnection 并持有 track，管理端只需要接收；
 // 双向视频（远控回环）不在这一批范围内。
 // ────────────────────────────────────────────────────────────────────────────
-
 /**
  * 取 WebRTC 信令里的字段（sdp / candidate），**两层都找**。
  *
@@ -705,7 +837,6 @@ static QString rtcField(const QJsonObject &pay, const QLatin1String &key)
     if (v.isUndefined() || v.isNull()) v = pay.value(QStringLiteral("payload")).toObject().value(key);
     return v.toString();
 }
-
 /** 离屏渲染页：一个 <video>（远端视频轨）+ 一个 <canvas>（抽帧用），全黑底、无边框。 */
 static const char *kRtcViewerHtml = R"HTML(<!doctype html>
 <html><head><meta charset="utf-8"><title>rtc</title>
@@ -748,17 +879,13 @@ var c = document.getElementById('c');
 var x = c.getContext('2d');
 var pc = null;
 var tracks = [];
-
 // 注意：这里的 window.__qt.<name> 必须和 C++ 侧 Q_INVOKABLE 的**方法名逐字一致**
 // （QWebChannel 按名字映射，名字对不上是静默失效，最难查的一种失败）
 var qtc = function () { return window.__qt; };
-
 function log(m) { try { if (qtc()) qtc().rtcDiag(String(m)); } catch (e) {} }
-
 window.addEventListener('unhandledrejection', function (e) {
   log('REJECT ' + (e.reason && (e.reason.name + ' ' + e.reason.message) || e.reason));
 });
-
 // 建连：被控端的 offer 先到 → setRemoteDescription → createAnswer 回云端
 window.__setOffer = function (b64) {
   if (!qtc()) { console.error('no qtc jobject'); return; }
@@ -801,7 +928,6 @@ window.__setOffer = function (b64) {
     qtc().rtcDiag('setOffer failed: ' + (e.name + ' ' + e.message));
   });
 };
-
 window.__addIce = function (b64) {
   var candStr = atob(b64);
   if (!pc) { log('ice-before-pc ' + candStr.slice(0, 60)); return; }
@@ -809,7 +935,6 @@ window.__addIce = function (b64) {
     log('ice-added');
   }).catch(function (e) { log('ice-FAIL ' + e.name + ' ' + e.message); });
 };
-
 // 拆掉旧 pc，为一次**全新**的协商腾地方。
 //
 // 为什么必须有：被控端每次 rtc-start 都 new 一个全新的 RTCPeerConnection（见它的 __startStream），
@@ -825,7 +950,6 @@ window.__resetPc = function () {
   try { v.srcObject = null; } catch (e) {}
   log('pc-reset');
 };
-
 // 抽帧：远端 video 解码出的帧画到 canvas，转 JPEG 交回 C++（复用现有 frame 通道）
 window.__grab = function () {
   try {
@@ -839,7 +963,6 @@ window.__grab = function () {
     log('grab-FAIL ' + e.name + ' ' + e.message);
   }
 };
-
 // 自检/诊断出口：被控端那边也留了一个 __diag，这里对称放一个
 window.__diag = function () {
   return JSON.stringify({
@@ -853,7 +976,6 @@ window.__diag = function () {
 };
 </script>
 </body></html>)HTML";
-
 void ViewerBackend::setRtcState(const QString &s)
 {
     if (m_rtcState == s) return;
@@ -861,24 +983,20 @@ void ViewerBackend::setRtcState(const QString &s)
     m_rtcReady = (s == QStringLiteral("track"));   // 拿到远端视频轨才算真出画面
     emit rtcStateChanged();
 }
-
 void ViewerBackend::initRtcView()
 {
     if (m_rtcView) return;
     cancelRtcViewReap();   // 上一轮倒计时还没到，别把刚要复用的页面收掉
-
     // WebEngine 是 Chromium：默认沙箱在没配 seccomp 的环境下会拒跑 RTCPeerConnection 的
     // ICE 传输（被控端已经踩过同一个坑，同样用 qputenv 关掉）。必须在创建 view 之前设。
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
             "-no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage");
-
     // QWebEngineView 是 QWidget 子类、不是 QObject，没有 (QObject*) 构造 ——
     // 只能先不带 parent 建，再 setParent 挂到 backend 上（挂不上就直接泄漏在堆上）
     m_rtcView = new QWebEngineView();
     // 渲染层不参与界面布局：只负责跑 RTCPeerConnection，画完抽帧交回 C++。
     // 用 move 挪出屏幕而不是 hide —— hide 后 Chromium 会暂停媒体管线，ontrack 也拿不到帧。
     m_rtcView->setGeometry(-2000, -2000, 1280, 720);
-
     // 关键：页面必须以 **file://** origin 加载，才能访问 Qt 内建的
     // qrc:///qtwebchannel/qwebchannel.js。用 data: URL 加载会让 origin 变成 null，
     // 那个 <script src> 直接被同源策略拦掉，QWebChannel 建不起来 → JS 侧 __qt 是 undefined。
@@ -897,7 +1015,6 @@ void ViewerBackend::initRtcView()
     const QString rtcDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     const QString baseDir = rtcDir.isEmpty() ? QDir::tempPath() : rtcDir;
     QDir().mkpath(baseDir);                 // 目录不给就自己建，mkdir 失败下面照样会报出来
-
     QTemporaryFile tmp(baseDir + QStringLiteral("/stelarith-viewer-rtc-XXXXXX.html"));
     tmp.setAutoRemove(false);               // 文件要留给 WebEngine 加载，析构时绝不能删
     if (!tmp.open()) {
@@ -915,7 +1032,6 @@ void ViewerBackend::initRtcView()
     tmp.close();
     m_rtcHtmlPath = tmp.fileName();         // 退出时删掉，别在缓存目录里堆垃圾（见 ~ViewerBackend）
     const QString htmlPath = m_rtcHtmlPath;
-
     auto *page = new QWebEnginePage(m_rtcView);
     m_rtcView->setPage(page);
     // 刻意**不给 parent**：QWebEngineView 是 QWidget，只能挂 QWidget 做 parent，
@@ -925,14 +1041,12 @@ void ViewerBackend::initRtcView()
     m_rtcView->settings()->setAttribute(QWebEngineSettings::ShowScrollBars, false);
     // 这是纯渲染层，不该有 JS 弹新窗 / 下载的能力（被控端那边也没这需求）
     m_rtcView->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
-
     // QWebChannel：JS ↔ C++ 的桥。构造函数只收 (QObject *parent)，页面侧的 transport
     // 由 page->setWebChannel(channel) 接管，不用自己传（QWebChannel(QWebChannelPrivate&,QObject*)
     // 那个是私有的，别去碰）
     auto *channel = new QWebChannel(this);
     channel->registerObject(QStringLiteral("qt"), this);
     page->setWebChannel(channel);
-
     // 收流页的 console 必须接到日志里。以前页面内部报什么错完全看不见
     // （QWebChannel 建不起来时 JS 只往 console 打一行 error，C++ 侧什么都收不到），
     // 于是"为什么没出画面"只能靠猜，这一猜就是几个小时。
@@ -945,7 +1059,6 @@ void ViewerBackend::initRtcView()
         }
         logf("[viewer] 收流页就绪（离屏 1280x720）");
         setRtcState(QStringLiteral("waiting"));
-
         // 桥到底建没建起来，必须当场问清楚：typeof window.qt / transport 是关键，
         // "hasPc=false 且毫无报错"只说明 JS 提前 return 了，看不出原因
         m_rtcView->page()->runJavaScript(
@@ -960,7 +1073,6 @@ void ViewerBackend::initRtcView()
         // 原先这行写在 offer 补灌之后 → 补灌那一下永远判成"页面没就绪" → offer 被原样塞回队列，
         // pc 从头到尾建不起来，后面攒的候选只能喂给 null pc，日志里只留两行 ice-before-pc。
         m_rtcPageReady = true;
-
         // 远端候选补灌必须排在 offer 之后：页面里的 pc 是 __setOffer 里同步 new 出来的，
         // 顺序反了 addIceCandidate 就会撞上 "pc 还不存在"，JS 侧只记一行 ice-before-pc 然后丢掉，
         // 候选就这么无声无息少了一批，ICE 死活连不上还查不出原因。
@@ -969,7 +1081,6 @@ void ViewerBackend::initRtcView()
             m_pendingOffer.clear();
             deliverOffer(sdp);
         }
-
         if (!m_pendingIce.isEmpty()) {
             const QStringList queued = m_pendingIce;
             m_pendingIce.clear();
@@ -977,7 +1088,6 @@ void ViewerBackend::initRtcView()
                 addRemoteIce(c);
             logf("[viewer] RTC 收流页就绪后补灌远端 ICE 候选 %d 个", queued.size());
         }
-
         // 抽帧节拍：25fps 上限，但真帧率受被控端推流 fps 限制。
         // 用成员 timer（2026-10-06 占用优化）：之前每次建页都 new 两个挂在本对象上的 timer，
         // 收流页回收时不停，一轮重连留两个空转孤儿，攒多了 tick 全是白检 nullptr。
@@ -1002,10 +1112,8 @@ void ViewerBackend::initRtcView()
         });
         m_rtcDiagTimer->start(2000);
     });
-
     page->load(QUrl::fromLocalFile(htmlPath));
 }
-
 /** 诊断/日志（JS → C++）。 */
 void ViewerBackend::rtcDiag(const QString &s)
 {
@@ -1016,7 +1124,6 @@ void ViewerBackend::rtcDiag(const QString &s)
         setRtcState(QStringLiteral("negotiating"));
     }
 }
-
 /**
  * JS 侧 createAnswer 产出的 answer → **回云端给被控端**。
  *
@@ -1040,7 +1147,6 @@ void ViewerBackend::rtcGotAnswer(const QString &sdp)
     logf("[viewer] RTC answer 已回云端（sdp %d 字符 → %s）", sdp.size(),
          m_currentUid.toUtf8().constData());
 }
-
 /**
  * JS 侧**本端** ICE candidate 过来：回云端给被控端。
  *
@@ -1062,7 +1168,6 @@ void ViewerBackend::rtcGotIce(const QString &candJson)
     p.insert(QStringLiteral("from"), QStringLiteral("viewer"));
     sendEnvelope(QStringLiteral("rtc-ice"), p);
 }
-
 void ViewerBackend::addRemoteIce(const QString &candJson)
 {
     // 判断"页面能不能灌"必须看 m_rtcPageReady，不能看 m_rtcView 是否非空 ——
@@ -1082,7 +1187,6 @@ void ViewerBackend::addRemoteIce(const QString &candJson)
     m_rtcView->page()->runJavaScript(QStringLiteral("window.__addIce('%1');")
                                      .arg(QString::fromLatin1(b64)));
 }
-
 void ViewerBackend::deliverOffer(const QString &sdp)
 {
     if (!m_rtcView || !m_rtcPageReady) {
@@ -1101,7 +1205,6 @@ void ViewerBackend::deliverOffer(const QString &sdp)
         QStringLiteral("window.__setOffer('%1');").arg(QString::fromLatin1(b64)));
     logf("[viewer] RTC offer 已灌进收流页（sdp %d 字符 → base64 %d）", sdp.size(), b64.size());
 }
-
 /**
  * 真删离屏收流页。
  * deleteLater 而不是 delete：page 上还排着 runJavaScript 回调（补灌候选、抽帧都走它），
@@ -1122,18 +1225,15 @@ void ViewerBackend::releaseRtcView()
     setRtcState(QStringLiteral("idle"));
     logf("[viewer] 收流页已回收（Chromium 渲染进程随之退出）");
 }
-
 void ViewerBackend::cancelRtcViewReap()
 {
     if (m_rtcReap && m_rtcReap->isActive()) m_rtcReap->stop();
 }
-
 void ViewerBackend::stopRtcTimers()
 {
     if (m_grabTimer) m_grabTimer->stop();
     if (m_rtcDiagTimer) m_rtcDiagTimer->stop();
 }
-
 // 延迟回收：给"刚断又马上重连"留窗口，避免断线抖动时反复重建 Chromium（重建一次几百毫秒）。
 // 真正等多久由 STE_RTC_IDLE_MS（默认 20 秒）决定，从"跟云端断开"那一刻开始算。
 void ViewerBackend::scheduleRtcViewReap()
@@ -1155,14 +1255,12 @@ void ViewerBackend::scheduleRtcViewReap()
     m_rtcReap->setInterval((int)(limit - elapsed));
     m_rtcReap->start();
 }
-
 /** JS 侧 ontrack 触发：真正拿到远端视频轨。 */
 void ViewerBackend::rtcGotTrack()
 {
     logf("[viewer] ✅ RTC ontrack：拿到远端视频轨");
     setRtcState(QStringLiteral("track"));
 }
-
 /**
  * JS → C++：抽到一帧 JPEG（base64，可能带 data: 前缀）。
  * 复用现有 frame 通道（走 applyFrameBytes → frameChanged），所以 QML 那边一行都不用改。
@@ -1176,7 +1274,6 @@ void ViewerBackend::setRtcFrame(const QString &b64)
     if (raw.isEmpty()) return;
     applyFrameBytes(raw, QJsonObject(), RtcGrab);
 }
-
 void ViewerBackend::setStatus(const QString &s, bool warn)
 {
     if (m_statusText == s && m_statusWarn == warn) return;
@@ -1184,12 +1281,10 @@ void ViewerBackend::setStatus(const QString &s, bool warn)
     m_statusWarn = warn;
     emit statusTextChanged();
 }
-
 bool ViewerBackend::hasAnyCredential() const
 {
     return !m_cloudTicket.isEmpty() || !m_token.isEmpty();
 }
-
 int ViewerBackend::retryDelayMs() const
 {
     // 5s → 10s → 20s → 30s 封顶。断线时先快速补一次（网络抖一下就回来了），
@@ -1197,7 +1292,6 @@ int ViewerBackend::retryDelayMs() const
     // 除了把日志刷爆没有任何收益，还会把真正的错误挤出去。
     return qMin(30000, 5000 * (1 << qMin(m_retryCount, 2)));
 }
-
 void ViewerBackend::connectToCloud()
 {
     if (!m_ws) return;
@@ -1220,13 +1314,11 @@ void ViewerBackend::connectToCloud()
     m_ws->open(QUrl(m_url));
     logf("[viewer] 正在连云端 %s", m_url.toUtf8().constData());
 }
-
 void ViewerBackend::sendEnvelope(const QString &type, const QJsonObject &payload)
 {
     if (!m_ws) return;
     m_ws->sendTextMessage(makeEnvelope(type, payload));
 }
-
 void ViewerBackend::onConnected()
 {
     m_connected = true;
@@ -1244,10 +1336,13 @@ void ViewerBackend::onConnected()
     pickTicketOrToken(p);
     sendEnvelope(QStringLiteral("auth"), p);
 }
-
 void ViewerBackend::onDisconnected()
 {
     m_connected = false;
+    // 断线 / 重连时必须把语音与广播收掉：麦还开着、抓屏还 3fps 推着，
+    // 而老师那边的"正在讲话"不会自己变。旧代码一直保持 m_speaking = true，
+    // 表现出来就是"我什么都没点，怎么一直在讲话"。
+    stopAllLive(QStringLiteral("与云端断开，语音与广播已自动停"));
     // 离线看门狗：跟云端断了这么久还没连回来，收流页里那个 Chromium 渲染进程（~137MB）
     // 已经送不出任何画面，留着纯占内存。判据用"跟云端断多久"而不是"多久没收到信令"——
     // 画面稳定后对端本来就不发东西，按后者数会误杀正在看的画面。
@@ -1262,9 +1357,17 @@ void ViewerBackend::onDisconnected()
     if (m_notifyOnOffline && !m_retryStopped && !m_authFailed) {
         notifyPref(QStringLiteral("与云端断开了，正在自动重连…"));
     }
-
     if (m_authFailed || m_retryStopped) {
-        // 鉴权失败/已停机重连再连只会一遍遍失败：把原因留在屏幕上，别循环
+        // ⚠️ 分两种情形说，别混成一句：
+        //   ① 手上没凭据 = 用户刚点了「退出登录」⇒ 说"已退出登录"（说成"鉴权失败"是冤枉它，
+        //      也会让用户以为票坏了、跑去乱改配置）；
+        //   ② 有凭据但被拒 = 真的是鉴权没过，把云端原话带上。
+        if (!hasAnyCredential()) {
+            logf("[viewer] 已退出登录（无凭据），停在登录页等用户，不再重连");
+            setStatus(QStringLiteral("已退出登录。点右上角账户 → 登录，可换一个网站账号"), false);
+            emit authFailed(QStringLiteral("已退出登录"));
+            return;
+        }
         logf("[viewer] FAIL 鉴权没通过，已停止重连：%s", m_authFailReason.toUtf8().constData());
         setStatus(QStringLiteral("云端鉴权失败，已停止重连：") + m_authFailReason, true);
         emit authFailed(m_authFailReason);
@@ -1276,12 +1379,10 @@ void ViewerBackend::onDisconnected()
     setStatus(QStringLiteral("与云端断开，%1 秒后重连…").arg(delay / 1000), true);
     QTimer::singleShot(delay, this, [this] { connectToCloud(); });
 }
-
 void ViewerBackend::requestDevices()
 {
     sendEnvelope(QStringLiteral("devices"), QJsonObject());
 }
-
 /**
  * 自检用：订 → 退 → 再订，逼被控端重建连接重新 offer。
  *
@@ -1316,19 +1417,76 @@ void ViewerBackend::rtcRenegotiate(const QString &uid)
         logf("[viewer] 自检：重订 %s（云端应下发 rtc-start）", uid.toUtf8().constData());
     });
 }
-
 void ViewerBackend::setCurrentUid(const QString &uid)
 {
     if (uid.isEmpty() || uid == m_currentUid) return;
+    const QString prev = m_currentUid;
     m_currentUid = uid;
     refreshCapActions();          // 换机器 = 换一套能力，门控要立刻跟着变
+
+    // ⚠️ 2026-10-08 修「切了设备画面还是第一台」的两个源头，两个都要治：
+    //
+    // ① **必须退订上一台**。云端 subscribeViewer 只是往订阅集合里 add，从不替我们取消；
+    //    而被控端是"有人看才抓屏发帧"（watch 档）。不退订 ⇒ 上一台一直以为自己被看着、
+    //    一直发帧 ⇒ 两台的帧都落到同一张 m_frame 上。谁的帧最后到，屏幕上就是谁 ——
+    //    表现为"切了也没用，还是第一台"。
+    //    （退订与 m_screenActive 无关：即使当前页不可见，上一台也该停发——它本来就不在看了。）
+    if (!prev.isEmpty()) {
+        QJsonObject un;
+        un.insert(QStringLiteral("uid"), prev);
+        sendEnvelope(QStringLiteral("unsubscribe"), un);
+        logf("[viewer] 退订上一台 %s（不退订它会一直发帧，和新设备抢同一张画面）",
+             prev.toUtf8().constData());
+    }
+
+    // ② 手上那张旧画面立刻作废。新设备第一帧到之前必须显示"正在接通"，
+    //    绝不能把上一台的桌面留在屏幕上冒充新设备（老师会照着旧画面操作新机器）。
+    //    m_frameUid 清空 = 界面据此判"这张不是当前设备的"。
+    m_frameUid.clear();
+    m_frame = QImage();
+    m_frameHash = 0;
+    m_sameFrameStreak = 0;
+    setStatic(false);
+
     emit currentUidChanged();
+    emit frameChanged();
+    emit statsChanged();
+    // 2026-10-08：带画面页不可见（用户切到概览/批量/设置）时**不订阅**——
+    // 退订即停流，云端不再往这台推帧，省流量也省被控端抓屏开销。回到该页由 setScreenActive(true) 再订阅。
+    if (!m_screenActive) {
+        logf("[viewer] 切到 %s，但带画面页不可见，暂不订阅其画面（回到集控页再拉流）",
+             uid.toUtf8().constData());
+        return;
+    }
     logf("[viewer] 切到 %s，向云端订阅它的画面", uid.toUtf8().constData());
     QJsonObject sp;
     sp.insert(QStringLiteral("uid"), uid);
     sendEnvelope(QStringLiteral("subscribe"), sp);
 }
 
+void ViewerBackend::setScreenActive(bool on)
+{
+    if (m_screenActive == on) return;
+    m_screenActive = on;
+    if (m_currentUid.isEmpty()) return;   // 没选设备，无所谓订阅
+    QJsonObject sp;
+    sp.insert(QStringLiteral("uid"), m_currentUid);
+    if (on) {
+        sendEnvelope(QStringLiteral("subscribe"), sp);
+        logf("[viewer] 回到带画面页，恢复 %s 的画面订阅", m_currentUid.toUtf8().constData());
+    } else {
+        // 离开带画面页：退订 + 清本地帧。云端停推，被控端停抓这台。
+        sendEnvelope(QStringLiteral("unsubscribe"), sp);
+        m_frameUid.clear();
+        m_frame = QImage();
+        m_frameHash = 0;
+        m_sameFrameStreak = 0;
+        setStatic(false);
+        emit frameChanged();
+        emit statsChanged();
+        logf("[viewer] 离开带画面页，停掉 %s 的画面订阅（省流量）", m_currentUid.toUtf8().constData());
+    }
+}
 // 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）：
 // 订阅一批设备的画面（不切当前选中，只收缩略图帧），QML 网格 3×3 展示。
 // 与主画面共用一条 WS 订阅（云端按 uid 推帧，帧头带 uid → 按 uid 分槽存）
@@ -1360,7 +1518,6 @@ void ViewerBackend::subscribeThumbnails(const QVariantList &uids)
     logf("[viewer] 多班缩略图订阅 %d 台：%s", want.size(),
          want.join(QLatin1String(",")).toUtf8().constData());
 }
-
 void ViewerBackend::onTextMessage(const QString &text)
 {
     const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
@@ -1373,7 +1530,6 @@ void ViewerBackend::onTextMessage(const QString &text)
     const bool isV1 = o.contains(QStringLiteral("v"));
     const QJsonObject pay = isV1 ? o.value(QStringLiteral("payload")).toObject() : o;
     const QString type = o.value(QStringLiteral("type")).toString();
-
     // RTC 报文级流水：offer 到没到、ice 到没到、answer 回没回，靠的就是这几行。
     // 以前只有"成功/失败"两种日志，缺中间态，排障只能靠猜。
     if (type.startsWith(QStringLiteral("rtc-"))) {
@@ -1384,7 +1540,6 @@ void ViewerBackend::onTextMessage(const QString &text)
              pay.value(QStringLiteral("candidate")).toString().size(),
              pay.value(QStringLiteral("payload")).toObject().size());
     }
-
     if (type == QStringLiteral("authed") || type == QStringLiteral("auth-ok")) {
         m_authed = true;
         m_retryCount = 0;           // 通了就把退避计清零，下一次断线还是 5 秒起步
@@ -1394,27 +1549,56 @@ void ViewerBackend::onTextMessage(const QString &text)
              pay.value(QStringLiteral("mode")).toString().toUtf8().constData());
         setStatus(QStringLiteral("已连上云端，等教室机推画面…"), false);
         requestDevices();   // 鉴权过后再拉设备表（之前是连上就拉，现在会被云端拒）
+        requestClasses();  // 2026-10-08 拉班级列表
+        requestStorage();  // 2026-10-08 拉云端存储概况（需求 #2：概览页要展示）
+        // 2026-10-08 兜底轮询：云端推 + 本地 15s 轮询双保险，避免 WS 抖动时设备表卡旧。
+        if (!m_refreshTimer) {
+            m_refreshTimer = new QTimer(this);
+            m_refreshTimer->setInterval(15000);
+            connect(m_refreshTimer, &QTimer::timeout, this, [this] {
+                if (m_authed) { requestDevices(); requestClasses(); requestStorage(); }
+            });
+        }
+        m_refreshTimer->start();
     } else if (type == QStringLiteral("auth-fail")) {
         m_authFailReason = pay.value(QStringLiteral("reason")).toString();
         // 拿票连的、却被拒 —— 票可能是过期的、也可能是站点那边换了密钥（旧票仍签得出但验不过）。
         // 这种情况下"停起重连"没意义（票还是那张票），正确做法是把票废掉、逼一次重新登录，
         // 由用户在浏览器里重新同意一次拿到新票。别把人卡在一条死路上。
         if (!m_cloudTicket.isEmpty()) {
-            logf("[viewer] FAIL 接入票被云端拒（%s）→ 废掉这张票，需要重新用网站账号登录",
+            logf("[viewer] FAIL 接入票被云端拒（%s）→ 废掉这张票",
                  m_authFailReason.toUtf8().constData());
             m_cloudTicket.clear();
             m_ticketExp = 0;
-            m_accountFatal = true;
-            m_accountText = QStringLiteral("接入票失效，请重新登录");
-            emit accountChanged();
+            // ⚠️ 2026-10-08 修「过期后无法自动登录」：以前这里直接判死刑
+            //    （m_accountFatal = "接入票失效，请重新登录"），但**被云端拒的只是那张票，
+            //    不是网站会话** —— 票（云端 30 天）和会话（站点 30 天）是两样东西，
+            //    票过期/站点换了签名密钥而作废时，会话往往还好着。
+            //    会话还在就**静默**去站点换一张新票再连，不该逼用户重走一遍浏览器授权。
+            //    只有站点也回 401（会话真失效）才需要人来 —— 那条路由 onSessionTicketFinished
+            //    用人话写在界面上。
+            if (!m_sessionToken.isEmpty()) {
+                m_retryStopped = true;                 // 先停这轮，等新票到手
+                m_accountFatal = false;
+                logf("[viewer] 本机还有网站会话 → 静默重新取票（不用用户点登录）");
+                setStatus(QStringLiteral("接入票失效，正在自动重新取票…"), false);
+                emit accountChanged();
+                QTimer::singleShot(600, this, [this] {
+                    if (!m_sessionToken.isEmpty()) ensureCloudTicket(false);
+                });
+            } else {
+                m_retryStopped = true;
+                m_accountFatal = true;
+                m_accountText = QStringLiteral("接入票失效，请重新登录");
+                emit accountChanged();
+                setStatus(QStringLiteral("接入票失效，请点右上角重新登录"), true);
+            }
             saveAccount();
             // ⚠️ 2026-10-06：这里必须停机重连。旧代码只 close()，紧接着被 onDisconnected
             // 重新排了一次 5 秒重连 → 那张（已清掉的）票换了个姿势再来一遍 →
             // 日志里就是几十轮 "已连上云端 → 正在鉴权 → auth-fail → 关闭 → 5 秒后重连"，
-            // 界面上看着像"程序自己在抽风"。票废了就该停在这儿等用户重新授权。
-            m_retryStopped = true;
+            // 界面上看着像"程序自己在抽风"。票废了就该停在这儿等新票/重新授权。
             m_authFailReason = QStringLiteral("接入票失效（%1）").arg(m_authFailReason);
-            setStatus(QStringLiteral("接入票失效，请点右上角重新登录"), true);
             emit authFailed(m_authFailReason);
             if (m_ws) m_ws->close();
             return;
@@ -1440,6 +1624,23 @@ void ViewerBackend::onTextMessage(const QString &text)
             m_authFailReason = message;
             m_authFailed = true;
             m_retryStopped = true;
+            // 2026-10-08：和 auth-fail 同一条路数 —— 云端说过期/无效的是**票**，
+            // 而票能由网站会话换新的。会话还在就静默换一张再连（"过期后无法自动登录"
+            // 的另一半就是这个），会话没了才请人重新登录。
+            m_cloudTicket.clear();
+            m_ticketExp = 0;
+            if (!m_sessionToken.isEmpty()) {
+                m_accountFatal = false;
+                m_authFailed = false;
+                logf("[viewer] 云端说票过期/无效，但本机还有网站会话 → 静默重新取票");
+                setStatus(QStringLiteral("登录凭据过期，正在自动重新取票…"), false);
+                emit accountChanged();
+                QTimer::singleShot(600, this, [this] {
+                    if (!m_sessionToken.isEmpty()) ensureCloudTicket(false);
+                });
+                if (m_ws) m_ws->close();
+                return;
+            }
             setStatus(QStringLiteral("登录已过期，请重新登录"), true);
             emit authFailed(message);
             if (m_ws) m_ws->close();
@@ -1451,6 +1652,14 @@ void ViewerBackend::onTextMessage(const QString &text)
              pay.value(QStringLiteral("viewers")).toInt(-1));
     } else if (type == QStringLiteral("devices")) {
         refreshDevices(pay.value(QStringLiteral("devices")).toArray());
+    } else if (type == QStringLiteral("broadcast.started")) {
+        // 云端确认广播已开始（老师屏幕 → 全部在线设备）。以云端权威状态为准，
+        // 本端若因本地先设而漏发/错发，这里兜底对齐 UI。
+        if (!m_broadcasting) { m_broadcasting = true; emit broadcastingChanged(); }
+    } else if (type == QStringLiteral("broadcast.stopped")) {
+        // 云端确认广播结束的回执（批次7：原 viewer 只发 broadcast.stop 不等回执，
+        // 云端 stop 后本端状态不跟着变 → 界面卡在"广播中"）。这里接回执收口。
+        if (m_broadcasting) { m_broadcasting = false; emit broadcastingChanged(); }
     } else if (type == QStringLiteral("subscribed")) {
         logf("[viewer] 云端确认订阅 %s", pay.value(QStringLiteral("uid")).toString().toUtf8().constData());
     } else if (type == QStringLiteral("rtc-offer")) {
@@ -1538,12 +1747,17 @@ void ViewerBackend::onTextMessage(const QString &text)
     } else if (type == QStringLiteral("terminal_opened")) {
         // 会话真开起来了。被控端这侧已经在往外吐 terminal_data，这里只负责转给界面。
         const QString sid = pay.value(QStringLiteral("sid")).toString();
-        // 只认当前会话的帧：迟到/串台的帧直接丢，别糊进窗口里
-        if (m_termState != TermOpen || sid != m_termSid) {
+        // ⚠️ 这里以前写的是 `m_termState != TermOpen` 就整条丢掉。可本地下发 terminal_open
+        //    之后设的是 TermPending（Pending=1，Open=2）—— **Pending 状态下回的
+        //    terminal_opened 会被自己扔光**，状态永远停在"等本机确认…"，输入框一直是灰的，
+        //    看起来就是"终端打不开 / 连不上"（#95）。
+        // 判据改成：没会话（Idle）或 sid 串台才丢；Pending 与 Open 都收。
+        if (m_termState == TermIdle || sid != m_termSid) {
             logf("[viewer] WARN 收到 terminal_opened 但本机没在等（state=%d sid=%s our=%s）",
                  (int)m_termState, sid.toUtf8().constData(), m_termSid.toUtf8().constData());
             return;
         }
+        m_termClosing = false;   // 通了就不是"正在关"了，去重标记跟着放掉
         setTermState(TermOpen, sid, QString());
     } else if (type == QStringLiteral("terminal_data")) {
         if (m_termState != TermOpen) return;
@@ -1563,6 +1777,7 @@ void ViewerBackend::onTextMessage(const QString &text)
         // 界面要靠它把"点了没反应"变成一句"被本机拒绝了"。
         const QString sid = pay.value(QStringLiteral("sid")).toString();
         const QString reason = pay.value(QStringLiteral("reason")).toString();
+        m_termClosing = false;
         setTermState(TermIdle, sid, reason);
         emit terminalClosed(sid, reason);
     } else if (type == QStringLiteral("instruction-result")) {
@@ -1592,7 +1807,6 @@ void ViewerBackend::onTextMessage(const QString &text)
         logf("[viewer] 收到未处理的云端消息 type=%s", type.toUtf8().constData());
     }
 }
-
 void ViewerBackend::onBinaryMessage(const QByteArray &buf)
 {
     // v1 帧：[1B 版本=1][2B 大端 headerLen][header JSON][JPEG]
@@ -1613,7 +1827,6 @@ void ViewerBackend::onBinaryMessage(const QByteArray &buf)
     // 兜底：旧裸帧（无头），整块即 JPEG
     applyFrameBytes(buf, QJsonObject());
 }
-
 /**
  * 把当前选中设备的能力清单抽出来给 QML 用（2026-10-06 契合度改造）。
  * 设备的 actions 是云端 devices 广播里带下来的（云端原样转发被控端 register 的 caps.actions）。
@@ -1639,14 +1852,12 @@ void ViewerBackend::refreshCapActions()
     }
     if (m_capActions != before) emit capActionsChanged();
 }
-
 void ViewerBackend::reportUnsupported(const QString &label, const QString &action)
 {
     logf("[viewer] 拦下「%s」：这台被控端的能力清单里没有 %s",
          label.toUtf8().constData(), action.toUtf8().constData());
     setStatus(QStringLiteral("这台被控端不支持「%1」（它没上报 %2 这个能力）").arg(label).arg(action), true);
 }
-
 /**
  * 权限被拦下的反馈（和 reportUnsupported 成对：那边是"机器不支持"，
  *  这边是"人没这个身份"—— 两种灰按钮的解释必须一样直白）。
@@ -1658,7 +1869,6 @@ void ViewerBackend::reportDenied(const QString &label)
          label.toUtf8().constData(), m_role.toUtf8().constData());
     setStatus(QStringLiteral("「%1」要管理员身份才做得到（点右上角账户就能切）").arg(label), true);
 }
-
 bool ViewerBackend::deviceSupports(const QString &action) const
 {
     if (action.isEmpty()) return false;
@@ -1668,19 +1878,107 @@ bool ViewerBackend::deviceSupports(const QString &action) const
     if (m_capActions.isEmpty()) return true;
     return m_capActions.contains(action);
 }
-
+int ViewerBackend::onlineCount() const
+{
+    int n = 0;
+    for (const QJsonValue &v : m_devices) {
+        const QJsonObject d = v.toObject();
+        if (d.value(QStringLiteral("online")).toBool(true)) ++n;
+    }
+    return n;
+}
 void ViewerBackend::refreshDevices(const QJsonArray &arr)
 {
-    const bool countChanged = (arr.size() != m_devices.size());
-    m_devices = arr;
-    if (countChanged) logf("[viewer] 设备表更新：在线 %d 台", (int)arr.size());
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    // ── 把云端推来的整批设备记进台账（在线 + 离线都在）─────────────────
+    // 10-08 后云端 listDevices() 已含离线设备，且 online 不再写死 true（由 socket 派生）。
+    // 这里必须**信任云端算好的 online**，不能自己强制 true —— 否则离线机器会被打成在线，
+    // 正是用户报的"假绿 / 离线不显示"根因（旧逻辑是云端只发在线设备时写的，云端的契约已变）。
+    // 缺省 true 仅兜底老云端（不发 online 字段时）。
+    QHash<QString, bool> seen;
+    for (const QJsonValue &v : arr) {
+        QJsonObject d = v.toObject();
+        const QString uid = d.value(QStringLiteral("uid")).toString();
+        if (uid.isEmpty()) continue;
+        const bool online = d.value(QStringLiteral("online")).toBool(true);
+        d.insert(QStringLiteral("online"), online);
+        // lastSeenAt：在线用此刻；离线用云端给的真实值（云端发 ISO 串，转成 ms 给 QML）。
+        qint64 ls = now;
+        const QJsonValue lsRaw = d.value(QStringLiteral("lastSeenAt"));
+        if (lsRaw.isString()) {
+            const qint64 parsed = QDateTime::fromString(lsRaw.toString(), Qt::ISODate).toMSecsSinceEpoch();
+            if (parsed > 0) ls = parsed;
+        } else if (lsRaw.isDouble()) {
+            ls = (qint64)lsRaw.toDouble();
+        }
+        if (online) {
+            d.insert(QStringLiteral("lastSeenAt"), (double)now);
+            d.remove(QStringLiteral("lastSeenAgoSec"));   // 在线的不说"多久没见"
+        } else {
+            d.insert(QStringLiteral("lastSeenAt"), (double)ls);
+            d.insert(QStringLiteral("lastSeenAgoSec"),
+                     (double)((ls > 0) ? (now - ls) / 1000 : -1));
+        }
+        m_devLedger.insert(uid, d);
+        seen.insert(uid, true);
+    }
+    // 过期台账清掉：机器被拔走/换掉之后，不该在列表里躺一辈子。
+    // 顺带封顶，别让一个被反复改 uid 的坏客户端把内存撑起来。
+    for (auto it = m_devLedger.begin(); it != m_devLedger.end(); ) {
+        const double t = it.value().value(QStringLiteral("lastSeenAt")).toDouble();
+        if (t > 0 && now - (qint64)t > kLedgerKeepMs) it = m_devLedger.erase(it);
+        else ++it;
+    }
+    if (m_devLedger.size() > 200) {
+        // 超上限丢最旧的：正常场景（一间机房几十台）永远走不到这儿
+        QList<QPair<double, QString>> byAge;
+        for (auto it = m_devLedger.constBegin(); it != m_devLedger.constEnd(); ++it)
+            byAge.append({ it.value().value(QStringLiteral("lastSeenAt")).toDouble(), it.key() });
+        std::sort(byAge.begin(), byAge.end());
+        for (int i = 0; i < byAge.size() - 200; ++i) m_devLedger.remove(byAge.at(i).second);
+    }
+
+    // ── 组装给界面的表：在线按云端的顺序在前，离线的按"最近掉线"在后 ──
+    QJsonArray full;
+    for (const QJsonValue &v : arr) {
+        const QString uid = v.toObject().value(QStringLiteral("uid")).toString();
+        if (uid.isEmpty() || !m_devLedger.contains(uid)) continue;
+        full.append(m_devLedger.value(uid));
+    }
+    QList<QPair<double, QJsonObject>> offline;
+    for (auto it = m_devLedger.constBegin(); it != m_devLedger.constEnd(); ++it) {
+        if (seen.contains(it.key())) continue;
+        QJsonObject d = it.value();
+        d.insert(QStringLiteral("online"), false);
+        const double t = d.value(QStringLiteral("lastSeenAt")).toDouble();
+        d.insert(QStringLiteral("lastSeenAgoSec"),
+                 (double)(t > 0 ? (now - (qint64)t) / 1000 : -1));
+        offline.append({ t, d });
+    }
+    // 刚掉线的排前面（t 大的在前）
+    std::sort(offline.begin(), offline.end(),
+              [](const QPair<double, QJsonObject> &a, const QPair<double, QJsonObject> &b) {
+                  return a.first > b.first;
+              });
+    for (const auto &p : offline) full.append(p.second);
+
+    const int onlineNow = arr.size();
+    const int offlineNow = offline.size();
+    const bool countChanged = (full.size() != m_devices.size());
+    m_devices = full;
+    if (countChanged || offlineNow > 0) {
+        logf("[viewer] 设备表更新：在线 %d 台，离线台账 %d 台（共 %d 条）",
+             onlineNow, offlineNow, (int)full.size());
+    }
     refreshCapActions();          // 设备一变（新增/掉线/换 uid），能力表就要重算
     emit devicesChanged();
-
     if (arr.isEmpty()) {
         if (!m_currentUid.isEmpty()) {
             m_currentUid.clear();
+            m_frameUid.clear();
+            m_frame = QImage();
             emit currentUidChanged();
+            emit frameChanged();
         }
         return;
     }
@@ -1689,12 +1987,47 @@ void ViewerBackend::refreshDevices(const QJsonArray &arr)
         setCurrentUid(arr.first().toObject().value(QStringLiteral("uid")).toString());
     }
 }
-
 void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,
                                     FrameSource src)
 {
     if (jpeg.isEmpty()) {
         logf("[viewer] FAIL 收到一帧但内容是空的");
+        return;
+    }
+
+    // ── 先按 uid 分诊：这一帧到底是谁的？────────────────────────────────
+    // 这是「切换设备后画面还是第一台」的根治点（2026-10-08）。
+    // 背景：云端 subscribeViewer 只往订阅集合里 add，一台设备只要被订过就会一直推帧
+    // （见 setCurrentUid 的说明）。所以到这里必须自己判，三条路：
+    //   · 当前正在看的这台        → 主画面
+    //   · 缩略图墙点名要的那几台  → **只**进缩略图槽，绝不碰主画面
+    //   · 其余（上一台还赖着发的）→ 丢掉
+    // 旧格式裸帧没有 uid 头（老被控端/老云端）⇒ 无从判断，按"当前这台"处理，别把画面弄黑。
+    const QString fuid = header.value(QStringLiteral("uid")).toString();
+    const bool isMain = fuid.isEmpty() || fuid == m_currentUid;
+    const bool isThumb = !isMain && m_thumbUids.contains(fuid);
+    if (!isMain && !isThumb) {
+        static int dropped = 0;
+        if (++dropped == 1 || dropped % 300 == 0) {
+            logf("[viewer] 丢掉非当前设备（%s）的帧 %d 张 —— 订阅没退干净时，这就是画面不跟着切的原因",
+                 fuid.toUtf8().constData(), dropped);
+        }
+        return;
+    }
+
+    // 缩略图帧到这儿就够了：只缓存一张小图，**不写 m_frame**。
+    // 以前两者共用一条路，多班面板一开，主画面就在几台缩略图之间乱跳。
+    if (isThumb) {
+        QImage t;
+        if (!t.loadFromData(jpeg)) return;
+        // ⚠️ 变量名别叫 small：Windows 头（rpcndr.h）里有 `#define small char`，
+        //    写了就是 `const QImage char = …` ⇒ C2628「QImage 后面跟 char 是非法的」，
+        //    报错落在这一行、看着像 QImage 没定义，其实跟 QImage 一点关系没有。
+        const QImage thumbImg = (t.width() > 160) ? t.scaledToWidth(160, Qt::SmoothTransformation) : t;
+        if (m_thumbFrames.value(fuid) != thumbImg) {
+            m_thumbFrames.insert(fuid, thumbImg);
+            emit thumbnailChanged(fuid);
+        }
         return;
     }
 
@@ -1714,13 +2047,11 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
         }
         return;
     }
-
     const QString wantSource = (src == RtcGrab) ? QStringLiteral("rtc") : QStringLiteral("jpeg");
     if (m_frameSource != wantSource) {
         m_frameSource = wantSource;
         emit frameSourceChanged();
     }
-
     m_frameCount++;
     m_framesSinceCheck++;
     m_lastFrameBytes = jpeg.size();
@@ -1733,20 +2064,8 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
     }
     // 不在这里缩放：缩放是界面的事（QML 有自己的 Image 缩放与填充策略）
     m_frame = img;
-
-    // ── 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）──
-    // 帧头带 uid（云端 makeFrame 按 uid 推帧）。若这台的 uid 正在被缩略图订阅，
-    // 按 uid 分槽缓存一份（**小尺寸**，缩略图 160 宽足够；不占主画面内存）。
-    const QString fuid = header.value(QStringLiteral("uid")).toString();
-    if (!fuid.isEmpty() && m_thumbUids.contains(fuid)) {
-        const QImage thumb = (img.width() > 160)
-            ? img.scaledToWidth(160, Qt::SmoothTransformation) : img;
-        if (m_thumbFrames.value(fuid) != thumb) {
-            m_thumbFrames.insert(fuid, thumb);
-            emit thumbnailChanged(fuid);
-        }
-    }
-
+    // 记下这帧的归属：裸帧（fuid 空）按"当前这台"记账，否则界面会因为"uid 对不上"永远不上屏。
+    m_frameUid = fuid.isEmpty() ? m_currentUid : fuid;
     // ── 静态区：画面连续 kStaticStreak 帧一模一样 → 不再 emit frameChanged，
     //    界面就不换 tick，等于"这张已经画出过了，别再画一遍"。
     //    （画面内容本身没变，所以停刷显示的仍是最新内容，不是旧图。）
@@ -1755,7 +2074,6 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
     m_frameHash = fp;
     setStatic(m_sameFrameStreak >= kStaticStreak);
     if (!m_screenStatic) emit frameChanged();
-
     if (m_frameCount % 30 == 1) {   // 每 30 帧报一次，别把日志刷爆
         // header 空 = 旧帧（无 v1 帧头）；现在 RTC 帧不再混在这条路里，
         // 所以 "(旧帧)" 这三个字不会再误导人以为 RTC 帧走了裸帧通道
@@ -1768,7 +2086,6 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
     }
     emit statsChanged();
 }
-
 void ViewerBackend::setStatic(bool s)
 {
     if (m_screenStatic == s) return;
@@ -1777,13 +2094,11 @@ void ViewerBackend::setStatic(bool s)
     else   logf("[viewer] 画面恢复动态 → 恢复全帧率重绘");
     emit statsChanged();
 }
-
 void ViewerBackend::tickFps()
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const double secs = (now - m_lastFpsCheckMs) / 1000.0;
     if (secs < 1.0) return;
-
     // 基准时间戳**必须无条件推进**。原来的写法把它写在 if (有帧) 里面：
     // 一旦有某个 1 秒窗口里一帧都没有（切设备、RTC 建连、被控端 momentarily 断流），
     // 基准就冻在那儿不动，下一次算出 secs = 好几秒，真实帧率被除以这段空窗 →
@@ -1793,7 +2108,6 @@ void ViewerBackend::tickFps()
     m_lastFpsCheckMs = now;
     emit statsChanged();
 }
-
 void ViewerBackend::sendAction(const QString &action, const QJsonObject &params)
 {
     if (m_currentUid.isEmpty()) {
@@ -1808,75 +2122,108 @@ void ViewerBackend::sendAction(const QString &action, const QJsonObject &params)
     if (!params.isEmpty()) p.insert(QStringLiteral("params"), params);
     sendEnvelope(QStringLiteral("instruction"), p);
 }
-
 // ──────────────────────────────────────────────────────────────────────
 // 语音对讲（设计文档 3.3，2026-10-07）
 // 老师端：开麦 → audio.start → 每帧 PCM 二进制发云端 → 云端 fan-out → 学生端播放。
 // 安全（3.3.6）：默认静音，只有点"开始讲话"才采集；停止即完全静音；不录音不存储。
 // ──────────────────────────────────────────────────────────────────────
-
+// ──────────────────────────────────────────────────────────────────────
+// 语音对讲（设计文档 3.3，2026-10-07 改写）
+// 老师端：开麦 → audio.start → 每帧 PCM 二进制发云端 → 云端 fan-out → 学生端播放。
+// 安全（3.3.6）：默认静音（**强制**：没点"开始讲话"就不采一帧），只有点开才采集；
+// 停止即完全静音；不录音不存储。
+// 新增（2026-10-07）：硬时长上限 —— 到点自动停并如实回执（见文件头的 kDefaultSpeakMaxMs）。
+// 上限环境变量：STE_MAX_SPEAK_MS（毫秒，默认 3 分钟，最长 1 小时）。
+// ──────────────────────────────────────────────────────────────────────
 bool ViewerBackend::startSpeaking()
 {
     if (m_speaking) return true;
     if (!m_audioCapture) m_audioCapture = new AudioCapture(this);
-
     // 采集回调：每 20ms 一帧 PCM → 发云端（二进制帧，云端按 audio 会话转发）
     m_audioCapture->onFrame = [this](const QByteArray &pcm) {
         if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState) return;
         m_ws->sendBinaryMessage(pcm); // 原始 PCM 帧（云端 parseFrame 兼容，mime 由会话推断）
     };
+    // 采集中途出错也要把状态收干净：只把 m_speaking 置 false 而不发 audio.stop，
+    // 云端那边还挂着"老师在讲话"，学生端会一直提示。（2026-10-07 补）
     m_audioCapture->onError = [this](const QString &err) {
-        setStatus(QStringLiteral("语音：") + err, true);
         m_speakError = err;
-        m_speaking = false;
+        emit speakErrorChanged();
+        setStatus(QStringLiteral("语音：") + err, true);
+        if (m_speaking) stopSpeaking(QStringLiteral("语音出错，已自动停：") + err);
     };
-
     if (!m_audioCapture->startCapture()) {
         m_speakError = m_audioCapture->lastError();
+        emit speakErrorChanged();
         setStatus(QStringLiteral("开麦失败：") + m_speakError, true);
         return false;
     }
-
     // 通知云端开始语音会话（之后二进制帧才被接受并转发）
     sendEnvelope(QStringLiteral("audio.start"), QJsonObject());
     m_speaking = true;
     m_speakError.clear();
-    setStatus(QStringLiteral("🎤 正在讲话（全班可听），再次点击停止"), false);
-    qInfo("[viewer] 🎤 语音对讲开始");
+    emit speakErrorChanged();
+    // 起时长上限：到点自动停 + 界面上的"还剩几秒"
+    m_speakLeftMs = m_speakMaxMs;
+    m_speakLeftSec = m_speakMaxMs / 1000;
+    m_speakLimit->start(m_speakMaxMs);
+    m_leftTick->start();
+    emit speakingChanged();
+    emit limitsChanged();
+    setStatus(QStringLiteral("🎤 正在讲话（全班可听）；最长 %1，到点自动停").arg(fmtLimit(m_speakMaxMs)), false);
+    qInfo("[viewer] 🎤 语音对讲开始（上限 %lld 秒）", (long long)m_speakMaxMs / 1000);
     return true;
 }
-
-void ViewerBackend::stopSpeaking()
+void ViewerBackend::stopSpeaking(QString why)
 {
     if (!m_speaking) return;
     if (m_audioCapture) m_audioCapture->stopCapture();
-    sendEnvelope(QStringLiteral("audio.stop"), QJsonObject());
+    m_speakLimit->stop();
     m_speaking = false;
-    setStatus(QStringLiteral("语音已停止（静音）"), false);
-    qInfo("[viewer] 🎤 语音对讲结束");
+    m_speakLeftMs = 0;
+    m_speakLeftSec = 0;
+    sendEnvelope(QStringLiteral("audio.stop"), QJsonObject());
+    if (!m_leftTick->isActive()) m_leftTick->stop();
+    if (why.isEmpty()) {
+        setStatus(QStringLiteral("语音已停止（静音）"), false);
+        qInfo("[viewer] 🎤 语音对讲结束");
+    } else {
+        // 自动停必须说清楚：界面上按钮会自己变回"开始讲话"，
+        // 但不说一句，老师只觉得"刚才那半句话怎么断了，也不提示"。
+        m_autoNote = why;
+        emit autoNoteChanged();
+        setStatus(why, false);
+        qInfo("[viewer] %s", qPrintable(why));
+    }
+    emit speakingChanged();
+    emit limitsChanged();
 }
-
-bool ViewerBackend::speaking() const
+bool ViewerBackend::isSpeaking() const
 {
     return m_speaking;
 }
-
+int ViewerBackend::speakLeftSec() const
+{
+    return m_speakLeftSec;
+}
 QString ViewerBackend::speakError() const
 {
     return m_speakError;
 }
-
 // ──────────────────────────────────────────────────────────────────────
-// 屏幕广播（设计文档《屏幕广播-第一版设计》，2026-10-07）
+// 屏幕广播（设计文档《屏幕广播-第一版设计》，2026-10-07 改写）
 // 管理端抓屏（3fps JPEG）→ 二进制帧发云端 → 云端 fan-out → 被控端全屏显示。
+// 同样带硬时长上限（见文件头）：抓屏比开麦更费，忘了关能把一台机器和上行一起熬干。
 // ──────────────────────────────────────────────────────────────────────
-
 bool ViewerBackend::startBroadcast()
 {
     if (m_broadcasting) return true;
     if (!m_bcastTimer) {
         m_bcastTimer = new QTimer(this);
-        m_bcastTimer->setInterval(330); // ~3fps（设计文档：讲课 3-5fps 足够且带宽友好）
+        // 2026-10-08 修「屏幕广播延迟太大」：原 330ms（~3fps）是主要延迟源（单帧最多等 333ms 才刷新）。
+        // 提到 100ms（~10fps）：屏幕共享标准档，帧新鲜度提升 3 倍、体感明显跟手；
+        // 上行只是老师单机一条流，10fps 完全扛得住（带宽瓶颈在云端 fan-out，教室场景可接受）。
+        m_bcastTimer->setInterval(100); // ~10fps
         connect(m_bcastTimer, &QTimer::timeout, this, [this] {
             if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState) return;
             QScreen *screen = QGuiApplication::primaryScreen();
@@ -1893,26 +2240,60 @@ bool ViewerBackend::startBroadcast()
     m_bcastTimer->start();
     m_broadcasting = true;
     sendEnvelope(QStringLiteral("broadcast.start"), QJsonObject());
-    setStatus(QStringLiteral("📺 正在屏幕广播（老师屏幕 → 全部在线设备），再次点击停止"), false);
-    qInfo("[viewer] 📺 屏幕广播开始");
+    // 起时长上限：到点自动停 + 界面上的"还剩几秒"
+    m_bcastLeftMs = m_bcastMaxMs;
+    m_bcastLeftSec = m_bcastMaxMs / 1000;
+    m_bcastLimit->start(m_bcastMaxMs);
+    m_leftTick->start();
+    emit broadcastingChanged();
+    emit limitsChanged();
+    setStatus(QStringLiteral("📺 正在屏幕广播（老师屏幕 → 全部在线设备）；最长 %1，到点自动停").arg(fmtLimit(m_bcastMaxMs)), false);
+    qInfo("[viewer] 📺 屏幕广播开始（上限 %lld 秒）", (long long)m_bcastMaxMs / 1000);
     return true;
 }
-
-void ViewerBackend::stopBroadcast()
+void ViewerBackend::stopBroadcast(QString why)
 {
     if (!m_broadcasting) return;
-    if (m_bcastTimer) m_bcastTimer->stop();
+    m_bcastTimer->stop();
     m_broadcasting = false;
+    m_bcastLeftMs = 0;
+    m_bcastLeftSec = 0;
     sendEnvelope(QStringLiteral("broadcast.stop"), QJsonObject());
-    setStatus(QStringLiteral("屏幕广播已停止"), false);
-    qInfo("[viewer] 📺 屏幕广播结束");
+    if (!m_leftTick->isActive()) m_leftTick->stop();
+    if (why.isEmpty()) {
+        setStatus(QStringLiteral("屏幕广播已停止"), false);
+        qInfo("[viewer] 📺 屏幕广播结束");
+    } else {
+        m_autoNote = why;
+        emit autoNoteChanged();
+        setStatus(why, false);
+        qInfo("[viewer] %s", qPrintable(why));
+    }
+    emit broadcastingChanged();
+    emit limitsChanged();
 }
-
-bool ViewerBackend::broadcasting() const
+bool ViewerBackend::isBroadcasting() const
 {
     return m_broadcasting;
 }
+int ViewerBackend::bcastLeftSec() const
+{
+    return m_bcastLeftSec;
+}
+QString ViewerBackend::defaultCloudUrl()
+{
+    return kDefaultViewerUrl;
+}
 
+QString ViewerBackend::autoNote() const
+{
+    return m_autoNote;
+}
+void ViewerBackend::stopAllLive(const QString &why)
+{
+    if (m_speaking) stopSpeaking(why);
+    if (m_broadcasting) stopBroadcast(why);
+}
 void ViewerBackend::fetchRecordings()
 {
     if (!m_nam) m_nam = new QNetworkAccessManager(this);
@@ -1923,13 +2304,11 @@ void ViewerBackend::fetchRecordings()
     const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
     if (wsIdx > 0) httpUrl.truncate(wsIdx);
     httpUrl += QStringLiteral("/api/recordings");
-
     QNetworkRequest req{ QUrl(httpUrl) };
     // 云端令牌：票据优先（有 uid 可审计），否则静态令牌
     const QByteArray token = !m_cloudTicket.isEmpty()
         ? m_cloudTicket.toUtf8() : m_token.toUtf8();
     if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
-
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -1945,11 +2324,70 @@ void ViewerBackend::fetchRecordings()
         reply->deleteLater();
     });
 }
+// ── 分班制（2026-10-08）──
+// 拉全部班级（含每台在线数）。云端算好结论推下来，界面只消费。
+void ViewerBackend::requestClasses()
+{
+    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    QString httpUrl = m_url;
+    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
+           .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0) httpUrl.truncate(wsIdx);
+    httpUrl += QStringLiteral("/api/classes");
+    QNetworkRequest req{ QUrl(httpUrl) };
+    const QByteArray token = !m_cloudTicket.isEmpty()
+        ? m_cloudTicket.toUtf8() : m_token.toUtf8();
+    if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 200) {
+            const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            if (doc.isObject() && doc.object().value(QStringLiteral("ok")).toBool()) {
+                m_classes = doc.object().value(QStringLiteral("classes")).toArray();
+                emit classesChanged();
+                logf("[class] 班级列表已刷新：%d 个", (int)m_classes.size());
+            }
+        } else {
+            logf("[class] 拉班级列表失败（HTTP %d，多数情况是管理端令牌与云端 VIEWER_TOKEN 不一致）", status);
+        }
+        reply->deleteLater();
+    });
+}
 
+void ViewerBackend::requestStorage()
+{
+    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    QString httpUrl = m_url;
+    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
+           .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0) httpUrl.truncate(wsIdx);
+    httpUrl += QStringLiteral("/api/storage");
+    QNetworkRequest req{ QUrl(httpUrl) };
+    const QByteArray token = !m_cloudTicket.isEmpty()
+        ? m_cloudTicket.toUtf8() : m_token.toUtf8();
+    if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 200) {
+            const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            if (doc.isObject() && doc.object().value(QStringLiteral("ok")).toBool()) {
+                m_storage = doc.object().value(QStringLiteral("storage")).toObject();
+                emit storageChanged();
+                logf("[storage] 云端存储概况已刷新");
+            }
+        } else {
+            logf("[storage] 拉云端存储概况失败（HTTP %d）", status);
+        }
+        reply->deleteLater();
+    });
+}
 // ──────────────────────────────────────────────────────────────────────
 // 远程终端
 // ──────────────────────────────────────────────────────────────────────
-
 void ViewerBackend::setTermState(TermState s, const QString &sid, const QString &note)
 {
     if (m_termState == s && m_termSid == sid && m_termNote == note) return;
@@ -1958,7 +2396,6 @@ void ViewerBackend::setTermState(TermState s, const QString &sid, const QString 
     m_termNote = note;
     emit termStateChanged();
 }
-
 void ViewerBackend::sendTermAction(const QString &action, const QJsonObject &params)
 {
     if (m_currentUid.isEmpty()) {
@@ -1972,7 +2409,6 @@ void ViewerBackend::sendTermAction(const QString &action, const QJsonObject &par
     sendEnvelope(QStringLiteral("instruction"), p);
     logf("[viewer] → %s 终端动作 %s", m_currentUid.toUtf8().constData(), action.toUtf8().constData());
 }
-
 void ViewerBackend::termOpen(const QString &shell)
 {
     const QString sh = shell.trimmed().toLower();
@@ -1996,8 +2432,9 @@ void ViewerBackend::termOpen(const QString &shell)
     params.insert(QStringLiteral("cmdMs"), 30000);
     setTermState(TermPending, sid, QStringLiteral("等本机点头…"));
     sendTermAction(QStringLiteral("terminal_open"), params);
+    // 收口：本机可能一直不点头（弹窗没人看），到点上面那条定时器会把状态放回 Idle
+    m_termWait->start();
 }
-
 void ViewerBackend::termInput(const QString &sid, const QString &keys)
 {
     if (m_termState != TermOpen || sid != m_termSid) {
@@ -2010,10 +2447,14 @@ void ViewerBackend::termInput(const QString &sid, const QString &keys)
     params.insert(QStringLiteral("keys"), keys);
     sendTermAction(QStringLiteral("terminal_input"), params);
 }
-
 void ViewerBackend::termClose()
 {
     if (m_termState == TermIdle) return;
+    // 去重：「等本机点头」和「关断请求已发、在等回话」两边状态都是 Pending（前一种也要能取消），
+    // 光看状态分不出来。不加这一道，连点按钮 / 弹窗 esc 关（onClosed→doClose）会重复下发
+    // terminal_close —— 界面上那颗按钮已经禁用了，这里再兜一道，别只靠 QML 那一层。
+    if (m_termClosing) return;
+    m_termClosing = true;
     const QString sid = m_termSid;
     QJsonObject params;
     params.insert(QStringLiteral("sid"), sid);
@@ -2021,8 +2462,10 @@ void ViewerBackend::termClose()
     // 本地先收摊：等被控端回 terminal_closed 可能要几百毫秒，
     // 这期间输入框留着会让人以为还能敲（敲了也是发给一个已经关掉的会话）
     setTermState(TermPending, sid, QStringLiteral("正在关…"));
+    // 收口：被控端不回 terminal_closed（会话早死了/网络断了）时，2.5 秒后按已关处理，
+    // 否则状态永远停在 Pending ⇒ 这台再也开不了新终端（#95 的"关不掉"那一半）。
+    m_termCloseWait->start();
 }
-
 void ViewerBackend::sendPing()
 {
     if (m_currentUid.isEmpty()) {
@@ -2036,7 +2479,6 @@ void ViewerBackend::sendPing()
     sendEnvelope(QStringLiteral("instruction"), p);
     setStatus(QStringLiteral("已向 %1 发探活，等它回话…").arg(m_currentUid), false);
 }
-
 void ViewerBackend::sendPointer(const QString &kind, double nx, double ny)
 {
     if (m_currentUid.isEmpty()) { logf("[viewer] FAIL 没选设备不发操控"); return; }
@@ -2052,14 +2494,11 @@ void ViewerBackend::sendPointer(const QString &kind, double nx, double ny)
     logf("[viewer] 操控→ %s 在 (%d%%, %d%%)", kind.toUtf8().constData(),
          (int)(nx * 100), (int)(ny * 100));
 }
-
 // ──────────────────────────────────────────────────────────────────────
 // 文件推送
 // ──────────────────────────────────────────────────────────────────────
-
 // 7 个读数（fileState/fileName/fileBytes/fileTotal/filePercent/fileError/fileTarget）
 // 在头文件里内联定义了 —— 那里是唯一一处，别在这儿再写一遍（C2084 重定义）。
-
 void ViewerBackend::clearFilePush()
 {
     if (m_pushFile.isOpen()) m_pushFile.close();
@@ -2074,7 +2513,6 @@ void ViewerBackend::clearFilePush()
     m_pushNext = 0;
     emit fileProgressChanged();
 }
-
 void ViewerBackend::setFileFail(const QString &why)
 {
     m_fileState = QStringLiteral("failed");
@@ -2083,7 +2521,6 @@ void ViewerBackend::setFileFail(const QString &why)
     logf("[viewer] FAIL 文件推送中断：%s", why.toUtf8().constData());
     emit fileProgressChanged();
 }
-
 QString ViewerBackend::pickFile()
 {
     const QString path = QFileDialog::getOpenFileName(
@@ -2095,7 +2532,6 @@ QString ViewerBackend::pickFile()
     logf("[viewer] 选文件 → %s", url.toUtf8().constData());
     return url;
 }
-
 void ViewerBackend::pushFile(const QString &urlText)
 {
     // 没选设备就直接判失败：sendAction 会自己拦下来发不出去，但状态已经被设成 pushing 了，
@@ -2105,7 +2541,6 @@ void ViewerBackend::pushFile(const QString &urlText)
         return;
     }
     clearFilePush();
-
     // 界面拿到的是 file:// URL，这里统一解一次，顺便把"到底在推哪个文件"印进日志 ——
     // 出错时日志里能直接对上，不用再去问人"你选的是哪个文件"
     const QString path = QUrl::fromUserInput(urlText).toLocalFile();
@@ -2123,11 +2558,9 @@ void ViewerBackend::pushFile(const QString &urlText)
         setFileFail(QStringLiteral("这是个空文件（0 字节），推过去对不上账"));
         return;
     }
-
     m_fileName = fi.fileName();
     m_fileTotal = fi.size();
     m_pushPath = path;
-
     // QFile 必须先 setFileName 才能 open —— 2026-10-04 踩过：漏了这行，open() 直接 false，
     // 而且 errorString() 只会给你一句无用的 "Unknown error"（没文件名时 Qt 连错误类型都设不出来）。
     // 那时候会在"开本机文件"这一步卡死，一片 file_chunk 都发不出去，日志上看不出根因。
@@ -2146,23 +2579,19 @@ void ViewerBackend::pushFile(const QString &urlText)
         return;
     }
     logf("[viewer] 本机源文件已打开（%lld 字节），开始推给教室机", (long long)m_pushFile.size());
-
     m_fileState = QStringLiteral("pushing");
     emit fileProgressChanged();
     logf("[viewer] 开会话 → file_push %s（%lld 字节）→ %s",
          m_fileName.toUtf8().constData(), (long long)m_fileTotal,
          m_currentUid.toUtf8().constData());
-
     QJsonObject p;
     p.insert(QStringLiteral("name"), m_fileName);
     p.insert(QStringLiteral("total_bytes"), (double)m_fileTotal);
     sendAction(QStringLiteral("file_push"), p);
 }
-
 void ViewerBackend::sendNextChunk()
 {
     if (m_fileState != QStringLiteral("sending")) return;
-
     const qint64 left = m_fileTotal - m_fileBytes;
     if (left <= 0) {
         // 收口：把声明的总字节数交给被控端，它自己会比对、对不上就把半截文件删掉
@@ -2171,7 +2600,6 @@ void ViewerBackend::sendNextChunk()
         sendAction(QStringLiteral("file_done"), p);
         return;
     }
-
     const QByteArray blob = m_pushFile.read(qMin(left, kFileChunkBytes));
     if (blob.isEmpty()) {
         // 注意：格式化参数只能给 QString::arg，不能塞进 QStringLiteral —— 那是宏，
@@ -2180,7 +2608,6 @@ void ViewerBackend::sendNextChunk()
                         .arg((long long)m_fileBytes).arg((long long)m_fileTotal));
         return;
     }
-
     QJsonObject p;
     p.insert(QStringLiteral("seq"), (double)m_pushNext);
     p.insert(QStringLiteral("data"), QString::fromLatin1(blob.toBase64()));
@@ -2190,7 +2617,6 @@ void ViewerBackend::sendNextChunk()
     emit fileProgressChanged();
     sendAction(QStringLiteral("file_chunk"), p);
 }
-
 void ViewerBackend::cancelPush()
 {
     if (m_fileState == QStringLiteral("idle")) return;
@@ -2211,7 +2637,6 @@ void ViewerBackend::cancelPush()
     logf("[viewer] 文件推送已取消（被控端已关会话并删掉半截文件，收件目录不留残骸）");
     emit fileProgressChanged();
 }
-
 void ViewerBackend::sendType(const QString &text)
 {
     if (m_currentUid.isEmpty()) { logf("[viewer] FAIL 没选设备不发打字"); return; }

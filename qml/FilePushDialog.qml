@@ -50,13 +50,14 @@ Popup {
                 font.pixelSize: 13
                 font.weight: Font.Medium
             }
-            Text {
+            SvgIcon {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.right: parent.right
                 anchors.rightMargin: 18
-                text: "✕"
-                color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
-                font.pixelSize: 13
+                name: "x"
+                tint: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                width: 14
+                height: 14
                 MouseArea {
                     anchors.fill: parent
                     anchors.margins: -10
@@ -165,9 +166,9 @@ Popup {
                     if (backend.fileState === "sending")
                         return "正在推：" + backend.fileBytes + " / " + backend.fileTotal + " 字节";
                     if (backend.fileState === "failed")
-                        return "✕ 推失败：" + backend.fileError;
+                        return "推失败：" + backend.fileError;
                     if (backend.fileState === "done")
-                        return "✅ 已推到：" + backend.fileTarget;
+                        return "已推到：" + backend.fileTarget;
                     if (backend.fileError === "已取消")
                         return "已取消";
                     return "选好文件后点「开始推送」";

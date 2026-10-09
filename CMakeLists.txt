@@ -1,33 +1,89 @@
 cmake_minimum_required(VERSION 3.21)
-project(stelarith-viewer-qt LANGUAGES CXX)
+# RC：让 CMake 认得 .rc（版本资源）。不加，下面列 app.rc 会报 RC language not enabled。
+project(stelarith-viewer-qt LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(/utf-8)
 
-# ── 管理端版本号（2026-10-06 打磨）──
+# ── 管理端版本号（2026-10-06 打磨；2026-10-07 改 DeepSeek Harness 同款）──
+# 命名只有两种形态（2026-10-07 起同 DeepSeek Harness）：正式版 X.Y.Z（0.6.23）、
+# 预发布 X.Y.Z-alpha.N（0.6.23-alpha.1，内测）与 X.Y.Z-rc.N（0.6.23-rc.1，候选），
+# 阶段序 alpha < rc < 正式；号同核心递增、换核心归零、转正即剥离后缀。
+# 成熟度标记（内测/公测/强制升级）不进版本号，归 ota.json 的 mandatory / notes 管。
+# 完整标准见 docs/版本号命名规范-2026-10-07.md。
 # 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
 # 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
-set(VIEWER_VERSION "0.6.14")
+set(VIEWER_VERSION "0.6.23-rc.2")
 add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
 
-# 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补）。
+# 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补；2026-10-07 正则收严到 X.Y.Z[-rc.N]）。
 # 背景：main.cpp 原先也硬编码 kViewerVersion="0.6.2"，CMake 这边已经 0.6.3 →
 # 日志首行写 0.6.2、「关于」写 0.6.3，用户一眼就看得出这软件没打磨过。
 # 光靠"记得同步"是守不住的（上面刚漂移过一次），所以在配置阶段直接读源码比对，不一致就别编。
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" _viewer_src)
-if (_viewer_src MATCHES "kViewerVersion[ \t\r\n]*=[ \t\r\n]*\"([0-9][^\"]*)\"")
+if (_viewer_src MATCHES "kViewerVersion[ \t\r\n]*=[ \t\r\n]*\"([^\"]+)\"")
   set(_src_version "${CMAKE_MATCH_1}")
-  if(NOT _src_version STREQUAL "${VIEWER_VERSION}")
-    message(FATAL_ERROR
-      "版本号漂移：CMakeLists.txt 是 ${VIEWER_VERSION}，src/main.cpp 里的回落是 ${_src_version}。\n"
-      "改版本只改 CMakeLists.txt 的 set(VIEWER_VERSION ...) 这一行（main.cpp 那份会自动跟随，\n"
-      "不一致说明手改过 main.cpp —— 要么删掉手改，要么把这里的 VIEWER_VERSION 一起改）。")
-  endif()
-  message(STATUS "[viewer] 版本一致性检查通过：${_src_version}")
 else()
   message(FATAL_ERROR "在 src/main.cpp 里找不到 kViewerVersion 字面量，版本号校验没法做")
 endif()
+# 命名守门（2026-10-07）：只认三种形态 —— 正式 X.Y.Z / 内测 X.Y.Z-alpha.N / 候选 X.Y.Z-rc.N
+# （阶段号从 1 起，alpha < rc）。顺带把 alpha.0、裸 "-rc"、四段式这些一律挡在构建外。
+if (NOT _src_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|rc)\\.[1-9][0-9]*)?$")
+  message(FATAL_ERROR
+    "版本号 ${_src_version} 不合命名规范：只认 0.6.23（正式）、0.6.23-alpha.1（内测）或 "
+    "0.6.23-rc.1（候选）这种形态；\n"
+    "阶段号从 1 起、不接受裸后缀、不接受第四段数字。详见 docs/版本号命名规范-2026-10-07.md")
+endif()
+if (NOT _src_version STREQUAL "${VIEWER_VERSION}")
+  message(FATAL_ERROR
+    "版本号漂移：CMakeLists.txt 是 ${VIEWER_VERSION}，src/main.cpp 里的回落是 ${_src_version}。\n"
+    "改版本只改 CMakeLists.txt 的 set(VIEWER_VERSION ...) 这一行（main.cpp 那份会自动跟随，\n"
+    "不一致说明手改过 main.cpp —— 要么删掉手改，要么把这里的 VIEWER_VERSION 一起改）。")
+endif()
+message(STATUS "[viewer] 版本一致性检查通过：${_src_version}")
+
+# installer.nsi（NSIS 安装器）的版本常量也由这里出（2026-10-08 立）。
+# 理由与被控端 version.nsh 完全一致：NSIS 那侧不再手抄一份版本号，用
+#   !include "..\build\version.nsh"
+# 吃这个生成文件 —— 从源头掐掉「安装器 0.6.5 / exe 0.6.23」靠人记着同步的老问题。
+# ⚠️ 命名与被控端不同：那边叫 VER，这边叫 VERSION_RAW（管理端 nsi 里是这个名字，
+#    保持一致，免得两个工程的脚本文案互相误导）。
+configure_file(src/version.nsh.in "${CMAKE_CURRENT_BINARY_DIR}/version.nsh" @ONLY)
+
+# ── 版本资源 + 应用图标（2026-10-07 补）──────────────────────────────────
+# 补之前 exe 是「无版本资源的裸 PE」：任务管理器细节页空白、右键属性没有描述。
+# 这里**不另写版本号**——直接吃上面校验过的 VIEWER_VERSION，从源头杜绝两份漂移。
+# ⚠️ 版本串可以带 -rc.N（显示用，.rc 的字符串字段吃得下：FileVersion "0.6.23-rc.1"），
+#    但 FILEVERSION / PRODUCTVERSION 是**二进制字段，只认四段纯数字** —— 直接把整个串按
+#    "." 拆开，来个 "0.6.23-rc.1" 会拆出 "22-rc" 这种段，成品 exe 的版本资源就废了。
+#    所以先剥出核心三段 X.Y.Z，第四段固定补 0（Windows 版本资源的规矩）。
+string(REGEX REPLACE "^(.+)-(alpha|rc)\\.([0-9]+)$" "\\1" VIEWER_CORE "${VIEWER_VERSION}")
+if (VIEWER_VERSION STREQUAL "${VIEWER_CORE}")
+  set(VIEWER_STAGE "")              # 正式版：没有阶段后缀
+  set(VIEWER_STAGE_N "")
+else()
+  string(REGEX REPLACE "^.*-(alpha|rc)\\.([0-9]+)$" "\\1" VIEWER_STAGE "${VIEWER_VERSION}")
+  string(REGEX REPLACE "^.*-(alpha|rc)\\.([0-9]+)$" "\\2" VIEWER_STAGE_N "${VIEWER_VERSION}")
+endif()
+message(STATUS "[viewer] 版本 ${VIEWER_VERSION}"
+  "（核心 ${VIEWER_CORE}，阶段 ${VIEWER_STAGE} ${VIEWER_STAGE_N}）")
+string(REPLACE "." ";" _viewer_v "${VIEWER_CORE}")
+list(LENGTH _viewer_v _viewer_vn)
+while(_viewer_vn LESS 4)
+  list(APPEND _viewer_v "0")
+  list(LENGTH _viewer_v _viewer_vn)
+endwhile()
+list(GET _viewer_v 0 _viewer_v0)
+list(GET _viewer_v 1 _viewer_v1)
+list(GET _viewer_v 2 _viewer_v2)
+list(GET _viewer_v 3 _viewer_v3)
+set(RC_VERSION_QUAD "${_viewer_v0},${_viewer_v1},${_viewer_v2},${_viewer_v3}")
+
+configure_file(src/app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app.rc" @ONLY)
+# ⚠️ rc.exe 的工作目录是构建目录，.rc 里的 ICON "app.ico" 是相对名 ⇒ 图标先备到这里。
+configure_file(src/app.ico "${CMAKE_CURRENT_BINARY_DIR}/app.ico" COPYONLY)
+
 if (MSVC)
   add_compile_options(/EHsc)
 endif()
@@ -47,7 +103,7 @@ endif()
 # QuickControls2（2026-10-06 加）：main.cpp 要 QQuickStyle::setStyle("Basic")。
 # 不把这个模块挂上，QQuickStyle 头文件/链接都拿不到，默认风格那堆
 # "style does not support customization" 警告也就消不掉。
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets Widgets WebEngineWidgets WebChannel)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets Widgets WebEngineWidgets WebChannel Svg)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
@@ -59,6 +115,9 @@ qt_add_executable(viewer-qt
   src/singleinstance.h
   src/oauthlogin.cpp
   src/oauthlogin.h
+  # ── 自更新（2026-10-08）：检查 / 下载 / sha256 校验 / 解压 / 退出后替换重启 ──
+  src/updater.cpp
+  src/updater.h
   # ── 语音对讲（2026-10-07）：管理端 winmm waveIn 采集 ──
   src/audio_capture.cpp
   src/audio_capture.h
@@ -78,6 +137,11 @@ qt_add_executable(viewer-qt
   # ── 课表编辑器文件选择（2026-10-06）──
   src/file_dialogs.cpp
   src/file_dialogs.h
+  # ── SVG 图标提供器（2026-10-08：image://svgicon/，lucide/morphicons 同款）──
+  src/svgiconprovider.cpp
+  src/svgiconprovider.h
+  # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
+  ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
 # 界面资源：QML 模块 URI = Stelarith。
 # 2026-10-06：Main.qml 不再列进 QML_FILES —— 它原先是跟 exe 一起烧进二进制的，
@@ -102,6 +166,11 @@ qt_add_qml_module(viewer-qt
     qml/schedule/SubjectManager.qml
 )
 
+# 2026-10-08 引入 lucide（morphicons 同款 24×24 stroke 风格，ISC）SVG 图标，
+# 编译进 exe（qrc 前缀 /icons），部署不带额外文件、颜色运行时按主题染。
+file(GLOB VIEWER_ICON_SVGS "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/*.svg")
+qt_add_resources(viewer-qt "viewericons" PREFIX "/icons" BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons" FILES ${VIEWER_ICON_SVGS})
+
 # 2026-10-06：QML 不再编进 exe（见上面对 QML_FILES 的改动），改为构建后拷到
 # exe 同目录的 qml/Stelarith/，运行期由 main.cpp 从磁盘加载。
 # 放子目录而不是 qml/ 根：那里是 windeployqt 的 Qt 插件地盘（QtQuick.2/、QtQml/…），
@@ -112,7 +181,7 @@ add_custom_command(TARGET viewer-qt POST_BUILD
           "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith"
   VERBATIM)
 
-target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel)
+target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Svg)
 set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE OFF)
 
 # ── Qt 运行时部署（用 Qt 官方部署工具 windeployqt）──

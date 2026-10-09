@@ -25,6 +25,14 @@ Item {
     property bool open: menu.visible
     /** 主窗口把"跳到设置页"塞进来（这里够不着 root，别硬写死页号）。 */
     property var goSettings: null
+    /** 宿主层：Main.qml 传进来的 acctLayer（z:9990，罩在所有页面之上）。
+     *  它存在只为让调用点的赋值合法 —— 当前 Popup 仍走 Overlay.overlay 那条
+     *  （见下面 anchorGlobal / ax / ay 的旧逻辑）。接手的人把 popup.parent 换到
+     *  这一层、并把 modal 遮罩一并挂进来，遮罩就不会再压住菜单。
+     *  ⚠️ 少了这一行声明，Main.qml 里的 `hostLayer: acctLayer` 会直接让整窗
+     *     QML 加载失败（Cannot assign to non-existent property），程序连起来都起不来。
+     */
+    property var hostLayer: null
 
     // 胶囊本体：一个 Rectangle 装「头像 + 名字 + 角色」
     Rectangle {
@@ -108,29 +116,26 @@ Item {
     // 下拉菜单（浮在顶栏下面，右对齐）
     Popup {
         id: menu
-        // ⚠️ 2026-10-06 二次修（第一次只夹了边界，没换坐标系，照旧飞出屏幕）：
-        // Popup 打开时会被 reparent 到 Overlay.overlay 上，它的 x/y 是**窗口级**坐标；
-        // 而 acct.x / acct.y 是胶囊**相对父容器**的坐标。两个坐标系一混，
-        // 胶囊嵌在顶栏 Row 里（acct.x 常常只有几十），算出来的位置就飘到窗口左上角甚至屏幕外。
-        // 另外旧式 `overlayH - height - 8` 在菜单比窗口还高时是**负数**，y 直接变负 → 出屏。
-        // 现在：先用 mapToGlobal 把胶囊位置换算进 overlay 坐标系，再四边夹住、下放不下就翻上去。
-        readonly property point anchorGlobal: acct.mapToGlobal(0, 0)
-        readonly property point overlayGlobal: Overlay.overlay ? Overlay.overlay.mapToGlobal(0, 0) : Qt.point(0, 0)
-        readonly property real ax: anchorGlobal.x - overlayGlobal.x
-        readonly property real ay: anchorGlobal.y - overlayGlobal.y
-        readonly property real avW: Overlay.overlay ? Overlay.overlay.width : 1280
-        readonly property real avH: Overlay.overlay ? Overlay.overlay.height : 720
-        // 菜单比可用高度还高时截到可用高度（配合下面的 clip，绝不许溢出到屏幕外）
-        readonly property real wantH: Math.min(implicitHeight, Math.max(120, avH - 16))
-        x: Math.max(8, Math.min(ax + acct.width - width, Math.max(8, avW - width - 8)))
-        y: {
-            var below = ay + acct.height + 6
-            if (below + wantH <= avH - 8) return below          // 下面放得下就贴着胶囊下缘
-            var above = ay - wantH - 6                          // 放不下就翻到胶囊上方
-            return Math.max(8, above)                           // 上下都放不下就贴顶，绝不许负数
-        }
-        height: wantH
+        // ⚠️⚠️ 父层**必须显式给**（这就是「用户面板不在屏幕内」的真根因，2026-10-08）：
+        //
+        //   不给的话 Popup 会落到"声明处"的坐标空间 —— 这个组件声明在**顶栏那一格里**
+        //   （150x28 的小 Item），于是 x/y 被当成相对那一格的偏移。
+        //   探针实测：菜单 x=926 被解释成"胶囊右边 926px" ⇒ 绝对位置 ≈ 窗口外 1900px，
+        //   **一个像素都没画出来**（但 menu.visible/opened 全是 true，日志也一片正常）。
+        //
+        //   为什么不是自动挂到 Overlay.overlay 上：本工程里 `Overlay.overlay` 在弹窗打开
+        //   之前读是 **null**（探针：overlayNull=true、parent=AccountMenu_QMLTYPE_63），
+        //   挂在顶栏那一格上，坐标空间就全错了。前两次修（换算法、加边界夹取）都栽在
+        //   "坐标系到底是谁的"这件事上，没治到父层。
+        //
+        //   hostLayer = Main.qml 里的 acctLayer：铺满窗口、z=9990。挂在它上面，
+        //   x/y 天然就是**窗口坐标**（下面的 place() 也按窗口算），菜单既在窗口里、
+        //   又压在所有页面之上。
+        parent: hostLayer
+        x: 0
+        y: 0
         width: 236
+        height: 200                 // 打开前 place() 会按内容重算
         modal: true
         padding: 0
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -268,8 +273,34 @@ Item {
         }
     }
 
+    /**
+     * 每次打开**现算**落点，绝不依赖绑定缓存。
+     * 细节见 menu 那段注释（这是「账户面板飞到屏幕外」的修复本体）。
+     */
+    function place() {
+        // 参考层：铺满窗口的那一层（hostLayer）。它拿不到时退到自己的父（同类空间）。
+        var ref = (hostLayer && hostLayer.width > 0) ? hostLayer : acct.parent
+        if (!ref) return
+        var p = acct.mapToItem(ref, 0, 0)          // 胶囊在这层里的坐标 = 窗口坐标
+        var wantH = Math.min(menu.implicitHeight, Math.max(120, ref.height - 16))
+        // 右对齐到胶囊右缘，再四边夹住（窗口很窄时也不会贴出右边界）
+        var mx = p.x + acct.width - menu.width
+        mx = Math.max(8, Math.min(mx, Math.max(8, ref.width - menu.width - 8)))
+        // 默认贴胶囊下缘；下面放不下就翻到上面；上下都放不下就贴顶
+        // ⚠️ 最后那次 Math.max(8, …) 必须**同时夹上下**：只夹上不夹下的话，
+        //    菜单比窗口还高时 y 会算成负数（老版就是这么飞出去的）。
+        var my = p.y + acct.height + 6
+        if (my + wantH > ref.height - 8) my = p.y - wantH - 6
+        my = Math.max(8, Math.min(my, Math.max(8, ref.height - wantH - 8)))
+        menu.height = wantH
+        menu.x = mx
+        menu.y = my
+        console.log("[acct] 菜单落点 (" + mx + "," + my + ") " + menu.width + "x" + menu.height
+                    + "（参考层 " + ref.width + "x" + ref.height + "，胶囊 " + p.x + "," + p.y + "）")
+    }
+
     function toggle() {
         if (menu.visible) menu.close()
-        else menu.open()
+        else { place(); menu.open() }
     }
 }

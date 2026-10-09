@@ -37,6 +37,7 @@
 
 class QTcpServer;
 class QTcpSocket;
+class QTimer;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QWidget;      // 内嵌登录窗：只在 .cpp 里 include WebEngine，头文件保持干净
@@ -101,6 +102,7 @@ private:
     QTcpServer *m_server = nullptr;
     QNetworkAccessManager *m_nam = nullptr;
     QTcpSocket *m_sock = nullptr;      // 只接第一路回拨就够，剩下的直接拒
+    QTimer *m_timeout = nullptr;       // 登录总超时：回拨不来必须收口（见 .cpp 注释）
     QByteArray m_pending;          // 本次回拨收到的 HTTP 请求原文（成员，不是 static）
     QWidget *m_loginWin = nullptr;     // 内嵌登录窗（QWebEngineView 的宿主）
     QString m_state;                   // CSRF：回拨回来对不上就判为无效

@@ -36,6 +36,7 @@ import QtQuick
 import QtQuick.Controls
 // 参数拼装抽到纯 JS 里，好让 node 能跑断言（scripts/test-notify-params.mjs）。
 // 见该文件顶部：契约来自 control-qt 的 notifyFromParams()，别凭记忆改。
+import "components"        // InputField：输入框必须走这一个组件，见它顶部那条白底白字的坑
 import "NotifyParams.js" as NP
 
 Popup {
@@ -86,13 +87,13 @@ Popup {
         border.color: tick.checked ? (dlg.theme ? dlg.theme.inv : "#F0F0F0")
                                    : (dlg.theme ? dlg.theme.stroke : "#242424")
         border.width: 1
-        Text {
+        SvgIcon {
             anchors.centerIn: parent
             visible: tick.checked
-            text: "✓"
-            color: dlg.theme ? dlg.theme.win : "#0A0A0A"
-            font.pixelSize: 11
-            font.weight: Font.Medium
+            name: "check"
+            tint: dlg.theme ? dlg.theme.win : "#0A0A0A"
+            width: 11
+            height: 11
         }
     }
 
@@ -174,13 +175,14 @@ Popup {
                 color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
                 font.pixelSize: 11
             }
-            Text {
+            SvgIcon {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.right: parent.right
                 anchors.rightMargin: 18
-                text: "✕"
-                color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
-                font.pixelSize: 13
+                name: "x"
+                tint: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                width: 14
+                height: 14
                 MouseArea {
                     anchors.fill: parent
                     anchors.margins: -10
@@ -227,27 +229,20 @@ Popup {
                 color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
                 font.pixelSize: 11
             }
-            Rectangle {
+            // ⚠️ 这里以前是「自画一个 Rectangle + 裸 TextInput」：只给了 color，没给 background。
+            //    QQC2 的 TextInput 默认背景吃系统调色板（Windows 上恒白），叠上 dlg.theme.fg
+            //    （暗色外观下是 #FAFAFA 近白）⇒ 白底白字，看起来就是"这框打不了字"（#94）。
+            //    统一走 InputField：底色透明、描边走主题，暗/亮两套都站得住。
+            InputField {
+                id: titleInput
+                th: dlg.theme
                 anchors.verticalCenter: parent.verticalCenter
                 x: 74
                 width: parent.width - 74 - 78
                 height: 30
-                radius: dlg.theme ? dlg.theme.rCtrl : 8
-                border.color: dlg.titleOver ? "#BA7517" : (dlg.theme ? dlg.theme.stroke : "#242424")
-                border.width: 1
-                TextInput {
-                    id: titleInput
-                    anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
-                    font.pixelSize: 12
-                    selectByMouse: true
-                    clip: true
-                    maximumLength: 120
-                    onTextChanged: dlg.error = ""
-                }
+                selectByMouse: true
+                maximumLength: 120
+                onTextChanged: dlg.error = ""
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -270,26 +265,15 @@ Popup {
                 color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
                 font.pixelSize: 11
             }
-            Rectangle {
+            InputField {
+                id: bodyInput
+                th: dlg.theme
                 anchors.verticalCenter: parent.verticalCenter
                 x: 74
                 width: parent.width - 74 - 78
                 height: 30
-                radius: dlg.theme ? dlg.theme.rCtrl : 8
-                border.color: dlg.contentOver ? "#BA7517" : (dlg.theme ? dlg.theme.stroke : "#242424")
-                border.width: 1
-                TextInput {
-                    id: bodyInput
-                    anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
-                    font.pixelSize: 12
-                    selectByMouse: true
-                    clip: true
-                    maximumLength: 300
-                }
+                selectByMouse: true
+                maximumLength: 300
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -312,24 +296,15 @@ Popup {
                 color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
                 font.pixelSize: 11
             }
-            Rectangle {
+            InputField {
+                id: secInput
+                th: dlg.theme
                 anchors.verticalCenter: parent.verticalCenter
                 x: 74
                 width: 92
                 height: 30
-                radius: dlg.theme ? dlg.theme.rCtrl : 8
-                border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
-                TextInput {
-                    id: secInput
-                    anchors.fill: parent
-                    anchors.leftMargin: 10
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
-                    font.pixelSize: 12
-                    validator: IntValidator { bottom: 0; top: 3600 }
-                    text: "0"
-                }
+                validator: IntValidator { bottom: 0; top: 3600 }
+                text: "0"
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
