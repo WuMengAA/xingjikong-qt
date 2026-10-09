@@ -20,9 +20,12 @@
 
 #include <QWidget>
 #include <QString>
+#include <QStringList>
+#include <QVector>
 #include <QPointer>
 #include <QTimer>
 #include <QPropertyAnimation>
+#include <functional>
 
 class QMouseEvent;
 class QPaintEvent;
@@ -53,6 +56,18 @@ public:
                     const QString &icon = QString(),
                     int durationMs = 5000, Form form = Form::Capsule);
     Form form() const { return m_form; }
+
+    // ── 带交互按钮的通知（2026-10-09 · 把「确认」并入灵动岛本体）───────────────
+    // actions 非空 ⇒ 本岛接管鼠标（不穿透）、**不自动收起**，等用户点中某一枚；
+    // 点击后回调 onAction(该按钮文案)，随后收回空闲态。form 建议用 Centered/Fullscreen
+    // （胶囊那档太矮放不下按钮，调用方需自行升到 Centered）。
+    // durationMs<=0 表示"等点击、不超时"；不建议给确认类设超时（会吞掉学生的确认动作）。
+    void showWithActions(const QString &title, const QString &desc, const QString &icon,
+                         Form form, const QStringList &actions,
+                         std::function<void(const QString &)> onAction,
+                         int durationMs = 0);
+    // 仅全屏形态的配色档（remind/inform/urgent），空 = 默认黑底。与旧 NotifyWindow 同白名单。
+    void setSeverity(const QString &severity);
 
     // 空闲态：没有任务/通知时收回顶部显示半胶囊（默认 true）。
     void setIdleEnabled(bool on);
@@ -102,6 +117,8 @@ private:
 
     void openInShell();        // 按 m_openPath 打开所在文件夹并选中该文件
     bool hitOpenButton(const QPoint &pt) const;   // 「▸ 打开」按钮命中区
+    QVector<QRect> actionButtonRects() const;                        // 交互按钮行（确认/快捷回复）
+    bool hitActionButton(const QPoint &pt, int *index) const;        // 命中哪一枚按钮
     void enterIdle();          // 收回成空闲半胶囊
     void paintBigForm();       // Centered / Fullscreen 的独立绘制（与胶囊绘制分开，互不干扰）
     QRect geometryForIdle() const;
@@ -134,6 +151,12 @@ private:
     bool m_dragged = false;
 
     QString m_openPath;           // 非空 = 这条提示可点击打开（explorer /select）
+
+    // ── 交互按钮（2026-10-09 · 确认并入岛本体）──
+    // 非空 ⇒ 岛体不穿透、不自动收，等点击；点击后回调一次即清空并收回。
+    QStringList m_actions;
+    std::function<void(const QString &)> m_onAction;
+    QString m_severity;           // 仅全屏形态配色：remind/inform/urgent（空=黑底）
 
     QTimer *m_autoClose = nullptr;
     QTimer *m_dismissGuard = nullptr;   // dismiss 淡出的兜底：动画没走完也强制 hide

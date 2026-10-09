@@ -187,7 +187,8 @@ QRect IslandOverlay::geometryForForm(Form f) const
     if (f == Form::Centered) {
         // 屏幕正中的卡片：宽不超过屏宽 40%，高度 200（够放图标+标题+两行描述）
         const int w = qMin(sg.width() * 2 / 5, 520);
-        const int h = 200;
+        // 有按钮行时加高，给底部按钮留位（否则描述会和按钮叠在一起）
+        const int h = m_actions.isEmpty() ? 200 : 250;
         return QRect(sg.x() + (sg.width() - w) / 2,
                      sg.y() + (sg.height() - h) / 2, w, h);
     }
@@ -216,6 +217,10 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     m_icon = icon;
     m_durationMs = durationMs;
     m_form = form;
+    // 普通 showIsland 一律无按钮：清掉上一条确认态残留的按钮/回调。
+    // （带按钮的走 showWithActions —— 它在调用本函数**之后**再回填 m_actions。）
+    m_actions.clear();
+    m_onAction = nullptr;
     m_idle = false;
     m_hadContent = true;
     m_contentActive = true;
@@ -262,6 +267,27 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
 
     // 新内容把上一条的展开态压平了 —— 状态变了就得发信号（见 enterIdle 里的同款说明）
     if (wasExpanded) emit expandedChanged(false);
+    update();
+}
+
+// 带交互按钮的通知（确认/快捷回复）。先切交互态再走 showIsland：
+// 这样 showIsland 内部算"要不要自动收"时看到的是"交互中" ⇒ 不会自己跑掉。
+void IslandOverlay::showWithActions(const QString &title, const QString &desc, const QString &icon,
+                                    Form form, const QStringList &actions,
+                                    std::function<void(const QString &)> onAction, int durationMs)
+{
+    const bool inter = !actions.isEmpty();
+    if (inter) setInteractive(true);
+    showIsland(title, desc, icon, inter ? 0 : durationMs, form);
+    m_actions = actions;
+    m_onAction = onAction;
+    update();
+}
+
+// 仅全屏形态的配色档（与旧 NotifyWindow 同白名单 + 黑底回落）
+void IslandOverlay::setSeverity(const QString &severity)
+{
+    m_severity = severity.trimmed().toLower();
     update();
 }
 
@@ -324,6 +350,8 @@ void IslandOverlay::enterIdle()
     m_contentActive = false;   // 内容这就算过去了，之后展开的是"最近一条"
     m_autoClose->stop();
     clearOpenPath();
+    m_actions.clear();         // 收回即清按钮，别让空闲态还留着上一条的"确认"
+    m_onAction = nullptr;
     // 空闲胶囊可点：这将近 120×36 的一小块不再穿透。作为补偿它贴在最顶端（y=10）
     // 且画得比活动态更淡，尽量少占课件的可视注意力。
     // （另一条防线在 setExpanded 里：展开态有硬回收超时，不会长期压着屏幕顶部。）
@@ -490,8 +518,14 @@ void IslandOverlay::paintBigForm()
     p.setRenderHint(QPainter::Antialiasing);
 
     // 底：全屏时更不透明（要压住桌面），居中卡片保持半透明（还能看见后面的课件）
-    const QColor bg = m_light ? QColor(250, 250, 250, full ? 248 : 235)
-                              : QColor(16, 16, 18, full ? 243 : 228);
+    QColor bg = m_light ? QColor(250, 250, 250, full ? 248 : 235)
+                        : QColor(16, 16, 18, full ? 243 : 228);
+    // 全屏配色档（remind/inform/urgent 三档白名单 + 黑底回落，与旧 NotifyWindow 一致）
+    if (full) {
+        if      (m_severity == QLatin1String("urgent")) bg = QColor(180, 20, 20, 210);
+        else if (m_severity == QLatin1String("inform")) bg = QColor(200, 140, 10, 205);
+        else if (m_severity == QLatin1String("remind")) bg = QColor(20, 140, 60, 205);
+    }
     const QColor fg = m_light ? QColor(10, 10, 10) : QColor(250, 250, 250);
     const QColor sub = m_light ? QColor(90, 90, 90) : QColor(168, 168, 178);
 
@@ -536,6 +570,30 @@ void IslandOverlay::paintBigForm()
         const QRect descRect(rect().center().x() - textW / 2, cursorY, textW, 0);
         QRect db = p.boundingRect(descRect, Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, m_desc);
         p.drawText(db, Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, m_desc);
+    }
+
+    // 交互按钮行（确认/快捷回复）。第一枚按"主按钮"画（实心反白），其余描边。
+    if (!m_actions.isEmpty()) {
+        const QVector<QRect> rs = actionButtonRects();
+        QFont bf = font();
+        bf.setPixelSize(full ? 22 : 14);
+        bf.setBold(true);
+        p.setFont(bf);
+        for (int i = 0; i < rs.size(); ++i) {
+            const QRect &r = rs[i];
+            const bool primary = (i == 0);
+            QPainterPath bp;
+            bp.addRoundedRect(r, 10, 10);
+            if (primary) {
+                p.fillPath(bp, m_light ? QColor(20, 20, 20) : QColor(245, 245, 245));
+                p.setPen(m_light ? QColor(250, 250, 250) : QColor(10, 10, 10));
+            } else {
+                p.setPen(m_light ? QColor(150, 150, 150) : QColor(96, 96, 104));
+                p.drawPath(bp);
+                p.setPen(m_light ? QColor(30, 30, 30) : QColor(232, 232, 236));
+            }
+            p.drawText(r, Qt::AlignCenter, m_actions[i]);
+        }
     }
 }
 
@@ -694,6 +752,44 @@ bool IslandOverlay::hitOpenButton(const QPoint &pt) const
     return btn.contains(pt);
 }
 
+// 交互按钮行的几何：底部居中一排，宽度按文案自适应。绘制与命中共用这一份，绝不各算各的。
+QVector<QRect> IslandOverlay::actionButtonRects() const
+{
+    QVector<QRect> out;
+    if (m_actions.isEmpty()) return out;
+    const bool full = (m_form == Form::Fullscreen);
+    QFont bf = font();
+    bf.setPixelSize(full ? 22 : 14);
+    bf.setBold(true);
+    const QFontMetrics fm(bf);
+    const int gap = 12;
+    const int h   = full ? 52 : 36;
+    QVector<int> ws;
+    int total = 0;
+    for (const QString &a : m_actions) {
+        const int w = qMax(full ? 160 : 104, fm.horizontalAdvance(a) + 40);
+        ws.append(w);
+        total += w;
+    }
+    total += gap * (m_actions.size() - 1);
+    int x = rect().center().x() - total / 2;
+    const int y = rect().bottom() - (full ? 40 : 24) - h;
+    for (int i = 0; i < ws.size(); ++i) {
+        out.append(QRect(x, y, ws[i], h));
+        x += ws[i] + gap;
+    }
+    return out;
+}
+
+bool IslandOverlay::hitActionButton(const QPoint &pt, int *index) const
+{
+    const QVector<QRect> rs = actionButtonRects();
+    for (int i = 0; i < rs.size(); ++i) {
+        if (rs[i].contains(pt)) { if (index) *index = i; return true; }
+    }
+    return false;
+}
+
 void IslandOverlay::mousePressEvent(QMouseEvent *ev)
 {
     if (!m_interactive) { ev->ignore(); return; }   // 穿透态不消费
@@ -734,6 +830,20 @@ void IslandOverlay::mouseReleaseEvent(QMouseEvent *ev)
     m_pressed = false;
     if (m_dragged) {                  // 这是一次拖拽手势，收尾就完，别再当点击
         m_dragged = false;
+        ev->accept();
+        return;
+    }
+
+    // 交互按钮优先：「确认 / 快捷回复」点哪枚回哪句。点完即清按钮并收回（不再展开/收起）。
+    int ai = -1;
+    if (hitActionButton(ev->pos(), &ai)) {
+        const QString reply = m_actions.value(ai);
+        auto cb = m_onAction;
+        m_actions.clear();
+        m_onAction = nullptr;
+        setInteractive(false);
+        dismiss();
+        if (cb) cb(reply);
         ev->accept();
         return;
     }
