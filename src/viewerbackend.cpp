@@ -27,6 +27,7 @@
 #include <QUrl>
 #include <QWebSocket>
 #include <QWebEngineView>
+#include "ldc_rtc_bridge.h"   // 2026-10-10：WebRTC ldc 桥接（轻量前向声明，大文件不膨胀 C1060）
 #include <QWebChannel>
 #include <QWebEngineProfile>
 #include <QWebEnginePage>
@@ -1059,6 +1060,17 @@ void ViewerBackend::setRtcState(const QString &s)
 }
 void ViewerBackend::initRtcView()
 {
+    // ── 2026-10-09 换 other webrtc：优先 libdatachannel（ldc_receiver 收流），
+    // 不拉起 Chromium（瘦身 137MB 常驻）。STE_USE_LDC_RTC=0 回退旧 WebEngine 路。
+    // 接线在独立编译单元 ldc_rtc_bridge.cpp（大文件不再膨胀，C1060 已解决）。──
+    if (qgetenv("STE_USE_LDC_RTC") != "0") {
+        if (m_ldcInitialized) return;
+        m_ldcInitialized = true;
+        cancelRtcViewReap();
+        ldcInitRtc(this);
+        logf("[viewer-ldc] 收流初始化（libdatachannel，无 Chromium）");
+        return;
+    }
     if (m_rtcView) return;
     cancelRtcViewReap();   // 上一轮倒计时还没到，别把刚要复用的页面收掉
     // WebEngine 是 Chromium：默认沙箱在没配 seccomp 的环境下会拒跑 RTCPeerConnection 的
@@ -1392,6 +1404,19 @@ void ViewerBackend::sendEnvelope(const QString &type, const QJsonObject &payload
 {
     if (!m_ws) return;
     m_ws->sendTextMessage(makeEnvelope(type, payload));
+}
+// ── 2026-10-10 ldc 桥接（ldc_rtc_bridge.cpp 调用，见 viewerbackend.h 声明）──
+void ViewerBackend::sendLdcSignal(const QString &type, const QJsonObject &payload)
+{
+    sendEnvelope(type, payload);
+}
+void ViewerBackend::setLdcRtcState(const QString &s)
+{
+    setRtcState(s);
+}
+void ViewerBackend::emitLdcFrame(const QImage &img)
+{
+    emit rtcFrameReady(img);
 }
 void ViewerBackend::onConnected()
 {
@@ -1764,6 +1789,11 @@ void ViewerBackend::onTextMessage(const QString &text)
                  text.left(220).toUtf8().constData());
             setRtcState(QStringLiteral("failed"));
         } else {
+            // ── 2026-10-09 ldc 路：offer 直接喂 libdatachannel（代替灌离屏 view）──
+            if (qgetenv("STE_USE_LDC_RTC") != "0") {
+                ldcFeedSignal(this, QStringLiteral("offer"), sdp.toUtf8());
+                return;
+            }
             // 新 offer = 新的一轮协商，上一轮攒下的候选已经作废，先清干净再灌。
             // 不清的话，上次那台机器的候选会被喂给新建的 pc，ICE 往一个不存在的对端上撞。
             if (!m_pendingIce.isEmpty()) {
@@ -1789,6 +1819,11 @@ void ViewerBackend::onTextMessage(const QString &text)
             logf("[viewer] WARN 收到 rtc-ice 但 candidate 是空的（原始=%s）",
                  text.left(200).toUtf8().constData());
         } else {
+            // ── 2026-10-09 ldc 路：candidate 直接喂 libdatachannel ──
+            if (qgetenv("STE_USE_LDC_RTC") != "0") {
+                ldcFeedSignal(this, QStringLiteral("candidate"), cand.toUtf8());
+                return;
+            }
             // 和 offer 一样懒建：云端转发顺序不保证 offer 一定先到，ICE 抢先是可能的。
             // 以前这种情况直接丢弃 → "候选平白少一半、ICE 怎么都连不上"，现在建页并排队。
             if (!m_rtcView) {
@@ -1877,6 +1912,12 @@ void ViewerBackend::onTextMessage(const QString &text)
                            : QStringLiteral("%1 在 %2 上失败：%3").arg(action, uid, err));
         }
         emit resultReceived(uid, action, state, result, err, detail, data);
+    } else if (type == QStringLiteral("unsubscribed")) {
+        // 2026-10-10：云端对我们主动退订的确认。它**不是错误**，原来落到下面那句
+        // "收到未处理的云端消息"里 —— 每次切设备/离开带画面页都刷一条，纯噪音。
+        // 这里显式收口（本轮不改变订阅状态机，只把回执认下来）。
+        logf("[viewer] 云端已确认退订（%s）",
+             pay.value(QStringLiteral("uid")).toString().toUtf8().constData());
     } else {
         logf("[viewer] 收到未处理的云端消息 type=%s", type.toUtf8().constData());
     }
@@ -2410,8 +2451,12 @@ void ViewerBackend::requestClasses()
     if (wsIdx > 0) httpUrl.truncate(wsIdx);
     httpUrl += QStringLiteral("/api/classes");
     QNetworkRequest req{ QUrl(httpUrl) };
-    const QByteArray token = !m_cloudTicket.isEmpty()
-        ? m_cloudTicket.toUtf8() : m_token.toUtf8();
+    // ⚠️ 2026-10-10：云端把 /api/classes 与 /api/storage 归在**只认静态令牌**的严格组
+    //   （index.js 的 isViewerApi 分支，票据不认）。原来这里"有票优先发票" ⇒ 登录后用票据拉必 401
+    //   （日志里成片的 [class] 拉班级列表失败（HTTP 401））。改成静态令牌（STE_VIEWER_TOKEN）
+    //   优先、票据兜底。
+    const QByteArray token = !m_token.isEmpty()
+        ? m_token.toUtf8() : m_cloudTicket.toUtf8();
     if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -2421,9 +2466,11 @@ void ViewerBackend::requestClasses()
             if (doc.isObject() && doc.object().value(QStringLiteral("ok")).toBool()) {
                 m_classes = doc.object().value(QStringLiteral("classes")).toArray();
                 emit classesChanged();
-                logf("[class] 班级列表已刷新：%d 个", (int)m_classes.size());
+                if (m_classErrStatus != -1) { m_classErrStatus = -1; logf("[class] 班级列表恢复正常"); }
             }
-        } else {
+        } else if (status != m_classErrStatus) {
+            // 只在状态**变化**时记（15s 轮询下原来会一直刷同一句 401）
+            m_classErrStatus = status;
             logf("[class] 拉班级列表失败（HTTP %d，多数情况是管理端令牌与云端 VIEWER_TOKEN 不一致）", status);
         }
         reply->deleteLater();
@@ -2440,8 +2487,9 @@ void ViewerBackend::requestStorage()
     if (wsIdx > 0) httpUrl.truncate(wsIdx);
     httpUrl += QStringLiteral("/api/storage");
     QNetworkRequest req{ QUrl(httpUrl) };
-    const QByteArray token = !m_cloudTicket.isEmpty()
-        ? m_cloudTicket.toUtf8() : m_token.toUtf8();
+    // 同 requestClasses：严格组只认静态令牌（见那里的说明）。
+    const QByteArray token = !m_token.isEmpty()
+        ? m_token.toUtf8() : m_cloudTicket.toUtf8();
     if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -2451,9 +2499,10 @@ void ViewerBackend::requestStorage()
             if (doc.isObject() && doc.object().value(QStringLiteral("ok")).toBool()) {
                 m_storage = doc.object().value(QStringLiteral("storage")).toObject();
                 emit storageChanged();
-                logf("[storage] 云端存储概况已刷新");
+                if (m_storageErrStatus != -1) { m_storageErrStatus = -1; logf("[storage] 云端存储概况恢复正常"); }
             }
-        } else {
+        } else if (status != m_storageErrStatus) {
+            m_storageErrStatus = status;
             logf("[storage] 拉云端存储概况失败（HTTP %d）", status);
         }
         reply->deleteLater();

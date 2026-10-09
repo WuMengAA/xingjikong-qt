@@ -35,6 +35,7 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 #include <QVariantList>
 
 class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向声明，避免引入 mmsystem）
+class LdcReceiver;  // 2026-10-09：WebRTC 收流（libdatachannel 替换 QWebEngine 离屏）
 
 class QDateTime;
 class QNetworkAccessManager;
@@ -167,6 +168,12 @@ public:
      *  多班面板缩略图墙（设计文档 3.2.2）：与主画面共用一条 WS 订阅，云端按 uid 推帧，
      *  帧头带 uid → 按 uid 分槽存。 */
     Q_INVOKABLE void subscribeThumbnails(const QVariantList &uids);
+
+    // ── 2026-10-09 ldc 桥接（ldc_rtc_bridge.cpp 调用，避免大文件膨胀）──
+    // 信令出站（answer/candidate → 云端）；状态设置；帧就绪信号
+    void sendLdcSignal(const QString &type, const QJsonObject &payload);
+    void setLdcRtcState(const QString &s);
+    void emitLdcFrame(const QImage &img);
 
     // 帧的来源。以前两路都调同一个 applyFrameBytes 且不区分来源，结果被控端的 JPEG
     // 轮询帧和 WebRTC 抽出来的帧互相覆盖同一张 m_frame —— 画面在两个源之间来回跳、
@@ -301,8 +308,12 @@ public:
     QString rtcState() const { return m_rtcState; }
     QString frameSource() const { return m_frameSource; }
 
-    /** 切到某台设备 → 向云端订阅它的画面。 */
-    void setCurrentUid(const QString &uid);
+    /** 切到某台设备 → 向云端订阅它的画面。
+     *  ⚠️ 2026-10-10：必须 `Q_INVOKABLE` —— 它是 Q_PROPERTY currentUid 的 WRITE，
+     *    但 QML 里写的是 `backend.setCurrentUid(uid)`（**当函数调**），而 WRITE 只在属性赋值时
+     *    可用、不能当方法调，所以原来 QML 报 "Property 'setCurrentUid' ... is not a function"
+     *    （点缩略图墙切设备全废）。下方 setScreenActive 一直是对的，它俩本就该一致。 */
+    Q_INVOKABLE void setCurrentUid(const QString &uid);
     /** 2026-10-08 修复「不在带画面页也无限拉流」：页面离开集控（带画面主页）时置 false，
      *  退订当前设备画面、清掉本地帧；回到该页置 true 重新订阅。云端按订阅发帧，退订即停流。 */
     Q_INVOKABLE void setScreenActive(bool on);
@@ -458,6 +469,8 @@ signals:
     void fileProgressChanged();
     /** WebRTC 收流链路状态变化（ready / negotiating / failed / idle）。 */
     void rtcStateChanged();
+    /** 2026-10-09：libdatachannel 收流帧就绪（ldc_receiver.frameReady → QML）。 */
+    void rtcFrameReady(const QImage &frame);
     /** 画面来源切换（jpeg ↔ rtc）——界面上那个链路徽标靠它刷新。 */
     void frameSourceChanged();
     /** 终端状态四件套（state/sid/note/busy）共用一个信号。 */
@@ -660,6 +673,7 @@ private:
 
     // ── WebRTC 收流现场 ──
     QWebEngineView *m_rtcView = nullptr;
+    bool m_ldcInitialized = false;   // 2026-10-09：libdatachannel 收流已初始化（并行方案标记）
     QString m_rtcHtmlPath;        // rtc page temp file (created by QTemporaryFile), removed on exit
     QString m_pendingOffer;   // 收流页 load 完成前到的 offer 先存这儿（见 initRtcView 的补灌）
     bool m_rtcReady = false;
@@ -691,6 +705,10 @@ private:
     QString m_currentClass;          // 2026-10-08 当前班级筛选（空=全部）
     QTimer *m_refreshTimer = nullptr; // 2026-10-08 设备表兜底轮询（15s，云端推送之外的保险）
     QJsonObject m_storage;            // 2026-10-08 云端存储概况（/api/storage 返回）
+    // 2026-10-10：401 曾被 15s 轮询刷成一片。只在"HTTP 状态**变化**"时打一次日志，
+    // 恢复 200 时复位（-1 表示"上次是好的/没记过"）。纯粹为压日志噪音，不影响请求逻辑。
+    int m_classErrStatus = -1;
+    int m_storageErrStatus = -1;
     /**
      * 设备台账（uid → 最后一次见到的设备对象）。
      *

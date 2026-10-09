@@ -5,6 +5,10 @@ project(stelarith-viewer-qt LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(/utf-8)
+# 2026-10-09：viewerbackend.cpp 大（2700+ 行）+ ldc 头 → 编译堆空间不足 C1060
+if(MSVC)
+  add_compile_options(/Zm1200)
+endif()
 
 # ── 管理端版本号（2026-10-06 打磨；2026-10-07 改 DeepSeek Harness 同款）──
 # 命名只有两种形态（2026-10-07 起同 DeepSeek Harness）：正式版 X.Y.Z（0.6.23）、
@@ -14,7 +18,7 @@ add_compile_options(/utf-8)
 # 完整标准见 docs/版本号命名规范-2026-10-07.md。
 # 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
 # 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
-set(VIEWER_VERSION "0.6.24-rc.3")
+set(VIEWER_VERSION "0.6.24-rc.4")
 add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
 
 # 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补；2026-10-07 正则收严到 X.Y.Z[-rc.N]）。
@@ -140,6 +144,12 @@ qt_add_executable(viewer-qt
   # ── SVG 图标提供器（2026-10-08：image://svgicon/，lucide/morphicons 同款）──
   src/svgiconprovider.cpp
   src/svgiconprovider.h
+  # ── WebRTC 收流（2026-10-09：libdatachannel 替换 QWebEngine 离屏，探针全绿）──
+  src/ldc_receiver.cpp
+  src/ldc_receiver.h
+  # ── WebRTC ldc 桥接（2026-10-09：独立编译单元，viewerbackend.cpp 大文件不膨胀）──
+  src/ldc_rtc_bridge.cpp
+  src/ldc_rtc_bridge.h
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
@@ -183,6 +193,29 @@ add_custom_command(TARGET viewer-qt POST_BUILD
 
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Svg)
 set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE OFF)
+
+# 2026-10-09：viewerbackend.cpp 2700+ 行单编译单元峰值超内存（C1060）。
+# 只此文件降优化（/Od），其余文件保持 Release 优化——编译内存峰值降下来，功能零影响。
+set_source_files_properties(src/viewerbackend.cpp PROPERTIES COMPILE_FLAGS "/Od /Ob0")
+
+# ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
+#    STE_USE_LDC_RTC=1 默认走 ldc，=0 回退 WebEngine）────────────────────
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
+  target_include_directories(viewer-qt PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
+  target_link_libraries(viewer-qt PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/srtp2.lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/juice.lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/usrsctp.lib"
+    "C:/Program Files/PostgreSQL/17/lib/libssl.lib"
+    "C:/Program Files/PostgreSQL/17/lib/libcrypto.lib"
+    ws2_32 bcrypt crypt32 userenv secur32)
+  target_compile_definitions(viewer-qt PRIVATE RTC_STATIC)
+  message(STATUS "[viewer] libdatachannel 已链入（RTC_STATIC）")
+else()
+  message(WARNING "[viewer] _probe/ldc_libs/datachannel.lib 缺失——ldc_receiver 编译会失败，请先重建 libdatachannel")
+endif()
 
 # ── Qt 运行时部署（用 Qt 官方部署工具 windeployqt）──
 # 【为什么必须有】2026-10-04 踩的"真机级"坑：Qt6Widgets.dll 没跟着 exe 走（链接上了、
