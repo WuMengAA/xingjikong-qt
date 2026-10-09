@@ -89,6 +89,12 @@ Item {
         Button {
             text: cc.recording ? "停录" : "开录"
             enabled: cc.selUid !== "" && cc.currentDev() !== ""
+            // 录制中 = 活动状态，文字转 ok 色（彩色规范 2026-10-09）
+            contentItem: Text {
+                text: cc.recording ? "停录" : "开录"
+                color: cc.recording ? (cc.theme.ok || "#2E9E5B") : (cc.theme.fg || "#FAFAFA")
+                font.pixelSize: 13
+            }
             onClicked: cc.recording ? cc.stopRec() : cc.startRec()
         }
         Button {

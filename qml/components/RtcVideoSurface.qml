@@ -79,7 +79,9 @@ Item {
             anchors.top: parent.top
             anchors.margins: 6
             radius: 4
-            color: surf.connected ? "#20D070" : "#606060"
+            // 状态色读主题令牌（彩色规范 2026-10-09）：ok=在线 / err=离线；
+            // fallback 深色版，浅色模式由 Main.qml 的 th 切换提供
+            color: surf.connected ? (surf.theme.ok || "#2E9E5B") : (surf.theme.err || "#D64545")
             width: chipRow.width + 12
             height: 18
             Row {
