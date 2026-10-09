@@ -114,10 +114,37 @@ add_executable(stelarith-agent-qt
   # ── 被控端灵动岛（2026-10-07 加：活动统一经过灵动岛，形状/位置转变 + 缓动 + 深浅色 + 交互穿透）──
   src/island.cpp
   src/island.h
+  # ── 通知体系新组件（2026-10-09 接线：通知规格 §6 全部独立组件，DeepSeek Harness 造）──
+  src/danmaku.cpp
+  src/danmaku.h
+  src/loop_reminder.cpp
+  src/loop_reminder.h
+  src/spectrum_widget.cpp
+  src/spectrum_widget.h
+  src/noise_monitor.cpp
+  src/noise_monitor.h
+  src/notification_gate.cpp
+  src/notification_gate.h
+  src/edge_tts.cpp
+  src/edge_tts.h
+  src/marquee_text.cpp
+  src/marquee_text.h
+  src/island_clock.cpp
+  src/island_clock.h
+  src/microphone.cpp
+  src/microphone.h
+  # ── WebRTC 推流（2026-10-09：libdatachannel 换 other webrtc，探针全绿）──
+  # ⚠️ 暂未进编译：ldc_streamer 依赖 datachannel-static + srtp2 + juice + usrsctp
+  #    + OpenSSL 静态链（详见 _probe/WebRTC引擎替换-技术验证总结-2026-10-08.md §6），
+  #    等 WebRTC 接线窗口统一配链接，先不阻塞通知体系编译。
+  #  src/ldc_streamer.cpp
+  #  src/ldc_streamer.h
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::WebEngineWidgets Qt6::Network Qt6::Svg)
+# 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
+target_link_libraries(stelarith-agent-qt PRIVATE winmm)
 
 # GUI 子系统：常驻托盘程序不该挂着控制台黑窗（日志已落盘到 agent-qt.log，不靠 stdout）
 set_target_properties(stelarith-agent-qt PROPERTIES WIN32_EXECUTABLE ON)

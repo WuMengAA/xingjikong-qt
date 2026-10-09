@@ -54,6 +54,16 @@
 #include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
 #include "audio_player.h"      // 2026-10-07：语音对讲播放（waveOut）
 #include "broadcast_view.h"    // 2026-10-07：屏幕广播全屏显示
+// ── 通知体系新组件（2026-10-09 接线 · DeepSeek Harness 造）──
+#include "danmaku.h"           // §1.2 弹幕：字幕式横向滚动
+#include "loop_reminder.h"     // §1.2 loopRemind：未确认循环提醒
+#include "notification_gate.h" // §6.2 考试模式禁一切通知与监视
+#include "marquee_text.h"      // §6.1 灵动岛展开态滚动文本
+#include "island_clock.h"      // 最初需求：灵动岛时间/状态显示
+#include "spectrum_widget.h"   // §6.3 语音通知 16 位频谱
+#include "edge_tts.h"          // §6.4 Edge 语音 TTS（管理端可选）
+#include "noise_monitor.h"     // §6.5 噪音检测
+#include "microphone.h"        // 语音通话：mic 会话内采集
 #include <QHostInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -144,6 +154,11 @@ bool g_everRegistered = false;
 // 语音对讲（2026-10-07）：学生端播放器（waveOut，懒打开——只在收到音频帧时开）
 AudioPlayer g_audioPlayer;
 bool g_audioHintShown = false;   // "老师正在讲话"提示是否已显示（每会话一次）
+// ── 通知体系组件实例（2026-10-09 接线 · DeepSeek Harness）──
+DanmakuWidget *g_danmaku = nullptr;          // 弹幕（懒建：实际用弹幕时才建窗口）
+LoopReminder g_loopReminder;                 // 循环提醒（无 UI，纯逻辑）
+NotificationGate g_notifGate;                // 通知门控（考试模式禁通知）
+Microphone g_microphone;                     // 语音通话 mic 采集（会话内开关）
 // 2026-10-08：断线灵动岛去重。退避重连期间每次 disconnected 都会再弹一条「连接中断」，
 // 首连快速重试（500ms）下等于每半秒闪一次，用户看到的就是"一直显示连接中断"。
 // 规则：同一段离线只弹第一条；云端回 registered（真的又连上了）才把闸门放开。
@@ -2291,6 +2306,13 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
     if (title.isEmpty())
         return QStringLiteral("notify 缺 title");
     const QString content = params.value(QStringLiteral("content")).toString();
+    // ── 考试模式门控（2026-10-09 接线 · §6.2）：考试激活期间一切通知静默丢弃 ──
+    // 不弹、不响、不记 error —— 学生机在考试中收到任何通知都应像没收到一样。
+    const bool gated = !g_notifGate.allow(
+        kind == QLatin1String("danmaku") ? NotificationGate::Danmaku
+        : kind == QLatin1String("loop") ? NotificationGate::LoopRemind
+        : NotificationGate::Island);
+    if (gated) return QStringLiteral("exam-active-gated");
     const int seconds = params.value(QStringLiteral("seconds")).toInt(0);
     // flags.speech → TTS 朗读（缺省不读，避免每教室都响）
     const QJsonObject flags = params.value(QStringLiteral("flags")).toObject();
@@ -2322,6 +2344,52 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
     if (kind == QStringLiteral("island")) k = NotifyWindow::Island;
     else if (kind == QStringLiteral("fullscreen")) k = NotifyWindow::Fullscreen;
     else k = NotifyWindow::Popup;   // popup 及未知值一律居中弹窗（安全默认）
+
+    // ── 弹幕（2026-10-09 接线 · §1.2/§6.1）：kind=danmaku → 字幕式横向滚动 ──
+    if (kind == QLatin1String("danmaku")) {
+        if (!g_danmaku) g_danmaku = new DanmakuWidget();   // 懒建：只在真用弹幕时才开窗口
+        g_danmaku->push(content.isEmpty() ? title : (title + QStringLiteral("：") + content));
+        // 同样进托盘通知留存（与 popup 行为一致，别丢静默列表）
+        if (g_tray) {
+            g_tray->showMessage(title, content.isEmpty() ? title : content,
+                                QSystemTrayIcon::Information, 10000);
+        }
+        return QString();
+    }
+
+    // ── 循环提醒（2026-10-09 接线 · §1.2 loopRemind）：flags.loop / params.repeat ──
+    // 展示超时未确认 → 间隔重现；只有学生点确认才终止。id 用 notice_id 或 title（幂等刷新）。
+    const bool loop = flags.value(QStringLiteral("loop")).toBool(false)
+                      || params.value(QStringLiteral("repeat")).toBool(false)
+                      || params.value(QStringLiteral("loopRemind")).toBool(false);
+    if (loop) {
+        const QString loopId = params.value(QStringLiteral("notice_id")).toString(
+            params.value(QStringLiteral("id")).toString());
+        LoopReminder::Config cfg;
+        cfg.intervalSec = params.value(QStringLiteral("intervalSec")).toInt(
+                              flags.value(QStringLiteral("interval_sec")).toInt(60));
+        // 确认回调：学生点「确认」→ 终止循环（唯一正常退出路径），并二次回执云端
+        std::function<void(const QString &)> loopConfirm = [loopId, id](const QString &reply) {
+            g_loopReminder.confirm(loopId);
+            if (!id.isEmpty()) {
+                QJsonObject d;
+                d.insert(QStringLiteral("confirmed"), true);
+                d.insert(QStringLiteral("reply"), reply);
+                sendActionReceipt(id, QStringLiteral("notify"), QStringLiteral("confirmed"),
+                                  QString(), d);
+            }
+        };
+        g_loopReminder.start(loopId.isEmpty() ? title : loopId, title, content, cfg);
+        // 立即展示第一轮：走 NotifyWindow（需要确认按钮，灵动岛没有按钮）
+        NotifyWindow::showNotice(NotifyWindow::Popup, title, content, seconds,
+                                 tts, severity, emergency, /*needConfirm=*/true, replies,
+                                 loopConfirm);
+        if (g_tray) {
+            g_tray->showMessage(title, content.isEmpty() ? title : content,
+                                QSystemTrayIcon::Information, 10000);
+        }
+        return QString();
+    }
 
     // 确认/快捷回复回调：把结果作为**二次回执**发给云端（原 notify 回执已发 done，
     // 这条补充 confirmed+reply，云端 recordResult 按 id 配对；管理端据此显示"已确认"）。
@@ -4451,6 +4519,8 @@ void handleControlText(const QString &text)
             const QJsonArray arr = params.value(QStringLiteral("blacklist")).toArray();
             for (const QJsonValue &v : arr) blacklist.append(v.toString());
             const bool enforcing = ExamMode::inst().start(minutes, blacklist);
+            // 2026-10-09 通知门控同步：考试激活 → 一切通知/弹幕/循环提醒静默
+            g_notifGate.setExamActive(true);
             // #98：考试模式也走灵动岛（顶部一条，考试期间不摊一个窗在桌面上）
             islandShow(QStringLiteral("考试模式已开始"),
                        QStringLiteral("倒计时 %1 分钟").arg(minutes)
@@ -4462,6 +4532,8 @@ void handleControlText(const QString &text)
         }
         if (action == QStringLiteral("exam_mode_stop")) {
             const bool was = ExamMode::inst().stop(QStringLiteral("manual"));
+            // 2026-10-09 通知门控同步：考试结束 → 放行通知
+            g_notifGate.setExamActive(false);
             islandShow(QStringLiteral("考试模式已结束"), QStringLiteral("已恢复操作"),
                        QStringLiteral("pencil"), 3000);
             sendActionReceipt(id, action, was ? QStringLiteral("done") : QStringLiteral("not_active"));
@@ -4731,6 +4803,19 @@ int main(int argc, char *argv[])
     } else {
         fprintf(stderr, "[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口\n");
     }
+
+    // ── 通知体系接线（2026-10-09 · DeepSeek Harness）─────────────────────
+    // 循环提醒：展示由 notifyFromParams 的 loop 分支直接走 NotifyWindow（含确认按钮，
+    // 点确认 → loopConfirm 回调 → g_loopReminder.confirm 终止）。这里只收终止日志。
+    QObject::connect(&g_loopReminder, &LoopReminder::expired, &app,
+        [](const QString &id, const QString &reason) {
+            qInfo("[agent-qt] 循环提醒已终止 %s（%s）", id.toUtf8().constData(),
+                  reason.toUtf8().constData());
+        });
+    // 考试模式切换 → 通知门控同步（考试激活 → 一切通知静默；结束 → 放行）
+    // ExamMode 是单例：hook 它的状态切换（start/stop 都在 exam_mode.cpp 内触发信号——
+    // 目前没有信号，改由 main.cpp 在两个指令处理点同步，见 exam_mode 指令分支）。
+    Q_UNUSED(g_notifGate);
 
     g_ws = new QWebSocket();
     g_ws->setParent(&app);
