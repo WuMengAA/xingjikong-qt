@@ -32,6 +32,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+// 版本解析/比较的唯一实现（2026-10-07 抽出来）：工作区根 scripts/version-compare.mjs。
+// 被控端 C++ 侧是同语义的另一份（Stelarith-control-qt/src/main.cpp 的 compareVersion），
+// 两边靠 scripts/test-version-naming.mjs 的断言对齐。
+import { cmpVersion } from '../../scripts/version-compare.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = path.join(ROOT, process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.json');
@@ -105,16 +109,8 @@ function humanSize(n) {
 	return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-/** 按点分段比较版本，只认数字段（0.6.0 > 0.5.1）。非数字段一律当 0，避免 NaN 传染。 */
-function cmpVersion(a, b) {
-	const pa = String(a).split('.').map((x) => parseInt(x, 10) || 0);
-	const pb = String(b).split('.').map((x) => parseInt(x, 10) || 0);
-	for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-		const d = (pa[i] || 0) - (pb[i] || 0);
-		if (d) return d > 0 ? 1 : -1;
-	}
-	return 0;
-}
+// 版本解析与比较统一走 ../../scripts/version-compare.mjs（cmpVersion 从那里 import）。
+// 本地不再留第二份实现 —— 两份实现迟早分叉，而分叉的表现是"云端说有新版、被控端说没有"。
 
 function pkgPathFromUrl(url) {
 	if (!url) return null;
@@ -256,8 +252,14 @@ async function cmdPublish() {
 	if (typeof product !== 'string' || !PRODUCTS.includes(product)) {
 		fail(`--product 必须是 ${PRODUCTS.join(' 或 ')}`);
 	}
-	if (typeof version !== 'string' || !/^\d+(\.\d+)*$/.test(version)) {
-		fail('--version 必填，形如 0.6.0');
+	// 2026-10-07：放开候选号后缀（0.6.23-rc.1 / 0.6.23-alpha.1 也发得出去）。规则见版本号命名规范。
+	// ⚠️ 这条正则必须和 scripts/version-compare.mjs 的 isCandidate() 同形 —— 阶段号从 1 起。
+	//    原先这里是 \d+，会放进 0.6.23-alpha.0：被控端 compareVersion 解析阶段号时要求 n>=1，
+	//    于是 alpha.0 被当成"无阶段 = 正式版" ⇒ 云端发了 alpha.0、教室机判定"已是最新"不升级，
+	//    等正式版 0.6.23 再发时比较结果也是相等 ⇒ **同样的版本推不下去**。2026-10-07 预演抓到。
+	if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-(?:alpha|rc)\.[1-9]\d*)?$/.test(version)) {
+		fail('--version 必填，形如 0.6.0（正式）、0.6.23-alpha.1（内测）或 0.6.23-rc.1（候选）；'
+			+ '见 docs/版本号命名规范-2026-10-07.md');
 	}
 	if (typeof file !== 'string') fail('--file 必填：要发布的安装包路径');
 	if (!fs.existsSync(file)) fail(`文件不存在：${file}`);

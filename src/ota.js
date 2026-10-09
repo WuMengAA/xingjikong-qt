@@ -34,6 +34,50 @@ function loadManifest() {
   }
 }
 
+/* ── 版本比较（2026-10-08 加）──────────────────────────────────────────
+ * 为什么放在云端：管理端/被控端都要回答"要不要升级"，而这个判断如果两端各写一遍
+ * C++ 实现，就会重演 0.6.23 之前那个静默 bug（core 打平后「正式版 < 候选版」，
+ * 结果是云端发了正式版、客户端判成"已是最新"、教室机永远不升级）。
+ * 现在**只有这一份实现**，客户端带 `?current=` 来问，直接拿 hasUpdate。
+ *
+ * 命名规范（docs/版本号命名规范-2026-10-07.md）：
+ *   X.Y.Z          正式版
+ *   X.Y.Z-rc.N     候选（N ≥ 1）
+ *   X.Y.Z-alpha.N  内测（N ≥ 1）
+ * 阶段序：alpha(0) < rc(1) < 正式(2)。
+ */
+const STAGE_RANK = { alpha: 0, rc: 1, '': 2 };
+
+/** 解析版本串；不合规范 → null（调用方按"没法比"处理，不抛）。 */
+export function parseVersion(s) {
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-(alpha|rc)\.([1-9]\d*))?$/.exec(String(s || '').trim());
+  if (!m) return null;
+  return {
+    core: [Number(m[1]), Number(m[2]), Number(m[3])],
+    stage: m[4] || '',
+    n: m[5] ? Number(m[5]) : 0,
+  };
+}
+
+/**
+ * 比较两个版本号：a < b → -1，相等 → 0，a > b → 1。
+ * **任何一侧解析不出来一律返回 0**（"不比"）：宁可不说有新版，也不能因为一个
+ * 格式没认出来就把升级推给全网 —— 静默错比漏提示危险得多。
+ */
+export function cmpVersion(a, b) {
+  const A = parseVersion(a);
+  const B = parseVersion(b);
+  if (!A || !B) return 0;
+  for (let i = 0; i < 3; i++) {
+    if (A.core[i] !== B.core[i]) return A.core[i] < B.core[i] ? -1 : 1;
+  }
+  const ra = STAGE_RANK[A.stage];
+  const rb = STAGE_RANK[B.stage];
+  if (ra !== rb) return ra < rb ? -1 : 1;
+  if (A.n !== B.n) return A.n < B.n ? -1 : 1;
+  return 0;
+}
+
 /** 某产品的最新版本条目；没有清单/没有该产品 → null。 */
 export function latestFor(product) {
   const m = loadManifest();

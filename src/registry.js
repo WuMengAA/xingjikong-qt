@@ -20,6 +20,21 @@ function sendTo(ws, type, payload, id = '') {
 /** uid -> { uid, version, ws, connectedAt, lastSeen, framesIn, bytesIn, lastError, recentFrame } */
 const devices = new Map();
 
+/**
+ * 持久「已知设备」表：无论在线离线都留着。
+ * 根因修复（2026-10-08）：原先 devices 只在在线时存在，markDisconnected / sweepStale 直接 delete，
+ * 离线设备从列表里彻底消失 —— 管理端「离线状态不显示」就是这么来的。
+ * 现在 online 由 `devices.has(uid)` 派生，name / classCode / version 落在这张表里，重连沿用、离线保留。
+ */
+const knownDevices = new Map();
+
+/**
+ * 分班制：classCode -> { code, name, devices:[uid] }。
+ * 设备上线 / 绑定 / 解绑时维护；列表接口与「按班定向下发」都读它。
+ * ⚠️ 这里只存「设备→班」的归属，不存设备自身的在线/帧数据（那些在一处真源 devices 里）。
+ */
+const classes = new Map();
+
 /** 上次记进日志的"观看结论"（uid + 被看人数），用来决定要不要再记一行 —— 见 pushWatchToAgent 末尾。 */
 let lastWatchLogUid = null;
 let lastWatchLogN = -1;
@@ -142,14 +157,30 @@ export function pushEvent(level, msg, extra = {}) {
   return ev;
 }
 
-/** @param caps 被控端 register 里的能力对象（含 actions 指令全集），可空（老版本被控端不带）。 */
-export function markConnected(uid, version, ws, caps = null) {
+/**
+ * @param caps 被控端 register 里的能力对象（含 actions 指令全集），可空（老版本被控端不带）。
+ * @param meta 设备展示元数据 { name?, classCode? }，来自 register 的辅助字段；
+ *             不传则沿用已知设备表里存的旧值（重连不改名）。
+ */
+export function markConnected(uid, version, ws, caps = null, meta = null) {
   const old = devices.get(uid);
   if (old && old.ws && old.ws !== ws) {
     pushEvent('warn', '同 uid 重连，踢掉旧连接', { uid, reason: 'duplicate' });
     try { old.ws.close(4001, 'superseded'); } catch { /* 已断就算了，别静默吞掉别的 */ }
   }
   const now = Date.now();
+  const known = knownDevices.get(uid) || {};
+  // 已知设备表：离线也留着，online 由 devices.has 派生；name/classCode 落这里，重连沿用。
+  const resolvedClass = meta?.classCode ?? known.classCode ?? null;
+  knownDevices.set(uid, {
+    uid,
+    name: meta?.name ?? known.name ?? null,
+    classCode: resolvedClass,
+    version: version || known.version || 'unknown',
+    lastSeen: now,
+  });
+  // 注册带班级码 → 同步进班级索引（保证「按班下发」能找到这台）。
+  if (resolvedClass) addToClassIndex(uid, resolvedClass);
   devices.set(uid, {
     uid,
     version: version || 'unknown',
@@ -160,6 +191,8 @@ export function markConnected(uid, version, ws, caps = null) {
     bytesIn: 0,
     heartbeatsIn: 0,
     lastError: null,
+    name: knownDevices.get(uid).name,
+    classCode: knownDevices.get(uid).classCode,
     recentFrame: old?.recentFrame ?? null,
     // 能力清单（2026-10-06 契合度）：被控端 register 带上来，云端**原样转给管端**，
     // 管端据此把不支持的按钮置灰，别让人点下去才吃一句"未知指令"。
@@ -179,18 +212,25 @@ export function markConnected(uid, version, ws, caps = null) {
     caps: (caps || old?.caps) ? { ...(old?.caps ?? {}), ...(caps ?? {}) } : null,
     actions: caps?.actions ?? old?.actions ?? null,
   });
-  pushEvent('info', '设备已注册并连上', { uid, version });
+  pushEvent('info', '设备已注册并连上', { uid, version, name: knownDevices.get(uid)?.name ?? null });
   // 刚上线：之前那些"订阅/退订"它一条都没收到过（那时它不在线，全记成 warn 了）。
   // 补发一次当前的"你在被看着"结论，否则新上线会停在"没人看"上一直不抓屏。
   // 没人看时这次推送只是白跑一回 send（uids 空数组），比让它永久空转强。
   pushWatchToAgent(String(uid || '').trim());
+  // 上线 → 把最新设备表推给所有管理端（含它自己），离线状态立刻刷新（根因修复）。
+  broadcastDevices();
 }
 
 export function markDisconnected(ws) {
   for (const [uid, d] of devices) {
     if (d.ws === ws) {
+      // 离线：从在线表移除，但「已知设备表」留着（online 由 devices.has 派生会自然变 false）。
+      const known = knownDevices.get(uid);
+      if (known) known.lastSeen = Date.now();
       devices.delete(uid);
       pushEvent('info', '设备掉线', { uid, frames: d.framesIn });
+      // 立刻把"它没了"推给管理端，离线状态马上刷新（根因修复）。
+      broadcastDevices();
       return uid;
     }
   }
@@ -245,6 +285,7 @@ export function sweepStale() {
       heartbeats: d.heartbeatsIn,
     });
     try { if (d.ws) d.ws.close(4000, 'heartbeat timeout'); } catch { /* 已经断了，不必再报 */ }
+    // 离线表保留（根因修复）：只从在线表移除，knownDevices 的 lastSeen 已是最新。
     devices.delete(uid);
   }
   return stale;
@@ -252,24 +293,141 @@ export function sweepStale() {
 
 export function listDevices() {
   const now = Date.now();
-  return [...devices.values()].map((d) => ({
-    uid: d.uid,
-    version: d.version,
-    online: true,
-    connectedAt: new Date(d.connectedAt).toISOString(),
-    lastSeenAgoSec: Math.round((now - d.lastSeen) / 1000),
-    framesIn: d.framesIn,
-    bytesIn: d.bytesIn,
-    heartbeatsIn: d.heartbeatsIn,
-    lastError: d.lastError,
-    // 管端门控要用：没上报过就是 null（老版本被控端），管端照旧全放开
-    caps: d.caps ?? null,
-    actions: d.actions ?? null,
-  }));
+  const out = [];
+  // 合并「已知设备表」与「在线表」：在线设备一定有 known 条目；离线设备只剩 known 条目。
+  for (const [uid, kd] of knownDevices) {
+    const d = devices.get(uid);
+    const online = !!d && d.ws && d.ws.readyState === 1;
+    const lastSeen = d ? d.lastSeen : kd.lastSeen;
+    out.push({
+      uid,
+      // 设备名：没上报过就是 null，管端照旧回退显示 uid（不是 undefined）。
+      name: kd.name ?? null,
+      classCode: kd.classCode ?? null,
+      version: d ? d.version : (kd.version || 'unknown'),
+      // online 由「在线表里有没有且 socket 还活着」派生 —— 不写死 true（根因修复）。
+      online,
+      connectedAt: d ? new Date(d.connectedAt).toISOString() : null,
+      lastSeenAt: new Date(lastSeen).toISOString(),
+      lastSeenAgoSec: Math.round((now - lastSeen) / 1000),
+      framesIn: d ? d.framesIn : 0,
+      bytesIn: d ? d.bytesIn : 0,
+      heartbeatsIn: d ? d.heartbeatsIn : 0,
+      lastError: d ? d.lastError : null,
+      // 管端门控要用：没上报过就是 null（老版本被控端），管端照旧全放开
+      caps: d ? (d.caps ?? null) : null,
+      actions: d ? (d.actions ?? null) : null,
+    });
+  }
+  return out;
 }
 
 export function getDevice(uid) {
   return devices.get(uid) || null;
+}
+
+/**
+ * 设置设备的展示元数据（名字 / 班级）。被控端 register 时带上来、或管理端手动改。
+ * 落「已知设备表」，重连沿用；不影响在线状态。
+ */
+export function setDeviceMeta(uid, meta = {}) {
+  const known = knownDevices.get(uid);
+  if (!known) {
+    knownDevices.set(uid, {
+      uid,
+      name: meta.name ?? null,
+      classCode: meta.classCode ?? null,
+      version: 'unknown',
+      lastSeen: Date.now(),
+    });
+    return;
+  }
+  if (meta.name !== undefined) known.name = meta.name ?? null;
+  if (meta.classCode !== undefined) {
+    known.classCode = meta.classCode ?? null;
+    if (meta.classCode) addToClassIndex(uid, meta.classCode);
+  }
+}
+
+/* ---------- 分班制（2026-10-08）----------
+ * 班级：classCode -> { code, name, devices:[uid] }。设备归属存「已知设备表」的 classCode，
+ * 这里只维护「班 → 设备列表」索引 + 班名，便于按班下发与管理端列班级树。
+ */
+
+/** 校验班级码格式：6-16 位字母数字或中划线/下划线（站点 /api/device/bind 的 classCode 同源）。 */
+export function isClassCodeValid(code) {
+  return typeof code === 'string' && /^[A-Za-z0-9_-]{6,16}$/.test(code);
+}
+
+/** 内部：保证 classCode 索引里有这台设备（注册带 classCode / 手动绑定 / 改名都走它）。 */
+function addToClassIndex(uid, code) {
+  if (!code) return;
+  let c = classes.get(code);
+  if (!c) { c = { code, name: code, devices: [] }; classes.set(code, c); }
+  if (!c.devices.includes(uid)) c.devices.push(uid);
+  let known = knownDevices.get(uid);
+  if (!known) { known = { uid, name: null, classCode: code, version: 'unknown', lastSeen: 0 }; knownDevices.set(uid, known); }
+  else known.classCode = code;
+}
+
+export function bindDeviceToClass(code, uid, className = '') {
+  if (!isClassCodeValid(code)) return { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' };
+  const key = code;
+  let c = classes.get(key);
+  if (!c) { c = { code: key, name: className || key, devices: [] }; classes.set(key, c); }
+  if (className) c.name = className;
+  addToClassIndex(uid, key);
+  pushEvent('info', '设备已绑定班级', { uid, classCode: key, className: c.name });
+  broadcastDevices();
+  return { ok: true, class: c };
+}
+
+export function unbindDeviceFromClass(code, uid) {
+  const c = classes.get(code);
+  if (c) c.devices = c.devices.filter((x) => x !== uid);
+  const known = knownDevices.get(uid);
+  if (known && known.classCode === code) known.classCode = null;
+  broadcastDevices();
+  return { ok: true };
+}
+
+export function listClasses() {
+  return [...classes.values()].map((c) => ({
+    code: c.code,
+    name: c.name,
+    devices: c.devices.slice(),
+    onlineCount: c.devices.filter((u) => {
+      const d = devices.get(u);
+      return !!d && d.ws && d.ws.readyState === 1;
+    }).length,
+  }));
+}
+
+export function getDevicesOfClass(code) {
+  const c = classes.get(code);
+  return c ? c.devices.slice() : [];
+}
+
+/**
+ * 云端存储/运行信息：管理端「班级电脑 / 云端存储信息」面板用。
+ * 只聚合内存态与事件日志体积，**不读 assets/pkg 大目录**（那是发布物，不是运行态）；
+ * 在线/离线/待回执指令都现算，不落表（落表会长出"不自刷新"的老毛病）。
+ */
+export function getStorageInfo() {
+  let online = 0;
+  for (const d of devices.values()) if (d.ws && d.ws.readyState === 1) online++;
+  let pendingCnt = 0;
+  try { pendingCnt = Object.keys(listPendingAll()).length; } catch { pendingCnt = 0; }
+  return {
+    knownDevices: knownDevices.size,
+    onlineDevices: online,
+    offlineDevices: knownDevices.size - online,
+    classes: classes.size,
+    pendingInstructions: pendingCnt,
+    eventsBytes,
+    eventsFiles: EVENTS_KEEP_FILES,
+    at: new Date().toISOString(),
+  };
 }
 
 /* ---------- 管理端（viewer）：订阅帧 + 收设备表 ---------- */
