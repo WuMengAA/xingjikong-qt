@@ -13,10 +13,13 @@
 // 绑定存储：Qt.labs.settings（cameraBind/<uid> = 设备名，与 CameraBindDialog 同key）
 //
 // 用法（等 Main.qml 解禁后挂）：
-//   CameraCenter { theme: root.th; backend: root.backend; width: ...; height: ... }
+//   CameraCenter { theme: root.th; backend: root.backendRef; width: ...; height: ... }
+//   ⚠️ 别写 `backend: backend`（自绑定循环，见 Main.qml 里 backendRef 的说明）。
 import QtQuick
 import QtQuick.Controls
-import Qt.labs.settings
+// ⚠️ 2026-10-10：Settings 自 Qt 6.5 起迁进 QtCore，Qt.labs.settings 已弃用（启动就刷 deprecation）。
+//   另外它的落点依赖 QCoreApplication 的 organizationName —— 团队已在 main.cpp 补设（见那里注释）。
+import QtCore
 
 Item {
     id: cc

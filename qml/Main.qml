@@ -166,6 +166,11 @@ ApplicationWindow {
     // 云端回来的东西：一切以它为准
     readonly property var devices: backend.devices
     readonly property string currentUid: backend.currentUid
+    // ⚠️ 2026-10-10：给「在子组件里引用 backend」的地方一个**不重名**的转发名。
+    //   子组件若自己也有 `backend` 属性（如 CameraCenter/CameraBindDialog），挂 `backend: backend`
+    //   时右侧的 `backend` 会被**自身属性遮蔽**（QML 非限定名先查自身），变成自绑定 ⇒ 引擎报
+    //   `Binding loop detected for property "backend"`，随后该子组件里所有 `xxx.backend.*` 全变 undefined。
+    readonly property var backendRef: backend
     // 屏幕上这张画面**确实是当前选中那台**的吗？
     // ⚠️ 2026-10-08 修「切了设备画面还是第一台」：光看 frameCount 不够 —— 上一台的帧
     //    还在路上（云端退订不是瞬时的），落进同一张 frame 就会继续冒充新设备。
@@ -1132,33 +1137,37 @@ ApplicationWindow {
                     //   现在先把画面区换算成**内接矩形**，只认矩形内的比例，矩形外夹到边界。
                     //   坐标是绝对的（0~1 → 被控端屏幕像素），不做任何相对位移累积，
                     //   所以拖到哪就到哪，不存在越用越飘。
-                    // 鼠标键 → 协议里的 button：以前只有左键，右键/中键远控过去被当左键按，
-                    //   右键菜单、中键自动滚全指望它。
-                    function btnOf(b) {
-                        if (b === Qt.RightButton) return "right"
-                        if (b === Qt.MiddleButton) return "middle"
-                        return "left"
-                    }
-                    readonly property rect fitRect: {
-                        var fw = backend.frame.width, fh = backend.frame.height
-                        var w = screenArea.width, h = screenArea.height
-                        if (fw <= 0 || fh <= 0 || w <= 0 || h <= 0)
-                            return Qt.rect(0, 0, w, h)
-                        var s = Math.min(w / fw, h / fh)
-                        var iw = fw * s, ih = fh * s
-                        return Qt.rect((w - iw) / 2, (h - ih) / 2, iw, ih)
-                    }
-                    // 画面内像素 → 被控端屏幕归一化坐标（0~1，绝对位置）
-                    function normOf(mx, my) {
-                        var r = fitRect
-                        return [Math.min(1, Math.max(0, (mx - r.x) / r.width)),
-                                Math.min(1, Math.max(0, (my - r.y) / r.height))]
-                    }
-
                     MouseArea {
                         id: screenArea
                         anchors.fill: parent
                         enabled: backend.frameCount > 0
+
+                        // 鼠标键 → 协议里的 button：以前只有左键，右键/中键远控过去被当左键按，
+                        //   右键菜单、中键自动滚全指望它。
+                        // ⚠️ 2026-10-10：这三个原先声明在**外层 Rectangle** 上，而 QML 的非限定名
+                        //   只查「自身对象 → 组件根」两级 —— MouseArea 的手柄够不到外层兄弟元素的
+                        //   函数，于是每次点画面都刷 `ReferenceError: normOf is not defined`，
+                        //   远控点击整个失效。移到 MouseArea 自身（唯一使用者）即根治。
+                        function btnOf(b) {
+                            if (b === Qt.RightButton) return "right"
+                            if (b === Qt.MiddleButton) return "middle"
+                            return "left"
+                        }
+                        readonly property rect fitRect: {
+                            var fw = backend.frame.width, fh = backend.frame.height
+                            var w = screenArea.width, h = screenArea.height
+                            if (fw <= 0 || fh <= 0 || w <= 0 || h <= 0)
+                                return Qt.rect(0, 0, w, h)
+                            var s = Math.min(w / fw, h / fh)
+                            var iw = fw * s, ih = fh * s
+                            return Qt.rect((w - iw) / 2, (h - ih) / 2, iw, ih)
+                        }
+                        // 画面内像素 → 被控端屏幕归一化坐标（0~1，绝对位置）
+                        function normOf(mx, my) {
+                            var r = fitRect
+                            return [Math.min(1, Math.max(0, (mx - r.x) / r.width)),
+                                    Math.min(1, Math.max(0, (my - r.y) / r.height))]
+                        }
                         // 左 / 中 / 右键全收：这三键在教室机上都用得上
                         acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                         cursorShape: pressed ? Qt.ClosedHandCursor : Qt.CrossCursor
@@ -1538,7 +1547,10 @@ ApplicationWindow {
                 // 操作结果提示（简单 toast）
                 property string hintText: ""
                 Timer { id: hintTimer; interval: 2500; onTriggered: consolePage.hintText = "" }
-                function hint(s) { island.showNote(s, "", "bell", 3000) }
+                // ⚠️ 2026-10-10：本页原来的 `function hint(s)` 已删 —— 它住在 consolePage 里，而 QML
+                //   非限定名只查「自身对象 → 组件根」两级，其它页调 hint() 一律 ReferenceError
+                //   （日志实锤：Main.qml 报 `hint is not defined`）。它与根级 root.toast() **函数体逐字相同**，
+                //   已把全部调用点统一成 root.toast()，不留第二个名字。
                 Text {
                     anchors.top: parent.top; anchors.topMargin: 6
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -1876,13 +1888,13 @@ ApplicationWindow {
                                         onClicked: {
                                             // 定时关机/重启会把一批教室机排进日程，跟电源键一个量级
                                             if (!backend.mayDo("schedule_shutdown")) {
-                                                hint("定时关机/重启要管理员身份");
+                                                root.toast("定时关机/重启要管理员身份");
                                                 return
                                             }
                                             const at = schedAt.text.trim()
-                                            if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(at)) { hint("时间格式 HH:mm"); return }
+                                            if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(at)) { root.toast("时间格式 HH:mm"); return }
                                             const uid = backend.currentUid
-                                            if (!uid) { hint("先选中设备"); return }
+                                            if (!uid) { root.toast("先选中设备"); return }
                                             const now = new Date()
                                             const [h, m] = at.split(":").map(Number)
                                             const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m)
@@ -1890,7 +1902,7 @@ ApplicationWindow {
                                             // 被控端要 ISO 8601（含毫秒）——见 control-qt main.cpp schedule 分支
                                             const iso = target.toISOString()
                                             backend.sendAction(schedWhat, { "at": iso })
-                                            hint("已设定 " + at + " → " + uid)
+                                            root.toast("已设定 " + at + " → " + uid)
                                         }
                                     }
                                 }
@@ -1975,7 +1987,7 @@ ApplicationWindow {
                                         text: "开始考试"
                                         onClicked: {
                                             const uid = backend.currentUid
-                                            if (!uid) { hint("先在控制页选中一台设备"); return }
+                                            if (!uid) { root.toast("先在控制页选中一台设备"); return }
                                             var blacklist = []
                                             examBlacklist.text.split(",").forEach(function(s) {
                                                 var t = s.trim()
@@ -1985,7 +1997,7 @@ ApplicationWindow {
                                                 "minutes": parseInt(examMinutes.text, 10) || 0,
                                                 "blacklist": blacklist
                                             })
-                                            hint("考试模式已下发 → " + uid)
+                                            root.toast("考试模式已下发 → " + uid)
                                         }
                                     }
                                     Btn {
@@ -1994,9 +2006,9 @@ ApplicationWindow {
                                         text: "结束考试"
                                         onClicked: {
                                             const uid = backend.currentUid
-                                            if (!uid) { hint("先在控制页选中一台设备"); return }
+                                            if (!uid) { root.toast("先在控制页选中一台设备"); return }
                                             backend.sendAction("exam_mode_stop", {})
-                                            hint("已请求结束考试 → " + uid)
+                                            root.toast("已请求结束考试 → " + uid)
                                         }
                                     }
                                 }
@@ -2029,12 +2041,12 @@ ApplicationWindow {
                                         onClicked: {
                                             if (backend.speaking) {
                                                 backend.stopSpeaking()
-                                                hint("语音已停止（静音）")
+                                                root.toast("语音已停止（静音）")
                                             } else {
                                                 if (backend.startSpeaking()) {
-                                                    hint("正在讲话，全班可听；再次点击停止")
+                                                    root.toast("正在讲话，全班可听；再次点击停止")
                                                 } else {
-                                                    hint("开麦失败：" + backend.speakError)
+                                                    root.toast("开麦失败：" + backend.speakError)
                                                 }
                                             }
                                             root.refreshIsland()   // 灵动岛语音胶囊跟手开/关
@@ -2069,12 +2081,12 @@ ApplicationWindow {
                                         onClicked: {
                                             if (backend.broadcasting) {
                                                 backend.stopBroadcast()
-                                                hint("屏幕广播已停止")
+                                                root.toast("屏幕广播已停止")
                                             } else {
                                                 if (backend.startBroadcast()) {
-                                                    hint("正在屏幕广播；再次点击停止")
+                                                    root.toast("正在屏幕广播；再次点击停止")
                                                 } else {
-                                                    hint("广播启动失败")
+                                                    root.toast("广播启动失败")
                                                 }
                                             }
                                             root.refreshIsland()   // 灵动岛广播胶囊跟手开/关
@@ -2108,7 +2120,7 @@ ApplicationWindow {
                                         text: "刷新"
                                         onClicked: {
                                             backend.fetchRecordings()
-                                            hint("正在拉取录制列表…")
+                                            root.toast("正在拉取录制列表…")
                                         }
                                     }
                                     Button {
@@ -2164,7 +2176,7 @@ ApplicationWindow {
                                         text: "刷新"
                                         onClicked: {
                                             multiThumb.watch()
-                                            hint("正在订阅多班缩略图…")
+                                            root.toast("正在订阅多班缩略图…")
                                         }
                                     }
                                 }
@@ -2209,14 +2221,19 @@ ApplicationWindow {
 
                                             // 缩略图：帧更新时 tick++ 换缓存键
                                             Image {
+                                                id: thumbImg
                                                 anchors.fill: parent
                                                 fillMode: Image.PreserveAspectFit
                                                 cache: false
+                                                // ⚠️ 2026-10-10：tick 是**本 Image** 的属性，原来却写 `cell.tick++`
+                                                //   （cell 是那一格的 Rectangle，没这属性）⇒ 每来一帧都刷
+                                                //   `Cannot assign to non-existent property "tick"`，缓存键永不刷新、
+                                                //   缩略图看着"不更新"。改用 Image 自己的 id 引用。
                                                 property int tick: 0
                                                 source: "image://frames/" + modelData + "?t" + tick
                                                 Connections {
                                                     target: backend
-                                                    function onThumbnailChanged(uid) { if (uid === modelData || uid === "") cell.tick++ }
+                                                    function onThumbnailChanged(uid) { if (uid === modelData || uid === "") thumbImg.tick++ }
                                                 }
                                             }
 
@@ -2243,14 +2260,14 @@ ApplicationWindow {
                                                 onClicked: {
                                                     backend.setCurrentUid(modelData)
                                                     root.page = 1   // 控制页
-                                                    hint("已切换查看 " + modelData)
+                                                    root.toast("已切换查看 " + modelData)
                                                 }
                                             }
 
                                             // 空态：还没收到这台帧
                                             Text {
                                                 anchors.centerIn: parent
-                                                visible: cell.tick === 0
+                                                visible: thumbImg.tick === 0
                                                 text: "等待画面…"
                                                 color: th.fg4
                                                 font.pixelSize: 10
@@ -3073,7 +3090,7 @@ ApplicationWindow {
         CameraCenter {
             id: camCenter
             theme: root.th
-            backend: backend
+            backend: root.backendRef
             anchors.fill: parent
             anchors.margins: 12
         }
@@ -3125,14 +3142,18 @@ ApplicationWindow {
         //  · 语音 / 广播状态变了（含被自动停掉），灵动岛要跟着重算一次。
         Connections {
             target: backend
-            onAutoNoteChanged: { if (backend.autoNote !== "") root.toast(backend.autoNote); root.refreshIsland() }
-            onSpeakingChanged: root.refreshIsland()
-            onBroadcastingChanged: root.refreshIsland()
+            // ⚠️ 2026-10-10：统一改成 `function onX(...)` 函数式声明 —— 老写法（直接写属性名）
+            //   Qt 6 已弃用，会刷 "Implicitly defined onFoo properties in Connections are deprecated"；
+            //   而 `onIslandNote: island.showNote(title, desc, icon, …)` 更严重：隐式参数注入同样
+            //   弃用，且上面还刷 "Parameter \"title\" is not declared"。改函数式后参数显式、告警消失。
+            function onAutoNoteChanged() { if (backend.autoNote !== "") root.toast(backend.autoNote); root.refreshIsland() }
+            function onSpeakingChanged() { root.refreshIsland() }
+            function onBroadcastingChanged() { root.refreshIsland() }
             // 设备表一变（有人掉线 / 新机上线 / 掉线重连）就重算：
             // 掉线是教室里最高频的异常，之前灵动岛对它是瞎的。
-            onDevicesChanged: root.refreshIsland()
+            function onDevicesChanged() { root.refreshIsland() }
             // 云端状态通知（断线重连 / 指令执行完成）统一走灵动岛，不再弹系统托盘气泡
-            onIslandNote: island.showNote(title, desc, icon, 3000)
+            function onIslandNote(title, desc, icon) { island.showNote(title, desc, icon, 3000) }
         }
         // 启动时没有任何输入进来，灵动岛从来没被刷过一次（一直是空的）。
         // 这里补一次：空的也得是"真的空"。
