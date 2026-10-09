@@ -159,7 +159,7 @@ export function pushEvent(level, msg, extra = {}) {
 
 /**
  * @param caps 被控端 register 里的能力对象（含 actions 指令全集），可空（老版本被控端不带）。
- * @param meta 设备展示元数据 { name?, classCode? }，来自 register 的辅助字段；
+ * @param meta 设备展示元数据 { name?, classCode?, className? }，来自 register 的辅助字段；
  *             不传则沿用已知设备表里存的旧值（重连不改名）。
  */
 export function markConnected(uid, version, ws, caps = null, meta = null) {
@@ -180,7 +180,7 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     lastSeen: now,
   });
   // 注册带班级码 → 同步进班级索引（保证「按班下发」能找到这台）。
-  if (resolvedClass) addToClassIndex(uid, resolvedClass);
+  if (resolvedClass) addToClassIndex(uid, resolvedClass, meta?.className ?? '');
   devices.set(uid, {
     uid,
     version: version || 'unknown',
@@ -359,11 +359,14 @@ export function isClassCodeValid(code) {
   return typeof code === 'string' && /^[A-Za-z0-9_-]{6,16}$/.test(code);
 }
 
-/** 内部：保证 classCode 索引里有这台设备（注册带 classCode / 手动绑定 / 改名都走它）。 */
-function addToClassIndex(uid, code) {
+/** 内部：保证 classCode 索引里有这台设备（注册带 classCode / 手动绑定 / 改名都走它）。
+ *  name（2026-10-09）：被控端 register 带 className 时用作班级显示名（默认 = code）。
+ *  只有非空才覆盖 —— 否则后继一条不带名的 register 会把已显示的真名打回 class_01。 */
+function addToClassIndex(uid, code, name = '') {
   if (!code) return;
   let c = classes.get(code);
-  if (!c) { c = { code, name: code, devices: [] }; classes.set(code, c); }
+  if (!c) { c = { code, name: name || code, devices: [] }; classes.set(code, c); }
+  if (name) c.name = name;
   if (!c.devices.includes(uid)) c.devices.push(uid);
   let known = knownDevices.get(uid);
   if (!known) { known = { uid, name: null, classCode: code, version: 'unknown', lastSeen: 0 }; knownDevices.set(uid, known); }

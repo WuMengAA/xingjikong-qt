@@ -1157,9 +1157,11 @@ wss.on('connection', (ws) => {
       const regCaps = (p.payload && typeof p.payload.caps === 'object' && p.payload.caps !== null)
         ? p.payload.caps : null;
       // 2026-10-08：register 带 name / classCode → 落到已知设备表（重连沿用、离线保留）。
+      // 2026-10-09：再带 className（班级显示名，如「1班」）→ 班级索引不再只显示 class_01。
       const regMeta = {
         name: (p.payload && typeof p.payload.name === 'string' && p.payload.name.trim()) ? p.payload.name.trim().slice(0, 64) : null,
         classCode: (p.payload && typeof p.payload.classCode === 'string' && p.payload.classCode.trim()) ? p.payload.classCode.trim() : null,
+        className: (p.payload && typeof p.payload.className === 'string' && p.payload.className.trim()) ? p.payload.className.trim().slice(0, 64) : null,
       };
       markConnected(uid, String(version || ''), ws, regCaps, regMeta);
       // 设备上线：把还没挑设备的管理端补上订阅（否则老师先开软件 → 永远黑屏）
