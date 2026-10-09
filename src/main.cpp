@@ -349,7 +349,7 @@ void scheduleReconnect()
  * 放成常量数组而不是散在各个 if 里，是为了让"能做什么"只有一处真值来源：
  * 以后 executeAction 加分支，这张表也得跟着加，否则设备会自称会做却做不了（或反之）。 */
 static const char *kActionNames[] = {
-    "camera_list", "camera_record_start", "camera_record_stop", "camera_snapshot",
+    "camera_bind", "camera_list", "camera_record_start", "camera_record_stop", "camera_snapshot", "camera_test",
     "cancel_schedule", "file_chunk", "file_done", "file_push",
     "input", "launch_app", "list_schedules", "list_shortcut_candidates",
     "lock", "log_tail", "media_delete", "media_list",
@@ -530,6 +530,56 @@ static QString ffmpegBin()
     if (!env.isEmpty() && QFileInfo::exists(env)) return env;
     const QString found = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
     return found.isEmpty() ? env : found;   // 空串让调用方判失败
+}
+
+// ── 摄像头绑定（2026-10-09）──────────────────────────────────────────────
+// 教室机上常有多枚摄像头（含 OBS 这类虚拟摄像头），抓拍/录制到底用哪一枚必须**本机说了算**
+// （只有本机能枚举）。所以绑定存在被控端：管理端「监控中心」选一枚 → camera_bind 落到这里；
+// 之后 camera_snapshot / camera_record_start 不带 device 时默认用它。
+// 存成 `%LOCALAPPDATA%/xingjikong/cameradev.txt`（与 classcode.txt 同款，不动 agent.env）。
+static QString cameraDevPath()
+{
+    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/cameradev.txt");
+}
+static QString boundCamera()   // 空 = 未绑定（调用方回落 video0 / 设备名）
+{
+    QFile f(cameraDevPath());
+    if (!f.open(QIODevice::ReadOnly)) return QString();
+    const QString d = QString::fromUtf8(f.readAll()).trimmed();
+    f.close();
+    return d;
+}
+static bool saveBoundCamera(const QString &dev)
+{
+    const QString d = dev.trimmed();
+    if (d.isEmpty()) { QFile::remove(cameraDevPath()); return true; }   // 传空 = 解绑
+    QDir().mkpath(QFileInfo(cameraDevPath()).absolutePath());
+    QFile f(cameraDevPath());
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    f.write(d.toUtf8());
+    f.close();
+    return true;
+}
+/** 解析 `ffmpeg -list_devices true -f dshow -i dummy` 的输出。
+ *  实测格式（ffmpeg 9.0，2026-10-09）：
+ *      [in#0 @ 0x…] "OBS Virtual Camera" (none)
+ *      [in#0 @ 0x…]   Alternative name "@device_sw_{…}"
+ *      [in#0 @ 0x…] "麦克风 (High Definition Audio Device)" (audio)
+ *  ⚠️ 设备名在**首对引号**里，类别在尾部括号里。别再抓行里第一个 '@' ——
+ *     那是 `[in#0 @ 0x…]` 的地址标记，抓它解析必然为空（旧实现的 bug）。
+ *  类别：video=摄像头；audio=麦克风；**none=虚拟摄像头（如 OBS），也算摄像头**。 */
+static void parseDshowDevices(const QString &txt, QJsonArray &cams, QJsonArray &mics)
+{
+    static const QRegularExpression re(QStringLiteral("\\]\\s*\"([^\"]+)\"\\s*\\(([A-Za-z]+)\\)"));
+    for (const QString &line : txt.split(QLatin1Char('\n'))) {
+        const QRegularExpressionMatch m = re.match(line);
+        if (!m.hasMatch()) continue;
+        const QString name = m.captured(1).trimmed();
+        const QString kind = m.captured(2).toLower();
+        if (name.isEmpty()) continue;
+        if (kind == QLatin1String("audio")) mics.append(name);
+        else                                cams.append(name);
+    }
 }
 
 // ffplay 定位：与 ffmpeg 同目录优先（WinGet 装的俩在一处），再退回 PATH。
@@ -3576,35 +3626,108 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.error = QStringLiteral("找不到 ffmpeg（可设 STE_QT_FFMPEG 指向 ffmpeg.exe）");
             return out;
         }
-        // -list_devices 输出是文本；直接读 stdout 抓 `@` 开头的设备名
+        // ⚠️ `-list_devices` **必须带布尔值 `true`**：只写 `-list_devices` 会把紧跟的 `-f`
+        //    当成它的值吃掉，ffmpeg 于是直接去开 dummy，**一条设备都不打印**（2026-10-09 实测真因）。
+        //    另外别再挂 `-loglevel error` —— 设备列表是 info 级输出的，挂上就全被吞。
         QProcess p;
         p.setProcessChannelMode(QProcess::MergedChannels);
-        p.start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
-                      QStringLiteral("error"), QStringLiteral("-list_devices"),
-                      QStringLiteral("-f"), QStringLiteral("dshow"), QStringLiteral("-i"),
+        p.start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-list_devices"),
+                      QStringLiteral("true"), QStringLiteral("-f"),
+                      QStringLiteral("dshow"), QStringLiteral("-i"),
                       QStringLiteral("dummy") });
         if (!p.waitForFinished(4000)) {
             p.kill();
+            p.waitForFinished(1500);
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("ffmpeg 枚举设备超时（DirectShow 可能不可用）");
             return out;
         }
         const QString txt = QString::fromUtf8(p.readAll());
         QJsonArray cams, mics;
-        for (const QString &line : txt.split(QLatin1Char('\n'))) {
-            const int at = line.indexOf(QLatin1Char('@'));
-            if (at < 0) continue;
-            const QString name = line.mid(at + 1).trimmed();
-            if (name.isEmpty()) continue;
-            if (name.startsWith(QStringLiteral("videocapture"), Qt::CaseInsensitive))
-                cams.append(name);
-            else if (name.startsWith(QStringLiteral("audio"), Qt::CaseInsensitive))
-                mics.append(name);
-        }
+        parseDshowDevices(txt, cams, mics);
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("cameras"), cams);
         out.data.insert(QStringLiteral("microphones"), mics);
         out.data.insert(QStringLiteral("count"), cams.size());
+        out.data.insert(QStringLiteral("boundDevice"), boundCamera());   // "" = 未绑定
+        return out;
+    }
+
+    // 绑定摄像头：管理端「监控中心」选定一枚后落在这里，之后抓拍/录制默认用它。
+    // device 传空 = 解绑（回落默认）。绑定存本机（只有本机能枚举），不落 agent.env。
+    if (action == QStringLiteral("camera_bind")) {
+        const QString dev = params.value(QStringLiteral("device")).toString().trimmed();
+        if (!saveBoundCamera(dev)) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("camera_bind: 无法写入绑定文件 %1")
+                            .arg(QDir::toNativeSeparators(cameraDevPath()));
+            return out;
+        }
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("boundDevice"), dev);
+        out.data.insert(QStringLiteral("note"), dev.isEmpty()
+                                                      ? QStringLiteral("已解绑，抓拍/录制回落默认设备")
+                                                      : QStringLiteral("已绑定，抓拍/录制默认用它"));
+        return out;
+    }
+
+    // 摄像头自检：按绑定设备（或指定 device）真抓一帧，只回"能不能用 + 耗时 + 原因"。
+    // 与 camera_snapshot 的区别：这是**诊断**用途（管理端「测试」按钮），不管画面好看不好看。
+    if (action == QStringLiteral("camera_test")) {
+        const QString ff = ffmpegBin();
+        if (ff.isEmpty()) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("找不到 ffmpeg（可设 STE_QT_FFMPEG）");
+            return out;
+        }
+        QString dev = params.value(QStringLiteral("device")).toString().trimmed();
+        const bool fromBind = dev.isEmpty();
+        if (dev.isEmpty()) dev = boundCamera();
+        if (dev.isEmpty()) dev = QStringLiteral("video0");
+
+        QDir().mkpath(g_shotDir);
+        const QString path = g_shotDir + QStringLiteral("/_camtest-%1.png").arg(QDateTime::currentMSecsSinceEpoch());
+        QProcess p;
+        p.setProcessChannelMode(QProcess::SeparateChannels);
+        const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
+        // ⚠️ 输入串是 `video=<设备名>`。**不是** `video_device=` —— 后者 ffmpeg 直接报
+        //    "Malformed dshow input string"（2026-10-09 实测，旧实现对相机永远打不开）。
+        p.start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                      QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
+                      QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video=%1").arg(dev),
+                      QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-q:v"),
+                      QStringLiteral("2"), path });
+        const bool finished = p.waitForFinished(9000);
+        const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - t0;
+        if (!finished) {
+            p.kill();
+            p.waitForFinished(1500);
+            QFile::remove(path);
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("自检超时（%1ms，设备 %2）：设备被占用或不出帧").arg(elapsed).arg(dev);
+            out.data.insert(QStringLiteral("device"), dev);
+            out.data.insert(QStringLiteral("elapsedMs"), (int)elapsed);
+            return out;
+        }
+        const qint64 bytes = QFileInfo::exists(path) ? QFileInfo(path).size() : 0;
+        if (p.exitCode() != 0 || bytes == 0) {
+            QFile::remove(path);
+            const QString err = QString::fromUtf8(p.readAllStandardError()).trimmed().left(300);
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("自检失败（退出码 %1，设备 %2）：%3")
+                            .arg(p.exitCode()).arg(dev)
+                            .arg(err.isEmpty() ? QStringLiteral("ffmpeg 未给 stderr") : err);
+            out.data.insert(QStringLiteral("device"), dev);
+            out.data.insert(QStringLiteral("elapsedMs"), (int)elapsed);
+            return out;
+        }
+        QFile::remove(path);   // 自检不留垃圾
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("device"), dev);
+        out.data.insert(QStringLiteral("fromBinding"), fromBind);
+        out.data.insert(QStringLiteral("elapsedMs"), (int)elapsed);
+        out.data.insert(QStringLiteral("bytes"), (qint64)bytes);
+        out.data.insert(QStringLiteral("ok"), true);
         return out;
     }
 
@@ -3612,7 +3735,10 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     if (action == QStringLiteral("camera_snapshot")) {
         const QString ff = ffmpegBin();
         if (ff.isEmpty()) { out.result = QStringLiteral("failed"); out.error = QStringLiteral("找不到 ffmpeg"); return out; }
-        const QString dev = params.value(QStringLiteral("device")).toString(QStringLiteral("video0")).trimmed();
+        // 设备：显式 device > 本机绑定的摄像头 > video0（2026-10-09）
+        QString dev = params.value(QStringLiteral("device")).toString().trimmed();
+        if (dev.isEmpty()) dev = boundCamera();
+        if (dev.isEmpty()) dev = QStringLiteral("video0");
         if (dev.isEmpty()) { out.result = QStringLiteral("failed"); out.error = QStringLiteral("camera_snapshot: device 不能为空"); return out; }
         QDir().mkpath(g_shotDir);
         const QString path = g_shotDir + QStringLiteral("/cam-%1.png").arg(QDateTime::currentMSecsSinceEpoch());
@@ -3624,7 +3750,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         // -frames:v 1 = 只要一帧；-y 覆盖；抽帧失败（设备不存在/占用）ffmpeg 会非零退出
         p.start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
                       QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
-                      QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video_device=%1").arg(dev),
+                      QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video=%1").arg(dev),
                       QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-q:v"),
                       QStringLiteral("2"), path });
         if (!p.waitForFinished(8000)) {
@@ -3667,7 +3793,10 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                 QDir::toNativeSeparators(g_recOutPath));
             return out;
         }
-        const QString dev = params.value(QStringLiteral("device")).toString(QStringLiteral("video0")).trimmed();
+        // 设备：显式 device > 本机绑定的摄像头 > video0（2026-10-09）
+        QString dev = params.value(QStringLiteral("device")).toString().trimmed();
+        if (dev.isEmpty()) dev = boundCamera();
+        if (dev.isEmpty()) dev = QStringLiteral("video0");
         const int maxSec = qBound(1, params.value(QStringLiteral("duration_sec")).toInt(300), 3600);
         QDir().mkpath(g_shotDir);
         g_recOutPath = g_shotDir + QStringLiteral("/rec-%1.mp4").arg(QDateTime::currentMSecsSinceEpoch());
@@ -3676,7 +3805,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         g_recProc->start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
                                QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
                                QStringLiteral("dshow"), QStringLiteral("-i"),
-                               QStringLiteral("video_device=%1").arg(dev),
+                               QStringLiteral("video=%1").arg(dev),
                                QStringLiteral("-t"), QString::number(maxSec),
                                QStringLiteral("-c:v"), QStringLiteral("libx264"), QStringLiteral("-preset"),
                                QStringLiteral("ultrafast"), QStringLiteral("-crf"), QStringLiteral("28"),
