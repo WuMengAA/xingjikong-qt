@@ -28,7 +28,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebSockets WebEngineWidget
 # 命名同为 DeepSeek Harness 同款：正式 X.Y.Z / 内测 X.Y.Z-alpha.N / 候选 X.Y.Z-rc.N
 # （阶段序 alpha < rc < 正式；号同核心递增、换核心归零、转正即剥离后缀）。
 # 成熟度标记不进版本号，归 ota.json 的 mandatory / notes 管。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
-set(AGENT_VERSION "0.6.23-rc.2")
+set(AGENT_VERSION "0.6.24-rc.3")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" _agent_src)
 if(_agent_src MATCHES "kAppVersion[ \t\r\n]*=[ \t\r\n]*\"([^\"]+)\"")
   set(_src_agent_version "${CMAKE_MATCH_1}")
@@ -134,17 +134,34 @@ add_executable(stelarith-agent-qt
   src/microphone.cpp
   src/microphone.h
   # ── WebRTC 推流（2026-10-09：libdatachannel 换 other webrtc，探针全绿）──
-  # ⚠️ 暂未进编译：ldc_streamer 依赖 datachannel-static + srtp2 + juice + usrsctp
-  #    + OpenSSL 静态链（详见 _probe/WebRTC引擎替换-技术验证总结-2026-10-08.md §6），
-  #    等 WebRTC 接线窗口统一配链接，先不阻塞通知体系编译。
-  #  src/ldc_streamer.cpp
-  #  src/ldc_streamer.h
+  src/ldc_streamer.cpp
+  src/ldc_streamer.h
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::WebEngineWidgets Qt6::Network Qt6::Svg)
 # 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
 target_link_libraries(stelarith-agent-qt PRIVATE winmm)
+# ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
+#    STE_USE_LDC_RTC=1 默认走 ldc，=0 回退 WebEngine）────────────────────
+# 库：_probe/ldc_libs（重建产物，命名 datachannel.lib/juice.lib）+ PG17 OpenSSL
+# 头：_probe/libdatachannel-master/include（rtc/rtc.hpp）
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
+  target_include_directories(stelarith-agent-qt PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
+  target_link_libraries(stelarith-agent-qt PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/srtp2.lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/juice.lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/usrsctp.lib"
+    "C:/Program Files/PostgreSQL/17/lib/libssl.lib"
+    "C:/Program Files/PostgreSQL/17/lib/libcrypto.lib"
+    ws2_32 bcrypt crypt32 userenv secur32)
+  target_compile_definitions(stelarith-agent-qt PRIVATE RTC_STATIC)
+  message(STATUS "[agent] libdatachannel 已链入（RTC_STATIC）")
+else()
+  message(WARNING "[agent] _probe/ldc_libs/datachannel.lib 缺失——ldc_streamer 编译会失败，请先重建 libdatachannel")
+endif()
 
 # GUI 子系统：常驻托盘程序不该挂着控制台黑窗（日志已落盘到 agent-qt.log，不靠 stdout）
 set_target_properties(stelarith-agent-qt PROPERTIES WIN32_EXECUTABLE ON)
