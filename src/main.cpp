@@ -143,7 +143,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.23-rc.2";
+constexpr const char *kAppVersion = "0.6.24-rc.1";
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = kFirstBackoffMs;
@@ -154,11 +154,13 @@ bool g_everRegistered = false;
 // 语音对讲（2026-10-07）：学生端播放器（waveOut，懒打开——只在收到音频帧时开）
 AudioPlayer g_audioPlayer;
 bool g_audioHintShown = false;   // "老师正在讲话"提示是否已显示（每会话一次）
+int g_audioUpSeq = 0;            // 语音通话上行帧序号（2026-10-09）
 // ── 通知体系组件实例（2026-10-09 接线 · DeepSeek Harness）──
 DanmakuWidget *g_danmaku = nullptr;          // 弹幕（懒建：实际用弹幕时才建窗口）
 LoopReminder g_loopReminder;                 // 循环提醒（无 UI，纯逻辑）
 NotificationGate g_notifGate;                // 通知门控（考试模式禁通知）
 Microphone g_microphone;                     // 语音通话 mic 采集（会话内开关）
+SpectrumWidget *g_spectrum = nullptr;        // §6.3 语音频谱（懒建：有语音才出现）
 // 2026-10-08：断线灵动岛去重。退避重连期间每次 disconnected 都会再弹一条「连接中断」，
 // 首连快速重试（500ms）下等于每半秒闪一次，用户看到的就是"一直显示连接中断"。
 // 规则：同一段离线只弹第一条；云端回 registered（真的又连上了）才把闸门放开。
@@ -265,6 +267,30 @@ QByteArray makeFrameBytes(const QString &uid, int seq, const QByteArray &jpeg)
     out.append(char(header.size() & 0xFF));
     out.append(header);
     out.append(jpeg);
+    return out;
+}
+
+// 语音通话上行帧（2026-10-09 · 语音通话设计 §4.1）：学生 mic PCM → 云端。
+// 与画面帧同 v1 结构，区别在 mime=audio/pcm（云端据此走 duplex 单播回老师）。
+QByteArray makeAudioFrameBytes(const QByteArray &pcm)
+{
+    QJsonObject h;
+    h.insert(QStringLiteral("v"), kProtocolVersion);
+    h.insert(QStringLiteral("type"), QStringLiteral("frame"));
+    h.insert(QStringLiteral("uid"), g_uid);
+    h.insert(QStringLiteral("seq"), ++g_audioUpSeq);
+    h.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
+    h.insert(QStringLiteral("mime"), QStringLiteral("audio/pcm"));
+    h.insert(QStringLiteral("bytes"), pcm.size());
+    const QByteArray header = QJsonDocument(h).toJson(QJsonDocument::Compact);
+
+    QByteArray out;
+    out.reserve(3 + header.size() + pcm.size());
+    out.append(char(kProtocolVersion));
+    out.append(char((header.size() >> 8) & 0xFF));
+    out.append(char(header.size() & 0xFF));
+    out.append(header);
+    out.append(pcm);
     return out;
 }
 
@@ -4433,14 +4459,27 @@ void handleControlText(const QString &text)
 
     // 语音对讲（2026-10-07）：老师开始/结束讲话 —— 重置"正在讲话"提示标记。
     // （提示的实际显示在收到第一帧音频时触发；stop 后下次 start 再提示。）
+    // 2026-10-09 语音通话：duplex=true → 学生开 mic 采集回传（只回发起老师）。
     if (type == QStringLiteral("audio.start")) {
         g_audioHintShown = false;
+        const bool duplex = pay.value(QStringLiteral("duplex")).toBool(false)
+                            || pay.value(QStringLiteral("params")).toObject()
+                                   .value(QStringLiteral("duplex")).toBool(false);
+        if (duplex && !g_microphone.running()) {
+            // 会话内采集：硬上限 120s 自动停（防挂起窃听，安全边界见语音通话设计 §3）
+            g_microphone.start(120000);
+            qInfo("[agent-qt] 🔊 语音通话开始（duplex，学生 mic 已开启，回传老师）");
+        }
         qInfo("[agent-qt] 🔊 老师开始讲话（语音对讲）");
         return;
     }
     if (type == QStringLiteral("audio.stop")) {
         g_audioHintShown = true;   // 结束后不再提示
         g_audioPlayer.closePlayer();
+        if (g_microphone.running()) {
+            g_microphone.stop();
+            qInfo("[agent-qt] 🔊 语音通话结束（学生 mic 已关闭）");
+        }
         qInfo("[agent-qt] 🔊 老师结束讲话（语音对讲已静音）");
         return;
     }
@@ -4812,6 +4851,15 @@ int main(int argc, char *argv[])
             qInfo("[agent-qt] 循环提醒已终止 %s（%s）", id.toUtf8().constData(),
                   reason.toUtf8().constData());
         });
+    // 语音通话：mic 采集帧 → v1 音频帧发回云端（云端 duplex 单播回发起老师）
+    QObject::connect(&g_microphone, &Microphone::pcmReady, &app,
+        [](const QByteArray &pcm) {
+            if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
+            g_ws->sendBinaryMessage(makeAudioFrameBytes(pcm));
+        });
+    QObject::connect(&g_microphone, &Microphone::hardStop, &app, [] {
+        qInfo("[agent-qt] 🔊 语音通话硬上限到达，学生 mic 自动关闭（安全边界）");
+    });
     // 考试模式切换 → 通知门控同步（考试激活 → 一切通知静默；结束 → 放行）
     // ExamMode 是单例：hook 它的状态切换（start/stop 都在 exam_mode.cpp 内触发信号——
     // 目前没有信号，改由 main.cpp 在两个指令处理点同步，见 exam_mode 指令分支）。
@@ -4895,6 +4943,15 @@ int main(int argc, char *argv[])
             }
             if (!g_audioPlayer.isOpen()) g_audioPlayer.open();
             g_audioPlayer.write(payload);
+            // §6.3 语音频谱：对讲帧喂 16 位频谱（懒建窗口，只在有语音时出现）
+            if (!g_spectrum) {
+                g_spectrum = new SpectrumWidget();
+                g_spectrum->resize(240, 48);
+                g_spectrum->move(20, 20);
+                g_spectrum->setLightMode(false);
+            }
+            g_spectrum->pushPcm(payload);
+            g_spectrum->show();
             return;
         }
         if (mime == QLatin1String("image/jpeg")) {
