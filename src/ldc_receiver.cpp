@@ -87,6 +87,21 @@ void LdcReceiver::createPc(const QByteArray &payload)
 
         pc->setRemoteDescription(rtc::Description(payload.constData(), "offer"));
         qDebug() << "[receiver] offer set, generating answer...";
+        // ⚠️ 2026-10-10 修：接收方必须响应 offer 的 media（addTrack），
+        // answer 才会带媒体生成（onLocalDescription 才回调）。缺这一步 =
+        // setLocalDescription 返回但永远等不到 answer（联调实测卡死）。
+        const rtc::Description offer(payload.constData(), "offer");
+        for (int i = 0; i < offer.mediaCount(); ++i) {
+            // media(i) 是 variant<Media*, Application*>：视频/音频 media 才响应，
+            // application（DataChannel 的 SDP 描述）没有 addTrack 概念，跳过。
+            const auto media = offer.media(i);
+            // offer 是 const → media(i) 返回 variant<const Media*, const Application*>
+            // ⚠️ 不用 get_if（libdatachannel 版本里 const Media 模板推导歧义触发
+            //    static assert），用 hold_alternative + get 显式取。
+            if (std::holds_alternative<const rtc::Description::Media *>(media)) {
+                pc->addTrack(*std::get<const rtc::Description::Media *>(media));
+            }
+        }
         pc->setLocalDescription();   // 生成 answer
         qDebug() << "[receiver] setLocalDescription returned";
     } catch (const std::exception &e) {
