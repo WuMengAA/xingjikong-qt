@@ -1,4 +1,4 @@
-# WebRTC 去 WebEngine 底层 · 接线方案（2026-10-09 更新）
+﻿# WebRTC 去 WebEngine 底层 · 接线方案（2026-10-09 更新）
 
 > 目标：把两端 WebRTC 从 QWebEngine（Chromium）底层切到 libdatachannel。
 > 现状：被控端 g_rtcView（离屏 QWebEngineView 跑 JS 采集页，29 处）、
@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |----|------|
-| libdatachannel 静态库 | 🔶 重建中（datachannel-static.lib 误删，后台 job pwsh-309）|
+| libdatachannel 静态库 | 🔶 重建中（datachannel-static.lib 误删重建（新命名 datachannel.lib/juice.lib），后台 job pwsh-309）|
 | ldc_libs 备份 | ✅ juice-static/srtp2/usrsctp 已备份 `_probe\ldc_libs` |
 | 组件源码 | ✅ ldc_streamer/ldc_receiver 已提交两端 src/ |
 | 链接配方 | ✅ RTC_STATIC + datachannel-static + srtp2 + juice + usrsctp + libssl + libcrypto + ws2_32/bcrypt/crypt32/userenv/secur32（MSVC）|
