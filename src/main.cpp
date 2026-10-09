@@ -151,6 +151,9 @@ QWebSocket *g_ws = nullptr;
 int g_backoffMs = kFirstBackoffMs;
 // 2026-10-08：本机归属的班级码（OOBE 绑定后持久化，register 时带给云端 → 管理端按班分组）。
 QString g_classCode;
+// 2026-10-09：班级**显示名**（站点 /api/device/activate 回喂的 className，如「1班」）。
+// 云端班级索引的 name 默认等于 code；带上它，管理端面板才显示真名而不是 class_01。
+QString g_className;
 // 2026-10-08：是否曾经注册成功过（决定首连用快速重试还是正常退避）。
 bool g_everRegistered = false;
 // 语音对讲（2026-10-07）：学生端播放器（waveOut，懒打开——只在收到音频帧时开）
@@ -395,6 +398,8 @@ void sendRegister()
     p.insert(QStringLiteral("name"), envOr("STE_QT_NAME", QHostInfo::localHostName()));
     // 2026-10-08：本机归属的班级码（OOBE 绑定后持久化）；云端据此把设备按班分组。
     if (!g_classCode.isEmpty()) p.insert(QStringLiteral("classCode"), g_classCode);
+    // 2026-10-09：班级显示名 —— 云端班级索引 name 默认 = code，带上它管理端才显示「1班」。
+    if (!g_className.isEmpty()) p.insert(QStringLiteral("className"), g_className);
 
     // 2026-10-06：设备指纹（账号绑定路径需要）。
     // 如果 token 是站点签的设备票（7 段 v1.…），云端验票时会拿这个 fp 比对；
@@ -1060,6 +1065,34 @@ static void loadClassCode()
     }
 }
 
+// 2026-10-09：班级显示名持久化（与 classCode 分开存；同款理由：不动 agent.env 的 4 行格式）。
+static QString classNamePath()
+{
+    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/classname.txt");
+}
+static void saveClassName(const QString &name)
+{
+    const QString n = name.trimmed();
+    if (n.isEmpty()) return;   // 空值不覆盖已有（站点没回名时别把旧的抹掉）
+    g_className = n;
+    QFile f(classNamePath());
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(g_className.toUtf8());
+        f.close();
+    } else {
+        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法保存班级名：%1").arg(f.errorString());
+    }
+}
+static void loadClassName()
+{
+    QFile f(classNamePath());
+    if (f.open(QIODevice::ReadOnly)) {
+        const QString name = QString::fromUtf8(f.readAll()).trimmed();
+        f.close();
+        if (!name.isEmpty()) { g_className = name; qInfo().noquote() << QStringLiteral("[agent-qt] 已载入班级名 %1").arg(name); }
+    }
+}
+
 /* ══════════ 班级绑定（2026-10-04：OOBE 里消费激活码，把本机绑到班级） ══════════
  * 背景：管理员生成一次性、绑班级的接入码（XJK-XXXX-XXX）；教室端在配置向导里
  * 填进去，保存时调站点 `POST /api/device/activate?code=…&uid=…` 消费，
@@ -1138,13 +1171,28 @@ void consumeActivationCodeAsync(const QString &siteBase, const QString &code, co
         const QByteArray body = reply->readAll();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 200) {
-            // 成功：{"ok":true,"classId":"…","className":"…","uid":"…"}
+            // 成功：{"ok":true,"classId":"…","className":"…","classCode":"…","uid":"…"}
             QJsonParseError pe;
             const QJsonDocument doc = QJsonDocument::fromJson(body, &pe);
-            const QString cls = pe.error == QJsonParseError::NoError
-                                    ? doc.object().value(QStringLiteral("className")).toString()
-                                    : QString();
-            qInfo().noquote() << QStringLiteral("[agent-qt] ✅ 已绑定班级：%1").arg(cls.isEmpty() ? QStringLiteral("（返回无班级名）") : cls);
+            const QJsonObject o = (pe.error == QJsonParseError::NoError) ? doc.object() : QJsonObject();
+            const QString cls = o.value(QStringLiteral("className")).toString().trimmed();
+            // 2026-10-09：把**站点权威班级码**回存，替掉先前存进去的一次性接入码 ——
+            //   否则云端班级索引的键会是那串 XJK-xxxx-xxx（不稳定、重发还会换新）。
+            //   站点回 classCode（真源 class_id，如 class_01）；老站点不回则回退 classId。
+            QString authoritative = o.value(QStringLiteral("classCode")).toString().trimmed();
+            if (authoritative.isEmpty()) authoritative = o.value(QStringLiteral("classId")).toString().trimmed();
+            const bool changed = !authoritative.isEmpty() && authoritative != g_classCode;
+            if (changed) saveClassCode(authoritative);
+            if (!cls.isEmpty()) saveClassName(cls);
+            qInfo().noquote() << QStringLiteral("[agent-qt] ✅ 已绑定班级：%1（班级码 %2）")
+                                     .arg(cls.isEmpty() ? QStringLiteral("（返回无班级名）") : cls,
+                                          authoritative.isEmpty() ? QStringLiteral("（未回）") : authoritative);
+            // 权威码/名换过 → 补发一次 register，让云端立刻改掉键与显示名（不必等下次重连）。
+            if ((changed || !cls.isEmpty()) && g_ws
+                && g_ws->state() == QAbstractSocket::ConnectedState) {
+                sendRegister();
+                qInfo().noquote() << QStringLiteral("[agent-qt] 已补发 register（带上权威班级码/名）");
+            }
         } else {
             // 失败：404 码无效/过期；403 密钥错；其它
             qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 班级绑定失败（HTTP %1）：%2")
@@ -1159,14 +1207,13 @@ void consumeActivationCodeAsync(const QString &siteBase, const QString &code, co
 // 这就是第一次漂移的实例，所以只留一份实现。
 //
 // 一个输入框吃两种取值，不让用户去分辨自己手里是哪一种：
-//   · **班级码**（站点 stelarith_classes.code，6-16 位字母数字或 -_）→ 直接持久化，
+//   · **班级码**（云端班级索引的键，6-16 位字母数字或 -_）→ 直接持久化，
 //     下次 register 带上 classCode → 云端按班归组（云端 registry.js 的班级索引）。
-//   · **接入码**（XJK-XXXX-XXX，管理员生成、一次性、带 TTL）→ 持久化 + 调站点
-//     `/api/device/activate` 消费，站点据此落 device_bindings（uid→class）。
-// ⚠️ 已知缺陷（本轮**不改**，只记账）：接入码分支把**接入码本身**当班级码存下来
-//    （沿用 2026-10-08 的既有行为）。站点 `/api/device/activate` 目前只回 classId/className，
-//    **不回班级的 code**，被控端拿不到权威班级码 ⇒ 走接入码绑出来的班，云端那侧班名会是
-//    这串一次性码。修它要给站点响应加一个字段（另一个工程，等授权）。
+//   · **接入码**（XJK-XXXX-XXX，管理员生成、一次性、带 TTL）→ 先持久化 + 调站点
+//     `/api/device/activate` 消费；站点回喂**权威班级码**（classCode = 真源 class_id）与
+//     班级名，回调里回存并补发 register，替掉先前那串一次性接入码。
+//     ⚠️ 站点 `stelarith_classes.code` 存的是**中文名**（如"1班"），不合云端键格式，
+//        所以权威键取 `class_id`（`class_01`），显示名走 className（2026-10-09 三端贯通）。
 static void applyClassBinding(const QString &rawCode, const QString &wsUrl, const QString &uid)
 {
     const QString code = rawCode.trimmed();
@@ -5013,6 +5060,7 @@ int main(int argc, char *argv[])
     const int envN = loadEnvFile(agentEnvPath());
     if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（%s）", envN, qPrintable(agentEnvPath()));
     loadClassCode();   // 2026-10-08：载入持久化的班级码，register 时带给云端
+    loadClassName();   // 2026-10-09：载入班级显示名（同上，register 一起带给云端）
 
     // ── 配置校验（2026-10-04）：缺 URL 或 TOKEN = 未配置，必须可见地报出来（图标+日志+气泡），
     //    不再"进程在跑、静默重试"让老师误以为装好了。此刻托盘还没建，goUnconfigured 只负责落盘告警；
