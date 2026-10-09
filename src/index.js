@@ -432,7 +432,13 @@ const server = http.createServer((req, res) => {
   // 录制 = 被控端 ffmpeg DirectShow 本地录制（既有 camera_record_*）→ record_stop 后
   // 上传到云端 recordings/<uid>/<时间戳>.mp4 → 管理端列表 + 直接播放（HTTP 托管，第一版不切 HLS）。
   // 上传鉴权 = 设备令牌（DEV_TOKEN 或 agent ticket）；列表鉴权 = 管理端令牌。
-  const RECORDINGS_ROOT = join(__dirname, '..', 'recordings');
+  // 录制根目录。⚠️ 2026-10-09 加 env 覆盖：默认 <cloud-ws>/recordings。
+  // 教训（10-08 实测）：隔离实例（起另一个端口测试）没隔离本目录，
+  // 测试上传的 mp4 落进了**生产** recordings/（testcam01/prodtest01），
+  // 事后手工清理。测试必须设 CLOUD_RECORDINGS_DIR 指到临时目录。
+  const RECORDINGS_ROOT = process.env.CLOUD_RECORDINGS_DIR
+      ? resolve(process.env.CLOUD_RECORDINGS_DIR)
+      : join(__dirname, '..', 'recordings');
   const isRecordingUpload = u.pathname === '/api/recordings/upload';
   if (isRecordingUpload) {
     // 设备令牌验证（与 WS register 同一套：agent ticket 或静态 DEV_TOKEN）
