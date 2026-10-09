@@ -12,6 +12,17 @@
 namespace {
 AudioCapture *g_activeCapture = nullptr;
 
+/** 把 waveIn 的错误码翻译成人话。
+ *  起因（2026-10-09）：老师机弹「开麦失败：waveInOpen 失败，错误码 32」—— 光看数字
+ *  没人分得清是"格式不支持"还是"麦克风被别的程序占用"。错误信息必须给到能干活的程度。 */
+QString waveErrText(MMRESULT r)
+{
+    wchar_t buf[MAXERRORLENGTH] = { 0 };
+    if (waveInGetErrorTextW(r, buf, MAXERRORLENGTH) == MMSYSERR_NOERROR && buf[0])
+        return QString::fromWCharArray(buf).trimmed();
+    return QStringLiteral("未知错误（码 %1）").arg(int(r));
+}
+
 void CALLBACK waveInProc(HWAVEIN hwi, UINT uMsg, DWORD_PTR inst, DWORD_PTR, DWORD_PTR)
 {
     Q_UNUSED(hwi);
@@ -41,6 +52,12 @@ bool AudioCapture::startCapture()
         g_activeCapture->stopCapture();
     }
 
+    // 没有录音设备就直接说清楚 —— 别一路走到 waveInOpen 再吐一个数字
+    if (waveInGetNumDevs() == 0) {
+        m_lastError = QStringLiteral("未检测到麦克风设备（系统录音设备列表为空）");
+        return false;
+    }
+
     WAVEFORMATEX fmt;
     std::memset(&fmt, 0, sizeof(fmt));
     fmt.wFormatTag = WAVE_FORMAT_PCM;
@@ -55,7 +72,7 @@ bool AudioCapture::startCapture()
                             reinterpret_cast<DWORD_PTR>(this),
                             CALLBACK_FUNCTION);
     if (r != MMSYSERR_NOERROR) {
-        m_lastError = QStringLiteral("waveInOpen 失败，错误码 %1").arg(r);
+        m_lastError = QStringLiteral("waveInOpen 失败：%1（16kHz/单声道/16bit）").arg(waveErrText(r));
         m_waveIn = nullptr;
         return false;
     }
@@ -69,14 +86,14 @@ bool AudioCapture::startCapture()
 
     r = waveInPrepareHeader(m_waveIn, &m_header, sizeof(m_header));
     if (r != MMSYSERR_NOERROR) {
-        m_lastError = QStringLiteral("waveInPrepareHeader 失败，错误码 %1").arg(r);
+        m_lastError = QStringLiteral("waveInPrepareHeader 失败：%1").arg(waveErrText(r));
         waveInClose(m_waveIn);
         m_waveIn = nullptr;
         return false;
     }
     r = waveInAddBuffer(m_waveIn, &m_header, sizeof(m_header));
     if (r != MMSYSERR_NOERROR) {
-        m_lastError = QStringLiteral("waveInAddBuffer 失败，错误码 %1").arg(r);
+        m_lastError = QStringLiteral("waveInAddBuffer 失败：%1").arg(waveErrText(r));
         waveInUnprepareHeader(m_waveIn, &m_header, sizeof(m_header));
         waveInClose(m_waveIn);
         m_waveIn = nullptr;
@@ -84,7 +101,7 @@ bool AudioCapture::startCapture()
     }
     r = waveInStart(m_waveIn);
     if (r != MMSYSERR_NOERROR) {
-        m_lastError = QStringLiteral("waveInStart 失败，错误码 %1").arg(r);
+        m_lastError = QStringLiteral("waveInStart 失败：%1").arg(waveErrText(r));
         waveInUnprepareHeader(m_waveIn, &m_header, sizeof(m_header));
         waveInClose(m_waveIn);
         m_waveIn = nullptr;

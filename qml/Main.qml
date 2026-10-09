@@ -3079,14 +3079,18 @@ ApplicationWindow {
         }
     }
 
-    // #93：摄像头枚举 / 拍照回执 → CameraCenter（与云端 instruction-result 路由对齐）
+    // #93：摄像头枚举 / 拍照 / 自检 / 绑定回执 → CameraCenter（与云端 instruction-result 路由对齐）
     Connections {
         target: backend
         function onResultReceived(uid, action, state, result, err, detail, data) {
             if (action === "camera_list") {
-                camCenter.onCams((data && data.cameras) ? data.cameras : [])
+                camCenter.onCams(data || {})
             } else if (action === "camera_snapshot") {
                 camCenter.onShotResult(result === "done", detail || err)
+            } else if (action === "camera_test") {
+                camCenter.onTestResult(result === "done", detail || err, data || {})
+            } else if (action === "camera_bind") {
+                camCenter.onBindResult(result === "done", err || detail, data || {})
             }
         }
     }

@@ -43,73 +43,173 @@ Item {
     property bool recording: false      // 本面板是否正在录制
     property string status: ""
     property var recordingGroup: ({})
+    property string boundDev: ""        // 被控端回执的当前绑定（权威；空 = 未绑定）
 
-    // ── 选设备 ──
-    Row {
+    // ── 表头：第一行＝标题 + 设备选择；第二行＝动作按钮 ──
+    // ⚠️ 2026-10-09 重做：原来一行硬塞「标题 + 原生 ComboBox + 4 个原生 Button」，
+    //    ① 宽度必然溢出（520 的容器塞 ~575 的内容）—— 就是用户看到的"没放对位置"；
+    //    ② 原生 ComboBox/Button 走**系统调色板**，暗色界面里渲染成白底（"杂乱"的元凶）。
+    //    项目铁律：不用 Qt 原生 Button/ComboBox/TextField，一律走 Btn / 自绘。
+    Column {
+        id: head
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         spacing: 8
-        Text {
-            text: "监控中心"
-            color: cc.theme.fg || "#FAFAFA"
-            font.pixelSize: 14
-            font.weight: Font.Medium
-            anchors.verticalCenter: parent.verticalCenter
-        }
-        ComboBox {
-            id: devSel
-            width: 180
-            height: 26
-            model: {
-                var names = []
-                var devs = cc.backend.devices || []
-                for (var i = 0; i < devs.length; ++i)
-                    if (devs[i] && devs[i].uid) names.push(devs[i].uid)
-                return names
+
+        // 第一行：标题（固定宽）+ 设备选择（吃掉剩余宽度）
+        Item {
+            width: parent.width
+            height: 30
+            Text {
+                id: headTitle
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "监控中心"
+                color: cc.theme.fg || "#FAFAFA"
+                font.pixelSize: 14
+                font.weight: Font.Medium
             }
-            onActivated: {
-                cc.selUid = devSel.currentText
-                cc.refreshCams()
+            // 设备选择：自绘（Btn 同款长相）+ Popup 下拉，避开原生 ComboBox
+            Rectangle {
+                id: devSel
+                anchors.left: headTitle.right
+                anchors.leftMargin: 10
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                height: 30
+                radius: cc.theme.rCtrl !== undefined ? cc.theme.rCtrl : 8
+                color: devMa.containsMouse ? (cc.theme.hover || "#1E1E1E") : "transparent"
+                border.color: cc.theme.stroke || "#2A2A2A"
+                border.width: 1
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    anchors.right: caret.left
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: cc.selUid !== "" ? cc.selUid : (cc.deviceUids().length === 0 ? "（无在线设备）" : "请选择设备")
+                    color: cc.theme.fg || "#FAFAFA"
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+                Text {
+                    id: caret
+                    anchors.right: parent.right
+                    anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "▾"
+                    color: cc.theme.fg3 || "#8A8A8A"
+                    font.pixelSize: 12
+                }
+                MouseArea {
+                    id: devMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: devMenu.opened ? devMenu.close() : devMenu.open()
+                }
+                Popup {
+                    id: devMenu
+                    x: 0
+                    y: devSel.height + 4
+                    width: devSel.width
+                    padding: 4
+                    background: Rectangle {
+                        color: cc.theme.panel || "#181818"
+                        radius: cc.theme.rCtrl !== undefined ? cc.theme.rCtrl : 8
+                        border.color: cc.theme.stroke || "#2A2A2A"
+                        border.width: 1
+                    }
+                    contentItem: ListView {
+                        implicitHeight: Math.min(contentHeight, 220)
+                        clip: true
+                        model: cc.deviceUids()
+                        delegate: Rectangle {
+                            width: ListView.view.width
+                            height: 28
+                            radius: 4
+                            color: (cc.selUid === modelData)
+                                   ? (cc.theme.inv || "#F0F0F0")
+                                   : (devItemMa.containsMouse ? (cc.theme.hover || "#1E1E1E") : "transparent")
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: 8
+                                anchors.right: parent.right
+                                anchors.rightMargin: 8
+                                text: modelData
+                                color: (cc.selUid === modelData) ? (cc.theme.win || "#0A0A0A")
+                                                                 : (cc.theme.fg || "#FAFAFA")
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                            }
+                            MouseArea {
+                                id: devItemMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    cc.selUid = modelData
+                                    devMenu.close()
+                                    cc.refreshCams()
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            Component.onCompleted: {
-                if (devSel.model.length > 0) cc.selUid = devSel.model[0]
+        }
+
+        // 第二行：动作按钮（全用 Btn，宽度加起来 88+56+56+56+80 + 4×8 = 368，稳稳放得下）
+        Row {
+            spacing: 8
+            Btn {
+                theme: cc.theme
+                width: 88
+                text: cc.loadingCams ? "枚举中…" : "摄像头列表"
+                disabled: cc.selUid === ""
+                onClicked: cc.refreshCams()
             }
-        }
-        Button {
-            text: "摄像头列表"
-            enabled: cc.selUid !== ""
-            onClicked: cc.refreshCams()
-        }
-        Button {
-            text: "抓拍"
-            enabled: cc.selUid !== "" && cc.currentDev() !== ""
-            onClicked: cc.snapshot()
-        }
-        Button {
-            text: cc.recording ? "停录" : "开录"
-            enabled: cc.selUid !== "" && cc.currentDev() !== ""
-            // 录制中 = 活动状态，文字转 ok 色（彩色规范 2026-10-09）
-            contentItem: Text {
+            Btn {
+                theme: cc.theme
+                width: 56
+                text: "测试"
+                disabled: cc.selUid === ""
+                onClicked: cc.testCam()
+            }
+            Btn {
+                theme: cc.theme
+                width: 56
+                text: "抓拍"
+                disabled: cc.selUid === ""
+                onClicked: cc.snapshot()
+            }
+            Btn {
+                theme: cc.theme
+                width: 56
                 text: cc.recording ? "停录" : "开录"
-                color: cc.recording ? (cc.theme.ok || "#2E9E5B") : (cc.theme.fg || "#FAFAFA")
-                font.pixelSize: 13
+                disabled: cc.selUid === ""
+                onClicked: cc.recording ? cc.stopRec() : cc.startRec()
             }
-            onClicked: cc.recording ? cc.stopRec() : cc.startRec()
-        }
-        Button {
-            text: "刷新回放"
-            onClicked: { cc.backend.fetchRecordings(); cc.status = "已刷新录制列表" }
+            Btn {
+                theme: cc.theme
+                width: 80
+                text: "刷新回放"
+                onClicked: { cc.backend.fetchRecordings(); cc.status = "已刷新录制列表" }
+            }
         }
     }
 
     // ── 主体：左＝摄像头绑定 / 右＝回放 ──
     Row {
-        anchors.top: parent.top
-        anchors.topMargin: 40
+        anchors.top: head.bottom
+        anchors.topMargin: 10
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        anchors.bottom: statusLine.top
+        anchors.bottomMargin: 6
         spacing: 12
 
         // 左：摄像头列表 + 绑定
@@ -179,21 +279,28 @@ Item {
                     font.pixelSize: 10
                 }
                 Text {
-                    text: "当前绑定：" + (cc.boundDevice() || "（未绑定，默认 video0）")
+                    text: "当前绑定：" + (cc.boundDev !== "" ? cc.boundDev
+                                        : (cc.currentDev() !== "" ? cc.currentDev() + "（本地缓存）" : "（未绑定，默认 video0）"))
                     color: cc.theme.fg3 || "#8A8A8A"
                     font.pixelSize: 11
                     elide: Text.ElideRight
                     width: parent.width
                 }
-                Button {
+                Btn {
+                    theme: cc.theme
+                    width: parent.width
                     text: "绑定选中的摄像头"
-                    enabled: camList.currentIndex >= 0
+                    disabled: camList.currentIndex < 0
                     onClicked: {
                         if (cc.selUid === "" || camList.currentIndex < 0) return
+                        var dev = cc.cameras[camList.currentIndex]
+                        // 权威绑定落在**被控端**（只有它能枚举/打开摄像头）；本地 Settings
+                        // 只留一份镜像给 CameraBindDialog 复用同一个 key（2026-10-09）。
                         var map = store.bindings || {}
-                        map[cc.selUid] = cc.cameras[camList.currentIndex]
+                        map[cc.selUid] = dev
                         store.bindings = map
-                        cc.status = "已绑定 " + cc.selUid + " → " + cc.cameras[camList.currentIndex]
+                        cc.backend.sendAction("camera_bind", { device: dev })
+                        cc.status = "正在绑定 " + dev + " …"
                     }
                 }
             }
@@ -297,6 +404,7 @@ Item {
 
     // ── 状态行 ──
     Text {
+        id: statusLine
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -307,12 +415,31 @@ Item {
     }
 
     // ── 逻辑 ──
+    /** 可选设备（在线清单里的 uid）。原来直接喂给原生 ComboBox；现在喂自绘下拉。 */
+    function deviceUids() {
+        var out = []
+        var devs = cc.backend.devices || []
+        for (var i = 0; i < devs.length; ++i)
+            if (devs[i] && devs[i].uid) out.push(devs[i].uid)
+        return out
+    }
+    /** 本地缓存的绑定（镜像；权威在被控端 cc.boundDev）。 */
     function currentDev() {
         if (cc.selUid === "") return ""
         var b = store.bindings || {}
         return b[cc.selUid] || ""
     }
-    function boundDevice() { return cc.currentDev() }
+    function boundDevice() { return cc.boundDev !== "" ? cc.boundDev : cc.currentDev() }
+    /** 抓拍/录制要用的设备：权威绑定 > 本地镜像 > 空（让被控端自己回落 video0）。 */
+    function useDev() {
+        if (cc.boundDev !== "") return cc.boundDev
+        if (cc.currentDev() !== "") return cc.currentDev()
+        return ""
+    }
+    function paramsWithDev() {
+        var d = cc.useDev()
+        return d === "" ? {} : { device: d }
+    }
 
     function refreshCams() {
         if (cc.selUid === "") return
@@ -322,24 +449,50 @@ Item {
         cc.backend.sendAction("camera_list", {})
         // 回执由接线层调 cc.onCams()（Main.qml 现有回执处理转发）
     }
-    function onCams(cams) {
+    /** 摄像头列表回执。⚠️ 现在收的是**整个 data**（要顺带取 boundDevice）。 */
+    function onCams(data) {
         cc.loadingCams = false
+        var cams = (data && data.cameras) ? data.cameras : []
+        if (data && typeof data.boundDevice === "string") cc.boundDev = data.boundDevice
         if (Array.isArray(cams) && cams.length) {
             cc.cameras = cams
             cc.status = "发现 " + cams.length + " 个摄像头"
+                     + (cc.boundDev !== "" ? "，已绑定 " + cc.boundDev : "（尚未绑定）")
         } else {
-            cc.status = "该设备无摄像头或枚举失败"
+            cc.cameras = []
+            cc.status = "该设备无摄像头或枚举失败（确认被控端装了 ffmpeg，且机器上有摄像头）"
         }
     }
+    function onBindResult(ok, err, data) {
+        if (ok) {
+            if (data && typeof data.boundDevice === "string") cc.boundDev = data.boundDevice
+            cc.status = "已绑定：" + (cc.boundDev !== "" ? cc.boundDev : "（已解绑）")
+        } else {
+            cc.status = "绑定失败：" + (err || "未知原因")
+        }
+    }
+    function onTestResult(ok, err, data) {
+        if (ok) {
+            var ms = (data && data.elapsedMs !== undefined) ? data.elapsedMs : "?"
+            cc.status = "自检通过：" + ((data && data.device) || "") + "，出帧 " + ms + "ms"
+        } else {
+            cc.status = "自检失败：" + (err || "未知原因")
+        }
+    }
+    function onShotResult(ok, msg) {
+        cc.status = ok ? "已抓拍（画面见右栏）" : ("抓拍失败：" + (msg || "未知原因"))
+    }
     function snapshot() {
-        var dev = cc.currentDev() || "video0"
-        cc.status = "抓拍 " + cc.selUid + "（device=" + dev + "）…"
-        cc.backend.sendAction("camera_snapshot", { device: dev })
+        cc.status = "抓拍 " + cc.selUid + (cc.useDev() !== "" ? "（device=" + cc.useDev() + "）" : "") + "…"
+        cc.backend.sendAction("camera_snapshot", cc.paramsWithDev())
+    }
+    function testCam() {
+        cc.status = "正在自检 " + cc.selUid + "…"
+        cc.backend.sendAction("camera_test", cc.paramsWithDev())
     }
     function startRec() {
-        var dev = cc.currentDev() || "video0"
         cc.status = "正在开录 " + cc.selUid + "…"
-        cc.backend.sendAction("camera_record_start", { device: dev })
+        cc.backend.sendAction("camera_record_start", cc.paramsWithDev())
         cc.recording = true
         cc.backend.subscribeThumbnails([cc.selUid])   // 开启到帧刷新
     }
