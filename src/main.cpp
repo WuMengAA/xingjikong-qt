@@ -264,7 +264,7 @@ void stelarithNotifyTray(const QString &title, const QString &msg)
 // ⚠️ 命名标准为 DeepSeek Harness 同款：正式 X.Y.Z / 候选 X.Y.Z-rc.N（rc 号同核心递增、
 //    换核心归零、转正剥离后缀）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //    这一行是 CMake 校验用的回落值 —— 正常构建下由 CMakeLists.txt 的真源强制对齐。
-static constexpr const char *kViewerVersion = "0.6.23-rc.2";
+static constexpr const char *kViewerVersion = "0.6.24-rc.3";
 
 /**
  * 把窗口拉回屏幕内（2026-10-08）。

@@ -20,6 +20,8 @@
 #include <QNetworkReply>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QFile>
+#include <QProcess>
 #include <QTemporaryFile>
 #include <QTimer>
 #include <QUrl>
@@ -441,6 +443,78 @@ void ViewerBackend::markFirstRunDone()
     QSettings s;
     s.setValue(QStringLiteral("prefs/firstRunDone"), true);
     emit firstRunDoneChanged();
+}
+
+/* ── 开机自启 / 桌面快捷方式（2026-10-09 · 用户清单第②条）─────────────────────
+ * 管理端是「老师自己的机器」，所以走**当前用户**范围、**免提权**：
+ *   自启 = HKCU\...\Run 下一个值（不碰 HKLM、不建计划任务）；
+ *   快捷 = 当前用户桌面一枚 .lnk（WScript.Shell 建，不需管理员）。
+ * ⚠️ 被控端那条同名开关走的是**另一套**（登录触发器计划任务 + 公共桌面，要最高权限）——
+ *    两端机制不同是用户 2026-10-09 明确选定的（受管终端 vs 个人机器），别为了"统一"改回去。
+ */
+static const char *kViewerRunKey =
+    "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+static const char *kViewerRunValue = "StelarithViewer";
+static QString viewerDesktopLnk()
+{
+    const QString d = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    return d.isEmpty() ? QString() : (d + QStringLiteral("/星集控管理端.lnk"));
+}
+
+bool ViewerBackend::autoStartEnabled() const
+{
+    QSettings run(QString::fromLatin1(kViewerRunKey), QSettings::NativeFormat);
+    return run.contains(QString::fromLatin1(kViewerRunValue));
+}
+
+void ViewerBackend::setAutoStart(bool on)
+{
+    QSettings run(QString::fromLatin1(kViewerRunKey), QSettings::NativeFormat);
+    const QString key = QString::fromLatin1(kViewerRunValue);
+    if (on) {
+        const QString exe = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+        run.setValue(key, QStringLiteral("\"%1\"").arg(exe));
+    } else {
+        run.remove(key);
+    }
+    run.sync();
+    logf("[viewer] 开机自启 → %s（HKCU Run）", on ? "开" : "关");
+    emit autostartChanged();
+}
+
+bool ViewerBackend::desktopShortcutExists() const
+{
+    const QString p = viewerDesktopLnk();
+    return !p.isEmpty() && QFileInfo::exists(p);
+}
+
+void ViewerBackend::setDesktopShortcut(bool on)
+{
+    const QString lnk = viewerDesktopLnk();
+    if (lnk.isEmpty()) {
+        setStatus(QStringLiteral("取不到桌面路径，快捷方式建不了"), true);
+        return;
+    }
+    if (!on) {
+        if (QFile::exists(lnk) && !QFile::remove(lnk)) {
+            setStatus(QStringLiteral("桌面快捷方式删不掉（可能被占用）"), true);
+            return;
+        }
+        emit autostartChanged();
+        return;
+    }
+    const QString exe  = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+    const QString work = QDir::toNativeSeparators(QFileInfo(exe).absolutePath());
+    // 用 WScript.Shell 建 .lnk（无 Qt Ax 依赖）。失败会在签名/策略受限的机器上发生 ——
+    // 这里只 startDetached，不阻塞主线程；建没建成靠 desktopShortcutExists() 复查。
+    const QString ps = QStringLiteral(
+        "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%1');"
+        "$s.TargetPath='%2';$s.WorkingDirectory='%3';$s.IconLocation='%2,0';$s.Save()")
+        .arg(QDir::toNativeSeparators(lnk), exe, work);
+    QProcess::startDetached(QStringLiteral("powershell"),
+        {QStringLiteral("-NoProfile"), QStringLiteral("-ExecutionPolicy"), QStringLiteral("bypass"),
+         QStringLiteral("-Command"), ps});
+    emit autostartChanged();
 }
 // ───────────────────────────────────────────────────────────────────────────
 // 站点账号（OAuth 一户通）

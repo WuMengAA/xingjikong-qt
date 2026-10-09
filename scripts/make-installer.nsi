@@ -1,16 +1,19 @@
 ﻿; 星集控管理端 · NSIS 安装器（首次安装 / 二次升级 / 保留配置）
 ; 版本号来自 build/version.nsh（与 MSI、应用内同源，由 scripts/gen-wxs-viewer.mjs 生成）。
 ; 用法（在 viewer-qt/ 目录下）：makensis scripts/make-installer.nsi
-;   产出 dist/stelarith-viewer-setup-<版本>.exe，安装到 $PROGRAMFILES64\Stelarith\星集控管理端
+;   产出 dist/stelarith-viewer-setup-<版本>.exe，默认安装到 **$PROGRAMFILES64\StelarithViewer（纯 ASCII）**
 ;
 ; 三种安装方式：
-;   1) 首次安装：检测不到旧安装 → 走引导（欢迎 → 目录 → 安装 → 完成）。
-;   2) 二次升级：InstallDirRegKey 读到旧路径 → 沿用该路径覆盖文件；
+;   1) 首次安装：检测不到旧安装 → 走引导（欢迎 → 目录 → 安装 → 完成），默认目录纯 ASCII。
+;   2) 二次升级：.onInit 读注册表旧路径 → 沿用该路径覆盖文件（旧路径是 ASCII 时）；
+;      若读到的是**旧版中文默认目录**（$PROGRAMFILES64\Stelarith\星集控管理端）→ 迁移到新
+;      ASCII 目录并把旧目录删掉（viewer.env 先抢出来）。
 ;      viewer.env（老师配的站点/令牌）先备份再还原，不被默认包冲掉（对应铁律 #13 的 /XF viewer.env）。
 ;   3) OTA：由应用内 Updater 自更新（apply-update.cmd）完成，不经此安装器；
 ;      此处只覆盖"人手动装/升"两种场景，避免和 OTA 抢同一目录。
 
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 !include "..\build\version.nsh"
 
 Unicode true
@@ -26,11 +29,33 @@ Name "${APPNAME}"
 ;    不是"你在哪个目录敲 makensis"。写 "dist\..." 会产出到 scripts\dist\ 里去。
 ;    所以这里显式回一级到工程根，与被控端的 dist\stelarith-agent-setup.exe 对齐。
 OutFile "..\dist\stelarith-viewer-setup-${VERSION_RAW}.exe"
-InstallDir "$PROGRAMFILES64\Stelarith\星集控管理端"
-; 升级时沿用旧路径（注册表里记过就直接装回原处，不做"装两份"）
-InstallDirRegKey HKLM "${REGKEY}" "InstallDir"
+InstallDir "$PROGRAMFILES64\StelarithViewer"
+; ⚠️ 这里**故意不用 InstallDirRegKey**。它的语义是"注册表里记过就直接装回原处"，
+;    而旧版（0.6.24-rc.2 及以前）的默认目录是**中文**的
+;    （$PROGRAMFILES64\Stelarith\星集控管理端）—— 于是无论把上面的默认值改成什么，
+;    重装永远沿用注册表里那条中文路径 ⇒ 用户看到的还是中文目录（这是"改了却没生效"的真因）。
+;    改为在 .onInit 里手动裁决（见下）：非中文旧路径才沿用；命中旧中文默认则迁移。
+!define LEGACY_DEFAULT "$PROGRAMFILES64\Stelarith\星集控管理端"
+Var /GLOBAL LEGACYDIR
 
 RequestExecutionLevel admin
+
+; ── 安装目录裁决（为什么不用 InstallDirRegKey 见上面 InstallDir 的说明）──
+;   规则：
+;     · 没装过                  → 用 ASCII 默认 $PROGRAMFILES64\StelarithViewer
+;     · 旧路径 == 旧中文默认     → 记进 $LEGACYDIR，走"装到新目录 + 删旧目录"的迁移
+;     · 其它（自定义 / 已 ASCII） → 沿用原处，正常覆盖升级（不做"装两份"）
+Function .onInit
+  StrCpy $LEGACYDIR ""
+  ReadRegStr $0 HKLM "${REGKEY}" "InstallDir"
+  StrCmp $0 "" init_done
+  StrCmp $0 "${LEGACY_DEFAULT}" legacy_path
+  StrCpy $INSTDIR $0
+  Goto init_done
+legacy_path:
+  StrCpy $LEGACYDIR $0
+init_done:
+FunctionEnd
 
 ; ── 界面（三步引导：欢迎 / 目录 / 安装 / 完成）──
 !insertmacro MUI_PAGE_WELCOME
@@ -56,6 +81,13 @@ Section "Main" SEC_MAIN
   ; 在这台机器上还容易被执行策略/路径转换绊住）。
   nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process -Name viewer-qt -ErrorAction SilentlyContinue | Stop-Process -Force"'
   Sleep 800
+
+  ; ── 旧版中文目录迁移：先把旧目录里的 viewer.env 抢出来（比新目录里可能存在的更"真"）──
+  ;    仅在 .onInit 判定为"旧中文默认路径"（$LEGACYDIR 非空）时执行。
+  StrCmp $LEGACYDIR "" no_legacy_backup
+    IfFileExists "$LEGACYDIR\viewer.env" 0 no_legacy_backup
+      CopyFiles "$LEGACYDIR\viewer.env" "$PLUGINSDIR\viewer.env.bak"
+  no_legacy_backup:
 
   ; 升级保护：先把老师配的 viewer.env 备份，覆盖完再还原
   ; （默认包里的 viewer.env 是占位值，整目录覆盖会把真实配置冲回默认）
@@ -108,6 +140,13 @@ Section "Main" SEC_MAIN
   restore_env:
     CopyFiles "$PLUGINSDIR\viewer.env.bak" "$INSTDIR\viewer.env"
   no_restore:
+
+  ; ── 迁移收尾：删掉旧的「中文」安装目录（仅迁移时执行）──
+  ;    旧目录里的程序已被覆盖到新目录，这里只清残留；老师配置已在上面抢出来。
+  StrCmp $LEGACYDIR "" no_legacy_cleanup
+    RMDir /r "$LEGACYDIR"
+    RMDir "$PROGRAMFILES64\Stelarith"   ; 旧父目录空了就顺手收掉（被控端另装在 $PROGRAMFILES64\Stelarith，非空则自动跳过）
+  no_legacy_cleanup:
 
   ; 卸载器
   WriteUninstaller "$INSTDIR\uninstall.exe"

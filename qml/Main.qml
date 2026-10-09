@@ -2533,6 +2533,50 @@ ApplicationWindow {
                             }
                         }
 
+                        // ── 启动（2026-10-09 · 用户清单第②条：开机自启 / 桌面快捷方式）──
+                        // 管理端是「老师自己的机器」⇒ 走**当前用户**范围、**免提权**：
+                        //   自启写 HKCU\...\Run；快捷方式建在当前用户桌面。
+                        // 状态直接读后端属性（backend.autoStart / desktopShortcut = 现读注册表/桌面），
+                        // 不缓存到 QML，避免"界面说开着、注册表其实没有"的假象。
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: colSettingsBoot.implicitHeight + 32
+                            Layout.fillHeight: true
+                            radius: th.rCard
+                            color: th.panel
+                            border.color: th.card
+                            border.width: 1
+                            Column {
+                                id: colSettingsBoot
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 16
+                                spacing: 14
+                                Text { text: "启动"; color: th.fg3; font.pixelSize: 12 }
+                                Column {
+                                    width: parent.width
+                                    spacing: 4
+                                    ToggleRow {
+                                        width: parent.width
+                                        theme: th
+                                        text: "开机自动启动"
+                                        note: "登录 Windows 后自动打开管理端（写当前用户注册表，免管理员）"
+                                        checked: backend.autoStart
+                                        onToggled: function (on) { backend.setAutoStart(on) }
+                                    }
+                                    ToggleRow {
+                                        width: parent.width
+                                        theme: th
+                                        text: "桌面快捷方式"
+                                        note: "在桌面放一枚「星集控管理端」图标"
+                                        checked: backend.desktopShortcut
+                                        onToggled: function (on) { backend.setDesktopShortcut(on) }
+                                    }
+                                }
+                            }
+                        }
+
                         // ── 外观（真：深浅切换在这版已经可用）──
                         Rectangle {
                             Layout.fillWidth: true
@@ -3735,7 +3779,7 @@ ApplicationWindow {
                 spacing: 14
 
                 Text {
-                    text: ["① 选班级", "② 登录绑定", "③ 完成"][welcomeLayer.step]
+                    text: ["① 选班级", "② 登录绑定", "③ 启动方式", "④ 完成"][welcomeLayer.step]
                     color: th.fg; font.pixelSize: 16; font.weight: Font.Medium
                 }
 
@@ -3793,9 +3837,31 @@ ApplicationWindow {
                         text: backend.accountText; color: th.fg4; font.pixelSize: 12; visible: backend.accountText !== "" }
                 }
 
-                // 步骤 2：完成
+                // 步骤 2：启动方式（2026-10-09 · 用户清单第②条：引导里就能设自启/快捷）
                 Column {
                     visible: welcomeLayer.step === 2
+                    width: parent.width; spacing: 12
+                    Text { width: parent.width; wrapMode: Text.Wrap
+                        text: "要不要让它开机就自己起来、顺手在桌面放个图标？（之后随时能在设置页改）"; color: th.fg3; font.pixelSize: 13 }
+                    ToggleRow {
+                        width: parent.width; theme: th
+                        text: "开机自动启动"
+                        note: "登录 Windows 后自动打开（当前用户，免管理员）"
+                        checked: backend.autoStart
+                        onToggled: function (on) { backend.setAutoStart(on) }
+                    }
+                    ToggleRow {
+                        width: parent.width; theme: th
+                        text: "桌面快捷方式"
+                        note: "在桌面放一枚「星集控管理端」图标"
+                        checked: backend.desktopShortcut
+                        onToggled: function (on) { backend.setDesktopShortcut(on) }
+                    }
+                }
+
+                // 步骤 3：完成
+                Column {
+                    visible: welcomeLayer.step === 3
                     width: parent.width; spacing: 12
                     Text { width: parent.width; wrapMode: Text.Wrap
                         text: "都好了。以后想改，去设置页或右下角账户菜单。"; color: th.fg3; font.pixelSize: 13 }
@@ -3824,16 +3890,16 @@ ApplicationWindow {
                             onClicked: welcomeLayer.step = Math.max(0, welcomeLayer.step - 1) }
                     }
                     Item { width: Math.max(0, parent.width - (welcomeLayer.step > 0 ? 106 : 0)
-                            - (welcomeLayer.step < 2 ? 96 : 110)); height: 1 }
+                            - (welcomeLayer.step < 3 ? 96 : 110)); height: 1 }
                     Rectangle {
-                        visible: welcomeLayer.step < 2
+                        visible: welcomeLayer.step < 3
                         width: 96; height: 32; radius: th.rCtrl; color: th.inv
                         Text { anchors.centerIn: parent; text: "下一步"; color: th.win; font.pixelSize: 13 }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: welcomeLayer.step = Math.min(2, welcomeLayer.step + 1) }
+                            onClicked: welcomeLayer.step = Math.min(3, welcomeLayer.step + 1) }
                     }
                     Rectangle {
-                        visible: welcomeLayer.step === 2
+                        visible: welcomeLayer.step === 3
                         width: 110; height: 32; radius: th.rCtrl; color: th.inv
                         Text { anchors.centerIn: parent; text: "完成"; color: th.win; font.pixelSize: 13 }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: welcomeLayer.finish() }

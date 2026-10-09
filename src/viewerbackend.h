@@ -136,6 +136,9 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QString currentClass READ currentClass WRITE setCurrentClass NOTIFY classesChanged)
     /** 首启引导：false = 还没走完引导（主窗应叠 WelcomeOverlay）；true = 已走过。 */
     Q_PROPERTY(bool firstRunDone READ firstRunDone NOTIFY firstRunDoneChanged)
+    // ── 开机自启 / 桌面快捷方式（2026-10-09 · 当前用户范围、免提权）──
+    Q_PROPERTY(bool autoStart READ autoStartEnabled NOTIFY autostartChanged)
+    Q_PROPERTY(bool desktopShortcut READ desktopShortcutExists NOTIFY autostartChanged)
     // ── 云端存储概况（2026-10-08，对应需求 #2「没有云端存储信息」）──
     // 管理端概览页展示：已知设备数 / 在线 / 离线 / 班级数 / 待执行指令 / 事件落盘量 / 最近活跃时刻。
     // 数据面由云端 getStorageInfo 算好推下来，界面只消费，不许前端自己再数一遍（避免两端口径不一致）。
@@ -251,6 +254,12 @@ public:
     /** 首启引导：读取 / 写入「是否已走完引导」标记（QSettings prefs/firstRunDone）。 */
     Q_INVOKABLE bool firstRunDone() const;
     Q_INVOKABLE void markFirstRunDone();
+    // 开机自启：读写 HKCU\...\Run（当前用户，免提权）。返回写入后的实际状态。
+    Q_INVOKABLE bool autoStartEnabled() const;
+    Q_INVOKABLE void setAutoStart(bool on);
+    // 桌面快捷方式：当前用户桌面一枚 .lnk（免提权）。
+    Q_INVOKABLE bool desktopShortcutExists() const;
+    Q_INVOKABLE void setDesktopShortcut(bool on);
     /** 忘记本机上的账号（删本地凭据，下次要重新走一次授权）。 */
     Q_INVOKABLE void forgetAccount();
     /** 打开本机浏览器去站点注册新账号（注册页，不是授权页）。 */
@@ -465,6 +474,8 @@ signals:
     void islandNote(const QString &title, const QString &desc, const QString &icon);
     /** 首启引导是否已完成（标记位从 QSettings 读回；完成写标记后界面据此收起引导层）。 */
     void firstRunDoneChanged();
+    /** 开机自启 / 桌面快捷方式 任一状态变化（两者共用，读属性重新取即可）。 */
+    void autostartChanged();
     /**
      * 指令结果。state: "sent"（云端已写进连接）/ "executed"（机器真做了）/ 其它=没发成。
      * result: "done" / "failed"（仅 executed 时有意义）。data: 动作附加数据（可选）。
