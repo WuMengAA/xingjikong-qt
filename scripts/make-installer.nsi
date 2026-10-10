@@ -118,7 +118,6 @@ Section "Main" SEC_MAIN
   ; `Qt6*.dll` 通配匹配不到、windeployqt 也不拷 ⇒ 装完启动即「找不到 libssl-3-x64.dll」。
   File "..\build\libssl-3-x64.dll"
   File "..\build\libcrypto-3-x64.dll"
-  File "..\build\QtWebEngineProcess.exe"
 
   File /r "..\build\platforms"
   File /r "..\build\imageformats"
@@ -127,9 +126,9 @@ Section "Main" SEC_MAIN
   File /r "..\build\networkinformation"
   File /r "..\build\styles"
   File /r "..\build\tls"
-  File /r "..\build\resources"        ; ← WebEngine：icudtl.dat / *.pak
-  File /r "..\build\translations"
-  File /r "..\build\position"
+  ; translations / position 由 windeployqt 按需生成，缺失时不应让出包失败
+  File /nonfatal /r "..\build\translations"
+  File /nonfatal /r "..\build\position"
   File /r "..\build\qml"              ; ← 一次性带上 Qt 官方模块 + 我们的 qml/Stelarith/
 
   ; 这两个是配置文件，构建不产出它们；deploy/ 才是它们的家
