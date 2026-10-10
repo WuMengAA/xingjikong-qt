@@ -112,6 +112,19 @@ void MobileBackend::sendLightInstruction(const QString &uid, const QString &acti
     m_ws->sendTextMessage(makeEnvelope(QStringLiteral("instruction"), p));
 }
 
+// ── P1 便捷指令（2026-10-10 · 手机端设计 §5 P1）──
+void MobileBackend::pingDevice(const QString &uid)
+{
+    // ping = 动作探测：被控端回 action=pong（在线探测用）
+    sendLightInstruction(uid, QStringLiteral("ping"));
+}
+
+void MobileBackend::shutdownDevice(const QString &uid)
+{
+    // 关机：云端 store.js 对 shutdown 标 no_resend（进程死前不回执，防重连补发循环重启）
+    sendLightInstruction(uid, QStringLiteral("shutdown"));
+}
+
 void MobileBackend::setStatus(const QString &s)
 {
     if (m_status == s) return;

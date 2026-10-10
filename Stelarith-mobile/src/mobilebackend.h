@@ -39,9 +39,12 @@ public:
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
 
-    // 轻指令（手机端边界：只做确认式小动作）
-    void sendLightInstruction(const QString &uid, const QString &action,
-                              const QJsonObject &params = QJsonObject());
+    // 轻指令（手机端边界：只做确认式小动作）——QML 按钮触发
+    Q_INVOKABLE void sendLightInstruction(const QString &uid, const QString &action,
+                                          const QJsonObject &params = QJsonObject());
+    // 便捷封装：ping（在线探测）/ shutdown（关机，需 confirm）
+    Q_INVOKABLE void pingDevice(const QString &uid);
+    Q_INVOKABLE void shutdownDevice(const QString &uid);
 
     // 在线设备数（Q_PROPERTY 暴露给 QML）
     int onlineCount() const;

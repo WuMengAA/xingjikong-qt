@@ -16,6 +16,9 @@ ApplicationWindow {
     Theme { id: theme }
     readonly property var th: theme.th
 
+    // 关机确认目标 uid（P1 轻指令：关机弹窗共用）
+    property string confirmTarget: ""
+
     // backend 由 main.cpp 注入（C++ 实例，避免双份连接）
 
     // ── 顶部条 ──
@@ -135,11 +138,65 @@ ApplicationWindow {
                         }
                     }
                 }
-                // 轻指令：ping
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: backend.sendLightInstruction(modelData.uid, "ping")
+                // 轻指令：ping（点行 ping）/ 关机（显式按钮 + 确认弹窗）
+                Row {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8
+                    Rectangle {
+                        width: 44; height: 26; radius: 13
+                        color: root.th.panel2
+                        border.color: root.th.stroke
+                        border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "ping"
+                            color: root.th.acc
+                            font.pixelSize: 11
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: backend.pingDevice(modelData.uid)
+                        }
+                    }
+                    Rectangle {
+                        width: 44; height: 26; radius: 13
+                        color: root.th.err
+                        Text {
+                            anchors.centerIn: parent
+                            text: "关机"
+                            color: "#fff"
+                            font.pixelSize: 11
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                root.confirmTarget = modelData.uid
+                                confirmDialog.open()
+                            }
+                        }
+                    }
                 }
+            }
+        }
+
+        // ── 关机确认弹窗（P1：关机必须确认，防误触）──
+        Dialog {
+            id: confirmDialog
+            title: "关机确认"
+            modal: true
+            anchors.centerIn: parent
+            standardButtons: Dialog.No | Dialog.Yes
+            onAccepted: {
+                if (root.confirmTarget !== "") backend.shutdownDevice(root.confirmTarget)
+                root.confirmTarget = ""
+            }
+            onRejected: root.confirmTarget = ""
+            Label {
+                text: "确定要关闭设备 " + (root.confirmTarget || "?") + " 吗？\n（关机后需人工重启）"
+                wrapMode: Text.Wrap
+                width: 240
             }
         }
 
