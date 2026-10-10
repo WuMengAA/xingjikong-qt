@@ -145,7 +145,12 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.24-rc.5";
+constexpr const char *kAppVersion = "0.6.24-rc.6";
+
+// 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
+// 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
+static QString g_channel = QStringLiteral("stable");   // 供 register 上报；main 启动即解析覆盖
+QString resolvedChannel();                               // 前向声明（定义在 agentEnvPath 之后）
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = kFirstBackoffMs;
@@ -401,11 +406,11 @@ void sendRegister()
     // 2026-10-09：班级显示名 —— 云端班级索引 name 默认 = code，带上它管理端才显示「1班」。
     if (!g_className.isEmpty()) p.insert(QStringLiteral("className"), g_className);
 
-    // 2026-10-10：OTA 灰度渠道 —— 设备声明自己所在的更新通道（stable / gray），
-    //   云端据此在 registered 回执里下发对应通道的最新版本（见 ota.js latestFor 的 channel 参数）。
-    //   默认 stable；测试机在 agent.env 设 STE_QT_CHANNEL=gray 即加入灰度（重启后被控端生效）。
-    const QString channel = qEnvironmentVariable("STE_QT_CHANNEL").trimmed();
-    p.insert(QStringLiteral("channel"), channel.isEmpty() ? QStringLiteral("stable") : channel);
+    // 2026-10-10：灰度渠道 —— 设备声明自己所在的更新通道（stable / gray），云端据此下发对应通道版本。
+    //   改用「持久化后的当前渠道」g_channel（main 启动时已 resolvedChannel()+persistChannel() 落盘），
+    //   这样即便计划任务 action / OTA 重启助手没注入 STE_QT_CHANNEL，灰度也跨重启/升级保留（发现①修复）。
+    const QString channel = g_channel;
+    p.insert(QStringLiteral("channel"), channel);
 
     // 2026-10-06：设备指纹（账号绑定路径需要）。
     // 如果 token 是站点签的设备票（7 段 v1.…），云端验票时会拿这个 fp 比对；
@@ -1033,6 +1038,48 @@ QString agentEnvPath()
     }
     cached = dir + QStringLiteral("/agent.env");
     return cached;
+}
+
+// ── 2026-10-10：OTA 灰度渠道持久化（发现①修复）────────────────────────────
+// 渠道原本只由启动环境变量 STE_QT_CHANNEL 指定；但计划任务 action 与 OTA 自更新的
+// 重启助手(ota-relaunch.bat)默认不注入该变量 → 一旦重启/升级就拿不到 → 回落 stable，
+// 灰度机悄悄掉回稳定通道。这里把「当前生效渠道」落盘到数据目录 channel.txt：
+//   启动优先读环境变量 → 其次读 channel.txt → 都没有才 stable。
+// 首次以 gray 拉起后，之后任何重启/升级都自动沿用 gray（main 启动时 persistChannel 写回）。
+// ⚠️ 这里**不能**依赖 agentEnvPath()（它在文件更后面定义），直接拼数据目录。
+QString channelFilePath()
+{
+    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/channel.txt");
+}
+
+QString resolvedChannel()
+{
+    const QString env = qEnvironmentVariable("STE_QT_CHANNEL").trimmed();
+    if (!env.isEmpty()) return env;
+    QFile f(channelFilePath());
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString v = QString::fromUtf8(f.readAll()).trimmed();
+        f.close();
+        if (!v.isEmpty()) return v;
+    }
+    return QStringLiteral("stable");
+}
+
+// 把当前生效渠道写回 channel.txt（幂等：内容相同则不动盘）
+void persistChannel(const QString &ch)
+{
+    const QString p = channelFilePath();
+    QFile f(p);
+    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString cur = QString::fromUtf8(f.readAll()).trimmed();
+        f.close();
+        if (cur == ch) return;
+    }
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        f.write(ch.toUtf8());
+        f.write("\n");
+        f.close();
+    }
 }
 
 /**
@@ -5223,6 +5270,12 @@ int main(int argc, char *argv[])
     if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（%s）", envN, qPrintable(agentEnvPath()));
     loadClassCode();   // 2026-10-08：载入持久化的班级码，register 时带给云端
     loadClassName();   // 2026-10-09：载入班级显示名（同上，register 一起带给云端）
+
+    // 2026-10-10：解析并持久化灰度渠道（发现①修复）—— 见 resolvedChannel / persistChannel。
+    // 落盘 channel.txt 后，后续任何重启 / OTA 升级都自动沿用当前通道，无需启动器注入环境变量。
+    g_channel = resolvedChannel();
+    persistChannel(g_channel);
+    qInfo("[agent-qt] 更新渠道 = %s（env→channel.txt→stable 解析）", qPrintable(g_channel));
 
     // ── 配置校验（2026-10-04）：缺 URL 或 TOKEN = 未配置，必须可见地报出来（图标+日志+气泡），
     //    不再"进程在跑、静默重试"让老师误以为装好了。此刻托盘还没建，goUnconfigured 只负责落盘告警；

@@ -128,6 +128,12 @@ var
 begin
   if CurStep = ssInstall then
   begin
+    // 2026-10-10 修（发现②）：先**禁用** StelarithAgentGuard 计划任务，否则它会在本安装器
+    // 停掉旧 agent 之后、覆盖文件之前，秒级把 agent 重新拉起来 → exe 被占用 → 覆盖失败 → exit 1。
+    // 装完在 ssPostInstall 重新启用（新 agent 起来后由它继续兜底）。任务不存在则静默跳过。
+    Exec('powershell.exe',
+         '-NoProfile -Command "Disable-ScheduledTask -TaskName ''StelarithAgentGuard'' -ErrorAction SilentlyContinue"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // 先停掉正在跑的旧实例，否则 exe 被占用、覆盖失败。
     // 用 PowerShell 的 Stop-Process（不用 taskkill：语义模糊、返回难判断）。
     Exec('powershell.exe',
@@ -137,6 +143,10 @@ begin
   end;
   if CurStep = ssPostInstall then
   begin
+    // 2026-10-10 修（发现②）：重新启用看门狗任务（与 ssInstall 里的禁用成对）
+    Exec('powershell.exe',
+         '-NoProfile -Command "Enable-ScheduledTask -TaskName ''StelarithAgentGuard'' -ErrorAction SilentlyContinue"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // 写最小化 agent.env：不含云端地址/令牌（由「用星璃账号绑定」首次启动时写入）。
     // 只给截图目录；设备码/显示名留空则回落电脑名，可在 OOBE 弹窗里改。
     // 注释行纯 ASCII（GBK 终端读配置会乱码，不值得为注释引编码问题）。
@@ -154,6 +164,10 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
+    // 2026-10-10 修（发现②）：先禁用看门狗，否则卸载后它每 10 分钟仍去拉一个已删除的 exe（报错）。
+    Exec('powershell.exe',
+         '-NoProfile -Command "Disable-ScheduledTask -TaskName ''StelarithAgentGuard'' -ErrorAction SilentlyContinue"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // 先删任务（不然它可能把进程再拉起来），再杀进程
     Exec('powershell.exe',
          '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install-autostart.ps1') + '" -Uninstall',
