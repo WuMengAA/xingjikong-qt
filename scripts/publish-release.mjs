@@ -31,6 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 // 版本解析/比较的唯一实现（2026-10-07 抽出来）：工作区根 scripts/version-compare.mjs。
 // 被控端 C++ 侧是同语义的另一份（Stelarith-control-qt/src/main.cpp 的 compareVersion），
@@ -42,6 +43,25 @@ const MANIFEST = path.join(ROOT, process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.jso
 const EXAMPLE = path.join(ROOT, 'ota.json.example');
 const PKG_DIR = path.join(ROOT, process.env.CLOUD_ASSETS_DIR || 'assets', 'pkg');
 const PRODUCTS = ['agent', 'viewer'];
+
+/**
+ * 每个产品包里**必须**有的运行时件 —— 发布前解包自检，缺件直接拒发。
+ *
+ * 为什么要它（2026-10-10 事故）：
+ *   OTA 曾把「缺 libssl-3-x64.dll / libcrypto-3-x64.dll」的包发布给全校教室机 ——
+ *   那两个 DLL 是 exe 的**静态导入**（libdatachannel 的 DTLS 链了 PG17 的 OpenSSL），
+ *   windeployqt 不认识、`.nsi` 的 `Qt6*.dll` 通配也吃不到 ⇒ 装完双击即
+ *   「stelarith-agent-qt.exe - 系统错误：找不到 libssl-3-x64.dll」。
+ *   ⚠️ 本脚本原来的 check 只核对「清单 vs 磁盘文件」（size/sha256）——
+ *   它**从不看包里面有什么**，于是"文件与清单一致"的坏包被评为「一致 ✓」，
+ *   一路发到教室机。这里补上这道内容自检：宁可发不出去，也不发一个装完起不来的包。
+ *   新增必需件时往这里加 —— 与各出包脚本的 REQUIRED 清单保持同源。
+ */
+const REQUIRED_ENTRIES = {
+	agent: ['stelarith-agent-qt.exe', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll'],
+	viewer: ['viewer-qt.exe', 'qml/Stelarith/Main.qml', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll']
+};
+const SEVEN_ZIP = process.env.SEVEN_ZIP || 'C:\\Program Files\\7-Zip\\7z.exe';
 
 const argv = process.argv.slice(2);
 const cmd = argv[0] || 'check';
@@ -107,6 +127,47 @@ function humanSize(n) {
 	if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
 	if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
 	return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+// ── 包内容自检（2026-10-10 事故后补）────────────────────────────────────────
+/**
+ * 用 7z 列包内条目名（正斜杠归一化）。NSIS exe 与 zip 都能列。
+ *
+ * ⚠️ 必须用 `-slt`（逐条目 `Path = …`），**不能**用 `-ba` + 固定列正则：
+ *    NSIS 的输出列是 `date time attr size name`，zip 是 `… size compressed name` ——
+ *    列数不同，一种正则覆盖不了两种（10-10 实测：用 zip 的正当解析 NSIS 会丢光所有行 ⇒ 全判"缺件"误报）。
+ */
+function listArchiveEntries(file) {
+	const out = execFileSync(SEVEN_ZIP, ['l', '-slt', file], {
+		encoding: 'utf8',
+		maxBuffer: 256 * 1024 * 1024
+	});
+	const paths = [];
+	for (const l of out.split(/\r?\n/)) {
+		const m = l.match(/^Path = (.*)$/);
+		if (m) paths.push(m[1].trim().replace(/\\/g, '/'));
+	}
+	return paths.slice(1); // 第一行 Path 是归档自身，剔除
+}
+
+/**
+ * 校验一个包是否含该产品的必需运行时件。
+ * 返回 { ok, missing, error }：error 非空表示"没能检查"（7z 缺失 / 格式读不了）。
+ */
+function verifyPackageContent(product, file) {
+	const need = REQUIRED_ENTRIES[product];
+	if (!need) return { ok: true, missing: [] };
+	if (!fs.existsSync(SEVEN_ZIP)) {
+		return { ok: false, missing: [], error: `找不到 7-Zip（${SEVEN_ZIP}）—— 无法解包校验` };
+	}
+	let entries;
+	try {
+		entries = new Set(listArchiveEntries(file));
+	} catch (e) {
+		return { ok: false, missing: [], error: `无法读取包内容：${e.message}` };
+	}
+	const missing = need.filter((x) => !entries.has(x));
+	return { ok: missing.length === 0, missing };
 }
 
 // 版本解析与比较统一走 ../../scripts/version-compare.mjs（cmpVersion 从那里 import）。
@@ -176,7 +237,17 @@ async function cmdCheck() {
 		const sizeOk = Number(e.size) === st.size;
 		const shaOk = String(e.sha256) === got;
 		if (sizeOk && shaOk) {
-			log(`${tag} ✓ v${e.version}  ${humanSize(st.size)}  sha256 一致`);
+			const v = verifyPackageContent(name, p);
+			if (v.error) {
+				log(`${tag} ⚠ v${e.version}  ${humanSize(st.size)}  sha256 一致，但**未能校验包内容**：${v.error}`);
+			} else if (!v.ok) {
+				log(`${tag} ✗ v${e.version}  ${humanSize(st.size)}  sha256 一致，但包内**缺必需件**：${v.missing.join(', ')}`);
+				log(`      后果：教室机装上会直接启动失败（缺运行时 DLL）。清单与文件都对、包本身却是坏的。`);
+				log(`      修法：重新出包（见各出包脚本的 REQUIRED 清单）后重发。`);
+				bad++;
+			} else {
+				log(`${tag} ✓ v${e.version}  ${humanSize(st.size)}  sha256 一致，包内容齐 ✓`);
+			}
 			continue;
 		}
 		log(`${tag} ✗ v${e.version} 与磁盘文件不一致 —— 文件重打过但清单没跟着改：`);
@@ -319,6 +390,27 @@ async function cmdPublish() {
 	log('\n计算 sha256 …');
 	const sha = await sha256File(file);
 	log(`  sha256  ${sha}`);
+
+	// ── 发布前包内容自检（2026-10-10 事故）：缺运行时件一律拒发 ──────────────
+	// 与 size/sha256 校验互补：那两个只保证"清单描述的是磁盘上这个文件"，
+	// 不保证"这个文件装上去能跑"。缺 libssl/libcrypto-3-x64.dll 的包就是这样发出去的。
+	const chk = verifyPackageContent(product, file);
+	if (chk.error) {
+		fail(
+			`发布前包内容自检无法进行：${chk.error}\n` +
+				`  这是硬门槛 —— 宁可发不出去，也不发一个装完起不来的包（7z 路径可用 SEVEN_ZIP 覆盖）。`
+		);
+	}
+	if (!chk.ok) {
+		fail(
+			`拒绝发布：${path.basename(file)} 里**缺必需件** —— ${chk.missing.join(', ')}\n` +
+				`  这些是 exe 启动即加载的运行时件（如 OpenSSL 3 的 libssl-3-x64.dll /\n` +
+				`  libcrypto-3-x64.dll，由 libdatachannel 的 DTLS 引入）。装上去会直接\n` +
+				`  「系统错误：找不到 xxx.dll」。修法：检查 .nsi / make-portable*.mjs 的打包\n` +
+				`  清单后重新出包（见各脚本的 REQUIRED）。`
+		);
+	}
+	log(`  包内容自检 ✓（${REQUIRED_ENTRIES[product].length} 个必需件齐）`);
 
 	if (dryRun) {
 		log('\n--dry-run：不复制文件、不改清单。');
