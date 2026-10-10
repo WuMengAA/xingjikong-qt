@@ -1,14 +1,14 @@
 {
   "products": {
     "agent": {
-      "version": "0.6.24-rc.4",
-      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.24-rc.4.exe",
-      "sha256": "2d6f75b6d7c0708678b94267940e8009a65de00fc47ba560676fa55b4a6a6172",
-      "size": 93238961,
-      "notes": "Inno Setup 全量安装器迁移；装机不再收地址/令牌，装完用星璃账号绑定；支持设备显示名与换绑账号",
-      "mandatory": false
+      "version": "0.6.24-rc.5",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.24-rc.5.exe",
+      "sha256": "434434533b9beca7ac4acc0a3c6a4b008af1b49424ef867e2399fa1494e73c0d",
+      "size": 93226164,
+      "notes": "v0.6.24-rc.5",
+      "mandatory": true
     }
   },
-  "generatedAt": "2026-10-10T10:58:29.249Z",
+  "generatedAt": "2026-10-10T12:05:10.666Z",
   "generatedBy": "scripts/publish-release.mjs"
 }
