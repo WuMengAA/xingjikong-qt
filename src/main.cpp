@@ -401,6 +401,12 @@ void sendRegister()
     // 2026-10-09：班级显示名 —— 云端班级索引 name 默认 = code，带上它管理端才显示「1班」。
     if (!g_className.isEmpty()) p.insert(QStringLiteral("className"), g_className);
 
+    // 2026-10-10：OTA 灰度渠道 —— 设备声明自己所在的更新通道（stable / gray），
+    //   云端据此在 registered 回执里下发对应通道的最新版本（见 ota.js latestFor 的 channel 参数）。
+    //   默认 stable；测试机在 agent.env 设 STE_QT_CHANNEL=gray 即加入灰度（重启后被控端生效）。
+    const QString channel = qEnvironmentVariable("STE_QT_CHANNEL").trimmed();
+    p.insert(QStringLiteral("channel"), channel.isEmpty() ? QStringLiteral("stable") : channel);
+
     // 2026-10-06：设备指纹（账号绑定路径需要）。
     // 如果 token 是站点签的设备票（7 段 v1.…），云端验票时会拿这个 fp 比对；
     // 旧静态令牌路径不校验 fp，这个字段会被忽略。不填也不报错（兼容旧云端）。
@@ -1060,14 +1066,20 @@ void migrateAgentEnvFromInstallDir()
  * 格式：`set KEY=VALUE`（不带引号），与 deploy/agent.env、读端解析器一致。
  * @returns 文件是否写入成功
  */
-bool saveAgentEnv(const QString &url, const QString &token, const QString &uid)
+bool saveAgentEnv(const QString &url, const QString &token, const QString &uid, const QString &name)
 {
-    // 固定 4 行：1 行 ASCII 注释 + 3 个必需键（UID 留空也写一行，便于人看/手改）
+    // 4~5 行：1 行 ASCII 注释 + 3 个必需键（STE_QT_UID/NAME 留空也写一行，便于人看/手改）
+    // 设备显示名（STE_QT_NAME）若不显式给，则保留进程内已有的（OAuth 绑定一般不改显示名，
+    // 避免每次重绑把用户在手动表单里设的名字冲掉）；显式给则覆盖。
+    const QString existingName = qEnvironmentVariable("STE_QT_NAME").trimmed();
+    const QString finalName = name.trimmed().isEmpty() ? existingName : name.trimmed();
     QString text;
     text += QStringLiteral("rem Stelarith control agent - local config (auto-generated, safe to edit)\r\n");
     text += QStringLiteral("set STE_QT_WS_URL=") + url + QStringLiteral("\r\n");
     text += QStringLiteral("set STE_QT_WS_TOKEN=") + token + QStringLiteral("\r\n");
     text += QStringLiteral("set STE_QT_UID=") + uid + QStringLiteral("\r\n");
+    if (!finalName.isEmpty())
+        text += QStringLiteral("set STE_QT_NAME=") + finalName + QStringLiteral("\r\n");
 
     QFile f(agentEnvPath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -1082,8 +1094,10 @@ bool saveAgentEnv(const QString &url, const QString &token, const QString &uid)
     qputenv("STE_QT_WS_URL", url.toUtf8());
     qputenv("STE_QT_WS_TOKEN", token.toUtf8());
     qputenv("STE_QT_UID", uid.toUtf8());   // 空值=清除，sendRegister 会回退到电脑名
+    if (!finalName.isEmpty()) qputenv("STE_QT_NAME", finalName.toUtf8());
 
-    qInfo().noquote() << QStringLiteral("[agent-qt] 已保存配置 → %1（4 行，UTF-8 无 BOM）").arg(agentEnvPath());
+    qInfo().noquote() << QStringLiteral("[agent-qt] 已保存配置 → %1（%2 行，UTF-8 无 BOM）")
+                         .arg(agentEnvPath()).arg(finalName.isEmpty() ? 4 : 5);
     return true;
 }
 
@@ -2009,6 +2023,9 @@ void openConfigDialog()
     // C++ 里「后面才声明的局部变量」在 lambda 的捕获列表里够不到（实测 C2065）。
     // 这里只占个位，回调真正执行时（用户点完绑定）它的值早就赋好了。
     QLineEdit *codeEdit = nullptr;
+    // 设备显示名（STE_QT_NAME）先声明、后创建：OAuth 成功回调要用它，而那个 lambda 定义在本行上面，
+    // C++ lambda 捕获列表够不到后面才声明的局部变量（见 codeEdit 上方的同款注释）。
+    QLineEdit *nameEdit = nullptr;
 
     // 「用星璃账号绑定」的信号槽：OAuthBind 是独立对象，对话框关了也不能被析构（绑定时对话框还在）
     auto *oauth = new OAuthBind(&dlg);   // parent=dlg，对话框关闭时自动析构
@@ -2028,7 +2045,7 @@ void openConfigDialog()
         bindBtn->setText(QStringLiteral("已绑定（%1）").arg(owner));
 
         // 把设备票写进 agent.env（token 字段放票，与旧静态令牌同字段、云端按段数区分）
-        if (!saveAgentEnv(wsUrl, ticket, uid)) {
+        if (!saveAgentEnv(wsUrl, ticket, uid, nameEdit ? nameEdit->text() : QString())) {
             err->setStyleSheet(QStringLiteral("color:#c03030;"));
             err->setText(QStringLiteral("绑定成功但写配置失败（目录无写权限？）。请用管理员身份重装后再试。"));
             err->show();
@@ -2112,12 +2129,24 @@ void openConfigDialog()
     // —— 设备名（可选）——
     auto *uidEdit = new QLineEdit(qEnvironmentVariable("STE_QT_UID").trimmed());
     uidEdit->setPlaceholderText(QHostInfo::localHostName());
-    form->addRow(QStringLiteral("设备名（可选）"), uidEdit);
+    form->addRow(QStringLiteral("设备码（可选）"), uidEdit);
     auto *uidHint = new QLabel(QStringLiteral(
-        "这台电脑在集控里显示的名字。留空就用电脑本名，一般不用改。"));
+        "这台电脑在集控里的唯一代号（用于按班归组等）。留空就用电脑本名，一般不用改。"));
     uidHint->setWordWrap(true);
     uidHint->setStyleSheet(hintStyle);
     form->addRow(QString(), uidHint);
+
+    // —— 设备显示名（可选，2026-10-10 加）——
+    // 落 STE_QT_NAME，与上面的「设备码」(STE_QT_UID) 区分：码是唯一代号，显示名是给人看的友好名。
+    // 管理端据此显示「设备名」；留空回落电脑本名。改名后保存即生效、无需重启。
+    nameEdit = new QLineEdit(qEnvironmentVariable("STE_QT_NAME").trimmed());
+    nameEdit->setPlaceholderText(QHostInfo::localHostName());
+    form->addRow(QStringLiteral("设备显示名（可选）"), nameEdit);
+    auto *nameHint = new QLabel(QStringLiteral(
+        "管理面板里看到的这台电脑的名字（如「一班讲台机」）。留空就用电脑本名。"));
+    nameHint->setWordWrap(true);
+    nameHint->setStyleSheet(hintStyle);
+    form->addRow(QString(), nameHint);
 
     // —— 班级（可选）—— 2026-10-04 立；2026-10-09 起「账号绑定」那条路也吃它
     //    （两个按钮共用同一份绑定逻辑，见 applyClassBinding）
@@ -2209,7 +2238,7 @@ void openConfigDialog()
             err->show();
             return;   // 原地提示，不关窗、不弹二次窗口
         }
-        if (!saveAgentEnv(url, token, uid)) {
+        if (!saveAgentEnv(url, token, uid, nameEdit ? nameEdit->text() : QString())) {
             err->setStyleSheet(QStringLiteral("color:#c03030;"));
             err->setText(QStringLiteral("写入配置文件失败（可能是程序目录没有写权限）。请用管理员身份重装后再试。"));
             err->show();

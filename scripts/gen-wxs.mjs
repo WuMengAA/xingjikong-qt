@@ -27,17 +27,17 @@ function walk(dir) {
   return out;
 }
 
-// 版本号单一真源（2026-10-05）：从 installer.nsi 的 `!define VER "x.y.z"` 读，
-// 保证 NSIS 包与 MSI 包**不可能**各写一个版本号而分叉（历史上 exe 报 0.4.0-v1、
-// 安装器写 0.5.0 就是这样出的岔子）。改版本只改 installer.nsi，MSI 自动跟随。
-const NSI = join(__dirname, '..', 'installer.nsi');
+// 版本号单一真源：从 build\version.nsh 的 `!define VER "x.y.z"` 读（由 CMake configure
+// 生成，唯一真源＝CMakeLists.txt 的 set(AGENT_VERSION ...)）。MSI 包与 Inno 全量安装包
+// 共用同一份，杜绝各写版本号而分叉（历史上 exe 报 0.4.0-v1、安装器写 0.5.0）。
+const VER_NSHT = join(__dirname, '..', 'build', 'version.nsh');
 let APP_VER = '0.0.0';
 try {
-  const m = readFileSync(NSI, 'utf8').match(/!define\s+VER\s+"([^"]+)"/);
+  const m = readFileSync(VER_NSHT, 'utf8').match(/!define\s+VER\s+"([^"]+)"/);
   if (m) APP_VER = m[1];
-  else console.error('[gen-wxs] WARN 未在 installer.nsi 找到 !define VER，回落到 0.0.0');
+  else console.error('[gen-wxs] WARN 未在 build/version.nsh 找到 !define VER，回落到 0.0.0');
 } catch (e) {
-  console.error(`[gen-wxs] WARN 读不到 installer.nsi（${e.message}），回落到 0.0.0`);
+  console.error(`[gen-wxs] WARN 读不到 build/version.nsh（${e.message}），回落到 0.0.0`);
 }
 
 // 目录树：rel 路径 -> 目录 id（INSTALLFOLDER 为根）
