@@ -1,6 +1,9 @@
 #include "mobilebackend.h"
 
 #include <QWebSocket>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
 #include <QJsonDocument>
 #include <QJsonValue>
 
@@ -20,6 +23,7 @@ MobileBackend::MobileBackend(QObject *parent) : QObject(parent)
 {
     m_url = qEnvironmentVariable("STE_MOBILE_URL", QStringLiteral("wss://control.245959623.xyz/ws/viewer")).trimmed();
     m_token = qEnvironmentVariable("STE_MOBILE_TOKEN", QString()).trimmed();
+    m_net = new QNetworkAccessManager(this);   // P2 HTTP
     m_reconnect.setSingleShot(true);
     connect(&m_reconnect, &QTimer::timeout, this, &MobileBackend::connectCloud);
 }
@@ -123,6 +127,59 @@ void MobileBackend::shutdownDevice(const QString &uid)
 {
     // 关机：云端 store.js 对 shutdown 标 no_resend（进程死前不回执，防重连补发循环重启）
     sendLightInstruction(uid, QStringLiteral("shutdown"));
+}
+
+// ── P2 摘要 + 回放列表（2026-10-10 · 手机端设计 §5 P2，HTTP GET）──
+// 用 viewer 令牌走 Bearer（与 WS auth 同令牌）；base URL 从 WS URL 剥出。
+static QString httpBase()
+{
+    QString u = qEnvironmentVariable("STE_MOBILE_URL",
+                                     QStringLiteral("wss://control.245959623.xyz/ws/viewer")).trimmed();
+    u.replace(QStringLiteral("wss://"), QStringLiteral("https://"));
+    u.replace(QStringLiteral("ws://"), QStringLiteral("http://"));
+    const int slash = u.indexOf(QStringLiteral("/ws/"));
+    if (slash >= 0) u.truncate(slash);
+    return u;
+}
+
+void MobileBackend::fetchEvents()
+{
+    if (!m_net || m_token.isEmpty()) return;
+    QNetworkRequest req(QUrl(httpBase() + QStringLiteral("/api/events?limit=30")));
+    req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
+    QNetworkReply *rep = m_net->get(req);
+    connect(rep, &QNetworkReply::finished, this, [this, rep]() {
+        const QByteArray body = rep->readAll();
+        rep->deleteLater();
+        QJsonArray arr;
+        const QJsonObject o = QJsonDocument::fromJson(body).object();
+        if (o.value(QStringLiteral("ok")).toBool()) {
+            arr = o.value(QStringLiteral("events")).toArray();
+        } else {
+            setStatus(QStringLiteral("事件获取失败"));
+        }
+        emit eventsChanged(arr);
+    });
+}
+
+void MobileBackend::fetchRecordings()
+{
+    if (!m_net || m_token.isEmpty()) return;
+    QNetworkRequest req(QUrl(httpBase() + QStringLiteral("/api/recordings")));
+    req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
+    QNetworkReply *rep = m_net->get(req);
+    connect(rep, &QNetworkReply::finished, this, [this, rep]() {
+        const QByteArray body = rep->readAll();
+        rep->deleteLater();
+        QJsonArray arr;
+        const QJsonObject o = QJsonDocument::fromJson(body).object();
+        if (o.value(QStringLiteral("ok")).toBool()) {
+            arr = o.value(QStringLiteral("recordings")).toArray();
+        } else {
+            setStatus(QStringLiteral("回放获取失败"));
+        }
+        emit recordingsChanged(arr);
+    });
 }
 
 void MobileBackend::setStatus(const QString &s)

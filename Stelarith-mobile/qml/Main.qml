@@ -19,6 +19,10 @@ ApplicationWindow {
     // 关机确认目标 uid（P1 轻指令：关机弹窗共用）
     property string confirmTarget: ""
 
+    // P2 监控摘要（backend.fetchEvents/fetchRecordings 填充）
+    property var monitorEvents: []
+    property var monitorRecordings: []
+
     // backend 由 main.cpp 注入（C++ 实例，避免双份连接）
 
     // ── 顶部条 ──
@@ -200,23 +204,55 @@ ApplicationWindow {
             }
         }
 
-        // ── 页 2：监控 ──
-        Column {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.topMargin: 16
-            spacing: 12
-            Text {
-                text: "监控摘要（回放列表）"
-                color: root.th.fg3
-                font.pixelSize: 12
-            }
-            MobileCard {
-                title: "录制回放"
-                sub: "完整监控管理请用桌面端（摄像头绑定/抓拍/录制）"
-                value: "→"
+        // ── 页 2：监控（P2 摘要 + 回放列表，2026-10-10）──
+        Flickable {
+            contentHeight: monitorCol.height + 24
+            clip: true
+            Column {
+                id: monitorCol
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 16
+                spacing: 12
+
+                Text {
+                    text: "实时事件摘要（最近 30 条）"
+                    color: root.th.fg3
+                    font.pixelSize: 12
+                }
+                // 事件列表
+                Repeater {
+                    model: monitorEvents
+                    delegate: MobileCard {
+                        title: modelData.type || "事件"
+                        sub: (modelData.detail || "") + " · " + (modelData.at || "")
+                        value: modelData.level || ""
+                    }
+                }
+                Text {
+                    text: "录制回放"
+                    color: root.th.fg3
+                    font.pixelSize: 12
+                }
+                Repeater {
+                    model: monitorRecordings
+                    delegate: MobileCard {
+                        title: modelData.name || modelData.file || "录制"
+                        sub: (modelData.size || "?") + " · " + (modelData.at || modelData.createdAt || "")
+                        value: "→"
+                    }
+                }
+                // 空态
+                Text {
+                    text: monitorEvents.length === 0 && monitorRecordings.length === 0
+                          ? "暂无摘要/回放（设备未录制或未连接云端）"
+                          : ""
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    color: root.th.fg4
+                    font.pixelSize: 11
+                }
             }
         }
 
@@ -248,7 +284,23 @@ ApplicationWindow {
         TabButton { text: "我的" }
     }
 
-    Component.onCompleted: backend.start()
+    Component.onCompleted: {
+        // P2：backend 摘要信号 → 根属性（QML 显示）
+        backend.eventsChanged.connect(function(ev) { root.monitorEvents = ev })
+        backend.recordingsChanged.connect(function(rec) { root.monitorRecordings = rec })
+        backend.start()
+    }
+
+    // 切到监控页（index 2）时拉取摘要（P2）
+    Connections {
+        target: tabs
+        function onCurrentIndexChanged() {
+            if (tabs.currentIndex === 2 && backend.authed) {
+                backend.fetchEvents()
+                backend.fetchRecordings()
+            }
+        }
+    }
 
     // ── Qt 6.12 返回键适配（2026-10-10 · 用户强调的理解点）──
     // 6.12 起 Android 返回键默认 moveTaskToBack() 退后台（不再直接退出）。

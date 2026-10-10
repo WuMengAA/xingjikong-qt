@@ -17,6 +17,8 @@
 #include <QElapsedTimer>
 
 class QWebSocket;
+class QNetworkAccessManager;
+class QNetworkReply;
 
 class MobileBackend : public QObject
 {
@@ -46,6 +48,10 @@ public:
     Q_INVOKABLE void pingDevice(const QString &uid);
     Q_INVOKABLE void shutdownDevice(const QString &uid);
 
+    // ── P2（2026-10-10 · 手机端设计 §5）：摘要 + 回放列表（HTTP GET）──
+    Q_INVOKABLE void fetchEvents();       // GET /api/events → eventsChanged
+    Q_INVOKABLE void fetchRecordings();   // GET /api/recordings → recordingsChanged
+
     // 在线设备数（Q_PROPERTY 暴露给 QML）
     int onlineCount() const;
 
@@ -56,6 +62,9 @@ signals:
     void statusChanged();
     void instructionResult(const QString &uid, const QString &action,
                            const QString &result, const QJsonObject &data);
+    // P2：事件摘要 / 回放列表（QML 监控页显示）
+    void eventsChanged(const QJsonArray &events);
+    void recordingsChanged(const QJsonArray &recordings);
 
 private:
     void connectCloud();
@@ -66,6 +75,7 @@ private:
     void setStatus(const QString &s);
 
     QWebSocket *m_ws = nullptr;
+    QNetworkAccessManager *m_net = nullptr;   // P2：HTTP GET（events/recordings）
     QString m_url;
     QString m_token;
     bool m_connected = false;
