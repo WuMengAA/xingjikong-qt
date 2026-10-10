@@ -288,7 +288,8 @@ const server = http.createServer((req, res) => {
     // 不带 current 时 hasUpdate 恒 false：官网下载中心只要 version/url/sha256，
     // 它不该因为少了这个参数就以为"有新版"。
     const current = (u.searchParams.get('current') || '').trim();
-    const ota = latestFor(product);
+    const channel = (u.searchParams.get('channel') || 'stable').trim();
+    const ota = latestFor(product, channel);
     // 没发布过就如实回 published:false —— 官网据此显示"暂未发布"，不假装有内容。
     if (!ota || !ota.version) {
       return send(200, { ok: true, product, published: false, latest: null, hasUpdate: false });
@@ -390,8 +391,9 @@ const server = http.createServer((req, res) => {
     // OTA：声明某产品的最新版本（供管理端/站点比对在线设备版本，决定是否下发升级）。
     // 未发布过（无 ota.json）→ latest:null，如实相告，不假装"已是最新"。
     const product = (u.searchParams.get('product') || 'agent').trim();
-    const latest = latestFor(product);
-    return send(200, { ok: true, product, latest });
+    const channel = (u.searchParams.get('channel') || 'stable').trim();
+    const latest = latestFor(product, channel);
+    return send(200, { ok: true, product, channel, latest });
   }
 
   // ── 班级监控 / 设备元数据 / 云端存储（2026-10-08）──
@@ -1170,9 +1172,14 @@ wss.on('connection', (ws) => {
       // 回执：v1 收 registered（顺带**下发心跳参数**，不再靠两端各猜一个数字）；旧客户端仍收 registration-ok
       // 2026-10-06：把 OTA 清单（ota.json）里的最新版本随注册回执一起下发给被控端 ——
       // 被控端据此在托盘/「设置与信息」里提示升级，并复用 self_update 链路一键升。
+      // 2026-10-10：版本按更新通道分发 —— 设备 register 带 channel（stable/gray），
+      //   据此读 ota-<channel>.json（灰度清单）。灰度设备拿到 rc.4，stable 设备仍拿 stable 的 rc.3，
+      //   实现"灰度发布、不惊动全网"。
       // 没发布过版本时 latestFor 返回 null → 这些字段是 null，被控端按"未知"显示
       // （**不是**"已是最新"：这两件事运维必须分得清，否则会以为升级链路是好的）。
-      const agentOta = latestFor('agent');
+      const agentChannel = (p.payload && typeof p.payload.channel === 'string' && p.payload.channel.trim())
+        ? p.payload.channel.trim() : 'stable';
+      const agentOta = latestFor('agent', agentChannel);
       snd(ws, ws.__v1 === true ? 'registered' : 'registration-ok', {
         uid,
         server: 'stelarith-cloud-ws/0.4.0',

@@ -15,21 +15,30 @@
 //     "viewer": { ... }
 //   }
 // }
+//
+// 更新通道（2026-10-10 加）：除 ota.json（stable）外，可存在 ota-<channel>.json
+// （如 ota-gray.json），形态完全一致。latestFor(product, channel) 读对应通道清单；
+// 通道清单缺失即回落 null（该通道"无更新"），不会去读 stable。灰度发布 = 把候选版本
+// 发到 ota-gray.json，只有 register 带 channel=gray 的设备拿得到，不惊动全网。
 
 import { readFileSync } from 'node:fs';
 import { OTA_MANIFEST_FILE } from './config.js';
 
-/** 读取并解析清单；文件不存在/坏 JSON → null（调用方据此说"没发布过版本"）。 */
-function loadManifest() {
+/** 读取并解析清单；文件不存在/坏 JSON → null（调用方据此说"没发布过版本"）。
+ *  @param {string} [channel] 更新通道：'stable'（默认）读 ota.json；其它值（如 'gray'）
+ *    读同目录的 ota-<channel>.json（灰度清单）。灰度清单缺失即回落 null（设备当"无更新"），
+ *    不会去读 stable 清单 —— 灰度必须是显式发布的，避免把 stable 误当成灰度推下去。 */
+function loadManifest(channel) {
+  const file = (channel && channel !== 'stable') ? `ota-${channel}.json` : OTA_MANIFEST_FILE;
   try {
-    const raw = readFileSync(OTA_MANIFEST_FILE, 'utf8');
+    const raw = readFileSync(file, 'utf8');
     const obj = JSON.parse(raw);
     if (!obj || typeof obj !== 'object') return null;
     return obj;
   } catch (e) {
     // 首次部署时文件不存在是正常态，不打 error 刷屏；只在"文件在但坏了"时才值得注意。
     if (e && e.code === 'ENOENT') return null;
-    console.error(`[cloud] FAIL 读取 OTA 清单失败（${OTA_MANIFEST_FILE}）：${e.message}`);
+    console.error(`[cloud] FAIL 读取 OTA 清单失败（${file}）：${e.message}`);
     return null;
   }
 }
@@ -78,9 +87,11 @@ export function cmpVersion(a, b) {
   return 0;
 }
 
-/** 某产品的最新版本条目；没有清单/没有该产品 → null。 */
-export function latestFor(product) {
-  const m = loadManifest();
+/** 某产品的最新版本条目；没有清单/没有该产品 → null。
+ *  @param {string} product  产品名（'agent' / 'viewer'）
+ *  @param {string} [channel] 更新通道（'stable' 读 ota.json；'gray' 读 ota-gray.json 等） */
+export function latestFor(product, channel) {
+  const m = loadManifest(channel);
   if (!m || !m.products || typeof m.products !== 'object') return null;
   const p = m.products[product];
   if (!p || typeof p !== 'object') return null;

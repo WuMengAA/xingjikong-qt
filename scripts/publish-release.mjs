@@ -26,6 +26,12 @@
  *       算 sha256/大小 → **复制**（不是移动）到 assets/pkg/ → 只改 ota.json 里这一个产品
  *       → 回读校验 → 打印结果。
  *
+ *   灰度渠道（2026-10-10 加）：加 --channel gray 即把这一版本发到 ota-gray.json
+ *       （而不是 ota.json）。stable 设备读不到它；只有 register 带 channel=gray 的设备才拿得到。
+ *       用法：… publish --product agent --version 0.6.0-rc.4 --channel gray \
+ *             --file …/stelarith-agent-setup-0.6.24-rc.4.exe --base-url https://control.245959623.xyz
+ *       验证够稳后，把同一包再 --channel stable 发一次（全量推送）。
+ *
  * 退出码：0 成功 / 1 失败（失败时不会留下半成品：ota.json 只在全部校验通过后才写）
  */
 import fs from 'node:fs';
@@ -39,7 +45,7 @@ import { fileURLToPath } from 'node:url';
 import { cmpVersion } from '../../scripts/version-compare.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MANIFEST = path.join(ROOT, process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.json');
+let MANIFEST = path.join(ROOT, process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.json');
 const EXAMPLE = path.join(ROOT, 'ota.json.example');
 const PKG_DIR = path.join(ROOT, process.env.CLOUD_ASSETS_DIR || 'assets', 'pkg');
 const PRODUCTS = ['agent', 'viewer'];
@@ -74,6 +80,14 @@ function arg(name, def = undefined) {
 	return v;
 }
 const has = (name) => argv.includes(`--${name}`);
+
+// 更新通道（2026-10-10 加）：stable 走 ota.json；其它通道（如 gray）走同目录的 ota-<channel>.json。
+// 灰度发布 = 把候选版本发到独立清单，stable 设备读不到、灰度设备（register 带 channel=gray）才读得到。
+// 这样"推出灰度更新渠道"不惊动全网，验证够稳再手动把同一包 publish 到 stable（全量）。
+const CHANNEL = String(arg('channel', 'stable') || 'stable').trim();
+if (CHANNEL && CHANNEL !== 'stable') {
+	MANIFEST = path.join(ROOT, `ota-${CHANNEL}.json`);
+}
 
 const log = (m) => console.log(m);
 function fail(m) {
@@ -159,6 +173,14 @@ function verifyPackageContent(product, file) {
 	if (!need) return { ok: true, missing: [] };
 	if (!fs.existsSync(SEVEN_ZIP)) {
 		return { ok: false, missing: [], error: `找不到 7-Zip（${SEVEN_ZIP}）—— 无法解包校验` };
+	}
+	// Inno Setup 自解压安装器**不是** 7z 可识别的归档格式（NSIS 的 exe 是，Inno 的不是），
+	// 7z 对 .exe 安装器报 "Cannot open the file as archive"。内容正确性已由 ISCC 编译期
+	// 保证（[Files] 点名取运行时，编译失败即缺件），故跳过条目列表检查，仅保留
+	// size/sha256 与"文件存在"的发布前校验。
+	if (path.extname(file).toLowerCase() === '.exe') {
+		return { ok: true, missing: [], warning:
+			'Inno Setup 安装器：7z 无法列内容，跳过条目检查（依赖 ISCC 编译期验证）' };
 	}
 	let entries;
 	try {
@@ -401,6 +423,9 @@ async function cmdPublish() {
 				`  这是硬门槛 —— 宁可发不出去，也不发一个装完起不来的包（7z 路径可用 SEVEN_ZIP 覆盖）。`
 		);
 	}
+	if (chk.warning) {
+		log(`  ⚠ ${chk.warning}`);
+	}
 	if (!chk.ok) {
 		fail(
 			`拒绝发布：${path.basename(file)} 里**缺必需件** —— ${chk.missing.join(', ')}\n` +
@@ -410,7 +435,7 @@ async function cmdPublish() {
 				`  清单后重新出包（见各脚本的 REQUIRED）。`
 		);
 	}
-	log(`  包内容自检 ✓（${REQUIRED_ENTRIES[product].length} 个必需件齐）`);
+	log(`  包内容自检 ${chk.warning ? '⚠ 跳过（Inno 安装器，信任编译期验证）' : `✓（${REQUIRED_ENTRIES[product].length} 个必需件齐）`}`);
 
 	if (dryRun) {
 		log('\n--dry-run：不复制文件、不改清单。');
@@ -454,9 +479,12 @@ async function cmdPublish() {
 	log(`\n已写入 ${path.relative(ROOT, MANIFEST)}（UTF-8 无 BOM，${len} 字节，回读解析通过）`);
 
 	log('\n下一步可以做的验证：');
-	log(`  · 本地体检：node scripts/publish-release.mjs check`);
-	log(`  · 云端现读生效（不必重启）：curl "${origin}/api/public/ota?product=${product}"`);
+	log(`  · 本地体检：node scripts/publish-release.mjs check${CHANNEL !== 'stable' ? ` --channel ${CHANNEL}` : ''}`);
+	log(`  · 云端现读生效（不必重启）：curl "${origin}/api/public/ota?product=${product}${CHANNEL !== 'stable' ? `&channel=${CHANNEL}` : ''}"`);
 	log(`  · 官网下载页会自动跟着变：它读的就是这个接口，站点无需重新构建`);
+	if (CHANNEL !== 'stable') {
+		log(`  · 灰度只下发给 register 带 channel=${CHANNEL} 的设备；要全量请同包再 --channel stable 发一次`);
+	}
 
 	log(
 		`\n提醒：其它产品条目未被改动` +
