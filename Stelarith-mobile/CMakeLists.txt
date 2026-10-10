@@ -24,6 +24,10 @@ qt_add_executable(StelarithMobile
     qml/components/MobileCard.qml
     qml/components/StatusDot.qml
 )
+# Android 打包：用项目自定义 AndroidManifest（包名 com.stelarith.mobile、label 星集控、网络权限）
+if(ANDROID)
+    set(QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
+endif()
 qt_add_qml_module(StelarithMobile
     URI StelarithMobile
     VERSION 1.0
