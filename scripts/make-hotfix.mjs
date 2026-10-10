@@ -91,8 +91,31 @@ function listZip(zip) {
 		.filter((s) => s && s !== '/');
 }
 
-/** 管理端热修包**必须**含这两样：exe 是 OTA 的自检门槛，Main.qml 是界面本体。 */
-const VIEWER_MUST = ['viewer-qt.exe', 'qml/Stelarith/Main.qml'];
+/**
+ * OpenSSL 3 运行库（2026-10-10 补）：两侧的 WebRTC 都走 libdatachannel，它的 DTLS
+ * 链的是 PostgreSQL 17 自带的 OpenSSL ⇒ exe 导入表里含 libssl-3-x64.dll /
+ * libcrypto-3-x64.dll。windeployqt 不认识它们，全量安装包靠 .nsi 显式点名；
+ * **热修包也必须带上** —— 否则只换 exe、老机器上没有这两个 DLL，热修完照样
+ * 「stelarith-agent-qt.exe - 系统错误：找不到 libssl-3-x64.dll」。
+ */
+const OPENSSL_DLLS = ['libssl-3-x64.dll', 'libcrypto-3-x64.dll'];
+
+/** 管理端热修包**必须**含这些：exe 是 OTA 自检门槛，Main.qml 是界面本体，DLL 是运行库。 */
+const VIEWER_MUST = ['viewer-qt.exe', 'qml/Stelarith/Main.qml', ...OPENSSL_DLLS];
+
+/** 把 OpenSSL 运行库从 build/ 拷进暂存目录；缺了直接失败（别发出跑不起来的热修包）。 */
+function stageOpenSsl(box, stage) {
+	for (const dll of OPENSSL_DLLS) {
+		const src = path.join(box, dll);
+		if (!fs.existsSync(src)) {
+			fail(
+				`找不到 ${path.relative(ROOT, src)} —— 全量包/热修包都必须带它；` +
+					'先把它从 "C:\\Program Files\\PostgreSQL\\17\\bin" 拷进 build/'
+			);
+		}
+		fs.copyFileSync(src, path.join(stage, dll));
+	}
+}
 
 // ── 管理端：zip ──────────────────────────────────────────────────────────────
 function buildViewer({ dryRun }) {
@@ -122,7 +145,7 @@ function buildViewer({ dryRun }) {
 	const stage = path.join(VIEWER, 'dist', `hotfix-${ver}`);
 	const out = path.join(VIEWER, 'dist', `stelarith-viewer-hotfix-${ver}.zip`);
 	log(`管理端热修 → ${path.relative(ROOT, out)}`);
-	log(`  含 viewer-qt.exe + qml/Stelarith/**（源码 ${fs.readdirSync(srcQml).length} 项）`);
+	log(`  含 viewer-qt.exe + qml/Stelarith/**（源码 ${fs.readdirSync(srcQml).length} 项）+ ${OPENSSL_DLLS.join(' / ')}`);
 
 	if (dryRun) {
 		log('  --dry-run：不写盘');
@@ -133,6 +156,7 @@ function buildViewer({ dryRun }) {
 	fs.mkdirSync(stage, { recursive: true });
 	fs.copyFileSync(exe, path.join(stage, 'viewer-qt.exe'));
 	fs.cpSync(qmlSrc, path.join(stage, 'qml', 'Stelarith'), { recursive: true });
+	stageOpenSsl(box, stage);
 	// ⚠️ 从暂存目录**里面**压（cwd=stage，`.\*`），让 zip 根层就是应用目录，
 	//    与 make-portable.mjs 同一口径 —— 管理端 OTA 是把包解开后 robocopy 覆盖安装目录的。
 	fs.rmSync(out, { force: true });
@@ -155,7 +179,7 @@ function buildAgent({ dryRun }) {
 	if (!fs.existsSync(nsi)) fail(`找不到 ${path.relative(ROOT, nsi)}`);
 	const out = path.join(AGENT, 'dist', `stelarith-agent-hotfix-${ver}.exe`);
 	log(`被控端热修 → ${path.relative(ROOT, out)}`);
-	log(`  含 stelarith-agent-qt.exe（${humanSize(fs.statSync(exe).size)}）`);
+	log(`  含 stelarith-agent-qt.exe（${humanSize(fs.statSync(exe).size)}）+ ${OPENSSL_DLLS.join(' / ')}`);
 
 	if (dryRun) {
 		log('  --dry-run：不写盘');
@@ -166,6 +190,7 @@ function buildAgent({ dryRun }) {
 	fs.rmSync(stage, { recursive: true, force: true });
 	fs.mkdirSync(stage, { recursive: true });
 	fs.copyFileSync(exe, path.join(stage, 'stelarith-agent-qt.exe'));
+	stageOpenSsl(box, stage);
 	fs.mkdirSync(path.join(AGENT, 'dist'), { recursive: true });
 	fs.rmSync(out, { force: true });
 	execFileSync(MAKENSIS, ['make-hotfix.nsi'], { cwd: AGENT, stdio: 'inherit' });
@@ -185,10 +210,10 @@ function check(target) {
 		const missing = VIEWER_MUST.filter((f) => !entries.has(f));
 		if (missing.length) fail(`缺必需件：${missing.join(', ')}`);
 		log(`条目 ${entries.size}，必需件齐 ✓`);
-		if (size > 20 * 1024 * 1024) log('⚠ 体积偏大 —— 热修包应远小于全量包，确认没把运行时塞进来');
+		if (size > 20 * 1024 * 1024) log('⚠ 体积偏大 —— 热修包应远小于全量包，确认没把 Qt 运行时塞进来');
 	} else {
-		// exe 形态（被控端）：只需体积合理 —— 它只装一个 ~0.7MB 的 exe
-		if (size > 20 * 1024 * 1024) log('⚠ 体积偏大 —— 被控端热修包应约 1MB');
+		// exe 形态（被控端）：exe ~0.7MB + OpenSSL 两枚（压缩后约 2MB）
+		if (size > 20 * 1024 * 1024) log('⚠ 体积偏大 —— 被控端热修包应约 3MB（exe + OpenSSL 两枚）');
 		else log('体积合理 ✓');
 	}
 	return true;
