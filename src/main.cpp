@@ -33,11 +33,6 @@
 #include <QDesktopServices>
 #include <QTimer>
 #include <QScreen>
-// ⚠️ WebEngine 的拉起时机由"第一次 new QWebEngineView"决定，见 rtcStart()：
-// 只要不在 main 里提前 new，Chromium 就不会在进程启动时被拉起来。
-// 反过来，如果哪天有人在 main 开头 new 一个 QWebEngineView（哪怕只是为了"预热"），
-// 就得回 ~456MB 私有内存 / 78 线程的常驻，跟按需加载互相抵消。
-#include <QWebEngineView>
 #include <QPixmap>
 #include <QDateTime>
 #include <QDir>
@@ -186,10 +181,11 @@ int g_heartbeatMs = kHeartbeatIntervalMs;   // 实际心跳间隔：云端下发
 int g_timeoutMs = 30000;                    // 云端判离线阈值（只用于日志说明，不自己判）
 QTimer *g_hbTimer = nullptr;   // 心跳定时器（registered 拿到参数后要能改间隔，所以放外面）
 
-// ---- WebRTC 推流状态（内嵌采集页）----
+// ---- WebRTC 推流状态（ldc_streamer 接管，2026-10-10 去 WebEngine）----
 // ⚠️ 这四行曾经在一次误合并里被整段删掉（只删声明、没删使用），编译期满屏
 //    "g_rtcView: 未声明的标识符"。改这块时留意：声明和使用必须同时存在。
-static QWebEngineView *g_rtcView = nullptr;
+// 2026-10-10：WebEngine 已移除（ldc 是唯一推流路），g_rtcView 不再需要——
+// 保留 g_rtcTick/g_rtcOn 供 rtcTickOnce 的离线看门狗逻辑使用。
 static QTimer *g_rtcTick = nullptr;
 static bool g_rtcOn = false;
 // 采集页回收定时器（2026-10-05 内存优化）：没人看画面这件事在机房里是常态（几十台机器
@@ -4528,6 +4524,7 @@ static int g_rtcDiagTick = 0;
 static bool g_rtcForceReoffer = false;
 static void rtcStop(const QString &why);   // 定义在下面（rtcStart/rtcStop 那一段），这里要给 tick 用
 
+#if 0   // 2026-10-10 去 WebEngine：rtcTickOnce（JS 采集页注入）禁用，ldc 已接管
 static void rtcTickOnce()
 {
     if (!g_rtcOn || !g_rtcView) return;
@@ -4629,15 +4626,12 @@ static void rtcFeedSignal(const QString &kind, const QString &sdp, const QString
     g_rtcView->page()->runJavaScript(js);
 }
 
-// 真删采集页。用 deleteLater 而不是 delete：正在往事件循环里排的 runJavaScript 回调
-// 还攥着 page 指针，当场 delete 会打在半路上。
+#endif // rtcTickOnce
+// 真删采集页。2026-10-10 去 WebEngine：无 Chromium 页可回收，空实现（保留给
+// scheduleRtcViewReap 的 timer 安全调用）。
 static void releaseRtcView()
 {
-    if (!g_rtcView) return;
-    g_rtcView->close();
-    g_rtcView->deleteLater();
-    g_rtcView = nullptr;
-    qInfo("[rtc] 采集页已回收（Chromium 渲染进程随之退出）");
+    // WebEngine 已移除，无采集页可回收
 }
 
 // 延迟回收：给"刚停又马上要看"留一段窗口，避免 rtc-stop/rtc-start 抖动时反复拉起/销毁
@@ -4721,6 +4715,11 @@ static void rtcStart()
         qInfo("[rtc-ldc] 推流已开（libdatachannel，无 Chromium）");
         return;
     }
+    // ── 2026-10-10 去 WebEngine 底层：WebEngine 采集页推流分支已禁用 ──
+    // ldc 是唯一推流路（上面 useLdc 默认开）。旧 WebEngine 路（g_rtcView + JS
+    // 采集页 + canvas.captureStream）用 #if 0 包住保留，后续清理可删。
+    // STE_USE_LDC_RTC=0 走到这里 = 明确关闭 ldc，但 WebEngine 已移除 → 不可推流。
+#if 0
     if (g_rtcOn && g_rtcView) return;
     g_offlineSince = 0;           // 重新推流 = 还在线上，离线看门狗解除
     cancelRtcViewReap();          // 上一轮还在倒计时就别回收了，直接复用现有的 view
@@ -4769,6 +4768,7 @@ static void rtcStart()
                              });
                          qInfo("[rtc] 采集页就绪，推流已开");
                      });
+#endif
 }
 
 static void rtcStop(const QString &why)
@@ -4781,11 +4781,14 @@ static void rtcStop(const QString &why)
         qInfo("[rtc-ldc] 推流已停：%s", qPrintable(why));
         return;
     }
+    // 2026-10-10 去 WebEngine：旧路（g_rtcView __reset + 延迟回收）已禁用
+#if 0
     if (g_rtcTick) g_rtcTick->stop();
     if (g_rtcView) g_rtcView->page()->runJavaScript(QStringLiteral("window.__reset();"));
     qInfo("[rtc] 推流已停：%s", qPrintable(why));
     // 采集页先留着 5 秒，没人重新点开就回收（省的是那 137MB 的 Chromium 渲染进程）
     scheduleRtcViewReap();
+#endif
 }
 
 /**
@@ -4933,7 +4936,14 @@ void handleControlText(const QString &text)
         return;
     }
     if (type == QStringLiteral("rtc-offer")) {
-        rtcFeedSignal(QStringLiteral("offer"), pay.value(QStringLiteral("sdp")).toString(), QString());
+        // 2026-10-10 去 WebEngine：agent 是 offer 发起方，正常不会收到 rtc-offer；
+        // 若收到（云端转发异常），ldc 路喂 onSignal，回退路已无 WebEngine 丢弃。
+        if (qgetenv("STE_USE_LDC_RTC") != "0") {
+            LdcStreamer::instance().onSignal(QStringLiteral("offer"),
+                                             pay.value(QStringLiteral("sdp")).toString().toUtf8());
+        } else {
+            qWarning("[rtc] 收到 rtc-offer 但 WebEngine 已移除，丢弃");
+        }
         return;
     }
     if (type == QStringLiteral("rtc-answer")) {
@@ -4942,7 +4952,7 @@ void handleControlText(const QString &text)
             LdcStreamer::instance().onSignal(QStringLiteral("answer"),
                                              pay.value(QStringLiteral("sdp")).toString().toUtf8());
         } else {
-            rtcFeedSignal(QStringLiteral("answer"), pay.value(QStringLiteral("sdp")).toString(), QString());
+            qWarning("[rtc] 收到 rtc-answer 但 WebEngine 已移除，丢弃");
         }
         return;
     }
@@ -4952,7 +4962,7 @@ void handleControlText(const QString &text)
             LdcStreamer::instance().onSignal(QStringLiteral("candidate"),
                                              pay.value(QStringLiteral("candidate")).toString().toUtf8());
         } else {
-            rtcFeedSignal(QStringLiteral("ice"), QString(), pay.value(QStringLiteral("candidate")).toString());
+            qWarning("[rtc] 收到 rtc-ice 但 WebEngine 已移除，丢弃");
         }
         return;
     }

@@ -16,7 +16,7 @@ endif()
 # 2026-10-04 +Network：OOBE 绑定界面要 POST 站点消费班级接入码（/api/device/activate）
 # 注：WebEngine 的按需加载不需要额外组件 —— 不加 WebEngineQuick（它在动态构建下会死锁，见
 #     src/main.cpp 的 ensureWebEngine 注释），只要不在 main 里提前 new QWebEngineView 即可。
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebSockets WebEngineWidgets Network Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg)
 
 # ── 版本资源 + 应用图标（2026-10-07 补）────────────────────────────────────
 # 补之前 exe 是「无版本资源的裸 PE」：任务管理器细节页空白、右键属性没有描述、
@@ -139,7 +139,7 @@ add_executable(stelarith-agent-qt
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
-target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::WebEngineWidgets Qt6::Network Qt6::Svg)
+target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Svg)
 # 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
 target_link_libraries(stelarith-agent-qt PRIVATE winmm)
 # ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
