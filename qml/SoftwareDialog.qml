@@ -1,8 +1,9 @@
-// 软件弹窗：列出教室机上"有主窗口"的进程；选中一行可结束它。
+﻿// 软件弹窗：列出教室机上"有主窗口"的进程；选中一行可结束它。
 // 受保护的（系统关键 / 安全软件 / 集控自身）由被控端拒绝，这里先置灰标出来。
 
 import QtQuick
 import QtQuick.Controls
+import "components"       // 2026-10-10：SvgIcon 等组件统一显式 import（Qt6.12 严格解析）
 
 Popup {
     id: dlg

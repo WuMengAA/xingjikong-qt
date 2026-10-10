@@ -1,4 +1,4 @@
-// 定时弹窗：安排关机/重启（schedule_shutdown / schedule_reboot）、看待执行（list_schedules）、取消（cancel_schedule）。
+﻿// 定时弹窗：安排关机/重启（schedule_shutdown / schedule_reboot）、看待执行（list_schedules）、取消（cancel_schedule）。
 //
 // 为什么单独一个弹窗：定时是**唯一一个"设了看不见结果"**的动作 ——
 // 老师最怕"我设了，机器照常开机"。所以这里必须三件事一屏给全：
@@ -12,6 +12,7 @@
 
 import QtQuick
 import QtQuick.Controls
+import "components"       // 2026-10-10：SvgIcon 等组件统一显式 import（Qt6.12 严格解析）
 
 Popup {
     id: dlg

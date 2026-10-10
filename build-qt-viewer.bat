@@ -8,7 +8,7 @@ setlocal
 set MSVC=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.51.36231
 set SDK=C:\Program Files (x86)\Windows Kits\10
 set SDKVER=10.0.26100.0
-set QT=D:\Qt\6.8.1\msvc2022_64
+set QT=D:\QTqwq\6.12.0\msvc2022_64
 rem cl.exe lives at <MSVC>\bin\Hostx64\x64\cl.exe (the extra x64 level matters)
 set MSVCCL=%MSVC%\bin\Hostx64\x64
 

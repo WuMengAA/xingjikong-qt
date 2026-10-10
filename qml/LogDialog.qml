@@ -1,7 +1,8 @@
-// 日志弹窗：教室机被控端日志的尾部（装机后没有 stdout，出故障只能靠它）。
+﻿// 日志弹窗：教室机被控端日志的尾部（装机后没有 stdout，出故障只能靠它）。
 
 import QtQuick
 import QtQuick.Controls
+import "components"       // 2026-10-10：SvgIcon 等组件统一显式 import（Qt6.12 严格解析）
 
 Popup {
     id: dlg

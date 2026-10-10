@@ -1,4 +1,4 @@
-// 媒体弹窗：列出教室机媒体库里的文件（media_list），点一行就删（media_delete）。
+﻿// 媒体弹窗：列出教室机媒体库里的文件（media_list），点一行就删（media_delete）。
 //
 // 为什么把"列"和"删"放一起：老师要处理的就是"这台机器上有哪些教学媒体、哪个用完了要清掉"。
 // 分开成两个按钮的话，看一眼列表还得去别处找删除，等于让人记不住。
@@ -6,6 +6,7 @@
 
 import QtQuick
 import QtQuick.Controls
+import "components"       // 2026-10-10：SvgIcon 等组件统一显式 import（Qt6.12 严格解析）
 
 Popup {
     id: dlg

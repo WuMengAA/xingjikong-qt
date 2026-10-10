@@ -228,7 +228,7 @@ endif()
 find_program(STE_WINDEPLOYQT_EXECUTABLE
              NAMES windeployqt windeployqt6
              HINTS "$ENV{QTDIR}/bin"
-                   "D:/Qt/6.8.1/msvc2022_64/bin")
+                   "D:/QTqwq/6.12.0/msvc2022_64/bin")
 if(NOT STE_WINDEPLOYQT_EXECUTABLE)
   message(WARNING "[viewer] 没找到 windeployqt，Qt 运行时不会自动部署。"
                   "若 exe 启动即退出且没有任何日志，先手工在 build 目录跑一次 "

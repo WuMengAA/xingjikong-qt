@@ -1,4 +1,4 @@
-// 文件弹窗：把本机一个文件推给这台教室机（file_push → file_chunk → file_done）。
+﻿// 文件弹窗：把本机一个文件推给这台教室机（file_push → file_chunk → file_done）。
 //
 // 为什么单独一个弹窗、不塞进媒体弹窗：方向是反的 —— 媒体是"教室机上的东西删掉"，
 // 这里是"从我这台灌进教室机"。混在一个列表里，老师会分不清哪个是自己的文件。
@@ -8,6 +8,7 @@
 
 import QtQuick
 import QtQuick.Controls
+import "components"       // 2026-10-10：SvgIcon 等组件统一显式 import（Qt6.12 严格解析）
 
 Popup {
     id: dlg
