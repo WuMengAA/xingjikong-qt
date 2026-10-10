@@ -12,6 +12,9 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core Gui Quick QuickControls2 Network WebSockets)
 
+# Qt 6.12 标准项目配置（Android 打包所需的 gradle/androiddeployqt 集成）
+qt_standard_project_setup()
+
 qt_add_executable(StelarithMobile
     src/main.cpp
     src/mobilebackend.cpp

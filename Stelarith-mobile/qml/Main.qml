@@ -192,4 +192,20 @@ ApplicationWindow {
     }
 
     Component.onCompleted: backend.start()
+
+    // ── Qt 6.12 返回键适配（2026-10-10 · 用户强调的理解点）──
+    // 6.12 起 Android 返回键默认 moveTaskToBack() 退后台（不再直接退出）。
+    // 手机端语义：返回键 = 退到上一页（非首页）/ 首页再按 = 退后台（默认行为保留）。
+    // ⚠️ Keys 只能挂 Item（ApplicationWindow 不是 Item）——挂窗口内容根。
+    Item {
+        anchors.fill: parent
+        Keys.onBackPressed: {
+            event.accepted = true
+            if (pages.currentIndex !== 0) {
+                pages.currentIndex = 0          // 非首页：回首页
+                tabs.currentIndex = 0
+            }
+            // 首页按返回：默认 moveTaskToBack 退后台（不退出应用，保持会话）
+        }
+    }
 }
