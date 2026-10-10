@@ -22,7 +22,14 @@ static QString makeEnvelope(const QString &type, const QJsonObject &payload)
 MobileBackend::MobileBackend(QObject *parent) : QObject(parent)
 {
     m_url = qEnvironmentVariable("STE_MOBILE_URL", QStringLiteral("wss://control.245959623.xyz/ws/viewer")).trimmed();
-    m_token = qEnvironmentVariable("STE_MOBILE_TOKEN", QString()).trimmed();
+    // 令牌：环境变量优先（桌面调试），否则编译期宏（Android 无环境变量，构建时 -D 注入）
+    m_token = qEnvironmentVariable("STE_MOBILE_TOKEN",
+#ifdef STE_MOBILE_TOKEN_CMake
+                                  QStringLiteral(STE_MOBILE_TOKEN_CMake)
+#else
+                                  QString()
+#endif
+                                  ).trimmed();
     m_net = new QNetworkAccessManager(this);   // P2 HTTP
     m_reconnect.setSingleShot(true);
     connect(&m_reconnect, &QTimer::timeout, this, &MobileBackend::connectCloud);

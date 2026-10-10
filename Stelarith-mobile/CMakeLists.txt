@@ -41,3 +41,12 @@ qt_add_qml_module(StelarithMobile
 target_include_directories(StelarithMobile PRIVATE src)
 target_link_libraries(StelarithMobile PRIVATE
     Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets)
+
+# ── 手机端令牌注入（2026-10-10）：Android 无环境变量，靠构建宏 ──
+# 打包时设 STE_MOBILE_TOKEN_BUILD=<生产 viewer token> 即注入；
+# 不设则仅环境变量（桌面调试）或空（Android 上会提示未鉴权）。
+if(DEFINED ENV{STE_MOBILE_TOKEN_BUILD} AND NOT "$ENV{STE_MOBILE_TOKEN_BUILD}" STREQUAL "")
+    target_compile_definitions(StelarithMobile PRIVATE
+        STE_MOBILE_TOKEN_CMake="$ENV{STE_MOBILE_TOKEN_BUILD}")
+    message(STATUS "[mobile] 已注入编译期令牌（STE_MOBILE_TOKEN_BUILD）")
+endif()
