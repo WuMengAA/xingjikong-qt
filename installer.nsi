@@ -151,6 +151,17 @@ Section "install"
 	; ── 运行时（build/：刚编出来的 exe + windeployqt 补全的 Qt）──
 	File "build\stelarith-agent-qt.exe"
 	File "build\Qt6*.dll"
+	; ── OpenSSL 3 运行库（2026-10-10 补）────────────────────────────────────────────
+	; 为什么必须**显式点名**（吃不到上面那条 `Qt6*.dll` 通配）：
+	; 被控端静态链了 libdatachannel 做 WebRTC，而它的 DTLS 走 PostgreSQL 17 自带的
+	; OpenSSL —— CMakeLists 里链的就是
+	;   "C:/Program Files/PostgreSQL/17/lib/libssl.lib" / libcrypto.lib
+	; 于是 exe 的**导入表**里直接写着 libssl-3-x64.dll / libcrypto-3-x64.dll；
+	; 而 windeployqt 只认 Qt 全家，不认识它们 ⇒ 装完双击就是
+	;   「stelarith-agent-qt.exe - 系统错误：由于找不到 libssl-3-x64.dll」。
+	; 这两个 DLL 随包分发（OpenSSL 3.x，Apache-2.0，允许再分发）。
+	File "build\libssl-3-x64.dll"
+	File "build\libcrypto-3-x64.dll"
 	File "build\QtWebEngineProcess.exe"
 	File /r "build\platforms"
 	File /r "build\imageformats"

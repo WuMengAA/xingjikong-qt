@@ -41,6 +41,13 @@ Section "hotfix"
 	nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process -Name stelarith-agent-qt -ErrorAction SilentlyContinue | Stop-Process -Force"'
 	Sleep 800
 
-	; 变更件。暂存目录由 scripts/make-hotfix.mjs 组装（只有这一件）。
+	; 变更件。暂存目录由 scripts/make-hotfix.mjs 组装。
 	File "hotfix-staging\stelarith-agent-qt.exe"
+
+	; ── OpenSSL 3 运行库（2026-10-10 补）──────────────────────────────────────────
+	; 只换 exe、机器上却没有 libssl-3-x64.dll / libcrypto-3-x64.dll ⇒ 热修完照样
+	; 起不来（「找不到 libssl-3-x64.dll」）。成因见 installer.nsi 里同一段注释。
+	; 这两个是**运行库**，与"只带变更件"并不冲突：不带上，这次热修本身就是坏的。
+	File "hotfix-staging\libssl-3-x64.dll"
+	File "hotfix-staging\libcrypto-3-x64.dll"
 SectionEnd
