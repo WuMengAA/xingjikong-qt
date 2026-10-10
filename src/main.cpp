@@ -264,7 +264,7 @@ void stelarithNotifyTray(const QString &title, const QString &msg)
 // ⚠️ 命名标准为 DeepSeek Harness 同款：正式 X.Y.Z / 候选 X.Y.Z-rc.N（rc 号同核心递增、
 //    换核心归零、转正剥离后缀）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //    这一行是 CMake 校验用的回落值 —— 正常构建下由 CMakeLists.txt 的真源强制对齐。
-static constexpr const char *kViewerVersion = "0.6.24-rc.3";
+static constexpr const char *kViewerVersion = "0.6.24-rc.5";
 
 /**
  * 把窗口拉回屏幕内（2026-10-08）。
@@ -343,6 +343,14 @@ int main(int argc, char *argv[])
     // 默认程序名是 exe 文件名（viewer-qt），换 exe 名或改名打包就会换一个目录、
     // 凭据读不到（表现为"每次重启都要重新登录"），这里钉死成一眼认得出的名字。
     QCoreApplication::setApplicationName(QStringLiteral("Stelarith Viewer"));
+    // 2026-10-10：组织名/域名以前**没设**，QML 的 Settings（QtCore.Settings）因此定位不到落点，
+    // 启动就刷 "Failed to initialize QSettings instance. Status code is: 1" +
+    // "The following application identifiers have not been set: QList(organizationName, organizationDomain)"
+    // —— CameraCenter 的绑定镜像（cameraBind/<uid>）永远存不下来。这里补上，与 QSettings() 默认构造同源。
+    // 副作用（一次性）：基于 QSettings 的旧偏好（如 prefs/firstRunDone）落点从"无名"迁到 Stelarith 下，
+    // 老用户首启引导会再出现一次，之后正常。
+    QCoreApplication::setOrganizationName(QStringLiteral("Stelarith"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("stelarith.local"));
     QCoreApplication::setApplicationVersion(QString::fromLatin1(kViewerVersion));
     logf("[viewer] viewer-qt 版本 %s（日志：%s）", kViewerVersion, logFilePath().toUtf8().constData());
 
@@ -451,17 +459,15 @@ int main(int argc, char *argv[])
     ScheduleTodayProvider schedToday;
     schedToday.setProfilePath(schedRepo.defaultProfilePath());
 
-    // ── 控件风格钉成 Basic（2026-10-06 打磨）────────────────────────────
-    // 默认风格（Windows 那套）不支持覆写 background，于是运行时刷一堆
-    //   "QQuickRectangle: The current style does not support customization of this control"
-    // —— 弹窗/日志框里那些自绘背景全被它warn，而界面本身是黑白自绘的，根本用不上默认外观。
-    // 顺带 Basic 只需要 QtQuickControls2Basic.dll（现在包里塞了 Basic/Fusion/Imagine/
-    // Material/Universal/FluentWinUI3 六套，全是被这个默认风格拖进来的）。
-    // 写进进程环境而不是 QQuickStyle::setStyle：这条变量由 QtQuick.Controls 的
-    // 风格插件在加载时读，越早设越好（main 开头、任何 QML 加载之前）。
-    // 效果同钉死风格，但不额外链接 QtQuickControls2 到本工程 —— 那个模块本来
-    // 只是随 QQC2 插件一起部署，没必拉进 exe 的依赖表。
-    qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
+    // ── 控件风格＝FluentWinUI3（2026-10-10 · UI 更新：A 全量转 Fluent）──
+    // 之前钉成 Basic 是因为默认 Windows 风格不支持 background 覆写刷 warn，
+    // 而界面本身是黑白自绘的、用不上默认外观。
+    // 现在用户裁决「直接 A」：管理端全量转 Qt 6.12 官方 FluentWinUI3 风格
+    // （与手机端同步，同为 Fluent 观感）。标准控件（Button/Dialog/ComboBox/
+    // Slider）呈现 WinUI3 外观；自绘卡片/画面区（Rectangle+th 令牌）不受影响
+    // —— Fluent 管交互控件，自绘管视觉主区，二者共存。
+    // 写进程环境而非 QQuickStyle::setStyle：风格插件加载时读，越早设越好。
+    qputenv("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3");
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
