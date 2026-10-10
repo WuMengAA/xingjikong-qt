@@ -45,6 +45,13 @@ const REQUIRED = [
 	"Qt6WebEngineWidgets.dll",
 	"Qt6WebSockets.dll",
 	"QtWebEngineProcess.exe",
+	// 2026-10-10 补：WebRTC 走 libdatachannel，其 DTLS 链的是 PostgreSQL 17 自带的
+	// OpenSSL ⇒ exe 导入表含 libssl-3-x64.dll / libcrypto-3-x64.dll。windeployqt 不认识
+	// 这两个名字，少任何一个 = 干净机器解压双击即「系统错误：找不到 libssl-3-x64.dll」。
+	// 下面的拷贝循环（按 .dll 后缀）本来就会带上它们，但**点名进 REQUIRED** 才有意义：
+	// build/ 里哪天没了要在出包这一步当场炸，而不是等装机现场 —— 同 0.6.0 漏 icudtl.dat 的教训。
+	"libssl-3-x64.dll",
+	"libcrypto-3-x64.dll",
 	"resources/icudtl.dat",
 	"platforms/qwindows.dll",
 	"tls/qschannelbackend.dll", // 连云端的 WSS/TLS 靠它（schannel 是 Windows 自带证书链）
