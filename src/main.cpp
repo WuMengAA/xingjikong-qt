@@ -145,7 +145,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.24-rc.4";
+constexpr const char *kAppVersion = "0.6.24-rc.5";
 
 QWebSocket *g_ws = nullptr;
 int g_backoffMs = kFirstBackoffMs;
