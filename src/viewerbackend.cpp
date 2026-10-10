@@ -26,12 +26,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QWebSocket>
-#include <QWebEngineView>
 #include "ldc_rtc_bridge.h"   // 2026-10-10：WebRTC ldc 桥接（轻量前向声明，大文件不膨胀 C1060）
-#include <QWebChannel>
-#include <QWebEngineProfile>
-#include <QWebEnginePage>
-#include <QWebEngineSettings>
 
 #include <algorithm>   // std::sort（离线台账清理与排序，见 refreshDevices）
 // ── 语音对讲 / 屏幕广播的时长上限（2026-10-07，用户点名："没有时长限制"）──
@@ -288,18 +283,10 @@ ViewerBackend::ViewerBackend(QObject *parent)
           (long long)m_termWait->interval() / 1000,
           (long long)m_termCloseWait->interval() / 1000);
 }
-// QWebEngineView 必须在 event loop 停止**之后**销毁：主线程一停转，Chromium 就要求 view
-// 已被释放，否则是 use-after-free 直接崩。这里用 deferDelete 把销毁推到事件循环之后。
 ViewerBackend::~ViewerBackend()
 {
-    if (!m_rtcHtmlPath.isEmpty()) {
-        QFile::remove(m_rtcHtmlPath);
-        m_rtcHtmlPath.clear();
-    }
-    if (m_rtcView) {
-        m_rtcView->deleteLater();
-        m_rtcView = nullptr;
-    }
+    // 2026-10-10 去 WebEngine 底层：收流页 temp 文件清理 + QWebEngineView 析构已移除
+    // （ldc 收流无 Chromium 无 temp 页；老的 m_rtcHtmlPath/m_rtcView 清理随代码删除）。
 }
 // ───────────────────────────────────────────────────────────────────────────
 // 版本 / 身份 / 角色 / 提醒偏好
@@ -1071,134 +1058,11 @@ void ViewerBackend::initRtcView()
         logf("[viewer-ldc] 收流初始化（libdatachannel，无 Chromium）");
         return;
     }
-    if (m_rtcView) return;
-    cancelRtcViewReap();   // 上一轮倒计时还没到，别把刚要复用的页面收掉
-    // WebEngine 是 Chromium：默认沙箱在没配 seccomp 的环境下会拒跑 RTCPeerConnection 的
-    // ICE 传输（被控端已经踩过同一个坑，同样用 qputenv 关掉）。必须在创建 view 之前设。
-    qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
-            "-no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage");
-    // QWebEngineView 是 QWidget 子类、不是 QObject，没有 (QObject*) 构造 ——
-    // 只能先不带 parent 建，再 setParent 挂到 backend 上（挂不上就直接泄漏在堆上）
-    m_rtcView = new QWebEngineView();
-    // 渲染层不参与界面布局：只负责跑 RTCPeerConnection，画完抽帧交回 C++。
-    // 用 move 挪出屏幕而不是 hide —— hide 后 Chromium 会暂停媒体管线，ontrack 也拿不到帧。
-    m_rtcView->setGeometry(-2000, -2000, 1280, 720);
-    // 关键：页面必须以 **file://** origin 加载，才能访问 Qt 内建的
-    // qrc:///qtwebchannel/qwebchannel.js。用 data: URL 加载会让 origin 变成 null，
-    // 那个 <script src> 直接被同源策略拦掉，QWebChannel 建不起来 → JS 侧 __qt 是 undefined。
-    // 文件写在临时目录、退出时清理；不放在工程目录里免得污染版本树。
-    // ⚠️ 2026-10-07：文件名带上进程号，不再所有实例共用同一个固定名。
-    // 真机上出现过 "收流页写不进临时文件（拒绝访问）" —— 上一个实例（或它残留的 Chromium
-    // 子进程）还握着那个同名文件，新实例一开就写不进去，RTC 收流整条路直接废掉：
-    // 画面看着还能动是因为有 JPEG 兜底，但那是 0.5–2 fps，不是实时流。
-    // 带 PID 之后各写各的互不干扰；真写不进去时先把同名残留清掉再试一次。
-    // ⚠️ 2026-10-07 第二次修：光带进程号还不够，真机日志里带 PID 的名字一样报
-    // "拒绝访问"。根因不是名字撞车，是**目录**：Temp 是公共目录，系统清理、实时防护
-    // 扫描、别的程序都在那儿落文件，谁先握住谁说了算，文件名再唯一也躲不开。
-    // 这次两处一起改：① 挪到**本应用自己的缓存目录**（CacheLocation），不再跟 Temp 抢；
-    // ② 文件名交给 QTemporaryFile 发 —— 系统保证唯一且原子创建，撞了会自己换名重试，
-    // 而不是像 QFile::open 那样一次失败就完蛋。
-    const QString rtcDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-    const QString baseDir = rtcDir.isEmpty() ? QDir::tempPath() : rtcDir;
-    QDir().mkpath(baseDir);                 // 目录不给就自己建，mkdir 失败下面照样会报出来
-    QTemporaryFile tmp(baseDir + QStringLiteral("/stelarith-viewer-rtc-XXXXXX.html"));
-    tmp.setAutoRemove(false);               // 文件要留给 WebEngine 加载，析构时绝不能删
-    if (!tmp.open()) {
-        logf("[viewer] FAIL 收流页临时文件建不出来（目录 %s）：%s",
-             baseDir.toUtf8().constData(), tmp.errorString().toUtf8().constData());
-        setRtcState(QStringLiteral("failed"));
-        return;
-    }
-    const QByteArray pageBytes(kRtcViewerHtml);
-    if (tmp.write(pageBytes) != pageBytes.size()) {
-        logf("[viewer] FAIL 收流页没写全（%s）", tmp.fileName().toUtf8().constData());
-        setRtcState(QStringLiteral("failed"));
-        return;
-    }
-    tmp.close();
-    m_rtcHtmlPath = tmp.fileName();         // 退出时删掉，别在缓存目录里堆垃圾（见 ~ViewerBackend）
-    const QString htmlPath = m_rtcHtmlPath;
-    auto *page = new QWebEnginePage(m_rtcView);
-    m_rtcView->setPage(page);
-    // 刻意**不给 parent**：QWebEngineView 是 QWidget，只能挂 QWidget 做 parent，
-    // 而 backend 是 QObject（挂不上）；再包一层 QWidget 纯属多余。
-    // 生命周期统一由析构里的 deleteLater() 收口（见 ~ViewerBackend）。
-    m_rtcView->setContextMenuPolicy(Qt::NoContextMenu);
-    m_rtcView->settings()->setAttribute(QWebEngineSettings::ShowScrollBars, false);
-    // 这是纯渲染层，不该有 JS 弹新窗 / 下载的能力（被控端那边也没这需求）
-    m_rtcView->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
-    // QWebChannel：JS ↔ C++ 的桥。构造函数只收 (QObject *parent)，页面侧的 transport
-    // 由 page->setWebChannel(channel) 接管，不用自己传（QWebChannel(QWebChannelPrivate&,QObject*)
-    // 那个是私有的，别去碰）
-    auto *channel = new QWebChannel(this);
-    channel->registerObject(QStringLiteral("qt"), this);
-    page->setWebChannel(channel);
-    // 收流页的 console 必须接到日志里。以前页面内部报什么错完全看不见
-    // （QWebChannel 建不起来时 JS 只往 console 打一行 error，C++ 侧什么都收不到），
-    // 于是"为什么没出画面"只能靠猜，这一猜就是几个小时。
-    // Qt6 移除了 signal 关键字，不能用 page->loadFinished.connect(...) 这种风格访问信号。
-    QObject::connect(page, &QWebEnginePage::loadFinished, this, [this](bool ok) {
-        if (!ok) {
-            logf("[viewer] FAIL 收流页加载失败");
-            setRtcState(QStringLiteral("failed"));
-            return;
-        }
-        logf("[viewer] 收流页就绪（离屏 1280x720）");
-        setRtcState(QStringLiteral("waiting"));
-        // 桥到底建没建起来，必须当场问清楚：typeof window.qt / transport 是关键，
-        // "hasPc=false 且毫无报错"只说明 JS 提前 return 了，看不出原因
-        m_rtcView->page()->runJavaScript(
-            QStringLiteral("(typeof __qtOk) + '/' + (typeof window.qt) + '/' + (window.qt ? typeof window.qt.webChannelTransport : 'none') + '/logs=' + JSON.stringify(window.__logs.slice(0, 6))"),
-            [](const QVariant &v) {
-                logf("[viewer] 收流页桥状态 __qtOk/qt/transport = %s", qPrintable(v.toString()));
-            });
-        // 页面还没 load 完时 runJavaScript 是对着 about:blank 执行的，window.__setOffer 不存在，
-        // 调用会**静默失败**（C++ 侧连个错都收不到）→ 表现为"收到 offer 了但毫无反应"。
-        // ⚠️ 顺序陷阱（2026-10-05 修）：m_rtcPageReady 必须在 offer 补灌**之前**置位。
-        // deliverOffer() 内部拿这个标志决定"直接灌 JS"还是"再存回 m_pendingOffer 等下一轮"，
-        // 原先这行写在 offer 补灌之后 → 补灌那一下永远判成"页面没就绪" → offer 被原样塞回队列，
-        // pc 从头到尾建不起来，后面攒的候选只能喂给 null pc，日志里只留两行 ice-before-pc。
-        m_rtcPageReady = true;
-        // 远端候选补灌必须排在 offer 之后：页面里的 pc 是 __setOffer 里同步 new 出来的，
-        // 顺序反了 addIceCandidate 就会撞上 "pc 还不存在"，JS 侧只记一行 ice-before-pc 然后丢掉，
-        // 候选就这么无声无息少了一批，ICE 死活连不上还查不出原因。
-        if (!m_pendingOffer.isEmpty()) {
-            const QString sdp = m_pendingOffer;
-            m_pendingOffer.clear();
-            deliverOffer(sdp);
-        }
-        if (!m_pendingIce.isEmpty()) {
-            const QStringList queued = m_pendingIce;
-            m_pendingIce.clear();
-            for (const QString &c : queued)
-                addRemoteIce(c);
-            logf("[viewer] RTC 收流页就绪后补灌远端 ICE 候选 %d 个", queued.size());
-        }
-        // 抽帧节拍：25fps 上限，但真帧率受被控端推流 fps 限制。
-        // 用成员 timer（2026-10-06 占用优化）：之前每次建页都 new 两个挂在本对象上的 timer，
-        // 收流页回收时不停，一轮重连留两个空转孤儿，攒多了 tick 全是白检 nullptr。
-        // 拿到页面所有权先复位，免得上一轮的旧 timer 还咬着已经 deleteLater 的 view。
-        stopRtcTimers();
-        if (!m_grabTimer) m_grabTimer = new QTimer(this);
-        QObject::connect(m_grabTimer, &QTimer::timeout, this, [this] {
-            if (m_rtcView) m_rtcView->page()->runJavaScript(QStringLiteral("window.__grab()"));
-        });
-        m_grabTimer->start(40);
-        // 每 2 秒捞一次收流页内部状态：pc 建没建、ICE 走到哪、视频轨有没有、解码出多大画面。
-        // 没有这个，画面不出来时你只能看到"没日志"，看不出卡在 offer/answer/ice 哪一步。
-        if (!m_rtcDiagTimer) m_rtcDiagTimer = new QTimer(this);
-        QObject::connect(m_rtcDiagTimer, &QTimer::timeout, this, [this] {
-            if (!m_rtcView) return;
-            m_rtcView->page()->runJavaScript(QStringLiteral("window.__diag()"),
-                                             [](const QVariant &v) {
-                                                 const QString s = v.toString();
-                                                 if (!s.isEmpty() && s != QStringLiteral("undefined"))
-                                                     logf("[viewer] 收流页状态 %s", qPrintable(s));
-                                             });
-        });
-        m_rtcDiagTimer->start(2000);
-    });
-    page->load(QUrl::fromLocalFile(htmlPath));
+    // ── 2026-10-10 去 WebEngine 底层：WebEngine 收流分支已移除，ldc 是唯一路 ──
+    // STE_USE_LDC_RTC=0 不再回退 WebEngine（Qt 6.12 不装 WebEngineWidgets，
+    // 且 "去 WebEngine 底层" 本就是目标）。走到这里说明被显式关闭了 ldc。
+    logf("[viewer] STE_USE_LDC_RTC=0 但 WebEngine 已移除——RTC 收流不可用，用 JPEG 兜底");
+    setRtcState(QStringLiteral("failed"));
 }
 /** 诊断/日志（JS → C++）。 */
 void ViewerBackend::rtcDiag(const QString &s)
@@ -1254,62 +1118,23 @@ void ViewerBackend::rtcGotIce(const QString &candJson)
     p.insert(QStringLiteral("from"), QStringLiteral("viewer"));
     sendEnvelope(QStringLiteral("rtc-ice"), p);
 }
-void ViewerBackend::addRemoteIce(const QString &candJson)
+void ViewerBackend::addRemoteIce(const QString &)
 {
-    // 判断"页面能不能灌"必须看 m_rtcPageReady，不能看 m_rtcView 是否非空 ——
-    // view 对象一 new 出来就非空，但 page->load() 是异步的，那段时间 runJavaScript
-    // 对着 about:blank 执行，window.__addIce 不存在，调用**静默失败**，
-    // 这就是 "window.__addIce is not a function" 的来源。
-    if (!m_rtcView || !m_rtcPageReady) {
-        if (m_pendingIce.size() >= kMaxPendingIce) {
-            logf("[viewer] WARN 远端 ICE 队列已满（%d 个），丢弃后来的候选 —— 对端可能在反复重连",
-                 m_pendingIce.size());
-            return;
-        }
-        m_pendingIce.append(candJson);
-        return;
-    }
-    const QByteArray b64 = candJson.toUtf8().toBase64();   // 同 __setOffer：base64 注入，杜绝字面量语法错
-    m_rtcView->page()->runJavaScript(QStringLiteral("window.__addIce('%1');")
-                                     .arg(QString::fromLatin1(b64)));
+    // ── 2026-10-10 去 WebEngine：远端 ICE 由 ldc 路接管（ldcFeedSignal "candidate"），
+    // 这个 QWebChannel 回调用不到了。保留签名（QML 可能还引用）但内部为空。──
 }
-void ViewerBackend::deliverOffer(const QString &sdp)
+void ViewerBackend::deliverOffer(const QString &)
 {
-    if (!m_rtcView || !m_rtcPageReady) {
-        m_pendingOffer = sdp;   // 页面还没就绪，等 loadFinished 补灌
-        return;
-    }
-    // 先拆旧 pc：被控端每个 offer 都是一个全新 peer（见 JS 里 __resetPc 的说明）。
-    // 两条 runJavaScript 按调用顺序在页面里排队执行，所以 reset 一定先于 setOffer。
-    m_rtcView->page()->runJavaScript(QStringLiteral("window.__resetPc()"));
-    // 走 base64 而不是 JSON 字符串字面量：SDP 里全是 CRLF，任何手写/库转义出的
-    // 字面量都可能被 Chromium 判成非法 token，一旦炸就是 "Uncaught SyntaxError"，
-    // 而且报在 runJavaScript 的注入串上、页面里一点痕迹都没有（logs 全空）。
-    // base64 只含 [A-Za-z0-9+/=]，物理上不可能产生语法错。
-    const QByteArray b64 = sdp.toUtf8().toBase64();
-    m_rtcView->page()->runJavaScript(
-        QStringLiteral("window.__setOffer('%1');").arg(QString::fromLatin1(b64)));
-    logf("[viewer] RTC offer 已灌进收流页（sdp %d 字符 → base64 %d）", sdp.size(), b64.size());
+    // ── 2026-10-10 去 WebEngine：远端 offer 由 ldc 路接管（ldcFeedSignal "offer"）──
 }
 /**
  * 真删离屏收流页。
- * deleteLater 而不是 delete：page 上还排着 runJavaScript 回调（补灌候选、抽帧都走它），
- * 当场删会打在半路。析构里统一收口（见 ~ViewerBackend）。
+ * 2026-10-10：WebEngine 已移除，ldc 收流无 Chromium 页可回收。保留签名，
+ * 内部只清状态（供依旧调用它的旧路径安全收尾）。
  */
 void ViewerBackend::releaseRtcView()
 {
-    if (!m_rtcView) return;
-    // 节拍先停表：页面上已经排进 Chromium 主线程的 __grab()/__diag() 调用还挂着，
-    // 不停的话 view 一销毁它们就打在已释放的 page 上。
-    stopRtcTimers();
-    m_rtcView->close();          // 不给 close 的话 Chromium 的渲染进程不退出
-    m_rtcView->deleteLater();
-    m_rtcView = nullptr;
-    m_rtcPageReady = false;      // 必须一起清：下次靠它判"这页能不能灌 JS"
-    m_pendingOffer.clear();
-    m_pendingIce.clear();
     setRtcState(QStringLiteral("idle"));
-    logf("[viewer] 收流页已回收（Chromium 渲染进程随之退出）");
 }
 void ViewerBackend::cancelRtcViewReap()
 {

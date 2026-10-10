@@ -21,11 +21,10 @@
 #include <QUrlQuery>
 #include <QtGlobal>
 
-// 内嵌登录窗（2026-10-06 加）：QWebEngineView 是 QWidget。
-// WebEngine 上下文在管理端进程里本来就有（收流页那个离屏 view），这里只是复用，没有新增依赖。
+// 登录窗（2026-10-10 改）：去 WebEngine 后统一走系统浏览器（QDesktopServices），
+// 原内嵌 QWebEngineView 登录窗已停用（openEmbeddedWindow 空实现）。
 #include <QWidget>
 #include <QVBoxLayout>
-#include <QWebEngineView>
 
 #include <cstdlib>
 #include <ctime>
@@ -222,42 +221,14 @@ bool OAuthLogin::openAuthUrl(const QUrl &authUrl)
     return false;
 }
 
-bool OAuthLogin::openEmbeddedWindow(const QUrl &url)
+bool OAuthLogin::openEmbeddedWindow(const QUrl &)
 {
-    // 排障开关：STE_OAUTH_EMBEDDED=0 强制走系统浏览器（比如要复现"只有浏览器才有的问题"）
-    if (QString::fromLocal8Bit(qgetenv("STE_OAUTH_EMBEDDED")).trimmed() == QLatin1String("0")) {
-        logf("[oauth] STE_OAUTH_EMBEDDED=0：本次跳过内嵌窗口");
-        return false;
-    }
-
-    auto *win = new QWidget();
-    win->setWindowTitle(QStringLiteral("星集控 · 用星璃账号登录"));
-    win->setAttribute(Qt::WA_DeleteOnClose);
-    auto *lay = new QVBoxLayout(win);
-    lay->setContentsMargins(0, 0, 0, 0);
-    auto *view = new QWebEngineView(win);
-    lay->addWidget(view);
-
-    win->resize(520, 720);
-    win->setMinimumSize(400, 520);
-
-    m_loginWin = win;
-    // 用户直接把窗口关了 = 放弃这次登录。必须复位状态，否则下一次点登录会被
-    // begin() 开头那句"上一次还没走完"挡掉（同样是"点了没反应"）。
-    QObject::connect(win, &QObject::destroyed, this, [this](QObject *) {
-        m_loginWin = nullptr;
-        if (!m_busy) return;          // 正常收尾（成功/失败）已经复位过了
-        m_busy = false;
-        stopServer();
-        logf("[oauth] 用户关掉了登录窗口，本次登录取消");
-        emit failed(QStringLiteral("登录窗口被关掉了，没完成登录"));
-    });
-
-    view->setUrl(url);
-    win->show();
-    win->raise();
-    win->activateWindow();
-    return true;
+    // ── 2026-10-10 去 WebEngine 底层：内嵌登录窗（QWebEngineView）移除 ──
+    // 管理端已不依赖 Chromium（WebRTC 收流改 ldc、UI 改 FluentWinUI3），
+    // 登录统一走系统浏览器（openAuthUrl ②分支），更省内存也去掉了一个依赖面。
+    // 函数保留签名（.h 仍声明），内部返回 false → openAuthUrl 自然落到系统浏览器。
+    logf("[oauth] 内嵌登录窗已停用（去 WebEngine），改走系统浏览器");
+    return false;
 }
 
 void OAuthLogin::closeLoginWindow()

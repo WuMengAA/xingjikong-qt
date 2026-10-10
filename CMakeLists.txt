@@ -107,7 +107,7 @@ endif()
 # QuickControls2（2026-10-06 加）：main.cpp 要 QQuickStyle::setStyle("Basic")。
 # 不把这个模块挂上，QQuickStyle 头文件/链接都拿不到，默认风格那堆
 # "style does not support customization" 警告也就消不掉。
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets Widgets WebEngineWidgets WebChannel Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets Widgets Svg)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
@@ -191,7 +191,7 @@ add_custom_command(TARGET viewer-qt POST_BUILD
           "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith"
   VERBATIM)
 
-target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Svg)
+target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg)
 set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE OFF)
 
 # 2026-10-09：viewerbackend.cpp 2700+ 行单编译单元峰值超内存（C1060）。
