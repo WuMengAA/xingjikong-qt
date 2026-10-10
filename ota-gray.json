@@ -1,14 +1,14 @@
 {
   "products": {
     "agent": {
-      "version": "0.6.24-rc.5",
-      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.24-rc.5.exe",
-      "sha256": "434434533b9beca7ac4acc0a3c6a4b008af1b49424ef867e2399fa1494e73c0d",
-      "size": 93226164,
-      "notes": "v0.6.24-rc.5",
+      "version": "0.6.24-rc.6",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.24-rc.6.exe",
+      "sha256": "7cbb616353a3d24c5371ba39f8b6514f9f4d8d74725f140a212878ba15c990d0",
+      "size": 93280214,
+      "notes": "v0.6.24-rc.6",
       "mandatory": true
     }
   },
-  "generatedAt": "2026-10-10T12:05:10.666Z",
+  "generatedAt": "2026-10-10T14:20:25.568Z",
   "generatedBy": "scripts/publish-release.mjs"
 }
