@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!-- 管理端/手机 App AndroidManifest（2026-10-11 · Qt 6.12 android 打包自定义版）
+     手机 App 并入管理端：mobile 工程归档后由 viewer-qt 出 APK。
+     以 Qt 模板为底，改应用名 + 网络权限。Qt 的 androiddeployqt 会合并此文件。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.stelarith.viewer"
+    android:installLocation="auto"
+    android:versionCode="1"
+    android:versionName="0.6.24-rc.5">
+    <!-- 网络：连云端 WS/HTTP（教室管理必需） -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <!-- 语音对讲（winmm 桌面）在手机 stub 不支持；真实原因：音频不经此路 -->
+
+    <supports-screens
+        android:anyDensity="true"
+        android:largeScreens="true"
+        android:normalScreens="true"
+        android:smallScreens="true" />
+
+    <application
+        android:name="org.qtproject.qt.android.bindings.QtApplication"
+        android:hardwareAccelerated="true"
+        android:label="星集控"
+        android:enableOnBackInvokedCallback="true">
+        <activity
+            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc"
+            android:launchMode="singleTop"
+            android:screenOrientation="unspecified"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <meta-data android:name="android.app.lib_name" android:value="viewer_qt"/>
+            <meta-data android:name="android.app.arguments" android:value=""/>
+        </activity>
+    </application>
+</manifest>

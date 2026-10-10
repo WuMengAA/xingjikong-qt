@@ -1,10 +1,24 @@
 cmake_minimum_required(VERSION 3.21)
-# RC：让 CMake 认得 .rc（版本资源）。不加，下面列 app.rc 会报 RC language not enabled。
-project(stelarith-viewer-qt LANGUAGES CXX RC)
+# RC：桌面要编 app.rc 需 RC 语言；Android toolchain 无 RC 处理器。
+# ⚠️ project() 调用前 toolchain 未加载，ANDROID 变量不可用 → project 固定 CXX，
+#    桌面在 project 之后（toolchain 已生效）用 enable_language(RC) 补 RC。
+project(stelarith-viewer-qt LANGUAGES CXX)
+
+# 2026-10-11：Android 判定用 CMAKE_SYSTEM_NAME（NDK toolchain 不设裸 ANDROID 变量，
+# 只有 ANDROID_ABI 等带前缀的）。统一用它做桌面/Android 分支。
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+  set(STE_IS_ANDROID ON)
+else()
+  set(STE_IS_ANDROID OFF)
+  enable_language(RC)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-add_compile_options(/utf-8)
+# /utf-8 是 MSVC 专属（clang 不认）；Android 交编译用 clang，跳过
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
 # 2026-10-09：viewerbackend.cpp 大（2700+ 行）+ ldc 头 → 编译堆空间不足 C1060
 if(MSVC)
   add_compile_options(/Zm1200)
@@ -111,20 +125,33 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network W
 qt_standard_project_setup(REQUIRES 6.5)
 
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
+# 2026-10-11：Android target 手机 App 并入 —— 桌面临时专属件（app.rc / winmm 采集 /
+# 单实例守卫）条件化。桌面照旧，Android 用 stub/跳过。
+if(STE_IS_ANDROID)
+  set(STE_APP_RC "")                     # Android 不编 .rc 版本资源
+  set(STE_AUDIO_CAPTURE_SRC src/audio_capture_android.cpp)
+  set(STE_AUDIO_CAPTURE_HDR src/audio_capture.h)
+  set(STE_SINGLEINSTANCE_SRC "")         # Android 多开无害，跳过单实例守卫
+else()
+  set(STE_APP_RC "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
+  set(STE_AUDIO_CAPTURE_SRC src/audio_capture.cpp)
+  set(STE_AUDIO_CAPTURE_HDR src/audio_capture.h)
+  set(STE_SINGLEINSTANCE_SRC src/singleinstance.cpp src/singleinstance.h)
+endif()
 qt_add_executable(viewer-qt
   src/main.cpp
   src/viewerbackend.cpp
   src/viewerbackend.h
-  src/singleinstance.cpp
-  src/singleinstance.h
+  ${STE_SINGLEINSTANCE_SRC}
   src/oauthlogin.cpp
   src/oauthlogin.h
   # ── 自更新（2026-10-08）：检查 / 下载 / sha256 校验 / 解压 / 退出后替换重启 ──
   src/updater.cpp
   src/updater.h
   # ── 语音对讲（2026-10-07）：管理端 winmm waveIn 采集 ──
-  src/audio_capture.cpp
-  src/audio_capture.h
+  # 2026-10-11：Android 无 winmm → 编 stub（audio_capture_android.cpp）
+  ${STE_AUDIO_CAPTURE_SRC}
+  ${STE_AUDIO_CAPTURE_HDR}
   # ── 课表编辑器模块（2026-10-06 从 schedule-qt 并入）──
   src/schedule/profile_repository.cpp
   src/schedule/schedule_model.cpp
@@ -150,8 +177,8 @@ qt_add_executable(viewer-qt
   # ── WebRTC ldc 桥接（2026-10-09：独立编译单元，viewerbackend.cpp 大文件不膨胀）──
   src/ldc_rtc_bridge.cpp
   src/ldc_rtc_bridge.h
-  # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
-  ${CMAKE_CURRENT_BINARY_DIR}/app.rc
+  # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块；Android 不编）──
+  ${STE_APP_RC}
 )
 # 界面资源：QML 模块 URI = Stelarith。
 # 2026-10-06：Main.qml 不再列进 QML_FILES —— 它原先是跟 exe 一起烧进二进制的，
@@ -196,11 +223,15 @@ set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE OFF)
 
 # 2026-10-09：viewerbackend.cpp 2700+ 行单编译单元峰值超内存（C1060）。
 # 只此文件降优化（/Od），其余文件保持 Release 优化——编译内存峰值降下来，功能零影响。
-set_source_files_properties(src/viewerbackend.cpp PROPERTIES COMPILE_FLAGS "/Od /Ob0")
+# 2026-10-11：/Od 是 MSVC flag，Android 交编译（clang）跳过。
+if(MSVC)
+  set_source_files_properties(src/viewerbackend.cpp PROPERTIES COMPILE_FLAGS "/Od /Ob0")
+endif()
 
 # ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
 #    STE_USE_LDC_RTC=1 默认走 ldc，=0 回退 WebEngine）────────────────────
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
+# 2026-10-11：桌面专用（MSVC .lib + PG OpenSSL）；Android 走文件尾的 ldc_libs_android 分支
+if(NOT STE_IS_ANDROID AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
   target_include_directories(viewer-qt PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
   target_link_libraries(viewer-qt PRIVATE
@@ -234,9 +265,46 @@ if(NOT STE_WINDEPLOYQT_EXECUTABLE)
                   "若 exe 启动即退出且没有任何日志，先手工在 build 目录跑一次 "
                   "windeployqt.exe viewer-qt.exe")
 endif()
-if(STE_WINDEPLOYQT_EXECUTABLE)
+# ... Android 不用 windeployqt（androiddeployqt 管）；且它读 Android .so 会报 DOS header
+# 2026-10-11：加桌面条件
+if(NOT STE_IS_ANDROID AND STE_WINDEPLOYQT_EXECUTABLE)
   add_custom_command(TARGET viewer-qt POST_BUILD
     COMMAND "${STE_WINDEPLOYQT_EXECUTABLE}" "$<TARGET_FILE:viewer-qt>"
             --no-translations
     VERBATIM)
+endif()
+
+# ═══ 2026-10-11：Android target —— 手机 App 并入管理端（用户裁决）═══
+# 与桌面并行：桌面全部逻辑不动，ANDROID 时额外配置。QML 在 Android 用 qrc 嵌入
+#（APK 无磁盘 build 目录；桌面保留磁盘热更）。ldc（libdatachannel）走 Android
+# 静态库（_probe/ldc_libs_android，mbedTLS 后端，配方见 _probe/WebRTC-Android-构建配方-2026-10-11.md）。
+if(STE_IS_ANDROID)
+  # ① QML 整树嵌入 qrc（递归 GLOB，杜绝手写漏项；PREFIX "/" + BASE qml → qrc:/Main.qml）
+  file(GLOB_RECURSE STE_VIEWER_QML_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.js")
+  qt_add_resources(viewer-qt "viewerqml" PREFIX "/" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+    FILES ${STE_VIEWER_QML_FILES})
+  # ② Android libdatachannel 静态链（mbedTLS 后端，路径与桌面 ldc_libs 平行）
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android")
+    target_include_directories(viewer-qt PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
+    target_link_libraries(viewer-qt PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libdatachannel.a"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libjuice.a"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libsrtp2.a"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libusrsctp.a"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libmbedtls.a"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libmbedcrypto.a"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libmbedx509.a"
+      log android log)
+    target_compile_definitions(viewer-qt PRIVATE RTC_STATIC)
+    message(STATUS "[viewer] Android ldc 已链入（mbedTLS 后端, RTC_STATIC）")
+  else()
+    message(FATAL_ERROR "[viewer] _probe/ldc_libs_android 缺失——先按 WebRTC-Android-构建配方交编译")
+  endif()
+  # ③ Android 打包：apk 目录（manifest/keystore 已从 mobile 拷入）
+  set(QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
+else()
+  # 桌面：QML 磁盘拷贝保留（见上面的 add_custom_command post-build）
 endif()

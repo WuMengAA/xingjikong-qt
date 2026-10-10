@@ -233,6 +233,20 @@ public:
         } else {
             img = m_backend->thumbFrame(base);
         }
+        // ── 2026-10-11 修「Failed to get image from provider: image://frames/...」──
+        // 多班墙刚打开、或某台设备还没到第一帧时，thumbFrame() 返回的是**空 QImage**。
+        // 直接把空图交回去，Qt 会在日志里刷 "Failed to get image from provider"，
+        // 一条设备一条，几十台机器就是几十行 —— 看起来像崩了，其实只是"还没帧"。
+        // 这里补一张占位图（尺寸优先用请求尺寸，没有就 16:10 的小图），
+        // 既消掉警告，也让格子里有块稳定的底色而不是忽隐忽现。
+        if (img.isNull()) {
+            QSize ph = requested.isValid() && !requested.isEmpty() ? requested : QSize(160, 100);
+            if (ph.width() <= 0 || ph.height() <= 0) ph = QSize(160, 100);
+            QImage placeholder(ph, QImage::Format_RGB32);
+            placeholder.fill(QColor(0x14, 0x14, 0x14));
+            if (size) *size = ph;
+            return placeholder;
+        }
         if (size) *size = img.size();
         return img;
     }
@@ -364,6 +378,8 @@ int main(int argc, char *argv[])
     // 画面/日志互相覆盖。命名互斥体用 Global\ 优先（跨会话，兼容计划任务 Session 0），
     // 外加一层 %LOCALAPPDATA% 文件锁兜底 —— 只写 Local\ 会失效（见 singleinstance.h）。
     // guard 必须活到 main 结束：析构才放手。
+    // 2026-10-11：Android（手机 App 并入管理端）无 Windows 互斥体、多开也无害 → 跳过守卫。
+#if !defined(Q_OS_ANDROID)
     SingleInstanceGuard guard;
     QString guardWhy;
     if (!guard.acquire(L"StelarithViewerQt_Singleton", L"viewer.lock", &guardWhy)) {
@@ -372,6 +388,7 @@ int main(int argc, char *argv[])
                                  QStringLiteral("管理端已经在运行了。\n本次启动自动退出：%1").arg(guardWhy));
         return 0;
     }
+#endif
 
     // 双击即用：配置（云端地址/令牌）从 exe 同目录的 viewer.env 读 —— 不要求先设环境变量。
     // 必须在 backend.start() 之前读完：start() 里立刻取 STE_VIEWER_URL / STE_VIEWER_TOKEN。
@@ -492,10 +509,18 @@ int main(int argc, char *argv[])
     // 实测（2026-10-06 spike）：裸类型名（SoftwareDialog / LogDialog …）在磁盘模式下照样能解析 ——
     // 只要 addImportPath 指向同目录，Qt 就按文件名把 .qml 当类型用；同模块自解析这条没受影响。
     // ⚠️ qml/Stelarith/ 是子目录（qml/ 根留给 windeployqt 的 Qt 插件），构建时由 CMake 拷过去。
+    // 2026-10-11：Android（手机 App 并入管理端）无磁盘 build 目录 → QML 走 qrc 嵌入
+    //（CMake ANDROID 分支把 qml/ 整树嵌进 :/ 前缀，load("qrc:/Main.qml")）。
+#if defined(Q_OS_ANDROID)
+    const QString qmlUrl = QStringLiteral("qrc:/Main.qml");
+    engine.addImportPath(QStringLiteral("qrc:/"));
+#else
     const QString qmlDir = QDir(QCoreApplication::applicationDirPath())
         .absoluteFilePath(QStringLiteral("qml/Stelarith"));
+    const QString qmlUrl = qmlDir + QStringLiteral("/Main.qml");
     engine.addImportPath(qmlDir);
-    engine.load(QUrl::fromLocalFile(qmlDir + QStringLiteral("/Main.qml")));
+#endif
+    engine.load(QUrl(qmlUrl));
 
     if (engine.rootObjects().isEmpty()) {
         logf("[viewer] FAIL QML 没能加载（qml/Main.qml 有问题？）—— 退出");

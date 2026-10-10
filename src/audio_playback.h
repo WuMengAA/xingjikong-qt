@@ -15,7 +15,10 @@
 
 #include <QObject>
 #include <QByteArray>
+// 2026-10-11：Android target 手机 App 无 waveOut，stub 实现（audio_playback_android.cpp）
+#ifndef Q_OS_ANDROID
 #include <windows.h>
+#endif
 
 class AudioPlayback : public QObject
 {
@@ -37,7 +40,9 @@ private:
     void closeDevice();
 
     bool m_open = false;
+#ifndef Q_OS_ANDROID
     HWAVEOUT m_waveOut = nullptr;
     WAVEHDR m_header = {};
     QByteArray m_buffer;      // waveOut 正在播的缓冲（播放期间必须保持存活）
+#endif
 };

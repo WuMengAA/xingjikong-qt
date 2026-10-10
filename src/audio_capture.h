@@ -16,7 +16,12 @@
 #include <QObject>
 #include <QByteArray>
 #include <functional>
+
+// 2026-10-11：手机 App 并入管理端（Android target）→ 音频采集是 winmm 专属。
+// Android 无 waveIn，用空实现 stub（startCapture 返回 false），保持接口不破。
+#ifndef Q_OS_ANDROID
 #include <windows.h>
+#endif
 
 class AudioCapture : public QObject
 {
@@ -48,9 +53,11 @@ public:
 private:
     bool m_active = false;
     QString m_lastError;
+#ifndef Q_OS_ANDROID
     HWAVEIN m_waveIn = nullptr;
     WAVEHDR m_header = {};
     QByteArray m_buffer;
+#endif
 };
 
 #endif // AUDIO_CAPTURE_H
