@@ -3,12 +3,12 @@
     "agent": {
       "version": "0.6.24-rc.6",
       "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.24-rc.6.exe",
-      "sha256": "7cbb616353a3d24c5371ba39f8b6514f9f4d8d74725f140a212878ba15c990d0",
-      "size": 93280214,
-      "notes": "v0.6.24-rc.6",
+      "sha256": "0bb11404a6b7de894d4f99c473ec71266f57577869ec372a869fdbc2741307d7",
+      "size": 27462834,
+      "notes": "rc.6 干净包：channel持久化+guard冲突修复+去WebEngine(瘦身71%)",
       "mandatory": true
     }
   },
-  "generatedAt": "2026-10-10T14:20:25.568Z",
+  "generatedAt": "2026-10-10T15:17:53.095Z",
   "generatedBy": "scripts/publish-release.mjs"
 }
