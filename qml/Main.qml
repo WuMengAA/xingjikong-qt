@@ -301,9 +301,11 @@ ApplicationWindow {
 
                     RowLayout {
                         spacing: 8
+                        // 2026-10-10 彩色令牌试点：连接状态点 = ok 绿（在线）/ err 红（离线）
+                        // 规范：状态强调只用点/标签/描边，不做背景铺色
                         Rectangle {
                             width: 5; height: 5; radius: 3
-                            color: backend.connected ? th.inv : th.fg4
+                            color: backend.connected ? th.ok : th.err
                         }
                         Text {
                             text: backend.connected
@@ -841,7 +843,8 @@ ApplicationWindow {
                             Rectangle {
                                 width: 5; height: 5; radius: 3
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: devOnline ? th.inv : th.fg4
+                                // 2026-10-10 彩色令牌：在线=ok 绿 / 离线=err 红
+                                color: devOnline ? th.ok : th.err
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter

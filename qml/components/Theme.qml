@@ -36,7 +36,14 @@ QtObject {
     property string fg4:  dark ? "#707070" : "#808080"
     property string inv:  dark ? "#F0F0F0" : "#1A1A1A"
     property string ph:   dark ? "#6E6E6E" : "#8A8A8A"
-    property string ok:   "#2E9E5B"
+    // ── 彩色令牌（2026-10-10 · 用户裁决「可以彩色」+ 管理端 Fluent 铺开）──
+    // 规范见 docs/彩色令牌设计规范-2026-10-09.md：只用于状态强调（点/标签/描边），
+    // 不做背景铺色。深/浅各一套（WCAG 校准过对比度）。
+    property string acc:  dark ? "#4A90D9" : "#2F6FBF"   // 强调/主操作
+    property string ok:   dark ? "#2E9E5B" : "#1F7A43"   // 成功/在线
+    property string warn: dark ? "#D4A017" : "#A87C0A"   // 警告/待处理
+    property string err:  dark ? "#D64545" : "#B02323"   // 错误/离线
+    property string info: dark ? "#3D7FB8" : "#2A6394"   // 信息/提示
 
     property int rWin:  16
     property int rCard: 12
