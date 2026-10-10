@@ -2,6 +2,7 @@
 #include "viewerbackend.h"
 #include "oauthlogin.h"
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
+#include <cmath>             // std::isfinite：拦住 NaN/Inf 坐标（2026-10-11）
 #include <QAbstractSocket>
 #include <QDateTime>
 #include <QCoreApplication>
@@ -2427,13 +2428,23 @@ void ViewerBackend::sendPing()
     sendEnvelope(QStringLiteral("instruction"), p);
     setStatus(QStringLiteral("已向 %1 发探活，等它回话…").arg(m_currentUid), false);
 }
-void ViewerBackend::sendPointer(const QString &kind, double nx, double ny)
+void ViewerBackend::sendPointer(const QString &kind, double nx, double ny, const QString &button)
 {
     if (m_currentUid.isEmpty()) { logf("[viewer] FAIL 没选设备不发操控"); return; }
+    // 2026-10-11：坐标不是有限数就别发。画面区还没算出尺寸时 fitRect 宽高为 0，
+    // QML 的 (mx - r.x) / r.width 得到 NaN，转成整数就是 INT_MIN —— 日志里那几百行
+    // `操控→ move 在 (-2147483648%, -2147483648%)` 就是这么来的：光标被甩到教室机角上。
+    if (!std::isfinite(nx) || !std::isfinite(ny)) {
+        logf("[viewer] FAIL 操控坐标不是有限数（画面区尺寸还没算出来），本次 %s 不发",
+             kind.toUtf8().constData());
+        return;
+    }
     QJsonObject params;
     params.insert(QStringLiteral("kind"), kind);
     params.insert(QStringLiteral("x"), nx);
     params.insert(QStringLiteral("y"), ny);
+    params.insert(QStringLiteral("button"),
+                  button.isEmpty() ? QStringLiteral("left") : button);
     QJsonObject p;
     p.insert(QStringLiteral("uid"), m_currentUid);
     p.insert(QStringLiteral("action"), QStringLiteral("input"));

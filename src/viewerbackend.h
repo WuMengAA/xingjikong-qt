@@ -333,7 +333,12 @@ public:
     Q_INVOKABLE void requestStorage();   // 2026-10-08 拉云端存储概况
     Q_INVOKABLE void sendAction(const QString &action, const QJsonObject &params = QJsonObject());
     Q_INVOKABLE void sendPing();
-    Q_INVOKABLE void sendPointer(const QString &kind, double nx, double ny);
+    /** 发一次鼠标操控。button 是 left/right/middle —— 被控端按它选 MOUSEEVENTF_*DOWN/UP。
+     *  ⚠️ 2026-10-11：这个参数以前**没有**，而 QML 一直在传第 4 个（btnOf 的结果），
+     *     QML 侧报 `Too many arguments, ignoring 1`，按键被静默丢掉 ⇒ 被控端恒当左键
+     *     （右键菜单点不出、中键自动滚全废）。补上签名，别再把按钮信息丢了。 */
+    Q_INVOKABLE void sendPointer(const QString &kind, double nx, double ny,
+                                 const QString &button = QStringLiteral("left"));
     Q_INVOKABLE void sendType(const QString &text);
 
     // ── 语音对讲（设计文档 3.3，2026-10-07）──

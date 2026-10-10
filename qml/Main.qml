@@ -1166,8 +1166,13 @@ ApplicationWindow {
                             return Qt.rect((w - iw) / 2, (h - ih) / 2, iw, ih)
                         }
                         // 画面内像素 → 被控端屏幕归一化坐标（0~1，绝对位置）
+                        // ⚠️ 2026-10-11：画面区尺寸还没算出来时 fitRect 宽高是 0，
+                        //    除零得到 NaN，传到 C++ 转 int 就是 INT_MIN —— 日志里刷几百行
+                        //    `操控→ move 在 (-2147483648%, -2147483648%)`，光标被甩到教室机角上。
+                        //    所以这里返回 null，调用处直接不发（C++ 侧也有一道 isfinite 兜底）。
                         function normOf(mx, my) {
                             var r = fitRect
+                            if (!(r.width > 0) || !(r.height > 0)) return null
                             return [Math.min(1, Math.max(0, (mx - r.x) / r.width)),
                                     Math.min(1, Math.max(0, (my - r.y) / r.height))]
                         }
@@ -1177,6 +1182,7 @@ ApplicationWindow {
 
                         onPressed: function (mouse) {
                             var n = normOf(mouse.x, mouse.y)
+                            if (!n) return
                             backend.sendPointer("down", n[0], n[1], btnOf(mouse.button))
                         }
                         // 只在**按住时**才发移动：悬停绝不能往教室机灌鼠标移动
@@ -1184,11 +1190,13 @@ ApplicationWindow {
                         onPositionChanged: function (mouse) {
                             if (mouse.buttons & (Qt.LeftButton | Qt.MiddleButton | Qt.RightButton)) {
                                 var n = normOf(mouse.x, mouse.y)
+                                if (!n) return
                                 backend.sendPointer("move", n[0], n[1])
                             }
                         }
                         onReleased: function (mouse) {
                             var n = normOf(mouse.x, mouse.y)
+                            if (!n) return
                             backend.sendPointer("up", n[0], n[1], btnOf(mouse.button))
                         }
                     }
