@@ -61,6 +61,13 @@ const REQUIRED = [
 	"Qt6PrintSupport.dll",
 	"Qt6OpenGL.dll",
 	"QtWebEngineProcess.exe",
+	// 2026-10-10 补：WebRTC 走 libdatachannel，其 DTLS 链的是 PostgreSQL 17 自带的
+	// OpenSSL ⇒ exe 导入表含 libssl-3-x64.dll / libcrypto-3-x64.dll。windeployqt 不认识
+	// 这两个名字（只认 Qt 全家），漏掉 = 干净机器解压双击即
+	// 「stelarith-agent-qt.exe - 系统错误：找不到 libssl-3-x64.dll」。
+	// ⚠️ 它们**不在 deploy/ 素材库里**（见 FROM_BUILD_FILES），所以必须点名 + 从 build/ 取。
+	"libssl-3-x64.dll",
+	"libcrypto-3-x64.dll",
 	// ↓↓↓ 事故漏掉的三件套
 	"resources/icudtl.dat",
 	"resources/qtwebengine_resources.pak",
@@ -85,6 +92,16 @@ const REQUIRED = [
  *    和 resources/translations 同一性质：只在 build/ 有。
  */
 const FROM_BUILD = ["resources", "translations", "position"];
+
+/**
+ * 只从 build/ 取、deploy/ 素材库里**没有**的散件（非目录）。
+ *
+ * ⚠️ 2026-10-10 补：libssl-3-x64.dll / libcrypto-3-x64.dll 是 libdatachannel 的 DTLS
+ *    依赖（见 REQUIRED 注释）。既然 deploy/ 从没放过它们，"从 deploy/ 拷 DLL"
+ *    这条老路就永远带不上 ⇒ 绿包在干净机器上启动即「找不到 libssl-3-x64.dll」。
+ *    和 resources/translations 同一性质：只在 build/ 有，必须显式取。
+ */
+const FROM_BUILD_FILES = ["libssl-3-x64.dll", "libcrypto-3-x64.dll"];
 
 /**
  * 绝不进发布包：
@@ -179,6 +196,17 @@ function build() {
 		if (!fs.existsSync(s)) fail(`build/${d} 不存在 —— windeployqt 没跑过？`);
 		copyDir(s, path.join(outDir, d));
 		console.log(`  + ${d}/（来自 build/，deploy/ 没有）`);
+	}
+
+	// ③b OpenSSL 运行库散件 —— 同样只在 build/，deploy/ 没有（2026-10-10 补）
+	for (const f of FROM_BUILD_FILES) {
+		const s = path.join(BUILD, f);
+		if (!fs.existsSync(s)) {
+			fail(`build/${f} 不存在 —— 它不是 windeployqt 产出的，需手工从 ` +
+				`"C:\\Program Files\\PostgreSQL\\17\\bin" 拷进 build/（见 REQUIRED 注释）`);
+		}
+		fs.copyFileSync(s, path.join(outDir, f));
+		console.log(`  + ${f}（来自 build/，deploy/ 没有）`);
 	}
 
 	// ④ 硬校验（在打包**之前**，别等打完才发现）
