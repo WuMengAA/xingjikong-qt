@@ -2806,7 +2806,7 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
  * OTA 自更新（self_update 指令 · 2026-10-05）
  *
  * 链路：云端下发 self_update{url,sha256,version} → 本机下载 → 校验 sha256
- *       → 派"重启助手" → 静默执行安装包（NSIS /S）→ 助手把新版拉起来。
+ *       → 派"重启助手" → 静默执行安装包（Inno /VERYSILENT，保留 /S 兼容旧 NSIS 包）→ 助手把新版拉起来。
  *
  * 为什么"自己换自己"还能活：安装包第一步就会 Stop-Process 掉本进程，
  *   所以**必须先派一个独立的重启助手**（等若干秒 → 启动安装目录下的 exe），
@@ -3035,8 +3035,12 @@ static void otaOnFinished()
     if (QFile::exists(helper))
         QProcess::startDetached(QStringLiteral("cmd.exe"), {QStringLiteral("/c"), helper});
 
-    // ② 启动安装包（NSIS 静默 /S）。它会先 Stop-Process 掉本进程，再覆盖文件。
-    const bool launched = QProcess::startDetached(path, {QStringLiteral("/S")});
+    // ② 启动安装包。它先 Stop-Process 掉本进程，再覆盖文件。
+    //   静默参数同时给 NSIS(/S) 与 Inno(/VERYSILENT)：旧版 NSIS 包认 /S，
+    //   新版 Inno 包认 /VERYSILENT；两者都静默，过渡期不弹窗。
+    const bool launched = QProcess::startDetached(
+        path, QStringList{QStringLiteral("/S"), QStringLiteral("/VERYSILENT"),
+                          QStringLiteral("/SUPPRESSMSGBOXES"), QStringLiteral("/NORESTART")});
     if (!launched) {
         sendActionReceipt(id, action, QStringLiteral("failed"),
                           QStringLiteral("安装包启动失败：%1").arg(path));
@@ -3048,7 +3052,7 @@ static void otaOnFinished()
                       QJsonObject{{QStringLiteral("stage"), QStringLiteral("installing")},
                                   {QStringLiteral("version"), ver},
                                   {QStringLiteral("path"), path}});
-    qInfo("[agent-qt] 🚀 OTA 已启动安装包（/S），重启助手已派发；本进程即将被替换");
+    qInfo("[agent-qt] 🚀 OTA 已启动安装包（/S + /VERYSILENT），重启助手已派发；本进程即将被替换");
 }
 
 // ── 班级监控上传（设计文档 3.6 第一版，2026-10-07）──
