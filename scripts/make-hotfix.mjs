@@ -3,8 +3,8 @@
  * 星集控 · 极小热修包（hotfix，2026-10-09 立）
  *
  * 与「全量包」的分工：
- *   · **NSIS 安装包**（stelarith-<端>-setup-*.exe）＝ 首次装机 / 大版本 / 运行时（DLL、
- *     Qt 插件、resources）有变时用。管理端全量 128MB、被控端全量 114MB。
+ *   · **安装包（Inno Setup）**（stelarith-<端>-setup-*.exe）＝ 首次装机 / 大版本 / 运行时（DLL、
+ *     Qt 插件、resources）有变时用。管理端全量 128MB、被控端全量 90MB+。
  *   · **热修包**（本脚本产出）＝ 只含**会随代码变化的少数文件**，走 OTA 推给已经装好的
  *     机器。管理端 ~0.6MB、被控端 ~1MB —— 差两个数量级。
  *
@@ -13,9 +13,9 @@
  *     （Stelarith-viewer-qt/src/updater.cpp 的 extractZip/launchReplacer）
  *     ⇒ 热修包 = **zip**；且解压后**必须含 viewer-qt.exe**，否则它自己那道
  *       「解压出来的东西真像管理端包吗」自检会拒绝覆盖（这是好事，保留）。
- *   · 被控端 OTA：下载 → 校验 sha256 → **静默执行 /S**
+ *   · 被控端 OTA：下载 → 校验 sha256 → **静默执行**（Inno /VERYSILENT，兼容旧包 /S）
  *     （Stelarith-control-qt/src/main.cpp 的 startSelfUpdate/otaOnFinished）
- *     ⇒ 热修包 = **exe**（NSIS，见 Stelarith-control-qt/make-hotfix.nsi）；
+ *     ⇒ 热修包 = **exe**（Inno Setup，见 Stelarith-control-qt/make-hotfix.iss）；
  *       zip 它根本跑不起来。
  *
  * 热修包含什么（**当前口径，写死在下面 CHANGED 里**）：
@@ -44,7 +44,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SEVEN_ZIP = 'C:\\Program Files\\7-Zip\\7z.exe';
-const MAKENSIS = 'C:\\Program Files (x86)\\NSIS\\makensis.exe';
+const ISCC = 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\Inno Setup 6\\ISCC.exe';
 
 const VIEWER = path.join(ROOT, 'Stelarith-viewer-qt');
 const AGENT = path.join(ROOT, 'Stelarith-control-qt');
@@ -169,14 +169,19 @@ function buildViewer({ dryRun }) {
 	return { ver, out, size: fs.statSync(out).size, sha: sha256(out), entries: entries.size };
 }
 
-// ── 被控端：exe（NSIS 极小安装器）─────────────────────────────────────────────
+// ── 被控端：exe（Inno Setup 极小安装器）─────────────────────────────────────────
 function buildAgent({ dryRun }) {
 	const ver = readVersion('agent');
 	const box = path.join(AGENT, 'build');
 	const exe = path.join(box, 'stelarith-agent-qt.exe');
-	const nsi = path.join(AGENT, 'make-hotfix.nsi');
+	const iss = path.join(AGENT, 'make-hotfix.iss');
 	if (!fs.existsSync(exe)) fail(`找不到 ${path.relative(ROOT, exe)}（先构建被控端）`);
-	if (!fs.existsSync(nsi)) fail(`找不到 ${path.relative(ROOT, nsi)}`);
+	if (!fs.existsSync(iss)) fail(`找不到 ${path.relative(ROOT, iss)}`);
+	// OpenSSL 运行库必须已在 build/（.iss 直接读 build\，缺了热修完照样起不来）
+	for (const dll of OPENSSL_DLLS) {
+		if (!fs.existsSync(path.join(box, dll)))
+			fail(`找不到 ${path.relative(ROOT, box)}/${dll} —— 热修包必须带它；先从 "C:\\Program Files\\PostgreSQL\\17\\bin" 拷进 build/`);
+	}
 	const out = path.join(AGENT, 'dist', `stelarith-agent-hotfix-${ver}.exe`);
 	log(`被控端热修 → ${path.relative(ROOT, out)}`);
 	log(`  含 stelarith-agent-qt.exe（${humanSize(fs.statSync(exe).size)}）+ ${OPENSSL_DLLS.join(' / ')}`);
@@ -185,16 +190,10 @@ function buildAgent({ dryRun }) {
 		log('  --dry-run：不写盘');
 		return { ver, out: null };
 	}
-	// 暂存：make-hotfix.nsi 里的 `File "hotfix-staging\stelarith-agent-qt.exe"` 就指这儿
-	const stage = path.join(AGENT, 'hotfix-staging');
-	fs.rmSync(stage, { recursive: true, force: true });
-	fs.mkdirSync(stage, { recursive: true });
-	fs.copyFileSync(exe, path.join(stage, 'stelarith-agent-qt.exe'));
-	stageOpenSsl(box, stage);
 	fs.mkdirSync(path.join(AGENT, 'dist'), { recursive: true });
 	fs.rmSync(out, { force: true });
-	execFileSync(MAKENSIS, ['make-hotfix.nsi'], { cwd: AGENT, stdio: 'inherit' });
-	fs.rmSync(stage, { recursive: true, force: true });
+	// .iss 直接读 build\ 下的 exe + OpenSSL DLL，无需暂存；版本经环境变量传入（规避 MSYS 路径改写）
+	execFileSync(ISCC, ['make-hotfix.iss'], { cwd: AGENT, stdio: 'inherit', env: { ...process.env, STE_INSTALLER_VERSION: ver } });
 
 	if (!fs.existsSync(out)) fail('makensis 没产出预期文件（看上面的编译输出）');
 	return { ver, out, size: fs.statSync(out).size, sha: sha256(out) };
@@ -212,7 +211,7 @@ function check(target) {
 		log(`条目 ${entries.size}，必需件齐 ✓`);
 		if (size > 20 * 1024 * 1024) log('⚠ 体积偏大 —— 热修包应远小于全量包，确认没把 Qt 运行时塞进来');
 	} else {
-		// exe 形态（被控端）：exe ~0.7MB + OpenSSL 两枚（压缩后约 2MB）
+		// exe 形态（被控端，Inno 打包）：exe + OpenSSL 两枚（约 3MB）
 		if (size > 20 * 1024 * 1024) log('⚠ 体积偏大 —— 被控端热修包应约 3MB（exe + OpenSSL 两枚）');
 		else log('体积合理 ✓');
 	}
