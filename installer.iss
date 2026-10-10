@@ -87,8 +87,6 @@ Source: "build\Qt6*.dll"; DestDir: "{app}"; Flags: ignoreversion
 ; 必须显式点名（吃不到上面的 Qt6*.dll 通配）。随包分发（OpenSSL 3.x，Apache-2.0）。
 Source: "build\libssl-3-x64.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\libcrypto-3-x64.dll"; DestDir: "{app}"; Flags: ignoreversion
-; ── QtWebEngine 进程（D8 拆 WebEngine 后整段删除）──────────────────────────
-Source: "build\QtWebEngineProcess.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; ── Qt 插件目录（递归）────────────────────────────────────────────────────
 Source: "build\platforms\*"; DestDir: "{app}\platforms"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\imageformats\*"; DestDir: "{app}\imageformats"; Flags: ignoreversion recursesubdirs createallsubdirs

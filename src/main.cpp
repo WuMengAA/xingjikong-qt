@@ -1042,10 +1042,14 @@ QString agentEnvPath()
 // 灰度机悄悄掉回稳定通道。这里把「当前生效渠道」落盘到数据目录 channel.txt：
 //   启动优先读环境变量 → 其次读 channel.txt → 都没有才 stable。
 // 首次以 gray 拉起后，之后任何重启/升级都自动沿用 gray（main 启动时 persistChannel 写回）。
-// ⚠️ 这里**不能**依赖 agentEnvPath()（它在文件更后面定义），直接拼数据目录。
+// ⚠️ 路径**必须**跟着 agentEnvPath() 走（而不是自己拼 LOCALAPPDATA）：那份实现已处理
+//    「目录建不出 → 回退安装目录 + qWarning」；自己拼的话 LOCALAPPDATA 一旦为空（服务账户/
+//    Session0）就会写到 C:/xingjikong/，写失败还**静默无声**，渠道悄悄丢（fail-silent 红线）。
+//    agentEnvPath() 定义在**本函数之前**（约 1023 行），可直接调用。
 QString channelFilePath()
 {
-    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/channel.txt");
+    // 与 agent.env 同目录：配置在哪，渠道就在哪，不会出现两者分裂。
+    return QFileInfo(agentEnvPath()).path() + QStringLiteral("/channel.txt");
 }
 
 QString resolvedChannel()
@@ -1075,7 +1079,12 @@ void persistChannel(const QString &ch)
         f.write(ch.toUtf8());
         f.write("\n");
         f.close();
+        return;
     }
+    // 写不出必须喊出来：渠道没持久化 = 重启/升级后悄悄回落 stable，
+    // 现场表现和"灰度机自己退出灰度"一模一样，不写日志事后根本查不到（fail-silent 红线）。
+    qWarning("[agent-qt] ⚠ channel.txt 写不出（%s：%s）—— 渠道不会持久化，重启/升级后可能回落 stable",
+             qPrintable(p), qPrintable(f.errorString()));
 }
 
 /**
