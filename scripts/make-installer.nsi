@@ -112,6 +112,12 @@ Section "Main" SEC_MAIN
   ;    结果是插件都在、但一个都找不到。
   File "..\build\viewer-qt.exe"
   File "..\build\Qt6*.dll"
+  ; ── OpenSSL 3 运行库（2026-10-10 补）──────────────────────────────────────────
+  ; 管理端同样静态链了 libdatachannel（ldc_receiver 收流），其 DTLS 走 PostgreSQL 17
+  ; 自带的 OpenSSL ⇒ exe 导入表含 libssl-3-x64.dll / libcrypto-3-x64.dll；
+  ; `Qt6*.dll` 通配匹配不到、windeployqt 也不拷 ⇒ 装完启动即「找不到 libssl-3-x64.dll」。
+  File "..\build\libssl-3-x64.dll"
+  File "..\build\libcrypto-3-x64.dll"
   File "..\build\QtWebEngineProcess.exe"
 
   File /r "..\build\platforms"
