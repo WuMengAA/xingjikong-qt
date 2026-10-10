@@ -266,6 +266,37 @@ ApplicationWindow {
             spacing: 12
             MobileCard { title: "账号"; sub: "站点一户通（OAuth，待接入）"; value: "→" }
             MobileCard { title: "外观"; sub: "深浅色切换"; value: "→" }
+            // P3：考试模式开关（破坏性——必须确认）
+            MobileCard {
+                title: "考试模式"
+                sub: "全屏拦截 · 禁通知 · 禁监视（发给全部在线设备）"
+                value: backend.onlineCount + " 台在线"
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: examDialog.open()
+                }
+            }
+        }
+    }
+
+    // ── P3 考试模式确认弹窗（破坏性，防误触）──
+    Dialog {
+        id: examDialog
+        title: "考试模式"
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: Dialog.No | Dialog.Yes
+        Label {
+            text: "开启考试模式将：\n· 全屏拦截被控端操作\n· 禁止一切通知与监视\n· 影响全部 " + backend.onlineCount + " 台在线设备\n\n确认开启？"
+            wrapMode: Text.Wrap
+            width: 240
+        }
+        onAccepted: {
+            // 发给全部在线设备
+            for (var i = 0; i < backend.devices.length; ++i) {
+                if (backend.devices[i].online)
+                    backend.examMode(backend.devices[i].uid, true)
+            }
         }
     }
 

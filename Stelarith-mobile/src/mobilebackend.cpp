@@ -129,6 +129,13 @@ void MobileBackend::shutdownDevice(const QString &uid)
     sendLightInstruction(uid, QStringLiteral("shutdown"));
 }
 
+// P3（2026-10-10 · 设计 §5）：考试模式开关（全屏拦截，破坏性——QML 必须确认）
+void MobileBackend::examMode(const QString &uid, bool on)
+{
+    sendLightInstruction(uid, on ? QStringLiteral("exam_mode")
+                                 : QStringLiteral("exam_mode_stop"));
+}
+
 // ── P2 摘要 + 回放列表（2026-10-10 · 手机端设计 §5 P2，HTTP GET）──
 // 用 viewer 令牌走 Bearer（与 WS auth 同令牌）；base URL 从 WS URL 剥出。
 static QString httpBase()

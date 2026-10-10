@@ -47,6 +47,8 @@ public:
     // 便捷封装：ping（在线探测）/ shutdown（关机，需 confirm）
     Q_INVOKABLE void pingDevice(const QString &uid);
     Q_INVOKABLE void shutdownDevice(const QString &uid);
+    // P3：考试模式开关（破坏性，需确认；exam_mode / exam_mode_stop）
+    Q_INVOKABLE void examMode(const QString &uid, bool on);
 
     // ── P2（2026-10-10 · 手机端设计 §5）：摘要 + 回放列表（HTTP GET）──
     Q_INVOKABLE void fetchEvents();       // GET /api/events → eventsChanged
