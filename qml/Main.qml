@@ -1470,7 +1470,7 @@ ApplicationWindow {
                                     backend.sendAction("list_shortcut_candidates")
                                     backend.sendAction("process_list")
                                 } },
-                                { l: "监控",   a: "camera_list",      t: false },
+                                { l: "监控",   f: function () { openOnly("camera") } },
                                 { l: "多班墙", f: function () { openOnly("multiband") } },
                                 { l: "音量",   f: function () { volumeDlg.open() } },
                                 { l: "文件",   f: function () { openOnly("file") } }
@@ -2992,6 +2992,7 @@ ApplicationWindow {
         multiThumbDlg.close()
         controlDlg.close()
         speechDlg.close()
+        camCenterDlg.close()
         if      (which === "software") softwareDlg.open()
         else if (which === "log")      logDlg.open()
         else if (which === "media")    mediaDlg.open()
@@ -3004,6 +3005,11 @@ ApplicationWindow {
         else if (which === "multiband")  multiThumbDlg.open()  // 多班缩略图墙（2026-10-11 从「批量管控」页搬来）
         else if (which === "control")    controlDlg.open()    // 广播/考试/语音/屏幕广播（同上）
         else if (which === "speech")    speechDlg.open()    // 语音对讲（集控界面直达）
+        else if (which === "camera") {                       // 监控/摄像头绑定（#93 2026-10-11 修：原弹窗无打开入口）
+            camCenter.selUid = backend.currentUid
+            camCenter.refreshCams()
+            camCenterDlg.open()
+        }
     }
 
     // 右侧所有动作按钮的统一入口。以前这段分支散在 Repeater 的 onClicked 里，
@@ -3025,7 +3031,9 @@ ApplicationWindow {
     readonly property var capByLabel: ({
         "音量": ["set_volume"],
         "软件": ["list_shortcut_candidates", "process_list"],
-        "定时": ["list_schedules"],
+        // 2026-10-11 修：键必须与按钮文案（d.l）逐字一致——按钮是「定时任务」，
+        // 原来写「定时」→ capNeedOf 取 capByLabel["定时任务"]=undefined → 门控静默失效。
+        "定时任务": ["list_schedules"],
         "文件": ["file_push"],
         "通知": ["notify"],
         "探活": ["ping"],
@@ -3112,7 +3120,8 @@ ApplicationWindow {
         if (d.a !== "") { backend.sendAction(d.a, {}); return }
 
         // 兜底：老调用点（命令面板 / 快捷键）只给了中文 label 的情况
-        const legacy = { "音量": "volume", "探活": "ping", "软件": "process_list", "定时": "list_schedules" }
+        // 2026-10-11 修：键与按钮文案一致（「定时任务」而非「定时」——原来永远走不到）
+        const legacy = { "音量": "volume", "探活": "ping", "软件": "process_list", "定时任务": "list_schedules" }
         if (legacy[d.l]) { backend.sendAction(legacy[d.l], {}); return }
         backend.reportUnsupported(d.l, "这一条没有动作");
     }
