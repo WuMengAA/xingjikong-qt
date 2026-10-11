@@ -500,7 +500,7 @@ Item {
         cc.backend.subscribeThumbnails([cc.selUid])   // 开启到帧刷新
     }
     function stopRec() {
-        cc.status = "已停录（录制自动上传云端，稍后刷新回放）"
+        cc.status = "已停录，稍后可云端回放"
         cc.backend.sendAction("camera_record_stop", {})
         cc.recording = false
     }

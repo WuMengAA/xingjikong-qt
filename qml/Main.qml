@@ -1702,7 +1702,7 @@ ApplicationWindow {
                                             text: "换成教师"
                                             strong: backend.role === "admin"
                                             enabled: backend.role === "admin"
-                                            tip: "切成教师后，操作类按钮会置灰，避免误点教室机"
+                                            tip: "切教师后操作类按钮置灰"
                                             onClicked: backend.setRole("teacher")
                                         }
                                     }
@@ -2640,7 +2640,7 @@ ApplicationWindow {
                         anchors.topMargin: 16
                         spacing: 10
                         Text { text: "语音对讲（老师讲话，全班听）"; color: th.fg3; font.pixelSize: 12 }
-                        Text { text: "默认关闭；到点自动停（按钮上显示剩余秒）"; color: th.fg4; font.pixelSize: 12 }
+                        Text { text: "到点自动停，按钮显示剩余秒"; color: th.fg4; font.pixelSize: 12 }
                         Row {
                             spacing: 8
                             Button {
@@ -2680,7 +2680,7 @@ ApplicationWindow {
                         anchors.topMargin: 16
                         spacing: 10
                         Text { text: "屏幕广播（老师屏幕 → 全部在线设备）"; color: th.fg3; font.pixelSize: 12 }
-                        Text { text: "默认关闭；到点自动停（按钮上显示剩余秒）"; color: th.fg4; font.pixelSize: 12 }
+                        Text { text: "到点自动停，按钮显示剩余秒"; color: th.fg4; font.pixelSize: 12 }
                         Row {
                             spacing: 8
                             Button {
@@ -2834,7 +2834,7 @@ ApplicationWindow {
             { name: "切到集控",         keys: ["jikong", "jk"], tip: "看教室机画面 + 下发动作", run: function () { root.page = 1 } },
             { name: "切到设置",         keys: ["settings", "shezhi", "sz"], tip: "账户 / 连接 / 提醒 / 外观", run: function () { root.page = 2 } },
             { name: "去广播给所有在线设备", keys: ["broadcast", "guangbo", "gb"], tip: "广播要填内容，点开弹窗填再发", run: function () { root.page = 1; openOnly("broadcast") } },
-            { name: "开始语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "老师讲话，全班在线设备可听（再次点停）", run: function () { if (backend.startSpeaking()) { root.refreshIsland(); root.toast("正在讲话") } else { root.toast("开麦失败：" + backend.speakError) } } },
+            { name: "开始语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "全班可听，再点停", run: function () { if (backend.startSpeaking()) { root.refreshIsland(); root.toast("正在讲话") } else { root.toast("开麦失败：" + backend.speakError) } } },
             { name: "停止语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "把语音广播收掉（静音）", run: function () { backend.stopSpeaking(); root.refreshIsland(); root.toast("语音已停止") } },
             { name: "开始屏幕广播",     keys: ["screen", "guangbo2", "gb2"], tip: "老师屏幕推给全部在线设备（再次点停）", run: function () { if (backend.startBroadcast()) { root.refreshIsland(); root.toast("正在屏幕广播") } else { root.toast("广播启动失败") } } },
             { name: "停止屏幕广播",     keys: ["screen", "tingbo"], tip: "把屏幕广播收掉", run: function () { backend.stopBroadcast(); root.refreshIsland(); root.toast("屏幕广播已停止") } },
@@ -3353,7 +3353,7 @@ ApplicationWindow {
                     Repeater {
                         model: [
                             { t: "看某台教室机画面", d: "控制页左边选设备。" },
-                            { t: "发通知 / 广播", d: "集控页，通知可选普通/重要/紧急，广播发全员。" },
+                            { t: "发通知 / 广播", d: "集控页发通知或广播。" },
                             { t: "按班级筛选设备", d: "设备列表上方点「全部班级」切换。" },
                             { t: "锁屏 / 重启 / 关机", d: "控制页右侧「电源」，需管理员。" },
                             { t: "查看更新历史", d: "设置页「更新日志」。" },

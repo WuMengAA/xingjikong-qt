@@ -131,7 +131,7 @@ Popup {
 
         Text {
             visible: dlg.cameras.length === 0
-            text: dlg.loading ? "正在枚举摄像头…" : "（枚举失败或无摄像头；先点「重新枚举」）"
+            text: dlg.loading ? "正在枚举摄像头…" : "无摄像头，点「重新枚举」"
             color: dlg.theme.fg4 || "#707070"
             font.pixelSize: 11
         }
