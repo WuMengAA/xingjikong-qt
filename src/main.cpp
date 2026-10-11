@@ -512,7 +512,9 @@ int main(int argc, char *argv[])
     // 2026-10-11：Android（手机 App 并入管理端）无磁盘 build 目录 → QML 走 qrc 嵌入
     //（CMake ANDROID 分支把 qml/ 整树嵌进 :/ 前缀，load("qrc:/Main.qml")）。
 #if defined(Q_OS_ANDROID)
-    const QString qmlUrl = QStringLiteral("qrc:/Main.qml");
+    // 2026-10-11 S2：手机 App 并入管理端 → Android 加载手机端布局 MobileMain.qml
+    //（复用全部 components + viewerbackend；桌面 Main.qml 照旧）
+    const QString qmlUrl = QStringLiteral("qrc:/MobileMain.qml");
     engine.addImportPath(QStringLiteral("qrc:/"));
 #else
     const QString qmlDir = QDir(QCoreApplication::applicationDirPath())
