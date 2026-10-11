@@ -1,4 +1,4 @@
-﻿// 文件弹窗：把本机一个文件推给这台教室机（file_push → file_chunk → file_done）。
+// 文件弹窗：把本机一个文件推给这台教室机（file_push → file_chunk → file_done）。
 //
 // 为什么单独一个弹窗、不塞进媒体弹窗：方向是反的 —— 媒体是"教室机上的东西删掉"，
 // 这里是"从我这台灌进教室机"。混在一个列表里，老师会分不清哪个是自己的文件。
@@ -28,6 +28,18 @@ Popup {
     modal: true
     padding: 0
     closePolicy: Popup.CloseOnEscape
+
+    // 2026-10-11 Android 修复：QML 里 backend.pickFile() 在 Android 上是**异步**的
+    // （SAF 系统选择器 → Activity 结果回调），同步版本永远返回空——所以手机上
+    // 「点选文件后没有任何反应」。这里监听 backend.filePicked 信号把 pendingUrl
+    // 补上；pendingName 会自己从 pendingUrl 派生（上面已有计算属性）。
+    // 桌面 pickFile() 是同步的，onClicked 里直接 assign 就行，本 Connections 无副作用。
+    Connections {
+        target: dlg.backend
+        function onFilePicked(url) {
+            if (url) dlg.pendingUrl = url
+        }
+    }
 
     background: Rectangle {
         color: dlg.theme ? dlg.theme.cream : "#141414"

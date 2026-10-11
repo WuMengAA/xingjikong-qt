@@ -35,6 +35,9 @@
 #if defined(Q_OS_ANDROID)
 #include <QtCore/private/qandroidextras_p.h>   // 2026-10-11：手机开麦请求 RECORD_AUDIO（Qt 官方 Android 私有 API）
 #include <QFutureWatcher>
+#include <QJniArray>                          // 2026-10-11：文件传输 SAF——读 content:// 用
+#include <QSaveFile>                          // 复制到缓存目录（写完才算成功，避免半截坏文件）
+#include <QtCore/qcoreapplication_platform.h> // QNativeInterface::QAndroidApplication::context()
 #endif
 
 #include <algorithm>   // std::sort（离线台账清理与排序，见 refreshDevices）
@@ -2925,6 +2928,110 @@ void ViewerBackend::setFileFail(const QString &why)
 }
 QString ViewerBackend::pickFile()
 {
+#if defined(Q_OS_ANDROID)
+    // ── 2026-10-11 手机「文件传输无法传」根因修复 ──
+    // 桌面走 QtWidgets 的 QFileDialog::getOpenFileName 同步弹窗；Android 上 Qt 不
+    // 提供原生对话框实现，上面那一行直接返回空串 → pickFile() 空转 → 用户看到
+    // 「文件传输点了没反应」。这里改成异步：调系统 SAF（ACTION_GET_CONTENT）弹
+    // 「应用内/最近文件/下载…」选择器，用户选完由 Activity 结果回调，把 content://
+    // URI 复制到应用缓存后 emit filePicked(file:// URL)——QML 监听该信号即可。
+    {
+        QJniObject intent("android/content/Intent",
+                          "(Ljava/lang/String;)V",
+                          QJniObject::fromString(
+                              QStringLiteral("android.intent.action.GET_CONTENT"))
+                              .object<jstring>());
+        intent.callMethod<void>(
+            "setType", "(Ljava/lang/String;)V",
+            QJniObject::fromString(QStringLiteral("*/*")).object<jstring>());
+        QJniObject chooser = intent.callObjectMethod(
+            "createChooser",
+            "(Landroid/content/Intent;)Landroid/content/Intent;",
+            intent.object());
+        if (!chooser.isValid()) {
+            logf("[viewer] FAIL Android 选文件：createChooser 拿不到 intent");
+            return QString();
+        }
+        QtAndroidPrivate::startActivity(chooser, 9001, [this](int resultCode, jint flags,
+                                                              const QJniObject &data) {
+            // Activity.RESULT_OK = -1
+            if (resultCode != -1 || !data.isValid()) {
+                logf("[viewer] Android 选文件：用户取消（resultCode=%d）", resultCode);
+                return;
+            }
+            // data 是回调给的 Intent 对象，从中取 getData() 的 Uri
+            const QJniObject uriObj = data.callObjectMethod(
+                "getData", "()Landroid/net/Uri;");
+            if (!uriObj.isValid()) {
+                logf("[viewer] FAIL Android 选文件：getData 拿不到 Uri");
+                return;
+            }
+            const QJniObject uri(uriObj);
+            const QString uriStr =
+                uri.callMethod<jstring>("toString", "()Ljava/lang/String;").toString();
+            // 文件名：优先 _display_name；取不到（query 太脆/权限受限）就退回 URI 末段
+            // —— 常见 content://com.android.providers/.../DCIM/IMG_0001.jpg 末段就是真名
+            QString name = QStringLiteral("picked.bin");
+            {
+                const QJniObject ctx(
+                    QNativeInterface::QAndroidApplication::context().object());
+                const QJniObject resolver = ctx.callObjectMethod(
+                    "getContentResolver", "()Landroid/content/ContentResolver;");
+                if (resolver.isValid()) {
+                    QJniObject cursor = resolver.callObjectMethod(
+                        "query",
+                        "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;"
+                        "Ljava/lang/String;Ljava/lang/String;)"
+                        "Landroid/databases/Cursor;",
+                        uri.object(),
+                        QJniArray<QString>({QStringLiteral("_display_name")})
+                            .object<jobject>(),
+                        nullptr, nullptr, nullptr);
+                    if (cursor.isValid()) {
+                        const bool moved =
+                            cursor.callMethod<jboolean>("moveToFirst", "()Z");
+                        if (moved) {
+                            const jint idx = cursor.callMethod<jint>(
+                                "getColumnIndex", "(Ljava/lang/String;)I",
+                                QJniObject::fromString(QStringLiteral("_display_name"))
+                                    .object<jstring>());
+                            if (idx >= 0) {
+                                const QString dn =
+                                    cursor.callMethod<jstring>(
+                                        "getString", "(I)Ljava/lang/String;", idx)
+                                        .toString();
+                                if (!dn.isEmpty()) name = dn;
+                            }
+                        }
+                        cursor.callMethod<void>("close", "()V");
+                    } else {
+                        logf("[viewer] Android 选文件：cursor 空（走 URI 末段兜底）");
+                    }
+                }
+            }
+            // URI 末段兜底
+            if (name.isEmpty() || name == QStringLiteral("picked.bin")) {
+                const int slash = uriStr.lastIndexOf(QLatin1Char('/'));
+                if (slash >= 0 && slash + 1 < uriStr.size()) {
+                    const QString tail = uriStr.mid(slash + 1);
+                    if (!tail.isEmpty() && !tail.contains(QLatin1Char('?')))
+                        name = tail;
+                }
+            }
+            const QString cacheUrl =
+                copyContentUriToCache(uriStr, name);
+            if (!cacheUrl.isEmpty()) {
+                logf("[viewer] 选文件 → %s（Android SAF）",
+                     cacheUrl.toUtf8().constData());
+                emit filePicked(cacheUrl);
+            } else {
+                logf("[viewer] FAIL Android 选文件：复制到缓存失败 uri=%s",
+                     uriStr.toUtf8().constData());
+            }
+        });
+        return QString();   // 同步返回空——真正的 URL 通过 filePicked 信号异步补
+    }
+#else
     const QString path = QFileDialog::getOpenFileName(
                 nullptr, QStringLiteral("选要推给这台教室机的文件"), QString(),
                 QStringLiteral("所有文件 (*.*)"));
@@ -2933,7 +3040,124 @@ QString ViewerBackend::pickFile()
     const QString url = QUrl::fromLocalFile(path).toString();
     logf("[viewer] 选文件 → %s", url.toUtf8().constData());
     return url;
+#endif
 }
+
+#if defined(Q_OS_ANDROID)
+QString ViewerBackend::copyContentUriToCache(const QString &uriStr,
+                                             const QString &suggestedName)
+{
+    if (uriStr.isEmpty()) return QString();
+    QJniEnvironment envGuard;
+    JNIEnv *env = QJniEnvironment::getJniEnv();
+    if (!env) return QString();
+
+    const QJniObject ctx(QNativeInterface::QAndroidApplication::context().object());
+    if (!ctx.isValid()) return QString();
+    const QJniObject resolver = ctx.callObjectMethod(
+        "getContentResolver", "()Landroid/content/ContentResolver;");
+    if (!resolver.isValid()) return QString();
+
+    // Uri.parse(String) —— content:// 字符串转 android.net.Uri
+    // 正确写法：callStaticObjectMethod（QJniObject 无 staticObjectMethod）
+    const QJniObject uri = QJniObject::callStaticObjectMethod(
+        "android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;",
+        QJniObject::fromString(uriStr).object<jstring>());
+    if (!uri.isValid()) return QString();
+
+    const QJniObject streamObj = resolver.callObjectMethod(
+        "openInputStream", "(Landroid/net/Uri;)Ljava/io/InputStream;", uri.object());
+    if (!streamObj.isValid()) return QString();
+    const jobject jstreamObj = streamObj.object();
+    if (!jstreamObj) return QString();
+    // InputStream.read(byte[]) —— 每次读 CHUNK 字节，n=-1 表示 EOF
+    const jclass jIn = env->FindClass("java/io/InputStream");
+    if (!jIn) return QString();
+    const jmethodID mRead = env->GetMethodID(jIn, "read", "([B)I");
+    env->DeleteLocalRef(jIn);
+    if (!mRead) return QString();
+
+    // 目标：应用缓存目录/pushed/<时间戳>_<安全化文件名>
+    const QJniObject filesDir = ctx.callObjectMethod(
+        "getFilesDir", "()Ljava/io/File;");
+    if (!filesDir.isValid()) {
+        env->DeleteLocalRef(jstreamObj);
+        return QString();
+    }
+    const QString base = filesDir.callMethod<jstring>(
+                             "getAbsolutePath", "()Ljava/lang/String;")
+                             .toString();
+    const QString dirPath =
+        QDir(base).absoluteFilePath(QStringLiteral("pushed"));
+    QDir().mkpath(dirPath);
+
+    const QString safeName =
+        suggestedName.isEmpty() ? QStringLiteral("picked.bin") : suggestedName;
+    QString clean = safeName;
+    for (QChar &c : clean) {
+        if (c == QLatin1Char('/') || c == QLatin1Char('\\') || c == QLatin1Char(':')
+            || c == QLatin1Char('?') || c == QLatin1Char('*') || c == QLatin1Char('"')
+            || c == QLatin1Char('<') || c == QLatin1Char('>') || c == QLatin1Char('|'))
+            c = QLatin1Char('_');
+    }
+    const QString dstPath =
+        dirPath + QStringLiteral("/") +
+        QStringLiteral("push_%1_").arg(
+            QDateTime::currentMSecsSinceEpoch()) + clean;
+    QSaveFile out(dstPath);
+    if (!out.open(QIODevice::WriteOnly)) {
+        logf("[viewer] FAIL 文件推送：打不开缓存目标 %s",
+             dstPath.toUtf8().constData());
+        env->DeleteLocalRef(jstreamObj);
+        return QString();
+    }
+
+    // InputStream.read(byte[]) 循环：一次读 64KB，攒够就 fwrite 落盘
+    const jsize CHUNK = 65536;
+    const jbyteArray buf = env->NewByteArray(CHUNK);
+    if (!buf) {
+        env->DeleteLocalRef(jstreamObj);
+        return QString();
+    }
+    jbyte data[CHUNK];
+    qint64 total = 0;
+    for (;;) {
+        const jint n = env->CallIntMethod(jstreamObj, mRead, buf);
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            break;
+        }
+        if (n <= 0) break;   // EOF / -1 / 0
+        env->GetByteArrayRegion(buf, 0, n, data);
+        if (out.write(reinterpret_cast<const char *>(data), n) != n) {
+            logf("[viewer] FAIL 文件推送：写缓存失败（%s）",
+                 out.errorString().toUtf8().constData());
+            env->DeleteLocalRef(buf);
+            env->DeleteLocalRef(jstreamObj);
+            return QString();
+        }
+        total += n;
+    }
+    env->DeleteLocalRef(buf);
+    env->DeleteLocalRef(jstreamObj);
+
+    if (!out.commit()) {
+        logf("[viewer] FAIL 文件推送：commit 缓存失败 %s",
+             out.errorString().toUtf8().constData());
+        return QString();
+    }
+    if (total <= 0) {
+        QFile::remove(dstPath);
+        logf("[viewer] FAIL 文件推送：content:// 读出 0 字节 uri=%s",
+             uriStr.toUtf8().constData());
+        return QString();
+    }
+    logf("[viewer] content:// 复制到缓存：%s（%lld 字节）",
+         dstPath.toUtf8().constData(), (long long)total);
+    return QUrl::fromLocalFile(dstPath).toString();
+}
+#endif
 void ViewerBackend::pushFile(const QString &urlText)
 {
     // 没选设备就直接判失败：sendAction 会自己拦下来发不出去，但状态已经被设成 pushing 了，

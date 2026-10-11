@@ -450,8 +450,17 @@ public:
      *
      * 走 C++ 原生 QFileDialog 而不是 QML 的 QtQuick.Dialogs：后者是一套独立的 QML 插件，
      * 部署时漏了就是"exe 起不来 / Main.qml 整个挂掉"，排查起来比多链接一个库贵得多。
+     *
+     * Android 分支（2026-10-11）：QtWidgets 的 QFileDialog 在 Android 上弹不出（Qt 不
+     * 提供原生对话框实现），所以手机上 pickFile() 直接空桩——用户看到"文件传输无反应"。
+     * 这里改成同步返回空串 + 异步走系统 SAF 文件选择器（ACTION_GET_CONTENT），结果
+     * 复制到应用缓存后 emit filePicked(file:// URL)，QML 监听该信号即可。
      */
     Q_INVOKABLE QString pickFile();
+#if defined(Q_OS_ANDROID)
+    /** Android 专用：把 SAF 返回的 content:// URI 复制到应用缓存目录，返回 file:// URL。 */
+    static QString copyContentUriToCache(const QString &uriStr, const QString &suggestedName);
+#endif
     Q_INVOKABLE void pushFile(const QString &urlText);
     /** 中断当前推送：让被控端把半截文件关掉、清会话（不留下半个坏文件在那台机器上）。 */
     Q_INVOKABLE void cancelPush();
@@ -520,6 +529,12 @@ signals:
     void autoNoteChanged();
     /** 文件推送进度：状态/文件名/已推字节/百分比/失败原因/落盘路径，全走这一个信号。 */
     void fileProgressChanged();
+    /**
+     * 2026-10-11：Android 上 pickFile() 是异步（SAF 系统选择器 → Activity 结果回调），
+     * 选完文件把 file:// URL 通过本信号通知 QML 补上 pendingUrl——桌面 pickFile() 同步
+     * 返回不需要它。
+     */
+    void filePicked(const QString &url);
     /** WebRTC 收流链路状态变化（ready / negotiating / failed / idle）。 */
     void rtcStateChanged();
     /** 2026-10-09：libdatachannel 收流帧就绪（ldc_receiver.frameReady → QML）。 */
