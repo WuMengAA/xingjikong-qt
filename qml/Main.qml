@@ -30,6 +30,9 @@ ApplicationWindow {
     visible: true
     title: "星集控"
     color: th.win
+    // 2026-10-11：手机端（Android）隐藏桌面专属（开机自启/屏幕广播等）。
+    // 桌面/手机同源一套 Main.qml，桌面功能零影响。
+    readonly property bool isPhone: Qt.platform.os === "android"
     // 字体兜底：没显式写 font.pixelSize 的文字走这一档（"正"）。
     // 页面里该显式写还是要显式写 —— 这里只是保证"漏写"不会掉回系统默认的小字。
     font.pixelSize: 13
@@ -409,15 +412,15 @@ ApplicationWindow {
                     Row {
                         spacing: 8
                         Repeater {
-                            model: [
-                                { l: "锁屏",       a: "lock" },
-                                { l: "发通知",     a: "notify" },
-                                { l: "广播",       a: "broadcast" },
-                                { l: "语音对讲",   a: "voice" },
-                                { l: "屏幕广播",   a: "screen" },
-                                { l: "考试模式",   a: "exam" },
-                                { l: "刷新多班墙", a: "multiband" }
-                            ]
+                            // 2026-10-11：手机管理端隐藏「屏幕广播」（老师桌面推流，桌面专属）
+                            model: root.isPhone
+                                   ? [ { l: "锁屏", a: "lock" }, { l: "发通知", a: "notify" },
+                                       { l: "广播", a: "broadcast" }, { l: "语音对讲", a: "voice" },
+                                       { l: "刷新多班墙", a: "multiband" } ]
+                                   : [ { l: "锁屏", a: "lock" }, { l: "发通知", a: "notify" },
+                                       { l: "广播", a: "broadcast" }, { l: "语音对讲", a: "voice" },
+                                       { l: "屏幕广播", a: "screen" }, { l: "考试模式", a: "exam" },
+                                       { l: "刷新多班墙", a: "multiband" } ]
                             delegate: Rectangle {
                                 width: 76; height: 30; radius: th.rCtrl
                                 color: qhMa.containsMouse ? th.hover2 : th.panel
@@ -1831,6 +1834,7 @@ ApplicationWindow {
                             color: th.panel
                             border.color: th.card
                             border.width: 1
+                            visible: !root.isPhone   // 开机自启/桌面快捷方式 = Windows 专属，手机隐藏
                             Column {
                                 id: colSettingsBoot
                                 anchors.left: parent.left
@@ -2792,6 +2796,7 @@ ApplicationWindow {
                     color: th.panel
                     border.color: th.card
                     border.width: 1
+                    visible: !root.isPhone   // 屏幕广播 = 老师桌面推流，手机管理端不出现
                     Column {
                         id: bcastCol2
                         anchors.left: parent.left
