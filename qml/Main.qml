@@ -13,7 +13,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
-import "NotifyParams.js" as NotifyParams
 
 ApplicationWindow {
     id: root
@@ -2321,99 +2320,6 @@ ApplicationWindow {
         }
     }
 
-    // ── 打开程序（快捷方式来源＝这台机器上的程序，不预置名单）──
-    Popup {
-        id: launchDlg
-        anchors.centerIn: parent
-        width: 320
-        modal: true
-        padding: 0
-
-        background: Rectangle {
-            color: th.cream
-            radius: th.rCard
-            border.color: th.stroke
-            border.width: 1
-        }
-
-        contentItem: Column {
-            spacing: 14
-            padding: 16
-
-            Text {
-                text: "打开程序"
-                color: th.fg
-                font.pixelSize: 14
-                font.weight: Font.Medium
-            }
-            Text {
-                text: "填程序名或路径（不在安全名单里的会被拒绝）"
-                color: th.fg3
-                font.pixelSize: 12
-            }
-
-            Rectangle {
-                width: parent.width - 32
-                height: 34
-                radius: th.rCtrl
-                color: "transparent"
-                border.color: th.stroke
-                border.width: 1
-                TextInput {
-                    id: launchInput
-                    anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: th.fg
-                    font.pixelSize: 14
-                    selectByMouse: true
-                }
-            }
-
-            Row {
-                spacing: 10
-                Rectangle {
-                    width: 130; height: 34; radius: th.rCtrl
-                    color: th.inv
-                    Text {
-                        anchors.centerIn: parent
-                        text: "打开"
-                        color: th.win
-                        font.pixelSize: 14
-                        font.weight: Font.Medium
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            if (launchInput.text !== "") {
-                                backend.sendAction("launch_app", { "target": launchInput.text })
-                                launchInput.text = ""
-                                launchDlg.close()
-                            }
-                        }
-                    }
-                }
-                Rectangle {
-                    width: 130; height: 34; radius: th.rCtrl
-                    color: "transparent"
-                    border.color: th.stroke
-                    border.width: 1
-                    Text {
-                        anchors.centerIn: parent
-                        text: "取消"
-                        color: th.op
-                        font.pixelSize: 14
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: launchDlg.close()
-                    }
-                }
-            }
-        }
-    }
-
     SoftwareDialog {
         id: softwareDlg
         theme: root.th
@@ -2486,11 +2392,16 @@ ApplicationWindow {
                 width: parent.width
                 spacing: 8
                 Text { text: "多班监控（缩略图墙）"; color: th.fg3; font.pixelSize: 11 }
-                Button {
-                    text: "刷新"
-                    onClicked: {
-                        multiThumb.watch()
-                        root.toast("正在订阅多班缩略图…")
+                Rectangle {
+                    width: 64; height: 26; radius: th.rCtrl
+                    color: th.inv
+                    Text { anchors.centerIn: parent; text: "刷新"; color: th.win; font.pixelSize: 12 }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            multiThumb.watch()
+                            root.toast("正在订阅多班缩略图…")
+                        }
                     }
                 }
             }
@@ -2829,20 +2740,27 @@ ApplicationWindow {
                         Text { text: "到点自动停，按钮显示剩余秒"; color: th.fg4; font.pixelSize: 12 }
                         Row {
                             spacing: 8
-                            Button {
-                                text: backend.broadcasting ? ("停止广播（剩 " + backend.bcastLeftSec + " 秒）") : "开始广播"
-                                onClicked: {
-                                    if (backend.broadcasting) {
-                                        backend.stopBroadcast()
-                                        root.toast("屏幕广播已停止")
-                                    } else {
-                                        if (backend.startBroadcast()) {
-                                            root.toast("正在屏幕广播；再次点击停止")
+                            Rectangle {
+                                width: backend.broadcasting ? 170 : 130
+                                height: 34; radius: th.rCtrl
+                                color: backend.broadcasting ? "#b03a2e" : th.inv
+                                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; font.weight: Font.Medium
+                                       text: backend.broadcasting ? ("停止广播（剩 " + backend.bcastLeftSec + " 秒）") : "开始广播" }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (backend.broadcasting) {
+                                            backend.stopBroadcast()
+                                            root.toast("屏幕广播已停止")
                                         } else {
-                                            root.toast("广播启动失败")
+                                            if (backend.startBroadcast()) {
+                                                root.toast("正在屏幕广播；再次点击停止")
+                                            } else {
+                                                root.toast("广播启动失败")
+                                            }
                                         }
+                                        root.refreshIsland()   // 灵动岛广播胶囊跟手开/关
                                     }
-                                    root.refreshIsland()   // 灵动岛广播胶囊跟手开/关
                                 }
                             }
                         }
