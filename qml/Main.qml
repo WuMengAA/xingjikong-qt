@@ -1098,6 +1098,7 @@ ApplicationWindow {
                         id: screenImg
                         anchors.fill: parent
                         fillMode: Image.PreserveAspectFit
+                        visible: backend.frameSource !== "rtc"
                         cache: false
                         property int tick: 0
                         source: root.frameReady ? ("image://frames/f?" + tick) : ""
@@ -1108,12 +1109,27 @@ ApplicationWindow {
                         }
                     }
 
+                    // ── 实时画面（WebRTC / libdatachannel）：frameSource==='rtc' 时挂载 ──
+                    // 接线：viewerbackend.rtcFrameReady(QImage) → vidSurf.onFrame(img)
+                    // 与 MobileMain.qml:494 同一接法；这是 #171「WebRTC 画面在桌面管理端显出来」的关键。
+                    // jpeg 轮询模式下本组件隐藏，画面走上面的 screenImg；rtc 模式下反过来。
+                    RtcVideoSurface {
+                        id: vidSurf
+                        anchors.fill: parent
+                        theme: th
+                        visible: backend.frameSource === "rtc"
+                    }
+                    Connections {
+                        target: backend
+                        function onRtcFrameReady(img) { vidSurf.onFrame(img) }
+                    }
+
                     // 空态照稿 .empty：标题 12/操作色 + 说明 11/辅助色，两行。
                     // 分三种情形（没选机器 / 正在接通 / 选了但没帧）：以前一句话包打天下，
                     // 用户看不出是"正在办"还是"没人理"。
                     Column {
                         anchors.centerIn: parent
-                        visible: !root.frameReady
+                        visible: !root.frameReady && backend.frameSource !== "rtc"
                         spacing: 6
 
                         BusyIndicator {
@@ -1152,7 +1168,7 @@ ApplicationWindow {
                         anchors.top: parent.top
                         anchors.right: parent.right
                         anchors.margins: 9
-                        visible: backend.screenStatic && root.frameReady
+                        visible: backend.screenStatic && root.frameReady && backend.frameSource !== "rtc"
                         text: "画面未变化 · 已暂停刷新"
                         // 固定灰，刻意不跟主题走：这行浮在**远程画面**上，底色是对方的桌面（不可控），
                         // 用主题色反而可能在浅色画面上消失。
@@ -1171,7 +1187,7 @@ ApplicationWindow {
                     MouseArea {
                         id: screenArea
                         anchors.fill: parent
-                        enabled: backend.frameCount > 0
+                        enabled: backend.frameCount > 0 || vidSurf.framesReceived > 0
 
                         // 鼠标键 → 协议里的 button：以前只有左键，右键/中键远控过去被当左键按，
                         //   右键菜单、中键自动滚全指望它。
