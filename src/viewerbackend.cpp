@@ -1046,6 +1046,18 @@ void ViewerBackend::start()
     QObject::connect(m_fpsTimer, &QTimer::timeout, this, &ViewerBackend::tickFps);
     m_fpsTimer->start(1000);
     m_lastFpsCheckMs = QDateTime::currentMSecsSinceEpoch();
+
+    // ── 2026-10-11（#4）「进后台就连不上云端」：半开连接探活 ──
+    // Android 后台网络被系统切断时 QWebSocket 是半开连接（不触发任何信号），
+    // 回前台还显示"已连"但发包无效。定时检查"多久没收到云端消息"，超阈值
+    // 主动 disconnect → 走既有退避重连。onAppStateChanged 让回前台立刻查一次。
+    m_ctrlWatchdog = new QTimer(this);
+    m_ctrlWatchdog->setInterval(10000);
+    connect(m_ctrlWatchdog, &QTimer::timeout, this, &ViewerBackend::onCtrlWatchdog);
+    m_ctrlWatchdog->start();
+    connect(qApp, &QGuiApplication::applicationStateChanged, this,
+            &ViewerBackend::onAppStateChanged);
+
     connectToCloud();
 }
 // ────────────────────────────────────────────────────────────────────────────
@@ -1516,6 +1528,31 @@ void ViewerBackend::onDisconnected()
     setStatus(QStringLiteral("与云端断开，%1 秒后重连…").arg(delay / 1000), true);
     QTimer::singleShot(delay, this, [this] { connectToCloud(); });
 }
+// ── 2026-10-11（#4）「进后台就连不上云端」：半开连接探活 ──
+// Android 后台网络被系统切断后，QWebSocket 是半开连接——不触发 connected /
+// disconnected / errorOccurred 任何信号，状态仍是"已连"，但实际收不到云端消息
+// 也发不出去。这里用"最后收到云端任何消息的时刻"判断：如果已连上、却超过
+// kCtrlStaleMs 一点消息都没有，那基本就是半开了 → 主动 disconnect() 走既有
+// 退避重连路径。云端正常时每 15s 至少广播一次 devices，45s 阈值给它留足余量。
+void ViewerBackend::onCtrlWatchdog()
+{
+    if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState || !m_authed)
+        return;   // 没连上/没鉴权成功时不需要探活（连接流程自己管）
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastRxMs > 0 && now - m_lastRxMs > kCtrlStaleMs) {
+        logf("[viewer] ⚠️ 探活：超过 %lld 秒没收到云端任何消息——判定半开连接，主动断开重连",
+             (long long)(kCtrlStaleMs / 1000));
+        setStatus(QStringLiteral("云端连接疑似掉线，正在重连…"), true);
+        m_ws->abort();   // abort 触发 disconnected → onDisconnected → 退避重连
+    }
+}
+void ViewerBackend::onAppStateChanged(Qt::ApplicationState state)
+{
+    // 回前台（Android onResume）立刻查一次半开，不用等 10s 定时器：
+    // 后台被挂起几十秒、回前台那一刻就要马上恢复，别让用户干等一个探活周期。
+    if (state == Qt::ApplicationActive)
+        onCtrlWatchdog();
+}
 void ViewerBackend::requestDevices()
 {
     sendEnvelope(QStringLiteral("devices"), QJsonObject());
@@ -1687,6 +1724,8 @@ void ViewerBackend::subscribeThumbnails(const QVariantList &uids)
 }
 void ViewerBackend::onTextMessage(const QString &text)
 {
+    // #4 探活：任何云端消息都刷新"最后收到"时刻（含未识别的、解析失败的消息）
+    m_lastRxMs = QDateTime::currentMSecsSinceEpoch();
     const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
     if (!doc.isObject()) {
         logf("[viewer] FAIL 云端消息解析不出来：%s", text.left(160).toUtf8().constData());
@@ -2002,6 +2041,8 @@ void ViewerBackend::onTextMessage(const QString &text)
 }
 void ViewerBackend::onBinaryMessage(const QByteArray &buf)
 {
+    // #4 探活：二进制帧也是"云端活着的证据"，同样刷新最后收到时刻
+    m_lastRxMs = QDateTime::currentMSecsSinceEpoch();
     // v1 帧：[1B 版本=1][2B 大端 headerLen][header JSON][JPEG]
     if (buf.size() >= 4 && (quint8)buf.at(0) == 1) {
         const int hLen = ((unsigned char)buf.at(1) << 8) | (unsigned char)buf.at(2);

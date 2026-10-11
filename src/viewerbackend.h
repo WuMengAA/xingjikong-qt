@@ -607,6 +607,11 @@ private:
     void onConnected();
     void onDisconnected();
     void onTextMessage(const QString &text);
+    /** 2026-10-11（#4）：探活 —— 已连上但超 kCtrlStaleMs 没收到云端任何消息 →
+     *  主动断开触发退避重连（覆盖 Android 后台被切断网络的半开连接）。 */
+    void onCtrlWatchdog();
+    /** 2026-10-11（#4）：应用回到前台（ApplicationActive）→ 立即查一次半开，不等 10s 定时器。 */
+    void onAppStateChanged(Qt::ApplicationState state);
     void onBinaryMessage(const QByteArray &buf);
     void refreshDevices(const QJsonArray &arr);
     void applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,
@@ -866,4 +871,12 @@ private:
     // ── 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）──
     QStringList m_thumbUids;                  // 当前订阅缩略图的设备 uid 列表
     QHash<QString, QImage> m_thumbFrames;     // uid → 缩略图帧缓存
+
+    // ── 2026-10-11「进后台就连不上云端」修复（#4）：半开连接探活 ──
+    // Android 后台网络被系统切断时，QWebSocket 是**半开连接**（不触发 connected/
+    // disconnected/error），回前台状态显示"已连"但发包无效。用收包时间戳 + 定时
+    // 器判断"多久没收到云端任何消息"：超 threshold 主动断开 → 走既有退避重连。
+    qint64 m_lastRxMs = 0;                    // 上次收到云端任何消息的时刻（0=从未收到）
+    QTimer *m_ctrlWatchdog = nullptr;         // 探活定时器（10s 一跳）
+    static const qint64 kCtrlStaleMs = 45000; // 45s 无收包即判半开，主动断开重连
 };
