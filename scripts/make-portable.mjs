@@ -30,7 +30,12 @@ const SEVEN_ZIP = "C:\\Program Files\\7-Zip\\7z.exe";
 
 /**
  * 包里**必须**有的运行时件。少任何一个都要当场报错。
- * ⚠️ `resources/icudtl.dat` 就是 0.6.0 漏掉的那个 —— 它是 WebEngine（远程画面收流）的必需品。
+ *
+ * ⚠️ 2026-10-11：viewer 已于 2026-10-09 用 libdatachannel 替换 QWebEngine 离屏收流
+ *    （见 CMakeLists「libdatachannel 替换 QWebEngine 离屏」）。`find_package` 里已无 WebEngine，
+ *    exe 导入表里**一个 WebEngine DLL 都没有**。原先强求的
+ *    Qt6WebChannel / Qt6WebEngineCore / Qt6WebEngineWidgets / QtWebEngineProcess / resources/icudtl.dat
+ *    全部删除 —— 它们已不是需要带的件，且当前构建用的 Qt 6.12.0 里根本没有 WebEngine 模块。
  */
 const REQUIRED = [
 	"viewer-qt.exe",
@@ -40,19 +45,14 @@ const REQUIRED = [
 	"Qt6Qml.dll",
 	"Qt6Quick.dll",
 	"Qt6QuickControls2.dll",
-	"Qt6WebChannel.dll",
-	"Qt6WebEngineCore.dll",
-	"Qt6WebEngineWidgets.dll",
 	"Qt6WebSockets.dll",
-	"QtWebEngineProcess.exe",
-	// 2026-10-10 补：WebRTC 走 libdatachannel，其 DTLS 链的是 PostgreSQL 17 自带的
-	// OpenSSL ⇒ exe 导入表含 libssl-3-x64.dll / libcrypto-3-x64.dll。windeployqt 不认识
-	// 这两个名字，少任何一个 = 干净机器解压双击即「系统错误：找不到 libssl-3-x64.dll」。
+	// 2026-10-10 补：WebRTC 走 libdatachannel，其 DTLS 链的是 OpenSSL ⇒ exe 导入表仍含
+	// libssl-3-x64.dll / libcrypto-3-x64.dll（2026-10-11 读 exe 导入表复核确认）。windeployqt
+	// 不认识这两个名字，少任何一个 = 干净机器解压双击即「系统错误：找不到 libssl-3-x64.dll」。
 	// 下面的拷贝循环（按 .dll 后缀）本来就会带上它们，但**点名进 REQUIRED** 才有意义：
-	// build/ 里哪天没了要在出包这一步当场炸，而不是等装机现场 —— 同 0.6.0 漏 icudtl.dat 的教训。
+	// build/ 里哪天没了要在出包这一步当场炸，而不是等装机现场。来源：PostgreSQL 17 的 bin/。
 	"libssl-3-x64.dll",
 	"libcrypto-3-x64.dll",
-	"resources/icudtl.dat",
 	"platforms/qwindows.dll",
 	"tls/qschannelbackend.dll", // 连云端的 WSS/TLS 靠它（schannel 是 Windows 自带证书链）
 	// 2026-10-06：QML 改从磁盘加载，这份源码链路就是"界面本体"。
