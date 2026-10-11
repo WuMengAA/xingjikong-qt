@@ -975,6 +975,12 @@ void ViewerBackend::start()
     m_url = qEnvironmentVariable("STE_VIEWER_URL", kDefaultViewerUrl).trimmed();
     if (m_url.isEmpty()) m_url = kDefaultViewerUrl;
     m_token = qEnvironmentVariable("STE_VIEWER_TOKEN", QString()).trimmed();
+    // 2026-10-11：Android 无环境变量 → 用编译期宏注入（CMake ANDROID 分支传
+    // -DSTE_VIEWER_TOKEN_CMake="…"，mobile 同款方案；方便未登录时连云端）
+#if defined(Q_OS_ANDROID) && defined(STE_VIEWER_TOKEN_CMake)
+    if (m_token.isEmpty())
+        m_token = QString::fromUtf8(STE_VIEWER_TOKEN_CMake).trimmed();
+#endif
     if (m_token.isEmpty()) {
         logf("[viewer] WARN 未设环境变量 STE_VIEWER_TOKEN：云端 /ws/viewer 已加鉴权，"
              "既没静态令牌也没接入票的话会被拒绝（不是网络问题，是没带凭据）");

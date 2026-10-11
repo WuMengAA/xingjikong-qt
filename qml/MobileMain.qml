@@ -36,6 +36,10 @@ ApplicationWindow {
     property string confirmTarget: ""
     property string confirmAction: "shutdown"
 
+    // ── 2026-10-11 P1 监控摘要：录制回放汇总 ──
+    property bool recBusy: false
+    property var recSummary: []   // [{uid, count, last}]，由 recordingsChanged 重算
+
     // backend 由 main.cpp 注入（ViewerBackend 实例，同一连接）
 
     // ── 顶部条 ──
@@ -323,16 +327,28 @@ ApplicationWindow {
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
                             Text { text: backend.accountName ? backend.accountName : "未登录"; color: root.th.fg; font.pixelSize: 15; font.weight: Font.Medium }
-                            Text { text: backend.role === "admin" ? "管理员" : "教师"; color: root.th.fg3; font.pixelSize: 12 }
+                            Text {
+                                text: backend.accountBusy ? "登录中…" : (backend.role === "admin" ? "管理员" : "教师")
+                                color: root.th.fg3; font.pixelSize: 12
+                            }
                         }
                         Item { width: 1; height: 1 }
+                        // 2026-10-11 P1：登录按钮带 busy 态（OAuth 打开浏览器等待回呼时禁用）
                         Rectangle {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             width: 96; height: 30; radius: 15
-                            color: root.th.inv
-                            Text { anchors.centerIn: parent; text: "网站账号登录"; color: root.th.win; font.pixelSize: 12 }
-                            MouseArea { anchors.fill: parent; onClicked: backend.loginWithSite() }
+                            color: backend.accountBusy ? root.th.fg4 : root.th.inv
+                            Text {
+                                anchors.centerIn: parent
+                                text: backend.accountBusy ? "等待登录…" : "网站账号登录"
+                                color: root.th.win; font.pixelSize: 12
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: !backend.accountBusy
+                                onClicked: backend.loginWithSite()
+                            }
                         }
                     }
                 }
@@ -378,6 +394,51 @@ ApplicationWindow {
                                 font.weight: (backend.themeMode === modelData.m) ? Font.Medium : Font.Normal
                             }
                             MouseArea { anchors.fill: parent; onClicked: backend.themeMode = modelData.m }
+                        }
+                    }
+                }
+
+                // ── 2026-10-11 P1 监控摘要：云端录制回放汇总 ──
+                // backend.recordings = { uid: [{name,bytes,url,mtimeMs}, ...] }
+                Text { text: "监控摘要 · 录制回放"; color: root.th.fg3; font.pixelSize: 12; anchors.topMargin: 6 }
+                Rectangle {
+                    width: parent.width; radius: root.th.rCard
+                    color: root.th.panel; border.color: root.th.stroke; border.width: 1
+                    implicitHeight: recCol.height + 20
+                    Column {
+                        id: recCol
+                        anchors.left: parent.left; anchors.right: parent.right
+                        anchors.top: parent.top; anchors.margins: 12
+                        spacing: 8
+                        // 触发拉取 + 汇总展示
+                        Rectangle {
+                            width: parent.width; height: 30; radius: 15
+                            color: root.th.hover; border.color: root.th.stroke; border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: recBusy ? "拉取中…" : "拉取录制列表"
+                                color: root.th.fg3; font.pixelSize: 12
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: !recBusy
+                                onClicked: { recBusy = true; backend.fetchRecordings() }
+                            }
+                        }
+                        // 各 uid 文件数 + 最近录制时间
+                        Repeater {
+                            model: recSummary
+                            delegate: Row {
+                                width: parent.width; spacing: 8
+                                Text { text: modelData.uid; color: root.th.fg; font.pixelSize: 13; width: parent.width * 0.4; elide: Text.ElideRight }
+                                Text { text: modelData.count + " 个录制"; color: root.th.fg3; font.pixelSize: 12 }
+                                Text { text: modelData.last; color: root.th.fg4; font.pixelSize: 11 }
+                            }
+                        }
+                        Text {
+                            visible: recSummary.length === 0 && !recBusy
+                            text: "暂无录制（或被控端未开录制）"
+                            color: root.th.fg4; font.pixelSize: 11
                         }
                     }
                 }
@@ -503,5 +564,34 @@ ApplicationWindow {
         backend.requestDevices()
         // 实时画面接线：viewerbackend rtcFrameReady → RtcVideoSurface
         backend.rtcFrameReady.connect(function (img) { vidSurf.onFrame(img) })
+        // 2026-10-11 P1 监控摘要：录制列表回来 → 汇总
+        backend.recordingsChanged.connect(function () { root.buildRecSummary() })
+        backend.fetchRecordings()
+    }
+
+    // ── 2026-10-11 P1 录制汇总：{uid: [{name,bytes,url,mtimeMs},...]} → [{uid,count,last}] ──
+    function buildRecSummary() {
+        root.recBusy = false
+        var recs = backend.recordings || {}
+        var out = []
+        for (var k in recs) {
+            var files = recs[k] || []
+            if (!files.length) continue
+            // 最近一个的 mtimeMs → 本地时间短串
+            var lastTxt = "-"
+            var newest = 0
+            for (var i = 0; i < files.length; ++i)
+                if (files[i].mtimeMs > newest) newest = files[i].mtimeMs
+            if (newest > 0) {
+                var d = new Date(newest)
+                lastTxt = (d.getMonth() + 1) + "-" + d.getDate() + " " +
+                          (d.getHours() < 10 ? "0" : "") + d.getHours() + ":" +
+                          (d.getMinutes() < 10 ? "0" : "") + d.getMinutes()
+            }
+            out.push({ uid: k, count: files.length, last: lastTxt })
+        }
+        // 按最近录制排序（新在前）
+        out.sort(function (a, b) { return (recs[b.uid][0].mtimeMs || 0) - (recs[a.uid][0].mtimeMs || 0) })
+        root.recSummary = out.slice(0, 12)
     }
 }

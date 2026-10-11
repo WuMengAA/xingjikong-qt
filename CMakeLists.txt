@@ -302,6 +302,14 @@ if(STE_IS_ANDROID)
       "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libmbedx509.a"
       log android log)
     target_compile_definitions(viewer-qt PRIVATE RTC_STATIC)
+    # 2026-10-11：Android 令牌编译期注入（mobile 同款：打包前设 STE_VIEWER_TOKEN_BUILD）
+    if(DEFINED ENV{STE_VIEWER_TOKEN_BUILD} AND NOT "$ENV{STE_VIEWER_TOKEN_BUILD}" STREQUAL "")
+      target_compile_definitions(viewer-qt PRIVATE
+        "STE_VIEWER_TOKEN_CMake=\"$ENV{STE_VIEWER_TOKEN_BUILD}\"")
+      message(STATUS "[viewer] Android 令牌已从 STE_VIEWER_TOKEN_BUILD 注入")
+    else()
+      message(WARNING "[viewer] 未设 STE_VIEWER_TOKEN_BUILD——Android 无静态令牌，未登录时云端会拒")
+    endif()
     message(STATUS "[viewer] Android ldc 已链入（mbedTLS 后端, RTC_STATIC）")
   else()
     message(FATAL_ERROR "[viewer] _probe/ldc_libs_android 缺失——先按 WebRTC-Android-构建配方交编译")
