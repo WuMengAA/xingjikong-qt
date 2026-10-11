@@ -2523,6 +2523,28 @@ static quint64 g_ttsCurToken = 0;       // 当前"正在读"的那条的 token�
 static QString g_ttsCurText;            // 当前"正在读"的文本（回退 SAPI 用）
 static bool g_ttsFallbackWired = false;
 
+// ── 2026-10-11 · 语音播报音量序列（用户点单）───────────────────────────────
+// 需求：开启语音播报发布通知时，**先**把音量调整到 75%，**等 TTS 播报完成后**恢复 50%。
+// 为什么：教室机平时主音量 50%，直接播报在嘈杂环境听不清；播完必须收回，否则下一节
+// 课件/视频会突然很响。抬/收都走 setSystemMasterVolume（Core Audio 主音量），与
+// set_volume 指令同一条路径 —— 改的是**系统主音量**，不是本进程音量（否则白改）。
+static const int kTtsVolSpeak   = 75;   // 播报期间抬到
+static const int kTtsVolRestore = 50;   // 播报完成后恢复
+
+// 播报结束（Edge 成功 finished / 回退 SAPI 读完）把主音量收回 50。
+// tok 用来判「这条还是不是当前那条」：被更新的一条顶掉之后，旧条的回调不再收音量，
+// 否则会把正在播的新一条提前掐回 50。
+static void ttsRestoreVolume(quint64 tok)
+{
+    if (tok != 0 && tok != g_ttsSeq) return;
+    QString verr;
+    if (!setSystemMasterVolume(kTtsVolRestore, &verr))
+        qWarning().noquote() << QStringLiteral("[agent-qt] TTS 播完恢复主音量 %1% 失败：%2")
+                                    .arg(kTtsVolRestore).arg(verr);
+}
+
+static bool g_ttsFinishedWired = false;
+
 static void speakText(const QString &text)
 {
     const QString say = text.trimmed();
@@ -2538,9 +2560,21 @@ static void speakText(const QString &text)
             // 被更新的一条顶掉了（token 已换）⇒ 这条 failed 是"过期"的，不再出声，
             // 否则会把正在由新一条朗读的内容重复念一遍。
             if (g_ttsCurToken == 0 || g_ttsCurToken != g_ttsSeq) return;
+            const quint64 tok = g_ttsCurToken;
             const QString fallback = g_ttsCurText;
             g_ttsCurToken = 0;   // 只回退一次
-            speakTextSapi(fallback);
+            speakTextSapi(fallback);        // 同步阻塞：读完才返回
+            ttsRestoreVolume(tok);          // 回退路也走「播完恢复 50」
+        });
+    }
+
+    // 只接一次：finished → 播报正常结束，恢复主音量 50
+    if (!g_ttsFinishedWired) {
+        g_ttsFinishedWired = true;
+        QObject::connect(&edge, &EdgeTts::finished, qApp, [](const QString &text) {
+            // 念完的已经不是"当前这条"（中间又来了新通知）⇒ 不收，交给新那条收
+            if (text != g_ttsCurText) return;
+            ttsRestoreVolume(g_ttsSeq);
         });
     }
 
@@ -2548,6 +2582,14 @@ static void speakText(const QString &text)
     const quint64 tok = ++g_ttsSeq;
     g_ttsCurToken = tok;
     g_ttsCurText  = say;
+
+    // ── 播报前先把系统主音量抬到 75%（需求：先调音量，再播）──
+    {
+        QString verr;
+        if (!setSystemMasterVolume(kTtsVolSpeak, &verr))
+            qWarning().noquote() << QStringLiteral("[agent-qt] TTS 播报前抬主音量 %1% 失败：%2")
+                                        .arg(kTtsVolSpeak).arg(verr);
+    }
 
     // 先让 Edge 读；它会异步报成功(finished)或失败(failed)
     edge.speak(say);
