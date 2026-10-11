@@ -110,13 +110,103 @@
 #include <mmsystem.h>   // waveOutSetVolume（set_volume，Rust 版实测零依赖可用）
 #include <shellapi.h>   // ShellExecuteW（launch_app）+ SHFileOperationW（media_delete 进回收站）
 #include <sapi.h>       // 2026-10-04：大屏通知 TTS 语音播报（Windows SAPI 5，微软免费离线语音）
+#include "system_volume.h"  // 2026-10-11：系统主音量（Core Audio/WASAPI，独立编译单元）
 #include <cstdio>
+
+// 前向声明：进程图标（定义在文件后半段，process_list 要用）
+static QString windowIconBase64(HWND hwnd);
+/**
+ * 取窗口图标 → 16×16 PNG 的 **base64**（给管理端「正在运行」列表显示图标用）。
+ *
+ * 为什么必须由被控端出图标：进程跑在这台教室机上，管理端本机没有它的 exe，
+ * 无从取图标；只能这边从窗口句柄取了编码回传。
+ *
+ * 取不到（服务进程 / 无窗口 / 跨权限）返回空串 —— 管理端会画一个首字方块占位，
+ * 不至于"有的有图标有的没有"看着像渲染坏了。
+ */
+static QString windowIconBase64(HWND hwnd)
+{
+    if (!hwnd || !IsWindow(hwnd)) return QString();
+
+    HICON ico = nullptr;
+    // 顺序：任务栏那个"大图标" → 小图标 → 窗口类注册时带的图标。
+    // 一律走 SendMessageTimeout 而不是 SendMessage：目标窗口若已挂起（无响应），
+    // 直接 SendMessage 会把抓屏这条线程一起卡死在那里。
+    DWORD_PTR r = 0;
+    if (!SendMessageTimeoutW(hwnd, WM_GETICON, ICON_BIG, 0, SMTO_ABORTIFHUNG, 60, &r) || r == 0) {
+        r = 0;
+        SendMessageTimeoutW(hwnd, WM_GETICON, ICON_SMALL2, 0, SMTO_ABORTIFHUNG, 60, &r);
+    }
+    ico = reinterpret_cast<HICON>(r);
+    if (!ico) ico = reinterpret_cast<HICON>(GetClassLongPtr(hwnd, GCLP_HICON));
+    if (!ico) return QString();
+
+    ICONINFO ii;
+    memset(&ii, 0, sizeof(ii));
+    if (!GetIconInfo(ico, &ii)) return QString();
+
+    QString out;
+    do {
+        HBITMAP hbm = ii.hbmColor;
+        if (!hbm) break;                       // 纯掩码图标（1bpp），不做，直接放弃
+
+        BITMAP bm;
+        memset(&bm, 0, sizeof(bm));
+        if (!GetObjectW(hbm, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) break;
+
+        HDC dc = CreateCompatibleDC(nullptr);
+        if (!dc) break;
+        BITMAPINFOHEADER bi;
+        memset(&bi, 0, sizeof(bi));
+        bi.biSize = sizeof(bi);
+        bi.biWidth = bm.bmWidth;
+        bi.biHeight = -bm.bmHeight;            // 负值 = 自上而下，省一次翻转
+        bi.biPlanes = 1;
+        bi.biBitCount = 32;
+        bi.biCompression = BI_RGB;
+
+        const int stride = bm.bmWidth * 4;
+        QByteArray buf(stride * bm.bmHeight, 0);
+        if (!GetDIBits(dc, hbm, 0, (UINT)bm.bmHeight, buf.data(),
+                       reinterpret_cast<BITMAPINFO *>(&bi), DIB_RGB_COLORS)) {
+            DeleteDC(dc);
+            break;
+        }
+        DeleteDC(dc);
+
+        // GDI 给的是 BGRA 字节序，小端下正好就是 Qt 的 Format_ARGB32 内存布局
+        QImage img(reinterpret_cast<const uchar *>(buf.constData()),
+                   bm.bmWidth, bm.bmHeight, QImage::Format_ARGB32);
+        if (img.isNull()) break;
+        // 缩到 16×16 再编码：图标经 JSON 回传，原图 32/48/256 都有，
+        // 几十条进程原样回传会把一条消息撑到几百 KB。
+        img = img.scaled(16, 16, Qt::KeepAspectRatio, Qt::SmoothTransformation).copy();
+
+        QByteArray png;
+        QBuffer bb(&png);
+        if (!bb.open(QIODevice::WriteOnly)) break;
+        if (!img.save(&bb, "PNG")) break;
+        bb.close();
+        out = QString::fromLatin1(png.toBase64());
+    } while (false);
+
+    // GetIconInfo 造出来的两张位图必须自己删，否则每个进程漏两个 GDI 句柄
+    if (ii.hbmColor) DeleteObject(ii.hbmColor);
+    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+    return out;
+}
+
 
 // 音量与进程内存信息要显式链接（MSVC 下 pragma 最省事，不必动 CMakeLists）
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shell32.lib")  // SHFileOperationW
 #pragma comment(lib, "sapi.lib")     // ISpVoice（通知 TTS）
+#pragma comment(lib, "ole32.lib")    // CoCreateInstance / CoInitializeEx（Core Audio）
+
+// setSystemMasterVolume 由 system_volume.h 声明、system_volume.cpp 实现。
+// 刻意独立成编译单元：main.cpp 已经 5500+ 行，再把 WASAPI/MMDevice 那一大套
+// SDK 头灌进来，只会让它更容易撞 C1060（编译器堆空间不足）。
 
 namespace {
 
@@ -227,6 +317,40 @@ QString g_fileRecvTarget;          // 目标文件绝对路径（file_push 时�
 QFile *g_fileRecvFile = nullptr;   // 接收文件句柄（WriteOnly）
 int g_fileRecvNext = 0;            // 下一个期望的分片序号（必须按序，乱序即失败）
 qint64 g_fileRecvBytes = 0;        // 累计已写入字节（file_done 时与声明值比对）
+// 2026-10-11：接收会话"最后一次有动静"的时刻（毫秒）。用来清半截文件 ——
+// file_push 一进来就把目标 Truncate 成 0 字节，若对方半途断线再也不来 file_done，
+// 这个空文件就永久留在收件目录里（用户报的"推完的文件是空的"多半就是撞上它）。
+qint64 g_fileRecvLastMs = 0;
+static const qint64 kFileRecvStaleMs = 120000;   // 120 秒没动静即判死会话
+
+// 人性化的体积文案（给"收到文件"提示用）：1024 进制，只到 MB 为止
+static QString humanBytes(qint64 n)
+{
+    if (n < 1024) return QString::number(n) + QStringLiteral(" B");
+    if (n < 1024 * 1024)
+        return QString::number((double)n / 1024.0, 'f', 1) + QStringLiteral(" KB");
+    return QString::number((double)n / 1024.0 / 1024.0, 'f', 1) + QStringLiteral(" MB");
+}
+
+// 死会话清理：关句柄 + 删半截文件 + 复位状态。心跳里每轮调一次。
+// 不做这件事的后果是收件目录里堆一堆打不开的 0 字节残骸，且下次 file_push
+// 会撞名（虽然有换名兜底，但目录还是被污染）。
+static void reapFileRecvIfStale()
+{
+    if (g_fileRecvTarget.isEmpty()) return;
+    if (g_fileRecvLastMs <= 0) { g_fileRecvLastMs = QDateTime::currentMSecsSinceEpoch(); return; }
+    if (QDateTime::currentMSecsSinceEpoch() - g_fileRecvLastMs < kFileRecvStaleMs) return;
+
+    qInfo("[agent-qt] 文件接收会话超时（%lld 秒没动静），清理半截文件：%s（已收 %lld 字节）",
+          (long long)(kFileRecvStaleMs / 1000), qPrintable(g_fileRecvTarget),
+          (long long)g_fileRecvBytes);
+    if (g_fileRecvFile) { g_fileRecvFile->close(); delete g_fileRecvFile; g_fileRecvFile = nullptr; }
+    QFile::remove(g_fileRecvTarget);
+    g_fileRecvTarget.clear();
+    g_fileRecvNext = 0;
+    g_fileRecvBytes = 0;
+    g_fileRecvLastMs = 0;
+}
 
 // ── 配置/连接可见性状态（2026-10-04）──
 // 目标：配置缺失时"明显报错"，不和"配了但连不上"混为一谈。
@@ -3297,8 +3421,15 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
-    // 主音量 0-100。用 winmm 的 waveOutSetVolume：零依赖、Rust 版实测可用。
-    // 越界**夹紧**（不报错），非数字回落 50；回执里回**实际生效值**，不许静默改了不说。
+
+    // 主音量 0-100。
+    //
+    // ⚠️ 2026-10-11 修「音量无法调节」：原来用 winmm 的 waveOutSetVolume，
+    //    它调的是**本进程自己的波形输出音量**（Windows Vista 之后音量是每应用/每会话的），
+    //    也就是说它只把"星集控被控端这个程序"的音量改了，教室机上正在放听力、放视频的
+    //    那些程序一点没变 —— 老师在管理端拖滑块，教室机声音纹丝不动，报上来就是"调不了"。
+    //    正确做法：走 Core Audio（WASAPI）的 IAudioEndpointVolume，改**默认播放设备的主音量**。
+    //    改完回读一次实际值回给管理端（不拿请求值冒充生效值）。
     if (action == QStringLiteral("set_volume")) {
         int v = 50;
         const QJsonValue jv = params.value(QStringLiteral("value"));
@@ -3306,9 +3437,23 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         else if (jv.isString()) { bool okv = false; const int t = jv.toString().trimmed().toInt(&okv); if (okv) v = t; }
         const int want = v;
         v = qBound(0, v, 100);
-        const quint32 lvl = ((quint32)v * 0xFFFFu) / 100u;
-        const quint32 packed = (lvl << 16) | lvl;
-        waveOutSetVolume(nullptr, packed);
+
+        if (!setSystemMasterVolume(v, &out.error)) {
+            // Core Audio 走不通（无音频设备 / 服务被禁 / 远程会话无端点）就如实报失败，
+            // 并且**回落到老的 waveOutSetVolume** —— 能调一点是一点，但不假装调成功了：
+            // 回落时回执里带 fallback 标记，管理端能看出这不是标准路径。
+            const quint32 lvl = ((quint32)v * 0xFFFFu) / 100u;
+            const quint32 packed = (lvl << 16) | lvl;
+            waveOutSetVolume(nullptr, packed);
+            qWarning("[agent-qt] set_volume 走 Core Audio 失败（%s），回落 waveOutSetVolume",
+                     out.error.toUtf8().constData());
+            out.result = QStringLiteral("done");
+            out.data.insert(QStringLiteral("volume"), v);
+            out.data.insert(QStringLiteral("fallback"), QStringLiteral("waveOut"));
+            out.data.insert(QStringLiteral("note"), QStringLiteral("系统主音量接口不可用，只改了被控端进程自身音量"));
+            if (want != v) out.data.insert(QStringLiteral("clampedFrom"), want);
+            return out;
+        }
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("volume"), v);
         if (want != v) out.data.insert(QStringLiteral("clampedFrom"), want);
@@ -3398,6 +3543,10 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             o.insert(QStringLiteral("mem_mb"), memMbOf(w.second));
             const QString prot = protectedCategory(*it);
             if (!prot.isEmpty()) o.insert(QStringLiteral("protected"), prot);
+            // 2026-10-11 需求#6：管理端进程列表要显示图标。图标只能这边取
+            // （管理端没有这台机器上的 exe），取不到就留空 —— 那边画首字方块兜底。
+            const QString ic = windowIconBase64(w.first);
+            if (!ic.isEmpty()) o.insert(QStringLiteral("icon"), ic);
             items.append(o);
         }
         out.result = QStringLiteral("done");
@@ -4203,6 +4352,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         }
         g_fileRecvBytes += data.size();
         g_fileRecvNext++;
+        g_fileRecvLastMs = QDateTime::currentMSecsSinceEpoch();   // 会话还在动，别清理
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("seq"), seq);
         out.data.insert(QStringLiteral("bytes"), written);
@@ -4224,9 +4374,14 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             g_fileRecvFile = nullptr;
         }
         const qint64 expect = params.value(QStringLiteral("total_bytes")).toVariant().toLongLong();
-        if (expect <= 0) {
-            // 发端点了"取消"（total_bytes=0 就是取消信号，不是"收完整"）。
-            // 半截文件**必须删掉**：留着就是这台机器上打不开的残缺文件，中间这段时间谁点开谁中招。
+        // 取消的判据改看**显式标志**，不再拿 total_bytes<=0 顶替：
+        // 那样做等于把"0 字节文件"和"取消"焊成同一件事，一个真要推的空文件会被当成取消删掉。
+        // 老管理端不会带 cancel 字段，那时仍按 total_bytes<=0 认取消 —— 兼容不变。
+        const bool wantCancel = params.value(QStringLiteral("cancel")).toBool(false)
+                                || (!params.contains(QStringLiteral("cancel")) && expect <= 0);
+        if (wantCancel) {
+            // 发端点了"取消"。半截文件**必须删掉**：留着就是这台机器上打不开的残缺文件，
+            // 中间这段时间谁点开谁中招。
             out.result = QStringLiteral("done");
             out.data.insert(QStringLiteral("cancelled"), true);
             out.data.insert(QStringLiteral("bytes"), g_fileRecvBytes);
@@ -4235,6 +4390,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             g_fileRecvTarget.clear();
             g_fileRecvNext = 0;
             g_fileRecvBytes = 0;
+            g_fileRecvLastMs = 0;
             return out;
         }
         if (expect != g_fileRecvBytes) {
@@ -4252,9 +4408,25 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.data.insert(QStringLiteral("path"), QDir::toNativeSeparators(g_fileRecvTarget));
         out.data.insert(QStringLiteral("bytes"), g_fileRecvBytes);
         out.data.insert(QStringLiteral("chunks"), g_fileRecvNext);
+        // ── 2026-10-11：「收到文件」的提示从这里发，不再在 file_push 里发 ──
+        // 以前开会话的瞬间就报"收到文件"，可那时文件刚被 Truncate 成 0 字节、
+        // 一片数据都还没到 —— 学生/老师点开就是个空文件（用户报的"推完的文件是空的"）。
+        // 现在放到字节数**比对通过之后**，文件名带体积，让人一眼知道收全了没有。
+        {
+            const QString shown = QDir::toNativeSeparators(g_fileRecvTarget);
+            const QString desc = QFileInfo(g_fileRecvTarget).fileName()
+                                 + QStringLiteral("（") + humanBytes(g_fileRecvBytes)
+                                 + QStringLiteral("）");
+            islandShow(QStringLiteral("收到文件"), desc, QStringLiteral("download"), 6000,
+                       true, shown);
+            trayNotify(QStringLiteral("收到文件"), desc, QSystemTrayIcon::Information, 10000);
+        }
+        qInfo("[agent-qt] ✅ 文件收全落盘：%s（%lld 字节 / %d 片）",
+              qPrintable(g_fileRecvTarget), (long long)g_fileRecvBytes, g_fileRecvNext);
         g_fileRecvTarget.clear();
         g_fileRecvNext = 0;
         g_fileRecvBytes = 0;
+        g_fileRecvLastMs = 0;
         return out;
     }
 
@@ -4327,27 +4499,22 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             g_fileRecvTarget = alt;
             g_fileRecvBytes = 0;
             g_fileRecvNext = 0;
+            g_fileRecvLastMs = QDateTime::currentMSecsSinceEpoch();
             out.result = QStringLiteral("done");
             out.data.insert(QStringLiteral("target"), QDir::toNativeSeparators(alt));
             out.data.insert(QStringLiteral("totalBytes"), total);
             out.data.insert(QStringLiteral("ready"), true);
-            // #92：接收端提醒。以前文件推送下来是**静默落盘**——学生根本不知道下了什么，
-            // 老师问"作业收到了吗"还得去翻收件目录。这里在灵动岛上点一句，
-            // 并且开交互（可点开看清楚文件名），而不是每次都弹窗打断上课。
-            islandShow(QStringLiteral("收到文件"), QDir::toNativeSeparators(alt),
-                       QStringLiteral("download"), 6000, true, QDir::toNativeSeparators(alt));
-            trayNotify(QStringLiteral("收到文件"),
-                       QFileInfo(alt).fileName(), QSystemTrayIcon::Information, 10000);
+            // ⚠️ 这里**不提示**"收到文件"。此刻只是把接收句柄开好、目标刚被 Truncate 成
+            // 0 字节，一片数据都还没到 —— 在这儿报"收到"就是让人去打开一个空文件
+            // （2026-10-11 用户报的"推完的文件是空的"正是这条）。
+            // 真正的提示挪到 file_done 字节数比对通过之后。
             return out;
         }
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("target"), QDir::toNativeSeparators(target));
         out.data.insert(QStringLiteral("totalBytes"), total);
         out.data.insert(QStringLiteral("ready"), true);
-        islandShow(QStringLiteral("收到文件"), QDir::toNativeSeparators(target),
-                   QStringLiteral("download"), 6000, true, QDir::toNativeSeparators(target));
-        trayNotify(QStringLiteral("收到文件"), QFileInfo(target).fileName(),
-                   QSystemTrayIcon::Information, 10000);
+        g_fileRecvLastMs = QDateTime::currentMSecsSinceEpoch();   // 同上：此刻不提示
         return out;
     }
 
@@ -4517,6 +4684,10 @@ static void rtcSendSignal(const QString &kind, const QString &sdp, const QString
         qWarning("[rtc] FAIL 信令没发出去（socket 不在线）kind=%s", qPrintable(kind));
         return;
     }
+    // ── 2026-10-11：这里以前**什么都不打**。云端日志里 grep 不到任何 rtc-offer，
+    //    根本分不清是"本机没生成 offer"还是"生成了没发出去"。补一行。──
+    qInfo("[rtc] 发信令 kind=%s sdp=%d B cand=%d B",
+          qPrintable(kind), sdp.size(), cand.size());
     QJsonObject body;
     body.insert(QStringLiteral("kind"), kind);
     if (!sdp.isEmpty()) body.insert(QStringLiteral("sdp"), sdp);
@@ -4710,13 +4881,27 @@ static void rtcStart()
         cancelRtcViewReap();
         g_rtcOn = true;
         LdcStreamer &s = LdcStreamer::instance();
-        // 信令出站：ldc 的 offer/candidate → 云端（与旧路同协议 rtc-* 消息）
+        // ── 2026-10-11 诊断：如果 LdcStreamer 的单例不是在**主线程**上构造的，
+        //    它身上那两个 QTimer（延迟发 offer 的 singleShot + 抓屏的 m_capture）
+        //    就永远等不到事件，表现正是"ldc 起来了但一个 offer 都没发出去"。
+        //    这里把线程关系打出来，一眼可判。──
+        qInfo("[rtc-ldc] 线程诊断：streamer.thread=%p app.thread=%p current=%p 同线程=%d",
+              (void *)s.thread(), (void *)qApp->thread(),
+              (void *)QThread::currentThread(),
+              (int)(s.thread() == qApp->thread()));
+        // ⚠️ 2026-10-11：ldc 的 onLocalDescription / onLocalCandidate 回调来自
+        //    libdatachannel 自己的线程（探针实测报过 "Timers cannot be stopped from
+        //    another thread"）。这里显式写 QueuedConnection，强制把信令投递回主线程再
+        //    碰 g_ws——AutoConnection 在跨线程时本来也是队列，但写死能防止以后有人
+        //    把 context 摘掉后退化成直连、在库线程里直接写 socket。
+        //    信令出站：ldc 的 offer/candidate → 云端（与旧路同协议 rtc-* 消息）
         QObject::connect(&s, &LdcStreamer::signalOffer, &s, [](const QByteArray &sdp) {
+            qInfo("[rtc-ldc] 收到 signalOffer（%d 字节）→ 发往云端", sdp.size());
             rtcSendSignal(QStringLiteral("offer"), QString::fromUtf8(sdp), QString());
-        }, Qt::UniqueConnection);
+        }, Qt::QueuedConnection);
         QObject::connect(&s, &LdcStreamer::signalCandidate, &s, [](const QByteArray &cand) {
             rtcSendSignal(QStringLiteral("ice"), QString(), QString::fromUtf8(cand));
-        }, Qt::UniqueConnection);
+        }, Qt::QueuedConnection);
         QObject::connect(&s, &LdcStreamer::failed, &s, [](const QString &reason) {
             qWarning("[rtc-ldc] FAIL %s", qPrintable(reason));
         }, Qt::UniqueConnection);
@@ -5532,7 +5717,12 @@ int main(int argc, char *argv[])
     if (hbMs <= 0) hbMs = kHeartbeatIntervalMs;
     g_heartbeatMs = hbMs;
     g_hbTimer = new QTimer(&app);
-    QObject::connect(g_hbTimer, &QTimer::timeout, &app, [] { sendHeartbeat(); });
+    // 2026-10-11：顺带捡一下"卡死的文件接收会话"——发端中途断线就再不会有 file_done，
+    // 目标文件会以一个 0 字节/半截的形态永久留在收件目录里。
+    QObject::connect(g_hbTimer, &QTimer::timeout, &app, [] {
+        sendHeartbeat();
+        reapFileRecvIfStale();
+    });
     g_hbTimer->start(g_heartbeatMs);
     qInfo("[agent-qt] 心跳间隔 %d ms（等云端 registered 下发 heartbeatMs 后以其为准；本机当前按 %d ms 无心跳即判离线）",
           g_heartbeatMs, g_timeoutMs);

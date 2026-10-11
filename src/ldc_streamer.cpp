@@ -73,9 +73,18 @@ void LdcStreamer::start(int captureMs)
         // 之后的 re-offer（negotiationNeeded 再触发）让 receiver 复用 PC 处理，
         // 重复发 offer 会撞车（2026-10-08 联调实测 Invalid ICE settings）。
         pc->onLocalDescription([this](rtc::Description desc) {
-            if (desc.type() == rtc::Description::Type::Offer && !m_offerSent) {
+            // ── 2026-10-11 诊断：整条 RTC 链路此前**零日志**，
+            //    "被控端起了 ldc 但云端从没收到过 offer" 这件事只能靠猜。
+            //    这里把回调是否到达、类型是什么、SDP 多长全打出来。──
+            const bool isOffer = desc.type() == rtc::Description::Type::Offer;
+            qInfo("[rtc-ldc] onLocalDescription 回调到达 type=%s offerSent=%d len=%d",
+                  isOffer ? "offer" : "answer", (int)m_offerSent,
+                  (int)std::string(desc).size());
+            if (isOffer && !m_offerSent) {
                 m_offerSent = true;
-                emit signalOffer(QByteArray::fromStdString(desc));
+                const QByteArray sdp = QByteArray::fromStdString(desc);
+                qInfo("[rtc-ldc] 发射 signalOffer（%d 字节）", sdp.size());
+                emit signalOffer(sdp);
             }
         });
         pc->onStateChange([this](rtc::PeerConnection::State st) {
@@ -102,10 +111,14 @@ void LdcStreamer::start(int captureMs)
         // 先跑完，否则同样报 "No ... to negotiate"（实测 start 立即发会失败）
         QTimer::singleShot(0, this, [this]() {
             auto *pc = static_cast<rtc::PeerConnection *>(m_pc.get());
-            if (!pc) return;
+            // ── 2026-10-11 诊断：这一段跑没跑、跑完有没有回调，以前全靠猜 ──
+            if (!pc) { qWarning("[rtc-ldc] FAIL 延迟发 offer 时 PC 已经没了"); return; }
+            qInfo("[rtc-ldc] 延迟发 offer：调 setLocalDescription()");
             try {
                 pc->setLocalDescription();
+                qInfo("[rtc-ldc] setLocalDescription() 已返回（等 onLocalDescription 回调）");
             } catch (const std::exception &e) {
+                qWarning("[rtc-ldc] FAIL setLocalDescription: %s", e.what());
                 emit failed(QStringLiteral("setLocalDescription: %1").arg(QString::fromLocal8Bit(e.what())));
             }
         });

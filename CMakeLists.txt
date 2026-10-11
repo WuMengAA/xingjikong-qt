@@ -136,6 +136,9 @@ add_executable(stelarith-agent-qt
   # ── WebRTC 推流（2026-10-09：libdatachannel 换 other webrtc，探针全绿）──
   src/ldc_streamer.cpp
   src/ldc_streamer.h
+  # ── 系统主音量（2026-10-11 Core Audio/WASAPI，独立编译单元隔离 SDK 头）──
+  src/system_volume.cpp
+  src/system_volume.h
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
