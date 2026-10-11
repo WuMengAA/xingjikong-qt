@@ -129,6 +129,11 @@ class ViewerBackend : public QObject
     Q_PROPERTY(int filePercent READ filePercent NOTIFY fileProgressChanged)
     Q_PROPERTY(QString fileError READ fileError NOTIFY fileProgressChanged)
     Q_PROPERTY(QString fileTarget READ fileTarget NOTIFY fileProgressChanged)
+    // 2026-10-11：进度条光有百分比不够看 —— 加上"第几片"和"已推/总量的人话体积"，
+    // 老师能一眼分辨"在大文件慢推"还是"卡住了没动"。
+    Q_PROPERTY(int fileChunks READ fileChunks NOTIFY fileProgressChanged)
+    Q_PROPERTY(QString fileBytesText READ fileBytesText NOTIFY fileProgressChanged)
+    Q_PROPERTY(QString fileTotalText READ fileTotalText NOTIFY fileProgressChanged)
     // ── 分班制（2026-10-08）──
     // 云端 /api/classes 返回的全部班级（含每台在线数），管理端据此在设备列表上做「按班分组/筛选」。
     // 云端算好结论推下来（requestClasses 拉 + 设备上下线时随 devices 刷新），界面只消费。
@@ -302,6 +307,9 @@ public:
     int filePercent() const { return m_filePercent; }
     QString fileError() const { return m_fileError; }
     QString fileTarget() const { return m_fileTarget; }
+    int fileChunks() const { return m_pushNext; }
+    QString fileBytesText() const;
+    QString fileTotalText() const;
 
     // RTC 读数
     bool rtcReady() const { return m_rtcReady; }
@@ -332,6 +340,22 @@ public:
     Q_INVOKABLE void requestClasses();   // 2026-10-08 拉班级列表
     Q_INVOKABLE void requestStorage();   // 2026-10-08 拉云端存储概况
     Q_INVOKABLE void sendAction(const QString &action, const QJsonObject &params = QJsonObject());
+
+    // ── 进程黑名单（2026-10-11 需求#6：「保存 → 指定软件一键关闭」）──
+    // 老师真正想做的是：把"上课不许开的那几个软件"一次性存下来，以后一键全部关掉，
+    // 而不是每次在进程列表里一个个挑。名单落在**管理端本机** QSettings（跟机器走，
+    // 不依赖云端），存的是进程名（如 chrome.exe），不区分大小写。
+    Q_PROPERTY(QStringList procBlacklist READ procBlacklist NOTIFY procBlacklistChanged)
+    QStringList procBlacklist() const;
+    /** 加一条（已存在就不重复加）。传进来的名字会做 trim。 */
+    Q_INVOKABLE void addProcToBlacklist(const QString &name);
+    Q_INVOKABLE void removeProcFromBlacklist(const QString &name);
+    /**
+     * 把当前进程表里**命中黑名单**的那些一次关掉（逐个发 process_stop）。
+     * @param pidsAndNames 由 QML 传进来的当前进程表 [{pid, name}, ...]
+     * @return 实际下发了几个关闭指令（0 = 一个都没匹配上，界面据此提示"没开着"）
+     */
+    Q_INVOKABLE int killBlacklisted(const QVariantList &items);
     Q_INVOKABLE void sendPing();
     /** 发一次鼠标操控。button 是 left/right/middle —— 被控端按它选 MOUSEEVENTF_*DOWN/UP。
      *  ⚠️ 2026-10-11：这个参数以前**没有**，而 QML 一直在传第 4 个（btnOf 的结果），
@@ -454,6 +478,8 @@ signals:
     void currentUidChanged();
     /** 当前选中设备的能力清单（actions）变了 —— 按钮门控要跟着刷。 */
     void capActionsChanged();
+    /** 进程黑名单变化（加/删一条）。 */
+    void procBlacklistChanged();
     void frameChanged();
     void statsChanged();
     void cloudUrlChanged();
@@ -642,8 +668,12 @@ private:
     QString m_token;
 
     QString m_currentUid;
+    // ── 2026-10-11「选中即远控」状态：记住现在正接管哪台，切换/清空时好收尾 ──
+    bool m_remoteControlling = false;
+    QString m_remoteControlUid;
     bool m_screenActive = true;   // 2026-10-08：带画面页是否可见（不可见则暂停单台拉流）
     QStringList m_capActions;              // 当前设备的指令能力全集（空=没上报过）
+    QStringList m_procBlacklist;           // 2026-10-11：进程黑名单（QSettings proc/blacklist）
     bool m_connected = false;
     bool m_authed = false;
     bool m_authFailed = false;      // 鉴权被拒后别再一遍遍重连
@@ -675,6 +705,9 @@ private:
     QString m_pushPath;        // 本机文件路径（便于报错时把路径直接说出来）
     QFile m_pushFile;          // 本机文件句柄（推完/取消就关，不留着）
     qint64 m_pushNext = 0;     // 下一片的 seq（被控端只认严格递增）
+    // 2026-10-11：推送看门狗。每发一条指令重启一次；超时即判"教室机没应答"，
+    // 报失败并让对面删掉半截文件 —— 否则流程永远卡在 sending，界面像死了一样。
+    QTimer *m_pushWatchdog = nullptr;
 
     // ── WebRTC 收流现场 ──
     QWebEngineView *m_rtcView = nullptr;

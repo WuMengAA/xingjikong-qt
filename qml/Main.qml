@@ -190,8 +190,27 @@ ApplicationWindow {
             if (state !== "executed")
                 return
             // 画面右下角那个音量，只认回执；滑块那个数字不写回界面（见 remoteVolume 注释）
-            if (action === "set_volume" && data && data.volume !== undefined)
+            if (action === "set_volume" && data && data.volume !== undefined) {
                 root.remoteVolume = data.volume
+                // 2026-10-11：只改界面数字、不给提示 = 老师看不见到底成没成。
+                // 被控端夹过的（比如传了 120）会带 clampedFrom，一并说出来。
+                if (data.clampedFrom !== undefined)
+                    root.toast("音量已设为 " + data.volume + "%（你填的 " + data.clampedFrom + " 超出 0-100，已夹到边界）")
+                else
+                    root.toast("音量已设为 " + data.volume + "%")
+            }
+
+            // 截图（2026-10-11）：以前点了就没声没息——指令确实发了、也确实执行了，
+            // 但界面一个字都不说，老师只能靠"没报错"猜。这里把回执念出来。
+            // 注意 path 是**教室机**上的路径，本机打不开，别误导成"已存到你电脑"。
+            if (action === "screenshot") {
+                if (result === "done" && data && data.path !== undefined)
+                    root.toast("已截图 → 教室机 " + uid + "：" + data.path
+                               + "（" + (data.width || "?") + "×" + (data.height || "?")
+                               + "，" + Math.round((data.bytes || 0) / 1024) + " KB）")
+                else
+                    root.toast("截图失败 → " + uid + "：" + (error || "未知原因"))
+            }
 
             // 概览页的「最近回执」流水：只收真回执（executed），时间倒序，最多 20 条
             var row = {
@@ -778,10 +797,16 @@ ApplicationWindow {
                 // 分班制（需求 #4）：按班级维度筛选设备。班级来自云端 /api/classes（界面只消费
                 // backend.classes），当前选中写 backend.currentClass，filteredDevices 已按它过滤。
                 // 班级可能不止几个，用 Flickable 兜住横向滚动，不挤占下面的设备列表宽度。
+                // ⚠️ 2026-10-11 修「选中班级是灰的、看不见字」：
+                //   旧写法是 Item + Rectangle + Text，宽度写 `clsLbl.width + 16`，而 clsLbl
+                //   又是 `anchors.centerIn: parent` —— 宽度绕回自己身上算，chip 被压到几乎没有
+                //   宽度，文字全被裁掉，只剩一条灰边（看着就是"灰的、没字"）。
+                //   改成 Rectangle 自己当 chip，宽度取 Text 的 **implicitWidth**（纯内容宽，
+                //   不依赖布局），并给未选中态一个淡底，选中/未选中一眼可分。
                 Flickable {
                     width: 168
                     height: 26
-                    contentWidth: clsRow.width
+                    contentWidth: Math.max(clsRow.implicitWidth, clsRow.width)
                     clip: true
                     Row {
                         id: clsRow
@@ -796,24 +821,27 @@ ApplicationWindow {
                                 }
                                 return arr
                             })()
-                            delegate: Item {
+                            delegate: Rectangle {
                                 height: 22
-                                width: clsLbl.width + 16
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: th.rCtrl
-                                    color: (backend.currentClass === modelData.code) ? th.inv : "transparent"
-                                    border.color: th.stroke; border.width: 1
-                                }
+                                width: clsLbl.implicitWidth + 16
+                                radius: th.rCtrl
+                                color: (backend.currentClass === modelData.code) ? th.inv
+                                                                                : th.hover2
+                                border.color: (backend.currentClass === modelData.code) ? th.inv
+                                                                                        : th.stroke
+                                border.width: 1
                                 Text {
                                     id: clsLbl
                                     anchors.centerIn: parent
                                     text: modelData.name
                                     color: (backend.currentClass === modelData.code) ? th.win : th.fg3
                                     font.pixelSize: 11
+                                    font.weight: (backend.currentClass === modelData.code)
+                                                 ? Font.DemiBold : Font.Normal
                                 }
                                 MouseArea {
                                     anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
                                     onClicked: backend.setCurrentClass(modelData.code)
                                 }
                             }
@@ -3388,7 +3416,7 @@ ApplicationWindow {
                         text: "先选你管的班级，后面设备列表默认只显示这个班。"; color: th.fg3; font.pixelSize: 13 }
                     Flickable {
                         width: parent.width; height: 30
-                        contentWidth: wClsRow.width; clip: true
+                        contentWidth: Math.max(wClsRow.implicitWidth, wClsRow.width); clip: true
                         Row {
                             id: wClsRow; spacing: 6
                             Repeater {
@@ -3398,18 +3426,21 @@ ApplicationWindow {
                                     for (var i = 0; i < cs.length; ++i) arr.push({ code: cs[i].code, name: (cs[i].name || cs[i].code) })
                                     return arr
                                 })()
-                                delegate: Item {
-                                    height: 26; width: wLbl.width + 16
-                                    Rectangle {
-                                        anchors.fill: parent; radius: th.rCtrl
-                                        color: (backend.currentClass === modelData.code) ? th.inv : "transparent"
-                                        border.color: th.stroke; border.width: 1
-                                    }
+                                // 同 clsRow：chip 宽度取 implicitWidth，别绕回 centerIn 的 Text 算宽度
+                                delegate: Rectangle {
+                                    height: 26; width: wLbl.implicitWidth + 16
+                                    radius: th.rCtrl
+                                    color: (backend.currentClass === modelData.code) ? th.inv : th.hover2
+                                    border.color: (backend.currentClass === modelData.code) ? th.inv
+                                                                                            : th.stroke
+                                    border.width: 1
                                     Text {
                                         id: wLbl; anchors.centerIn: parent
                                         text: modelData.name
                                         color: (backend.currentClass === modelData.code) ? th.win : th.fg3
                                         font.pixelSize: 12
+                                        font.weight: (backend.currentClass === modelData.code)
+                                                     ? Font.DemiBold : Font.Normal
                                     }
                                     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                         onClicked: backend.setCurrentClass(modelData.code) }

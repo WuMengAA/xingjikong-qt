@@ -12,9 +12,17 @@ Popup {
     property var candidates: []     // 可打开（来自 list_shortcut_candidates：有窗口的程序 + 桌面条目）
     property bool truncated: false
 
+    // 弹窗内的短提示（2026-10-11）：一键全关这种批量动作必须给人一个回音，
+    // 否则点了不知道是没匹配上还是没发出去。这里不跨页调 root.toast()——
+    // 本组件不认识 root，自己显示一行更可靠。
+    property string tipText: ""
+    function hint(msg) { dlg.tipText = msg; tipTimer.restart() }
+    Timer { id: tipTimer; interval: 2600; repeat: false; onTriggered: dlg.tipText = "" }
+
     anchors.centerIn: parent
     width: 720
-    height: 480
+    // 2026-10-11：加了下面那条「黑名单」区（原 480 已排满，加高才放得下）
+    height: 566
     modal: true
     padding: 0
     closePolicy: Popup.CloseOnEscape
@@ -202,6 +210,35 @@ Popup {
 
                     Row {
                         spacing: 8
+                        // 进程图标（2026-10-11 需求#6）：被控端从窗口句柄取图标、
+                        // 转 16×16 PNG 的 base64 带回来。取不到（服务进程 / 无窗口）
+                        // 就留一个同名首字的方块占位 —— 至少每行左边是齐的，
+                        // 不会"有的有图标有的没有"看起来像渲染坏了。
+                        Item {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 16
+                            height: 16
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 3
+                                color: dlg.theme ? dlg.theme.line : "#161616"
+                                visible: !(modelData.icon || "")
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: (modelData.name || "?").charAt(0).toUpperCase()
+                                    color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                                    font.pixelSize: 9
+                                }
+                            }
+                            Image {
+                                anchors.fill: parent
+                                visible: !!(modelData.icon || "")
+                                source: (modelData.icon || "")
+                                         ? ("data:image/png;base64," + modelData.icon) : ""
+                                fillMode: Image.PreserveAspectFit
+                                mipmap: true
+                            }
+                        }
                         Text {
                             text: modelData.name
                             color: sel ? (dlg.theme ? dlg.theme.fg : "#FAFAFA")
@@ -246,6 +283,153 @@ Popup {
                 MouseArea {
                     anchors.fill: parent
                     onClicked: listView.picked = index
+                }
+            }
+        }
+
+        // ── 黑名单（2026-10-11 需求#6：「保存 → 指定软件一键关闭」）──
+        // 老师真正重复做的事不是"关这一个进程"，而是"每节课都要关掉那几个"。
+        // 所以把"上课不许开的软件"存成一份名单（落在管理端本机，换机器也跟着走），
+        // 以后点一次就全部关掉。名单只对**当前正在运行**的进程生效：没开的不用管。
+        Item {
+            width: parent.width
+            height: 86
+
+            Rectangle {
+                anchors.top: parent.top
+                width: parent.width
+                height: 1
+                color: dlg.theme ? dlg.theme.line : "#161616"
+            }
+
+            Text {
+                y: 10
+                x: 18
+                text: "黑名单（" + backend.procBlacklist.length + "）· 存下来，以后一键全关"
+                color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                font.pixelSize: 11
+            }
+
+            // 名单横条：空的时候给一句人话，不要留一片空白让人以为没这个功能
+            Flickable {
+                y: 30
+                x: 18
+                width: parent.width - 210
+                height: 24
+                contentWidth: blRow.implicitWidth
+                clip: true
+                Row {
+                    id: blRow
+                    spacing: 4
+                    Repeater {
+                        model: backend.procBlacklist
+                        delegate: Rectangle {
+                            height: 22
+                            width: blLbl.implicitWidth + 26
+                            radius: 6
+                            color: dlg.theme ? dlg.theme.line : "#161616"
+                            Text {
+                                id: blLbl
+                                anchors.centerIn: parent
+                                x: 8
+                                text: modelData
+                                color: dlg.theme ? dlg.theme.op : "#C8C8C8"
+                                font.pixelSize: 11
+                            }
+                            // 右侧一个小 × 用来移除（不设 icon 字体，画两笔斜线最省事）
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.right: parent.right
+                                anchors.rightMargin: 6
+                                width: 12; height: 12
+                                color: "transparent"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "×"
+                                    color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                                    font.pixelSize: 12
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    anchors.margins: -4
+                                    onClicked: backend.removeProcFromBlacklist(modelData)
+                                }
+                            }
+                        }
+                    }
+                }
+                Text {
+                    visible: backend.procBlacklist.length === 0
+                    text: "（空）—— 在「正在运行」里选一行，点右边「加入黑名单」"
+                    color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
+                    font.pixelSize: 11
+                }
+            }
+
+            // 加入黑名单（拿当前选中的那一行）
+            Rectangle {
+                y: 30
+                anchors.right: parent.right
+                anchors.rightMargin: 100
+                width: 92; height: 24
+                radius: 6
+                color: "transparent"
+                border.color: dlg.theme ? dlg.theme.stroke : "#242424"
+                border.width: 1
+                Text {
+                    anchors.centerIn: parent
+                    text: "加入黑名单"
+                    color: listView.picked >= 0 ? (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                                                : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                    font.pixelSize: 11
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: listView.picked >= 0
+                    onClicked: {
+                        var it = dlg.items[listView.picked]
+                        if (it) backend.addProcToBlacklist(it.name)
+                    }
+                }
+            }
+
+            Text {
+                y: 58
+                x: 18
+                width: parent.width - 36
+                text: dlg.tipText
+                visible: dlg.tipText !== ""
+                color: dlg.theme ? dlg.theme.op : "#C8C8C8"
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+
+            // 一键关闭：命中名单且此刻正在运行的，逐个发 process_stop
+            Rectangle {
+                y: 30
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                width: 84; height: 24
+                radius: 6
+                color: backend.procBlacklist.length > 0 ? (dlg.theme ? dlg.theme.inv : "#F0F0F0")
+                                                        : (dlg.theme ? dlg.theme.line : "#161616")
+                Text {
+                    anchors.centerIn: parent
+                    text: "一键全关"
+                    color: backend.procBlacklist.length > 0 ? (dlg.theme ? dlg.theme.win : "#0A0A0A")
+                                                            : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                    font.pixelSize: 11
+                    font.weight: Font.Medium
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: backend.procBlacklist.length > 0
+                    onClicked: {
+                        var n = backend.killBlacklisted(dlg.items)
+                        if (n < 0) dlg.hint("还没选设备，不知道要关哪台机器上的")
+                        else if (n === 0) dlg.hint("名单里的软件这台机器现在都没开着")
+                        else dlg.hint("已下发 " + n + " 个关闭指令")
+                    }
                 }
             }
         }

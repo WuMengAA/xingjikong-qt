@@ -60,6 +60,20 @@ namespace {
  */
 constexpr qint64 kFileChunkBytes = 64 * 1024;
 /**
+ * 等多久算"教室机没应答"（毫秒）。分片是**一片一回报**的：发一片 → 等回执 → 发下一片。
+ * 任何一片超时都说明对面掉线/卡死，而流程会永远停在 sending —— 按钮锁死、进度条不动，
+ * 界面上看着就是"点了没反应"。有了这个上限，超时就明确报失败，并顺手让对面删掉半截文件。
+ */
+constexpr int kPushAckTimeoutMs = 15000;
+/** 体积的人话写法（1024 进制，只到 MB）。进度条旁边那行要给人看，不要甩一串字节数。 */
+QString humanBytes(qint64 n)
+{
+    if (n < 1024) return QString::number(n) + QStringLiteral(" B");
+    if (n < 1024 * 1024)
+        return QString::number((double)n / 1024.0, 'f', 1) + QStringLiteral(" KB");
+    return QString::number((double)n / 1024.0 / 1024.0, 'f', 1) + QStringLiteral(" MB");
+}
+/**
  * 协议 v1 信封：{"v":1,"type":...,"id":...,"ts":...,"payload":{...}}
  * 文本消息统一走它；二进制帧（画面）另走 [1B 版本][2B 大端 headerLen][header][JPEG]。 */
 QString makeEnvelope(const QString &type, const QJsonObject &payload)
@@ -180,6 +194,8 @@ ViewerBackend::ViewerBackend(QObject *parent)
                                              : error);
                              return;
                          }
+                         // 只要对面还在回话，就续一次看门狗 —— 它只在"该来的回执没来"时咬人
+                         if (m_pushWatchdog) m_pushWatchdog->start(kPushAckTimeoutMs);
                          if (action == QStringLiteral("file_push")) {
                              logf("[viewer] file_push 会话已开，开始分片（总 %lld 字节）",
                                   (long long)m_fileTotal);
@@ -208,6 +224,31 @@ ViewerBackend::ViewerBackend(QObject *parent)
                          } else if (action == QStringLiteral("file_chunk")) {
                              sendNextChunk();
                          } else if (action == QStringLiteral("file_done")) {
+                             if (m_pushWatchdog) m_pushWatchdog->stop();
+                             // 对账：被控端回的是它**实收**的字节数。和这边发出的不一致就是缺片
+                             // （用户报的"推完的文件是空的/损坏"若真发生，这里会立刻跳出来，
+                             // 而不是等谁去教室机上打开才发现）。
+                             const qint64 got = data.value(QStringLiteral("bytes")).toVariant().toLongLong();
+                             if (data.value(QStringLiteral("cancelled")).toBool(false)) {
+                                 m_fileState = QStringLiteral("failed");
+                                 m_fileError = QStringLiteral("教室机把这次推送当取消了（已推 %1，那边已删掉半截文件）")
+                                                   .arg(humanBytes(m_fileBytes));
+                                 if (m_pushFile.isOpen()) m_pushFile.close();
+                                 logf("[viewer] ⚠️ 教室机回执 cancelled=true（已推 %lld 字节）",
+                                      (long long)m_fileBytes);
+                                 emit fileProgressChanged();
+                                 return;
+                             }
+                             if (got >= 0 && got != m_fileBytes) {
+                                 m_fileState = QStringLiteral("failed");
+                                 m_fileError = QStringLiteral("对不上账：我这发了 %1，教室机只收到 %2")
+                                                   .arg(humanBytes(m_fileBytes)).arg(humanBytes(got));
+                                 if (m_pushFile.isOpen()) m_pushFile.close();
+                                 logf("[viewer] ⚠️ 文件对账不符：本地 %lld / 教室机实收 %lld",
+                                      (long long)m_fileBytes, (long long)got);
+                                 emit fileProgressChanged();
+                                 return;
+                             }
                              m_fileState = QStringLiteral("done");
                              m_fileTarget = data.value(QStringLiteral("path")).toString();
                              m_fileError.clear();
@@ -283,6 +324,18 @@ ViewerBackend::ViewerBackend(QObject *parent)
     qInfo("[viewer] 终端兜底：等本机点头 %lld 秒 / 等关断回话 %lld 秒",
           (long long)m_termWait->interval() / 1000,
           (long long)m_termCloseWait->interval() / 1000);
+    // ── 2026-10-11：文件推送看门狗 ──
+    // 发下一片由回执驱动（收到一片 done 才发下一片），但云端回执可能永远不来
+    // （教室机离线 / 被控端崩 / 网络断）。没这把锁，m_fileState 永久卡在 "sending"，
+    // 按钮锁死、界面像卡住。每次收到 file_push/chunk/done 回执就 start() 续命，
+    // 超时（kPushAckTimeoutMs=15s）即判失败并收口。singleShot 保证只咬一次。
+    m_pushWatchdog = new QTimer(this);
+    m_pushWatchdog->setSingleShot(true);
+    m_pushWatchdog->setInterval(kPushAckTimeoutMs);
+    QObject::connect(m_pushWatchdog, &QTimer::timeout, this, [this] {
+        setFileFail(QStringLiteral("推送超时：%1 秒没收到教室机回执（可能它离线了，或网络断了）")
+                            .arg(kPushAckTimeoutMs / 1000));
+    });
 }
 ViewerBackend::~ViewerBackend()
 {
@@ -421,6 +474,73 @@ void ViewerBackend::loadPrefs()
     m_notifyOnOffline = s.value(QStringLiteral("prefs/notifyOnOffline"), true).toBool();
     // 首启引导标记：默认 false（没走过引导）。写盘走 markFirstRunDone()，这里只负责读回。
     m_firstRunDone = s.value(QStringLiteral("prefs/firstRunDone"), false).toBool();
+    // 进程黑名单（2026-10-11 需求#6）：默认空。存的是进程名，比较时不区分大小写。
+    m_procBlacklist = s.value(QStringLiteral("proc/blacklist")).toStringList();
+    if (!m_procBlacklist.isEmpty())
+        logf("[viewer] 已载入进程黑名单 %d 条：%s",
+             m_procBlacklist.size(), m_procBlacklist.join(QLatin1String(", ")).toUtf8().constData());
+}
+
+QStringList ViewerBackend::procBlacklist() const { return m_procBlacklist; }
+
+void ViewerBackend::addProcToBlacklist(const QString &name)
+{
+    const QString n = name.trimmed();
+    if (n.isEmpty()) return;
+    // 不区分大小写去重：Windows 进程名大小写随意（Chrome.exe / chrome.EXE 都见过），
+    // 存两份会让"一键关闭"看起来只关掉一半。
+    for (const QString &e : m_procBlacklist)
+        if (e.compare(n, Qt::CaseInsensitive) == 0) return;
+    m_procBlacklist.append(n);
+    QSettings s;
+    s.setValue(QStringLiteral("proc/blacklist"), m_procBlacklist);
+    logf("[viewer] 进程黑名单新增：%s", n.toUtf8().constData());
+    emit procBlacklistChanged();
+}
+
+void ViewerBackend::removeProcFromBlacklist(const QString &name)
+{
+    const QString n = name.trimmed();
+    if (n.isEmpty()) return;
+    const int before = m_procBlacklist.size();
+    m_procBlacklist.removeIf([&n](const QString &e) { return e.compare(n, Qt::CaseInsensitive) == 0; });
+    if (m_procBlacklist.size() == before) return;
+    QSettings s;
+    s.setValue(QStringLiteral("proc/blacklist"), m_procBlacklist);
+    logf("[viewer] 进程黑名单移除：%s", n.toUtf8().constData());
+    emit procBlacklistChanged();
+}
+
+int ViewerBackend::killBlacklisted(const QVariantList &items)
+{
+    if (m_currentUid.isEmpty()) {
+        logf("[viewer] FAIL 没选设备，一键关闭黑名单无从下手");
+        return -1;   // -1 = 没选设备（区别于 0 = 选了但一个都没匹配上）
+    }
+    if (m_procBlacklist.isEmpty()) return 0;
+
+    int sent = 0;
+    for (const QVariant &v : items) {
+        const QVariantMap m = v.toMap();
+        const QString name = m.value(QStringLiteral("name")).toString();
+        const int pid = m.value(QStringLiteral("pid")).toInt();
+        if (name.isEmpty() || pid <= 0) continue;
+        bool hit = false;
+        for (const QString &b : m_procBlacklist) {
+            if (name.compare(b, Qt::CaseInsensitive) == 0) { hit = true; break; }
+        }
+        if (!hit) continue;
+        // 受保护的进程（系统关键进程）不碰：被控端自己也会拒，
+        // 但这里先拦一道，免得回执流水里多出一堆"拒绝"让人误会功能坏了。
+        if (m.contains(QStringLiteral("protected"))) continue;
+        QJsonObject p;
+        p.insert(QStringLiteral("pid"), pid);
+        sendAction(QStringLiteral("process_stop"), p);
+        ++sent;
+    }
+    logf("[viewer] 一键关闭黑名单：命中并下发 %d 个 process_stop → %s",
+         sent, m_currentUid.toUtf8().constData());
+    return sent;
 }
 
 bool ViewerBackend::firstRunDone() const { return m_firstRunDone; }
@@ -657,11 +777,20 @@ void ViewerBackend::forgetAccount()
     }
     m_devLedger.clear();   // 离线台账也一起清（换账号后看到的应该是新账号的机器）
     if (!m_currentUid.isEmpty() || !m_frameUid.isEmpty()) {
+        const QString prevUid = m_currentUid;
         m_currentUid.clear();
         m_frameUid.clear();
         m_frame = QImage();
         emit currentUidChanged();
         emit frameChanged();
+        // 2026-10-11：选中即远控之后，这里（换账号/断连）也必须收掉远控，
+        // 否则被控端一直挂着"被接管"状态、提示永不消失。
+        if (m_remoteControlling && !prevUid.isEmpty()) {
+            sendAction(QStringLiteral("remote_control_stop"), QJsonObject());
+            logf("[viewer] 清空当前设备，收掉对 %s 的远控", prevUid.toUtf8().constData());
+            m_remoteControlling = false;
+            m_remoteControlUid.clear();
+        }
     }
     // 静态令牌（viewer.env 里的 STE_VIEWER_TOKEN）也一并作废 —— 否则"退出登录"之后
     // hasAnyCredential() 仍为真、loggedIn() 仍为真，界面和菜单回到"已登录"那一组，
@@ -1362,6 +1491,17 @@ void ViewerBackend::setCurrentUid(const QString &uid)
         sendEnvelope(QStringLiteral("unsubscribe"), un);
         logf("[viewer] 退订上一台 %s（不退订它会一直发帧，和新设备抢同一张画面）",
              prev.toUtf8().constData());
+        // ── 2026-10-11 需求#7：离开一台机器 = 收掉对它的远控 ──
+        //    "选中即远控"之后，切换设备如果不给上一台发 stop，那台会一直认为自己
+        //    在被远控（学生端提示不消失、抓屏帧率一直压在高档），而且老师表面上看
+        //    不出任何异常 —— 这就是无声的资源泄漏 + 状态错位。
+        if (m_remoteControlling && m_remoteControlUid == prev) {
+            QJsonObject st;
+            sendAction(QStringLiteral("remote_control_stop"), st);
+            logf("[viewer] 离开 %s，收掉对它的远控", prev.toUtf8().constData());
+            m_remoteControlling = false;
+            m_remoteControlUid.clear();
+        }
     }
 
     // ② 手上那张旧画面立刻作废。新设备第一帧到之前必须显示"正在接通"，
@@ -1387,6 +1527,25 @@ void ViewerBackend::setCurrentUid(const QString &uid)
     QJsonObject sp;
     sp.insert(QStringLiteral("uid"), uid);
     sendEnvelope(QStringLiteral("subscribe"), sp);
+
+    // ── 2026-10-11 需求#7：选中一台设备 = 就是在远控它，不用再点开关 ──
+    //    原来的界面上摆着「远控开 / 远控关」两个按钮，但人已经在这个远控界面里、
+    //    也已经选好机器了 —— 那两个开关是纯多余的一步。改成选中即接管：
+    //    · 教师角色不发（权限不足，发了也是被拒，还会在回执流水里留一条失败）
+    //    · 设备没上报 remote_control_start 能力就不发（老版本被控端，别让回执流水里全是失败）
+    //    被控端收到 remote_control_start 会自己弹"已被老师接管"的提示（学生知情）。
+    if (role() == QStringLiteral("admin")
+        && m_capActions.contains(QStringLiteral("remote_control_start"))) {
+        QJsonObject rc;
+        sendAction(QStringLiteral("remote_control_start"), rc);
+        m_remoteControlling = true;
+        m_remoteControlUid = uid;
+        logf("[viewer] 选中即远控：已对 %s 下发 remote_control_start", uid.toUtf8().constData());
+    } else {
+        logf("[viewer] 选中 %s 但未自动进远控（role=%s，远控能力=%d）——权限或设备能力不满足",
+             uid.toUtf8().constData(), role().toUtf8().constData(),
+             (int)m_capActions.contains(QStringLiteral("remote_control_start")));
+    }
 }
 
 void ViewerBackend::setScreenActive(bool on)
@@ -1617,7 +1776,13 @@ void ViewerBackend::onTextMessage(const QString &text)
         } else {
             // ── 2026-10-09 ldc 路：offer 直接喂 libdatachannel（代替灌离屏 view）──
             if (qgetenv("STE_USE_LDC_RTC") != "0") {
+                // 2026-10-11 诊断：收到 offer 是整条链路的第一个可见节点。
+                // 之前"WebRTC 不生效"到底是卡在被控端没发、云端没转、还是本端没接，
+                // 全靠这一行区分。
+                logf("[viewer-ldc] 收到 offer（uid=%s，%d 字节）→ 喂 libdatachannel",
+                     m_currentUid.toUtf8().constData(), sdp.size());
                 ldcFeedSignal(this, QStringLiteral("offer"), sdp.toUtf8());
+                setRtcState(QStringLiteral("negotiating"));
                 return;
             }
             // 新 offer = 新的一轮协商，上一轮攒下的候选已经作废，先清干净再灌。
@@ -2251,7 +2416,7 @@ void ViewerBackend::fetchRecordings()
         ? m_cloudTicket.toUtf8() : m_token.toUtf8();
     if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
     QNetworkReply *reply = m_nam->get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, httpUrl]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 200) {
             const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
@@ -2285,7 +2450,7 @@ void ViewerBackend::requestClasses()
         ? m_token.toUtf8() : m_cloudTicket.toUtf8();
     if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
     QNetworkReply *reply = m_nam->get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, httpUrl]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 200) {
             const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
@@ -2297,7 +2462,18 @@ void ViewerBackend::requestClasses()
         } else if (status != m_classErrStatus) {
             // 只在状态**变化**时记（15s 轮询下原来会一直刷同一句 401）
             m_classErrStatus = status;
-            logf("[class] 拉班级列表失败（HTTP %d，多数情况是管理端令牌与云端 VIEWER_TOKEN 不一致）", status);
+            // 2026-10-11：光说"401，多半是令牌不一致"没法动手 —— 得说清这次用的是
+            // 哪一种令牌、多长（长度为 0 = 压根没配），才能对上是 viewer.env 漏配
+            // 还是和云端 .env 的 VIEWER_TOKEN 对不上。
+            logf("[class] 拉班级列表失败 HTTP %d；本次凭据＝%s（长 %d），URL=%s",
+                 status,
+                 !m_token.isEmpty() ? "静态令牌 STE_VIEWER_TOKEN"
+                                    : (m_cloudTicket.isEmpty() ? "完全没有凭据" : "登录票据"),
+                 (int)(!m_token.isEmpty() ? m_token.size() : m_cloudTicket.size()),
+                 httpUrl.toUtf8().constData());
+            if (status == 401)
+                logf("[class] 401 的修法：把 viewer.env 里的 STE_VIEWER_TOKEN 改成云端 .env 的"
+                     " VIEWER_TOKEN（两边必须逐字一致）；/api/classes 只认静态令牌，登录票据在这条路上不认");
         }
         reply->deleteLater();
     });
@@ -2318,7 +2494,7 @@ void ViewerBackend::requestStorage()
         ? m_token.toUtf8() : m_cloudTicket.toUtf8();
     if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
     QNetworkReply *reply = m_nam->get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, httpUrl]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 200) {
             const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
@@ -2458,8 +2634,11 @@ void ViewerBackend::sendPointer(const QString &kind, double nx, double ny, const
 // ──────────────────────────────────────────────────────────────────────
 // 7 个读数（fileState/fileName/fileBytes/fileTotal/filePercent/fileError/fileTarget）
 // 在头文件里内联定义了 —— 那里是唯一一处，别在这儿再写一遍（C2084 重定义）。
+QString ViewerBackend::fileBytesText() const { return humanBytes(m_fileBytes); }
+QString ViewerBackend::fileTotalText() const { return humanBytes(m_fileTotal); }
 void ViewerBackend::clearFilePush()
 {
+    if (m_pushWatchdog) m_pushWatchdog->stop();
     if (m_pushFile.isOpen()) m_pushFile.close();
     m_pushPath.clear();
     m_fileState = QStringLiteral("idle");
@@ -2474,6 +2653,8 @@ void ViewerBackend::clearFilePush()
 }
 void ViewerBackend::setFileFail(const QString &why)
 {
+    // 任何失败路径都先停看门狗：否则它到时还会再咬一次，把真实原因覆盖成"超时"。
+    if (m_pushWatchdog) m_pushWatchdog->stop();
     m_fileState = QStringLiteral("failed");
     m_fileError = why;
     if (m_pushFile.isOpen()) m_pushFile.close();
