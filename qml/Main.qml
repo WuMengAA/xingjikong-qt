@@ -1499,6 +1499,10 @@ ApplicationWindow {
                     ActBtn { d: ({ l: "管控…", f: function () {
                                             openOnly("control")
                                         }, t: false }); wide: true }
+                    // 2026-10-11：集控界面直达语音对讲（按住讲话 + 自动接收播放班级语音）
+                    ActBtn { d: ({ l: "语音对讲…", f: function () {
+                                            openOnly("speech")
+                                        }, t: false }); wide: true }
                 }
 
                 // （这里原先有个「给被控端打字」的输入框：老师日常用不上，且和通知/终端重复，
@@ -2214,6 +2218,84 @@ ApplicationWindow {
         }
     }
 
+    // ── 语音对讲（2026-10-11 集控界面直达：按住讲话 + 自动接收播放班级语音）──
+    Popup {
+        id: speechDlg
+        anchors.centerIn: Overlay.overlay
+        width: 360
+        modal: true
+        padding: 0
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            color: th.cream
+            radius: th.rCard
+            border.color: th.stroke
+            border.width: 1
+        }
+
+        contentItem: Column {
+            padding: 16
+            spacing: 12
+
+            Row {
+                spacing: 8
+                Text { text: "语音对讲"; color: th.fg; font.pixelSize: 14; font.weight: Font.Medium }
+                Rectangle {
+                    width: 6; height: 6; radius: 3
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: backend.speaking ? "#e74c3c" : th.fg4
+                    opacity: backend.speaking ? (speechPulse.running ? 1 : 0.25) : 1
+                    Timer { id: speechPulse; running: backend.speaking; repeat: true; interval: 500
+                            onTriggered: parent.opacity = parent.opacity === 1 ? 0.25 : 1 }
+                }
+            }
+            Text { text: "目标：" + (backend.currentUid !== "" ? backend.currentUid : "未选设备")
+                   color: th.fg3; font.pixelSize: 12 }
+            Text { text: backend.speaking
+                       ? ("时长：" + Math.max(0, 180 - backend.speakLeftSec) + " 秒（剩余 " + backend.speakLeftSec + " 秒）")
+                       : (backend.speakError !== "" ? ("上次开麦失败：" + backend.speakError) : "时长：未通话")
+                   color: th.fg3; font.pixelSize: 12 }
+            // 自动接收播放班级语音：audio_playback 已内置（B6），无需再开。
+
+            Row {
+                spacing: 10
+                Rectangle {
+                    width: 200; height: 48; radius: th.rCtrl
+                    color: speechPush.pressed ? "#a93226" : (backend.speaking ? "#e74c3c" : th.brand)
+                    Text {
+                        anchors.centerIn: parent
+                        text: speechPush.pressed ? "松开结束" : (backend.speaking ? "正在讲话…" : "按住讲话")
+                        color: "white"; font.pixelSize: 14; font.weight: Font.Medium
+                    }
+                    MouseArea {
+                        id: speechPush
+                        anchors.fill: parent
+                        onPressed: {
+                            if (!backend.startSpeaking()) root.toast("开麦失败：" + backend.speakError)
+                            else root.toast("正在讲话…松开结束；班级语音自动播放")
+                            root.refreshIsland()
+                        }
+                        onReleased: {
+                            if (backend.speaking) { backend.stopSpeaking(); root.toast("语音已停止（静音）") }
+                            root.refreshIsland()
+                        }
+                    }
+                }
+                Rectangle {
+                    visible: backend.speaking
+                    width: 96; height: 48; radius: th.rCtrl
+                    color: th.inv
+                    Text { anchors.centerIn: parent; text: "停止"; color: th.win; font.pixelSize: 14; font.weight: Font.Medium }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { backend.stopSpeaking(); root.toast("语音已停止"); root.refreshIsland() }
+                    }
+                }
+            }
+        }
+    }
+
     // ── 打开程序（快捷方式来源＝这台机器上的程序，不预置名单）──
     Popup {
         id: launchDlg
@@ -2904,6 +2986,7 @@ ApplicationWindow {
         helpDlg.close()
         multiThumbDlg.close()
         controlDlg.close()
+        speechDlg.close()
         if      (which === "software") softwareDlg.open()
         else if (which === "log")      logDlg.open()
         else if (which === "media")    mediaDlg.open()
@@ -2915,6 +2998,7 @@ ApplicationWindow {
         else if (which === "help")       helpDlg.open()        // 需求 #7
         else if (which === "multiband")  multiThumbDlg.open()  // 多班缩略图墙（2026-10-11 从「批量管控」页搬来）
         else if (which === "control")    controlDlg.open()    // 广播/考试/语音/屏幕广播（同上）
+        else if (which === "speech")    speechDlg.open()    // 语音对讲（集控界面直达）
     }
 
     // 右侧所有动作按钮的统一入口。以前这段分支散在 Repeater 的 onClicked 里，
