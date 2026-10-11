@@ -166,6 +166,15 @@ ApplicationWindow {
     // 多选的设备 uid（4.4）。和 currentUid 是两套东西：那个管"看哪台"，
     // 这个管"给哪些台发" —— 混在一处会互相踢（台数变了不知道该信哪个）。
     property var picked: []
+
+    // ── 危险操作二次确认（2026-10-12 · UI 评审二.3）──
+    // 锁屏 / 重启 / 关机 点错一次就是几十台教室机，光靠"按钮排得开、颜色区分"防不住误触。
+    // ⚠️ 判据一律按**动作名**（lock/reboot/shutdown），绝不按中文文案 ——
+    //    2026-10-07 踩过：把按钮文案从「音量」改成「喇叭」，按文案判的那条链当场断。
+    property string dangerAct: ""        // 待确认的动作名（"" = 当前没有待确认的）
+    property int    dangerN: 0           // 会中招的台数
+    property string dangerOne: ""        // 只有 1 台时的目标 uid（显示用）
+    property var    dangerList: []       // 批量时的完整 uid 列表（单台时为空）
     property int pickAnchor: -1       // Ctrl 点下的第一台，给 Shift 范围选当端点
 
     // 云端回来的东西：一切以它为准
@@ -3036,6 +3045,37 @@ ApplicationWindow {
         }
     }
 
+    // ── 危险操作二次确认（2026-10-12 · UI 评审二.3）──
+    /** 必须二次确认的动作。**按动作名判**：lock / reboot / shutdown。 */
+    function isDanger(a) { return a === "lock" || a === "reboot" || a === "shutdown" }
+    function dangerLabel(a) {
+        return a === "lock" ? "锁屏" : a === "reboot" ? "重启" : a === "shutdown" ? "关机" : a
+    }
+    /** 弹确认框。批量传 list（≥1 台），单台传 1 + 目标 uid。 */
+    function askDanger(a, n, list, one) {
+        root.dangerAct  = a
+        root.dangerN    = n
+        root.dangerList = (list && list.length) ? list : []
+        root.dangerOne  = one || ""
+        dangerDlg.open()
+    }
+    /** 确认后真下发。批量走 doBatch（原来的循环原样搬过去），单台走 sendAction。 */
+    function execDanger() {
+        const a = root.dangerAct
+        const one = root.dangerOne
+        dangerDlg.close()
+        root.dangerAct = ""; root.dangerOne = ""
+        if (a === "") return
+        if (root.dangerList.length > 0) {
+            const l = root.dangerList
+            root.dangerList = []
+            root.doBatch(a, l)
+        } else {
+            backend.sendAction(a, {})
+            toast("已下发「" + root.dangerLabel(a) + "」" + (one !== "" ? " → " + one : ""))
+        }
+    }
+
     function runAction(d) {
         if (d.t) return                      // 未实现的按钮：压根不该点得到
 
@@ -3055,6 +3095,11 @@ ApplicationWindow {
         //   2026-10-07 改：这条链原来是 if (d.l === "音量") … 一串 ——
         //   把按钮文案从「音量」改成「喇叭」，这条链就断了：点下去走 sendAction("") 空转，
         //   界面上什么报错都没有（灰按钮永远点不到，只有从状态行 / 快捷键触发才露出来）。
+        // 危险动作：先弹确认，别直接下发（2026-10-12 · UI 评审二.3）。
+        // 放在 d.f() 之前是必要的 —— 快捷操作有些是 d.f 自定义函数，
+        // 但 lock/reboot/shutdown 都是走 d.a，这里拦得住且不会误拦自定义函数。
+        if (root.isDanger(d.a)) { root.askDanger(d.a, 1, [], backend.currentUid); return }
+
         if (typeof d.f === "function") { d.f(); return }
         if (d.a !== "") { backend.sendAction(d.a, {}); return }
 
@@ -3338,7 +3383,21 @@ ApplicationWindow {
             toast("还没有可操作的设备")
             return
         }
-        const label = (a === "lock" ? "锁屏" : a === "shutdown" ? "关机" : a)
+        // 危险动作先确认，并把**台数摆在对话框上**（2026-10-12 · UI 评审二.3）。
+        // 台数就是这个对话框的全部价值——老师看到"将对 42 台设备执行关机"才会真的看一眼；
+        // 只写"确认关机吗"没人会读，点了等于没确认。
+        if (root.isDanger(a)) {
+            root.askDanger(a, list.length, list, list.length === 1 ? list[0] : "")
+            return
+        }
+        root.doBatch(a, list)
+    }
+
+    /** 批量下发循环体（从 runOnPicked 原样拆出，行为不变）。
+     *  ⚠️ label 改走 dangerLabel()：原来的三元表达式只认 lock/shutdown，
+     *     reboot 会原样显示成英文 `reboot已下发 3 台`（顺手一并修，就在本条路径上）。 */
+    function doBatch(a, list) {
+        const label = root.dangerLabel(a)
         root.batchStart(label + (list.length > 1 ? " " + list.length + " 台" : ""), list)
         const dead = []
         let sent = 0
@@ -3352,6 +3411,83 @@ ApplicationWindow {
         for (let j = 0; j < dead.length; ++j) root.batchStep(dead[j], false, "设备不在线")
         toast(label + "已下发 " + sent + " 台" + (dead.length > 0 ? "，" + dead.length + " 台不在线" : ""))
         root.picked = []
+    }
+
+    // ── 危险操作二次确认弹窗（2026-10-12 · UI 评审二.3）──
+    // 桌面端此前**完全没有**确认环节：关机/重启/锁屏点下去就直接下发，
+    // 而手机端那棵 `qml/mobile/Main.qml`（历史遗留死树）里反倒有一个 confirmDialog。
+    // ⚠️ 桌面这颗必须自绘（项目铁律：不用 Qt 原生 Dialog/Button，它们走系统调色板会变白）。
+    Popup {
+        id: dangerDlg
+        anchors.centerIn: Overlay.overlay
+        width: 340
+        modal: true
+        padding: 0
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            color: th.cream
+            radius: th.rCard
+            border.color: th.stroke
+            border.width: 1
+        }
+
+        contentItem: Column {
+            padding: 16
+            spacing: 14
+
+            Row {
+                spacing: 8
+                Rectangle {
+                    width: 8; height: 8; radius: 4
+                    color: th.err
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                    text: "确认" + root.dangerLabel(root.dangerAct)
+                    color: th.fg
+                    font.pixelSize: 14
+                    font.weight: Font.Medium
+                }
+            }
+            Text {
+                width: parent.width - 32
+                wrapMode: Text.Wrap
+                color: th.fg3
+                font.pixelSize: 12
+                text: root.dangerN > 1
+                      ? "将对 " + root.dangerN + " 台设备执行「" + root.dangerLabel(root.dangerAct) + "」。执行后无法撤销。"
+                      : "将对 " + (root.dangerOne !== "" ? root.dangerOne : "当前选中的设备")
+                        + " 执行「" + root.dangerLabel(root.dangerAct) + "」。执行后无法撤销。"
+            }
+            Row {
+                spacing: 10
+                anchors.horizontalCenter: parent.horizontalCenter
+                Btn {
+                    theme: th
+                    width: 118
+                    text: "取消"
+                    onClicked: dangerDlg.close()
+                }
+                // 危险操作用红色确认键（评审二.3「危险操作用红色或二次确认」—— 两个都给）。
+                Rectangle {
+                    width: 118; height: 30; radius: th.rCtrl
+                    color: th.err
+                    Text {
+                        anchors.centerIn: parent
+                        text: "确认执行"
+                        color: "#fff"
+                        font.pixelSize: 12
+                        font.weight: Font.Medium
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.execDanger()
+                    }
+                }
+            }
+        }
     }
 
     // ── 更新日志（需求 #7：把官网已有的「版本历史」能力搬进管理端）──
