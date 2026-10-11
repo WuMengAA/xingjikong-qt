@@ -9,7 +9,7 @@ import QtQuick 2.15
 //
 // 被控端差异：
 //   · 被控端岛默认**点击穿透**（设计文档 §9「学生端灵动岛默认纯展示、点击穿透」）
-//     ⇒ 列表默认不接收鼠标，interactive=false 时整体 ignore
+//     ⇒ 本组件不含 MouseArea，事件自然穿透到下层。
 //
 // 数据：states = [{ k: "voice", t: "老师正在讲话", d: "…", p: 0.4 }, ...]
 //   k 类别（决定图标）t 标题 d 描述 p 进度（-1=无进度条, 0~1=进度）
@@ -19,7 +19,6 @@ Item {
     property var theme
     // ⚠️ 不能叫 states —— QQuickItem 已有同名属性（会 shadow 基类）
     property var items: []
-    property bool interactive: false
     property int maxRows: 3               // 展开态最多逐条显示，超出走「还有 N 项」
 
     readonly property int n: items ? items.length : 0

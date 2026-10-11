@@ -45,6 +45,15 @@ QtObject {
     property int fsBody:    13   // 正文字号（空闲时钟 13px Medium，对齐 island.cpp）
     property int fsBadge:   14   // 徽标 / 展开列表标题
     property int fsTitle:   15   // 收起态标题（island.cpp 15px bold）/ 17 展开态
+    // 展开态标题自适应档位（15 → 64px，按字数收敛，见 IslandRoot 的 fitTitlePx）
+    property int fsTitleXs:  15   // 长标题（≥33 字）
+    property int fsTitleSm:  18   // 28–32 字
+    property int fsTitleMd:  24   // 17–27 字
+    property int fsTitleLg:  36   // 9–16 字
+    property int fsTitleXl:  48   // 5–8 字
+    property int fsTitleXxl: 64   // 1–4 字（最大，短通知/大数字）
+    // 展开态描述的"大字档"（# 标题行用），比正文大一号
+    property int fsBodyLg:   15
 
     // ── 形态（island.h Shape/Form 对齐）─────────────────────
     property int shapeIdle:      36

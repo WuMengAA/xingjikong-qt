@@ -54,8 +54,6 @@
 #include "danmaku.h"           // §1.2 弹幕：字幕式横向滚动
 #include "loop_reminder.h"     // §1.2 loopRemind：未确认循环提醒
 #include "notification_gate.h" // §6.2 考试模式禁一切通知与监视
-#include "marquee_text.h"      // §6.1 灵动岛展开态滚动文本
-#include "island_clock.h"      // 最初需求：灵动岛时间/状态显示
 #include "spectrum_widget.h"   // §6.3 语音通知 16 位频谱
 #include "edge_tts.h"          // §6.4 Edge 语音 TTS（管理端可选）
 #include "noise_monitor.h"     // §6.5 噪音检测

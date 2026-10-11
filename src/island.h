@@ -52,7 +52,7 @@ public:
     // Idle = 空闲时的矮胶囊（2026-10-07 用户要求"无任务、通知则收回顶部，显示半胶囊+横杠箭头"）。
     // 空闲态不隐藏、不消失：收成顶部一条常驻的半胶囊，中间一根横杠+箭头，
     // 点一下 / 往下一拉（触屏）就展开看最近那条活动。
-    enum Shape { Idle = 36, Collapsed = 56, Expanded = 168 };
+    enum Shape { Idle = 44, Collapsed = 56, Expanded = 168 };
 
     // ── 呈现形态（2026-10-09 · #98 ClassIsland 式）──────────────────────────
     // 用户原话："弹窗则居中，全屏则放大全屏，要有过渡。"
@@ -139,6 +139,22 @@ private:
     QRect geometryForForm(Form f) const;   // 按形态算目标几何
     void animateGeometry(const QRect &target);   // 弹性缓动改位置/大小
     // （原 positionForCurrent()/applyTheme() 只有声明、全工程无定义，按"不留看起来有能力其实没有的接口"删掉）
+
+    // ── 历史通知（2026-10-11 · 持久化）──────────────────────────
+    // 一条历史通知的内存模型。JSON 落盘到 LOCALAPPDATA/xingjikong/island_history.json。
+    struct HistoryItem {
+        QString title;
+        QString desc;
+        QString icon;
+        qint64  ts = 0;           // Unix 时间戳（秒）
+        QString timeStr;          // 预格式化时间串（"HH:mm" 或 "昨天 HH:mm" 或 "M/d HH:mm"）
+    };
+    QVector<HistoryItem> m_history;
+    static constexpr int kMaxHistory = 50;   // 最多保留 50 条，超出按 FIFO 清旧
+    void archiveToHistory();     // 把当前 m_title/m_desc/m_icon 归档
+    void loadHistory();          // 从 JSON 加载
+    void saveHistory() const;    // 写 JSON
+    QString historyPath() const; // LOCALAPPDATA/xingjikong/island_history.json
 
     QString m_title;
     QString m_desc;

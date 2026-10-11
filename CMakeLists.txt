@@ -136,10 +136,6 @@ add_executable(stelarith-agent-qt
   src/notification_gate.h
   src/edge_tts.cpp
   src/edge_tts.h
-  src/marquee_text.cpp
-  src/marquee_text.h
-  src/island_clock.cpp
-  src/island_clock.h
   src/microphone.cpp
   src/microphone.h
   # ── WebRTC 推流（2026-10-09：libdatachannel 换 other webrtc，探针全绿）──
@@ -148,6 +144,9 @@ add_executable(stelarith-agent-qt
   # ── 系统主音量（2026-10-11 Core Audio/WASAPI，独立编译单元隔离 SDK 头）──
   src/system_volume.cpp
   src/system_volume.h
+  # ── 小鲸鱼音效（2026-10-11 · dsh-whale-widget 移植：winmm PlaySound 播 wav）──
+  src/whale_audio.cpp
+  src/whale_audio.h
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )

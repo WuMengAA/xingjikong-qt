@@ -36,6 +36,9 @@ class IslandBridge : public QObject
     // ── 内容 ────────────────────────────────────────────────
     Q_PROPERTY(QString title    READ title    NOTIFY changed)
     Q_PROPERTY(QString desc     READ desc     NOTIFY changed)
+    // desc 的 Markdown 预渲染版（**粗** / # 标题 / - 列表 / \n 换行）。
+    // QML 用 Text { textFormat: RichText } 直接吃，避免 QML 侧解析 markdown 脆弱。
+    Q_PROPERTY(QString descHtml READ descHtml NOTIFY changed)
     Q_PROPERTY(QString icon     READ icon     NOTIFY changed)
     // ── 形态 ────────────────────────────────────────────────
     // "capsule" | "centered" | "fullscreen"（对齐 IslandOverlay::Form）
@@ -57,11 +60,26 @@ class IslandBridge : public QObject
     // [{ k: "exam", t: "标题", d: "描述", p: -1 }, ...]
     Q_PROPERTY(QVariantList states  READ states  NOTIFY changed)
 
+    // ── 小鲸鱼（2026-10-11 · dsh 移植）──────────────────────────
+    // 通知来时，桥把 title 推给鲸鱼气泡（"标题复读机"）。
+    // whaleBubble 非空 = 鲸鱼正在冒一句话。
+    // whaleAudioEnabled = 音效开关（默认 true）。
+    Q_PROPERTY(QString whaleBubble      READ whaleBubble      NOTIFY changed)
+    Q_PROPERTY(bool     whaleAudioOn    READ whaleAudioOn     NOTIFY changed)
+
+    // ── 历史通知（2026-10-11 · 持久化）────────────────────────────
+    // 通知消失（dismiss/enterIdle/showIsland 顶掉旧通知）时自动归档到历史。
+    // 历史列表由 IslandOverlay 维护（QVector + JSON 落盘）。
+    // QML 侧展开态显示历史面板：点项恢复详情，可清空。
+    // 每项格式：{title, desc, icon, ts, timeStr}
+    Q_PROPERTY(QVariantList history  READ history  NOTIFY changed)
+
 public:
     explicit IslandBridge(IslandOverlay *host, QObject *parent = nullptr);
 
     QString title() const;
     QString desc() const;
+    QString descHtml() const;
     QString icon() const;
     QString form() const;
     QString severity() const;
@@ -72,6 +90,21 @@ public:
     bool canOpen() const;
     QVariantList actions() const;
     QVariantList states() const;
+
+    // 小鲸鱼
+    QString whaleBubble() const;
+    bool whaleAudioOn() const;
+    // QML → C++：鲸鱼被点击（rua），播按压音效
+    Q_INVOKABLE void whaleClicked();
+    // QML → C++：鲸鱼被长按（0.8s+），播松开音效
+    Q_INVOKABLE void whaleLongPressed();
+
+    // 历史通知
+    QVariantList history() const;
+    // QML → C++：点历史项，恢复该通知到展开态
+    Q_INVOKABLE void showHistoryItem(int index);
+    // QML → C++：清空全部历史
+    Q_INVOKABLE void clearHistory();
 
     // 状态变了就调这个：一把全 NOTIFY。IslandOverlay 在每个改状态的点收口调用。
     void sync();

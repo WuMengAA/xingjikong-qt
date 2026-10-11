@@ -46,15 +46,16 @@ Item {
         }
     }
 
+    // ⚠️ 只有一个 MouseArea：既处理点击又提供 pressed 状态给 scale。
+    //    之前有两个 MouseArea，第二个 visible:false 收不到事件，pressed 恒 false。
     MouseArea {
+        id: btnMa
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
         hoverEnabled: true
         onClicked: btn.clicked()
     }
 
-    scale: ma.pressed ? 0.96 : 1.0
+    scale: btnMa.pressed ? 0.96 : 1.0
     Behavior on scale { NumberAnimation { duration: 90 } }
-
-    MouseArea { id: ma; anchors.fill: parent; visible: false }
 }

@@ -28,6 +28,7 @@
 #include "island.h"
 #include "island_bridge.h"
 #include "svgiconprovider.h"
+#include "whale_audio.h"
 
 #include <QApplication>
 #include <QDebug>
@@ -48,6 +49,11 @@
 #include <QTime>          // A3：空闲态时钟（HH:mm）
 #include <QUrl>
 #include <QQmlError>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QStandardPaths>
+#include <QDateTime>
 
 // 2026-10-08 lucide(morphicons 同款) SVG 图标渲染：读取 qrc 内 /icons/<name>.svg，
 // 把 stroke/fill 的 currentColor 换成主题前景色后渲染成 QPixmap（深浅主题自动适配）。
@@ -74,7 +80,8 @@ static QPixmap renderSvgIcon(const QString &name, int size, const QColor &color)
 static IslandOverlay *g_island = nullptr;
 
 // 空闲半胶囊的尺寸（比活动态小一号，真的"收回顶部"）
-static const int kIdleW = 120;
+// 4:3 比例（132×44），放得下鲸鱼 28px + 时钟
+static const int kIdleW = 132;
 // 活动态胶囊的最小宽度（原来写死 200；收到文件时路径很长会撑宽，短文案时兜这个下限）
 static const int kMinContentW = 200;
 // 触控容差（像素）：手指按下到抬起之间会有肉眼看不见的抖动，
@@ -83,6 +90,8 @@ static const int kDragSlop = 24;
 // 展开态最长停留时间（毫秒）：到点强制收回，避免大块胶囊长期压着屏幕顶部吃点击。
 // 交互态展开本来没有回收路径（m_autoClose 的守卫会吞掉），这是唯一兜底。
 static const int kExpandMaxMs = 20000;
+// 空闲态展开（无活跃通知，只是看一眼"暂无通知"）的自动收起时间：5s 够看一眼就收。
+static const int kIdleExpandMs = 5000;
 
 IslandOverlay *IslandOverlay::instance()
 {
@@ -192,6 +201,9 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     m_quick->setAttribute(Qt::WA_TranslucentBackground);
     m_quick->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_quick->rootContext()->setContextProperty(QStringLiteral("bridge"), m_bridge);
+    // 小鲸鱼音效实例（QML 侧 WhaleMascot 通过 bridgeRef.whaleClicked/whaleLongPressed 触发，
+    // 不直接用 whaleAudio，但留这个 context property 以备将来 QML 直接调 playByName）。
+    m_quick->rootContext()->setContextProperty(QStringLiteral("whaleAudio"), WhaleAudio::instance());
     // SVG 图标 provider（QML 侧 SvgIcon.qml 用 image://svgicon/<name>?color=...）。
     // ⚠️ 必须挂在**这个 QQuickWidget 自己的 engine** 上，不能挂全局默认 engine ——
     //    QQuickWidget 有独立 engine，挂错了图标全空白（且不报错，最难查）。
@@ -216,6 +228,9 @@ IslandOverlay::IslandOverlay(QWidget *parent)
 
     // 初始同步一次：把构造期定下的 m_light 推给 QML
     m_bridge->sync();
+
+    // ── 历史通知：启动时从 JSON 加载 ──
+    loadHistory();
 
     hide();
 }
@@ -287,9 +302,108 @@ void IslandOverlay::onFadeFinished()
     hide();
 }
 
+// ══════════════════════════════════════════════════════════════════
+// 历史通知（2026-10-11 · 持久化）
+// ══════════════════════════════════════════════════════════════════
+// 通知消失（被新通知顶掉 / dismiss / enterIdle）时归档到历史。
+// JSON 落盘到 LOCALAPPDATA/xingjikong/island_history.json，启动时加载。
+
+QString IslandOverlay::historyPath() const
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    // QStandardPaths::AppLocalDataLocation 在 Qt 里返回的是 CompanyName/ProductName 格式，
+    // 被控端没设组织名 → 返回空。兜底用已知的 LOCALAPPDATA/xingjikong。
+    if (base.isEmpty())
+        return QDir::homePath() + QStringLiteral("/AppData/Local/xingjikong/island_history.json");
+    return base + QStringLiteral("/island_history.json");
+}
+
+void IslandOverlay::loadHistory()
+{
+    QFile f(historyPath());
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    f.close();
+    const QJsonArray arr = doc.array();
+    m_history.clear();
+    for (const QJsonValue &v : arr) {
+        const QJsonObject o = v.toObject();
+        HistoryItem h;
+        h.title = o.value(QStringLiteral("title")).toString();
+        h.desc = o.value(QStringLiteral("desc")).toString();
+        h.icon = o.value(QStringLiteral("icon")).toString();
+        h.ts = o.value(QStringLiteral("ts")).toVariant().toLongLong();
+        h.timeStr = o.value(QStringLiteral("timeStr")).toString();
+        m_history.append(h);
+    }
+    // 限制条数
+    while (m_history.size() > kMaxHistory)
+        m_history.removeFirst();
+}
+
+void IslandOverlay::saveHistory() const
+{
+    QJsonArray arr;
+    for (const auto &h : m_history) {
+        QJsonObject o;
+        o.insert(QStringLiteral("title"), h.title);
+        o.insert(QStringLiteral("desc"), h.desc);
+        o.insert(QStringLiteral("icon"), h.icon);
+        o.insert(QStringLiteral("ts"), qint64(h.ts));
+        o.insert(QStringLiteral("timeStr"), h.timeStr);
+        arr.append(o);
+    }
+    QJsonDocument doc(arr);
+    QDir().mkpath(QFileInfo(historyPath()).absolutePath());
+    QFile f(historyPath());
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(doc.toJson(QJsonDocument::Compact));
+        f.close();
+    }
+}
+
+void IslandOverlay::archiveToHistory()
+{
+    // 有标题才归档（空内容/空闲态不该进历史）
+    if (m_title.isEmpty()) return;
+    // 同标题不重复归档（5 秒内的重复跳过）
+    if (!m_history.isEmpty()) {
+        const auto &last = m_history.last();
+        if (last.title == m_title && (QDateTime::currentSecsSinceEpoch() - last.ts) < 5)
+            return;
+    }
+
+    HistoryItem h;
+    h.title = m_title;
+    h.desc = m_desc;
+    h.icon = m_icon;
+    h.ts = QDateTime::currentSecsSinceEpoch();
+
+    // 格式化时间串
+    const QDateTime dt = QDateTime::fromSecsSinceEpoch(h.ts);
+    const QDateTime today = QDateTime::currentDateTime();
+    if (dt.date() == today.date()) {
+        h.timeStr = dt.toString(QStringLiteral("HH:mm"));
+    } else if (dt.date().addDays(1) == today.date()) {
+        h.timeStr = QStringLiteral("昨天 ") + dt.toString(QStringLiteral("HH:mm"));
+    } else {
+        h.timeStr = dt.toString(QStringLiteral("M/d HH:mm"));
+    }
+
+    m_history.append(h);
+    while (m_history.size() > kMaxHistory)
+        m_history.removeFirst();
+    saveHistory();
+}
+
 void IslandOverlay::showIsland(const QString &title, const QString &desc,
                                const QString &icon, int durationMs, Form form)
 {
+    // ── 历史归档：上一条有内容的通知在被顶掉时进历史 ──
+    // 判据：m_contentActive && m_title 非空（活动中的真通知被顶掉）
+    if (m_contentActive && !m_title.isEmpty())
+        archiveToHistory();
+
     m_title = title;
     m_desc = desc;
     m_icon = icon;
@@ -352,6 +466,12 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     if (wasExpanded) emit expandedChanged(false);
     if (m_bridge) m_bridge->sync();
     update();
+
+    // ── 通知上岛音效 ──
+    // 新通知上屏时播一声 minecraft-exp-orb.wav（清脆、不刺耳）。
+    // 带确认按钮的通知（showWithActions）也走这条路 → showIsland 先播，再回填按钮。
+    if (m_bridge && m_bridge->whaleAudioOn())
+        WhaleAudio::instance()->play(WhaleAudio::Sound::Notify, 0.8);
 }
 
 // 带交互按钮的通知（确认/快捷回复）。先切交互态再走 showIsland：
@@ -436,6 +556,9 @@ void IslandOverlay::enterIdle()
     if (m_idle && isVisible()) return;
 
     const bool wasExpanded = m_expanded;
+    // ── 历史归档：有内容的通知在收回空闲时进历史 ──
+    if (m_contentActive && !m_title.isEmpty())
+        archiveToHistory();
     m_idle = true;
     m_expanded = false;
     m_contentActive = false;   // 内容这就算过去了，之后展开的是"最近一条"
@@ -518,8 +641,10 @@ void IslandOverlay::setExpanded(bool on)
     //    而且交互态（不穿透）。原来唯一的出路是"上推 ≥24px"，而 m_autoClose 的
     //    `if (m_interactive && m_expanded) return;` 又会把到点的那次直接吞掉且不再排期 ——
     //    于是空闲态/文件提示一旦被点开，就永远压在屏幕顶部吃点击。
-    //    这里给 20 秒硬超时：到点无论如何收回去。
-    if (on) m_expandGuard->start(kExpandMaxMs);
+    //    硬超时按场景分档：
+    //    · 无活跃通知（从空闲拉下来看一眼"暂无通知"）→ 5s 收，用户不需要看那么久
+    //    · 有活跃通知内容 → 20s 收（原来的兜底）
+    if (on) m_expandGuard->start(m_contentActive ? kExpandMaxMs : kIdleExpandMs);
     else    m_expandGuard->stop();
     emit expandedChanged(on);
     if (m_bridge) m_bridge->sync();
