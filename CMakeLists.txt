@@ -132,6 +132,9 @@ if(STE_IS_ANDROID)
   set(STE_AUDIO_CAPTURE_SRC src/audio_capture_android.cpp)
   set(STE_AUDIO_CAPTURE_HDR src/audio_capture.h)
   set(STE_SINGLEINSTANCE_SRC "")         # Android 多开无害，跳过单实例守卫
+  # ⚠️ 2026-10-11：必须在 qt_add_executable 之前设 **CACHE** 变量，androiddeployqt
+  # 生成部署 json 时才读到（普通 set 不会进 json → manifest 不合并、包名变默认）
+  set(QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android" CACHE STRING "Android package source dir" FORCE)
 else()
   set(STE_APP_RC "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
   set(STE_AUDIO_CAPTURE_SRC src/audio_capture.cpp)
@@ -303,8 +306,7 @@ if(STE_IS_ANDROID)
   else()
     message(FATAL_ERROR "[viewer] _probe/ldc_libs_android 缺失——先按 WebRTC-Android-构建配方交编译")
   endif()
-  # ③ Android 打包：apk 目录（manifest/keystore 已从 mobile 拷入）
-  set(QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
+  # ③ Android 打包目录（QT_ANDROID_PACKAGE_SOURCE_DIR 已在 qt_add_executable 前设置）
 else()
   # 桌面：QML 磁盘拷贝保留（见上面的 add_custom_command post-build）
 endif()
