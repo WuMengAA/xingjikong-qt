@@ -87,7 +87,7 @@ ApplicationWindow {
                     value: backend.authed ? "就绪" : "离线"
                 }
                 Text {
-                    text: "手机端为管理端伴侣：查看教室状态、发轻指令。\n远控 / 语音 / 广播请用桌面管理端。"
+                    text: "手机端为管理端伴侣：查看教室状态、发轻指令。\n远控、语音、广播请用桌面端。"
                     width: parent.width
                     wrapMode: Text.Wrap
                     color: root.th.fg4
@@ -270,7 +270,7 @@ ApplicationWindow {
             MobileCard {
                 title: "考试模式"
                 sub: "全屏拦截 · 禁通知 · 禁监视（发给全部在线设备）"
-                value: backend.onlineCount + " 台在线"
+                value: backend.onlineCount + " 台"
                 MouseArea {
                     anchors.fill: parent
                     onClicked: examDialog.open()
@@ -287,7 +287,7 @@ ApplicationWindow {
         anchors.centerIn: parent
         standardButtons: Dialog.No | Dialog.Yes
         Label {
-            text: "开启考试模式将：\n· 全屏拦截被控端操作\n· 禁止一切通知与监视\n· 影响全部 " + backend.onlineCount + " 台在线设备\n\n确认开启？"
+            text: "开启考试模式将：\n· 全屏拦截被控端操作\n· 禁止通知与监视\n· 影响全部 " + backend.onlineCount + " 台设备\n\n确认开启？"
             wrapMode: Text.Wrap
             width: 240
         }
