@@ -9,10 +9,25 @@
 //     setInteractive(true) 后本岛接收点击（展开/收起）。
 //   · 深/浅色：默认跟随系统 QGuiApplication::styleHints()->colorScheme()，
 //     setLightMode() 可强制。
-//   · 背景：与 NotifyWindow 同思路 —— WA_TranslucentBackground + paintEvent
-//     手绘圆角半透明底（QSS 背景会在不透明窗口上先画一层方角底，露馅）。
+//   · 背景：与 NotifyWindow 同思路 —— WA_TranslucentBackground + 绘制
+//     圆角半透明底（QSS 背景会在不透明窗口上先画一层方角底，露馅）。
+//
+// ── 2026-10-11 · 绘制层改 QML ────────────────────────────────────────
+// 用户裁决：被控端灵动岛视觉层改 QML（系统层留 C++）。
+//   承载：m_quick = QQuickWidget，铺满本窗口，加载 qml/island/IslandRoot.qml
+//   桥  ：m_bridge = IslandBridge（Q_PROPERTY 暴露状态 + fireAction/requestExpand 回调）
+//   paintEvent 从此**不再画任何东西**（QML 铺满后 C++ 画笔无事可做），
+//   但**保留覆写**：一来留个"QML 没起来就退回手绘"的余地（见 paintEvent 里的判空），
+//   二来把原来那套绘制代码留档在上面，方便比对观感是否走样。
+//
+// ⚠️ 逻辑（几何/动画/定时器/鼠标/生命周期）**一个字都没动**：
+//    那些注释里写满踩坑记录的状态机（m_closing 淡出守卫 / kDragSlop 方向锁 /
+//    explorer /select 不 ShellExecute / m_expandGuard 硬回收）是本文件的核心资产，
+//    改 QML 只该换"长什么样"，不该碰"什么时候显示、点了会怎样"。
 
 #include "island.h"
+#include "island_bridge.h"
+#include "svgiconprovider.h"
 
 #include <QApplication>
 #include <QDebug>
@@ -24,10 +39,15 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QProcess>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQuickWidget>
 #include <QScreen>
 #include <QStyleHints>
 #include <QSvgRenderer>
 #include <QTime>          // A3：空闲态时钟（HH:mm）
+#include <QUrl>
+#include <QQmlError>
 
 // 2026-10-08 lucide(morphicons 同款) SVG 图标渲染：读取 qrc 内 /icons/<name>.svg，
 // 把 stroke/fill 的 currentColor 换成主题前景色后渲染成 QPixmap（深浅主题自动适配）。
@@ -145,6 +165,10 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     // 不给活动态/隐藏态添任何重绘负担。
     // A4 复用同一条心跳推进展开态的描述滚动（16px 步进 ≈ 32px/s，与 MarqueeText 默认 100px/s
     // 相比更慢更克制 —— 展开态是给人"读"的，不是跑马灯；500ms 一跳的步长按 fps 折算即可）。
+    //
+    // 2026-10-11 改 QML 后：这两件事 QML 自己用 Timer 做了（IslandClock / MarqueeText），
+    // m_clockTick 此时只剩"给 C++ 兜底手绘用"的意义 —— **保留不动**，
+    // 因为 paintEvent 里还留着旧绘制路径，删了会让兜底路走不通。
     m_clockTick = new QTimer(this);
     m_clockTick->setInterval(500);
     connect(m_clockTick, &QTimer::timeout, this, [this]() {
@@ -157,6 +181,41 @@ IslandOverlay::IslandOverlay(QWidget *parent)
         }
     });
     m_clockTick->start();
+
+    // ── 2026-10-11 · QML 绘制层（用户裁决：视觉层改 QML）─────────────
+    // 桥先建：QML 一加载就会读 bridge 的属性，不存在会报 ReferenceError。
+    m_bridge = new IslandBridge(this, this);
+    m_quick = new QQuickWidget(this);
+    // ⚠️ 必须 TRANSPARENT：本窗口是 WA_TranslucentBackground，QQuickWidget 默认
+    //    带自己的不透明底，会盖住圆角、露出方角。不清这个，胶囊看着是块方板。
+    m_quick->setClearColor(Qt::transparent);
+    m_quick->setAttribute(Qt::WA_TranslucentBackground);
+    m_quick->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    m_quick->rootContext()->setContextProperty(QStringLiteral("bridge"), m_bridge);
+    // SVG 图标 provider（QML 侧 SvgIcon.qml 用 image://svgicon/<name>?color=...）。
+    // ⚠️ 必须挂在**这个 QQuickWidget 自己的 engine** 上，不能挂全局默认 engine ——
+    //    QQuickWidget 有独立 engine，挂错了图标全空白（且不报错，最难查）。
+    m_quick->engine()->addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider);
+
+    // ⚠️ QML 走**磁盘加载**（不是 qrc）：改外观不用重编译，与 viewer 同一个约定。
+    //    路径基于 exe 目录的 qml/island/IslandRoot.qml（build.ps1 / CMake 会拷过去）。
+    //    找不到就**不致命** —— 退回手绘（paintEvent 里有判空），被控端不能因为
+    //    一个外观文件缺失就起不来。
+    const QString qmlRoot = QDir(QCoreApplication::applicationDirPath())
+                                .filePath(QStringLiteral("qml/island/IslandRoot.qml"));
+    if (QFileInfo::exists(qmlRoot)) {
+        m_quick->setSource(QUrl::fromLocalFile(qmlRoot));
+        for (const QQmlError &e : m_quick->errors())
+            qWarning() << "[island] QML 报错:" << e.toString();
+    } else {
+        qWarning() << "[island] 找不到" << qmlRoot << "—— 退回 C++ 手绘（外观走旧路径）";
+    }
+
+    // QML 铺满窗口（几何动画改的是本窗口的 geometry，子控件跟着伸缩）
+    m_quick->setGeometry(rect());
+
+    // 初始同步一次：把构造期定下的 m_light 推给 QML
+    m_bridge->sync();
 
     hide();
 }
@@ -291,6 +350,7 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
 
     // 新内容把上一条的展开态压平了 —— 状态变了就得发信号（见 enterIdle 里的同款说明）
     if (wasExpanded) emit expandedChanged(false);
+    if (m_bridge) m_bridge->sync();
     update();
 }
 
@@ -305,6 +365,10 @@ void IslandOverlay::showWithActions(const QString &title, const QString &desc, c
     showIsland(title, desc, icon, inter ? 0 : durationMs, form);
     m_actions = actions;
     m_onAction = onAction;
+    // ⚠️ showIsland 里已经 sync 过一次，但那时 m_actions 还是空的（第 303 行才回填）。
+    //    QML 侧按钮行读的是 bridge.actions ⇒ 必须在这里**再 sync 一次**，
+    //    否则"确认"按钮要到下一次状态变化才出现（表现为点了没按钮）。
+    if (m_bridge) m_bridge->sync();
     update();
 }
 
@@ -312,6 +376,7 @@ void IslandOverlay::showWithActions(const QString &title, const QString &desc, c
 void IslandOverlay::setSeverity(const QString &severity)
 {
     m_severity = severity.trimmed().toLower();
+    if (m_bridge) m_bridge->sync();
     update();
 }
 
@@ -326,6 +391,7 @@ void IslandOverlay::setIdleEnabled(bool on)
         setInteractive(false);
         hide();
     }
+    if (m_bridge) m_bridge->sync();
 }
 
 void IslandOverlay::ensureIdle()
@@ -363,6 +429,7 @@ void IslandOverlay::enterIdle()
         m_fadeAnim->stop();
         m_fadeAnim->setDirection(QAbstractAnimation::Forward);
         m_fadeAnim->start();
+        if (m_bridge) m_bridge->sync();
         return;
     }
 
@@ -396,6 +463,7 @@ void IslandOverlay::enterIdle()
     // 原来它不发 expandedChanged(false)，对外就出现"isExpanded() 已是 false、
     // 最后一次信号还是 true"的自相矛盾。
     if (wasExpanded) emit expandedChanged(false);
+    if (m_bridge) m_bridge->sync();
 }
 
 void IslandOverlay::setExpanded(bool on)
@@ -415,7 +483,7 @@ void IslandOverlay::setExpanded(bool on)
     }
     if (on) m_idle = false;
 
-    if (!isVisible()) { emit expandedChanged(on); return; }
+    if (!isVisible()) { emit expandedChanged(on); if (m_bridge) m_bridge->sync(); return; }
 
     // 空闲态展开再收起：直接回空闲半胶囊。
     // 中间别在"展开(168) → 标题胶囊(56) → 空闲(36)"来回三段跳 ——
@@ -423,6 +491,7 @@ void IslandOverlay::setExpanded(bool on)
     if (!on && !m_contentActive) {
         enterIdle();
         emit expandedChanged(on);
+        if (m_bridge) m_bridge->sync();
         return;
     }
 
@@ -433,6 +502,7 @@ void IslandOverlay::setExpanded(bool on)
         m_expanded = on;
         if (on) m_autoClose->start(qMax(5000, m_durationMs));
         emit expandedChanged(on);
+        if (m_bridge) m_bridge->sync();
         return;
     }
 
@@ -452,6 +522,7 @@ void IslandOverlay::setExpanded(bool on)
     if (on) m_expandGuard->start(kExpandMaxMs);
     else    m_expandGuard->stop();
     emit expandedChanged(on);
+    if (m_bridge) m_bridge->sync();
 }
 
 void IslandOverlay::animateGeometry(const QRect &target)
@@ -489,12 +560,14 @@ void IslandOverlay::dismiss()
         hide();
     }, Qt::UniqueConnection);
     m_fadeAnim->start();
+    if (m_bridge) m_bridge->sync();
 }
 
 void IslandOverlay::setLightMode(bool light)
 {
     if (m_light == light) return;
     m_light = light;
+    if (m_bridge) m_bridge->sync();
     update();
 }
 
@@ -503,16 +576,32 @@ void IslandOverlay::setInteractive(bool on)
     if (m_interactive == on) return;
     m_interactive = on;
     setAttribute(Qt::WA_TransparentForMouseEvents, !on);
+    // ⚠️⚠️ 2026-10-11 改 QML 后新增，漏了就是**事故**：
+    //    QQuickWidget 是**子 QWidget**，父窗口设了 WA_TransparentForMouseEvents
+    //    **不会**自动继承到它 —— 它会照常把鼠标事件吃在自己的 rect 里。
+    //    结果：标称"穿透"（C++ 层属性是对的，谁查都查不出问题），实际整块岛照样
+    //    挡住下面的课件/白板点击。教室里就是"老师点不中课件"。
+    //    必须把同一个属性同步给 m_quick。
+    // ⚠️ 还有一层：QQuickWidget 内部的 QQuickWindow 收到事件后会分给 QML 的 MouseArea。
+    //    所以 QML 侧也按 interactive 决定 MouseArea 的 enabled（见 IslandRoot.qml
+    //    的 gesture.enabled）—— 两边都要关，只关一边仍会"吃掉"点击。
+    if (m_quick) {
+        m_quick->setAttribute(Qt::WA_TransparentForMouseEvents, !on);
+        // QQuickWidget 自己要的鼠标策略：穿透态连 hover 都不该收
+        m_quick->setEnabled(on || !m_idle);
+    }
     if (on) setCursor(Qt::PointingHandCursor);
     else    unsetCursor();
     // 从可点切回纯展示：这条如果还在屏上，就得给它定个消失时间（可点时不定时）。
     if (!on && isVisible() && m_durationMs > 0)
         m_autoClose->start(m_durationMs);
+    if (m_bridge) m_bridge->sync();
 }
 
 void IslandOverlay::setOpenPath(const QString &path)
 {
     m_openPath = path;
+    if (m_bridge) m_bridge->sync();
     update();
 }
 
@@ -520,6 +609,7 @@ void IslandOverlay::clearOpenPath()
 {
     if (m_openPath.isEmpty()) return;
     m_openPath.clear();
+    if (m_bridge) m_bridge->sync();
     update();
 }
 
@@ -628,8 +718,29 @@ void IslandOverlay::paintBigForm()
     }
 }
 
+// 窗口改尺寸：QQuickWidget 要跟着铺满。
+// ⚠️ 不能只靠 setGeometry(rect()) 在构造时设一次：几何动画（m_geoAnim 改的是
+//    本窗口的 "geometry" 属性）每一次补间都会触发 resizeEvent，子控件不跟就会
+//    "窗口长大了、QML 还停在旧尺寸" —— 表现为展开时右边/下面缺一块。
+void IslandOverlay::resizeEvent(QResizeEvent *ev)
+{
+    QWidget::resizeEvent(ev);
+    if (m_quick) m_quick->setGeometry(rect());
+}
+
 void IslandOverlay::paintEvent(QPaintEvent *)
 {
+    // ── 2026-10-11 改 QML 后 ──────────────────────────────────────
+    // QML 铺满整个窗口，C++ 不需要再画任何东西（画了也会被 QQuickWidget 盖住）。
+    // 只在「QML 没起来」时退回下面那套手绘 —— 被控端不能因为一个外观文件
+    // 缺失/编译失败就在教室大屏上白屏。
+    if (m_quick && m_quick->status() == QQuickWidget::Ready) return;
+
+    // ⚠️ 下面这套是**兜底路径**（2026-10-11 前的主路径）。
+    //    保留它不是因为"可能还用得上"——是因为**必须**有个不留空白的退路：
+    //    被控端是教室里跑的软件，外观组件坏掉时宁可退回旧观感，也不能一片空。
+    //    改 QML 时请以 IslandRoot.qml 为准，这里只做同步（别只改一边）。
+
     // #98：居中卡片 / 全屏走独立绘制路径，不吃下面那套胶囊逻辑
     if (m_form != Form::Capsule) {
         paintBigForm();
@@ -909,8 +1020,8 @@ void IslandOverlay::mouseReleaseEvent(QMouseEvent *ev)
         auto cb = m_onAction;
         m_actions.clear();
         m_onAction = nullptr;
-        setInteractive(false);
-        dismiss();
+        setInteractive(false);          // 内部会 sync
+        dismiss();                      // 内部会 sync
         if (cb) cb(reply);
         ev->accept();
         return;

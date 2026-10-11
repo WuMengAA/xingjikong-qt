@@ -14,9 +14,12 @@ endif()
 
 # D1: Core+Gui（抓屏/JPEG）｜D2: +WebSockets（连云端发帧）｜D5: +Widgets（托盘常驻，见下）
 # 2026-10-04 +Network：OOBE 绑定界面要 POST 站点消费班级接入码（/api/device/activate）
+# 2026-10-11 +Quick/QuickWidgets：灵动岛视觉层改 QML（用户裁决），QQuickWidget 承载。
+#   只加 QuickWidgets 不够 —— QML 运行时（QtQml/QtQuick 的 DLL + qml/ 插件目录）
+#   必须随包走，否则装到干净机器上"岛白屏"（本机有 Qt 环境所以看不出来）。
 # 注：WebEngine 的按需加载不需要额外组件 —— 不加 WebEngineQuick（它在动态构建下会死锁，见
 #     src/main.cpp 的 ensureWebEngine 注释），只要不在 main 里提前 new QWebEngineView 即可。
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg Qml Quick QuickWidgets)
 
 # ── 版本资源 + 应用图标（2026-10-07 补）────────────────────────────────────
 # 补之前 exe 是「无版本资源的裸 PE」：任务管理器细节页空白、右键属性没有描述、
@@ -114,6 +117,12 @@ add_executable(stelarith-agent-qt
   # ── 被控端灵动岛（2026-10-07 加：活动统一经过灵动岛，形状/位置转变 + 缓动 + 深浅色 + 交互穿透）──
   src/island.cpp
   src/island.h
+  # ── 灵动岛 QML 桥（2026-10-11 加：视觉层改 QML，本桥把状态推给 QML / 接 QML 回调）──
+  src/island_bridge.cpp
+  src/island_bridge.h
+  # ── SVG 图标 provider（QML Image 的 image://svgicon 协议；与 viewer 同份实现）──
+  src/svgiconprovider.cpp
+  src/svgiconprovider.h
   # ── 通知体系新组件（2026-10-09 接线：通知规格 §6 全部独立组件，DeepSeek Harness 造）──
   src/danmaku.cpp
   src/danmaku.h
@@ -145,6 +154,8 @@ add_executable(stelarith-agent-qt
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Svg)
 # 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
 target_link_libraries(stelarith-agent-qt PRIVATE winmm)
+# 2026-10-11：灵动岛 QML（QQuickWidget 承载 qml/island/IslandRoot.qml）
+target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Qml Qt6::Quick Qt6::QuickWidgets)
 # ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
 #    STE_USE_LDC_RTC=1 默认走 ldc，=0 回退 WebEngine）────────────────────
 # 库：_probe/ldc_libs（重建产物，命名 datachannel.lib/juice.lib）+ PG17 OpenSSL
@@ -173,3 +184,26 @@ set_target_properties(stelarith-agent-qt PROPERTIES WIN32_EXECUTABLE ON)
 # 编译进 exe（qrc 前缀 /icons），部署不带额外文件、颜色运行时按主题染。
 file(GLOB AGENT_ICON_SVGS "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/*.svg")
 qt_add_resources(stelarith-agent-qt "agenticons" PREFIX "/icons" BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons" FILES ${AGENT_ICON_SVGS})
+
+# ── 2026-10-11 · 灵动岛 QML 资源 ────────────────────────────────────────
+# 鲸鱼娘素材（清单元数据 #1）：cp 自 Stelarith-viewer-qt/resources/whale/（源未动）。
+# 编进 exe（qrc 前缀 /whale）—— QML 里写 qrc:/whale/DSniang1.png。
+# ⚠️ 不能走磁盘：这两张是装饰图，跟着 exe 走最省心（装机不用带额外文件）。
+file(GLOB AGENT_WHALE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/whale/*")
+if(AGENT_WHALE_FILES)
+  qt_add_resources(stelarith-agent-qt "agentwhale" PREFIX "/whale" BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/whale" FILES ${AGENT_WHALE_FILES})
+  message(STATUS "[agent] 鲸鱼娘素材已编入（${AGENT_WHALE_FILES}）")
+else()
+  message(WARNING "[agent] resources/whale/ 为空——灵动岛展开态的鲸鱼娘会是空白")
+endif()
+
+# ── 灵动岛 QML：磁盘加载 + 构建时拷贝 ───────────────────────────────────
+# ⚠️ 走**磁盘**而不是 qrc：改外观不用重编译（与 viewer 同一个约定，项目笔记 §3）。
+#    代价是 build/ 下必须有 qml/ 目录，且打包要带上（NSIS 那边已按目录整包带）。
+#    POST_BUILD 覆盖拷贝：源码目录改了 qml，重编译即生效；改副本可热更（重启 exe）。
+add_custom_command(TARGET stelarith-agent-qt POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+          "$<TARGET_FILE_DIR:stelarith-agent-qt>/qml"
+  COMMENT "[agent] 拷贝 qml/ → 构建输出目录（灵动岛视觉层）")
+

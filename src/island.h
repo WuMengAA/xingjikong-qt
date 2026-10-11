@@ -14,6 +14,15 @@
 //
 // 与 NotifyWindow 的关系：NotifyWindow 保留（全屏遮罩/居中弹窗/紧急确认仍在它那里），
 // 灵动岛接管 **island 形态** 与各类瞬态提示（语音/广播/考试倒计时等）——见 island.cpp。
+//
+// ── 2026-10-11 · 绘制层改 QML（用户裁决）──────────────────────────────
+// 用户要求"被控端 QWidget 改 QML"。本次只把**绘制**搬走，**逻辑一行不动**：
+//   · 视觉层 → qml/island/IslandRoot.qml（+ 7 个组件），由 QQuickWidget 承载
+//   · 逻辑层（几何/动画/定时器/鼠标/生命周期/单例）→ 仍在本文件原样保留
+//   · 桥：island_bridge.{h,cpp}（private 实现细节，不为它新增公开接口）
+// ⚠️ 本文件的**公开接口一个字符都没改**（12 个方法 + 1 个信号），
+//    所以 main.cpp 的 5 处调用点 + notifyFromParams 全都零改动。
+//    这是本次改造最重要的风险控制点 —— 任何需要改 main.cpp 的方案都视为越界。
 
 #ifndef STELARITH_ISLAND_H
 #define STELARITH_ISLAND_H
@@ -29,6 +38,9 @@
 
 class QMouseEvent;
 class QPaintEvent;
+class QResizeEvent;      // 2026-10-11：resizeEvent(QResizeEvent*) 需要
+class QQuickWidget;
+class IslandBridge;
 
 class IslandOverlay : public QWidget
 {
@@ -105,6 +117,7 @@ signals:
 
 protected:
     void paintEvent(QPaintEvent *) override;
+    void resizeEvent(QResizeEvent *) override;      // 2026-10-11：QQuickWidget 跟着铺满
     void mousePressEvent(QMouseEvent *) override;
     void mouseMoveEvent(QMouseEvent *) override;    // 触控：下拉展开 / 上推收起
     void mouseReleaseEvent(QMouseEvent *) override; // 触控：拖动过就不算点击
@@ -177,7 +190,16 @@ private:
     QPropertyAnimation *m_geoAnim = nullptr;
     QPropertyAnimation *m_fadeAnim = nullptr;
 
-    friend class IslandPrivate;
+    // ── 2026-10-11 · QML 绘制层 ─────────────────────────────────
+    // 承载 qml/island/IslandRoot.qml 的子控件（铺满本窗口）。
+    // ⚠️ 它是**子 QWidget**：本窗口的 WA_TransparentForMouseEvents 不会自动继承到它，
+    //    所以 setInteractive() 里要同步给 m_quick 设同一个属性（见 island.cpp）。
+    //    漏掉这一步的表现是"标称穿透、实际挡点击"，教室大屏上属于事故。
+    QQuickWidget *m_quick = nullptr;
+    IslandBridge *m_bridge = nullptr;
+
+    friend class IslandBridge;   // 桥要读私有成员（见 island_bridge.cpp 的头注释）
+    friend class IslandPrivate;   // 既有前向声明（历史遗留，保留）
 };
 
 #endif // STELARITH_ISLAND_H
