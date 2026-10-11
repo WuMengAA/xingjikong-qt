@@ -131,6 +131,26 @@ void LdcStreamer::start(int captureMs)
     if (m_active) m_capture.start(qMax(50, m_captureMs));
 }
 
+void LdcStreamer::renegotiate()
+{
+    QMutexLocker lock(&m_mu);
+    auto *pc = static_cast<rtc::PeerConnection *>(m_pc.get());
+    if (!pc) { qWarning("[rtc-ldc] renegotiate：PC 不存在（还没 start？）"); return; }
+    m_offerSent = false;   // 让 onLocalDescription 的 offer 分支再发一次 signalOffer
+    lock.unlock();
+    QTimer::singleShot(0, this, [this]() {
+        auto *p = static_cast<rtc::PeerConnection *>(m_pc.get());
+        if (!p) { qWarning("[rtc-ldc] renegotiate：PC 在单次回调前已销毁"); return; }
+        try {
+            p->setLocalDescription();   // 同一条 SDP 媒体线重新协商 → 新 offer
+            qInfo("[rtc-ldc] renegotiate：重新 setLocalDescription（新订阅者拿 offer）");
+        } catch (const std::exception &e) {
+            qWarning("[rtc-ldc] FAIL renegotiate: %s", e.what());
+            emit failed(QStringLiteral("renegotiate: %1").arg(QString::fromLocal8Bit(e.what())));
+        }
+    });
+}
+
 void LdcStreamer::stop()
 {
     if (!m_active && !m_pc) return;

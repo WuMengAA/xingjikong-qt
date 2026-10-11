@@ -5004,7 +5004,13 @@ static void rtcStart()
     // 不拉起 Chromium（瘦身 137MB 常驻）。STE_USE_LDC_RTC=0 回退旧 WebEngine 路。──
     const bool useLdc = qgetenv("STE_USE_LDC_RTC") != "0";
     if (useLdc) {
-        if (g_rtcOn) return;   // 已在推
+        if (g_rtcOn) {
+            // 2026-10-11 修「WebRTC 没实时」：offer 原本只发一次，新订阅/重连的
+            // 管理端永远拿不到 offer。已推流时再次 rtc-start = 重新协商出 offer。
+            qInfo("[rtc-ldc] 已在推流，重新协商（新订阅者拿 offer）");
+            LdcStreamer::instance().renegotiate();
+            return;
+        }
         g_offlineSince = 0;
         cancelRtcViewReap();
         g_rtcOn = true;
@@ -5464,6 +5470,10 @@ void captureAndSend(const QString &outDir)
             qInfo("[agent-qt] 云端不在，跳过抓屏（累计跳过 %d 次）", skipped);
         return;
     }
+    // 2026-10-11 用户「强制取消单图片推流在实时远程的使用」：
+    // RTC（libdatachannel）推流已开时停掉 WS 单图片帧 —— 实时画面走 RTC，
+    // WS 帧双路重复抓屏 + 推送，还让管理端可能收到陈旧单图。停 RTC 后恢复。
+    if (g_rtcOn) return;
 
     QScreen *screen = QGuiApplication::primaryScreen();
     if (!screen) {

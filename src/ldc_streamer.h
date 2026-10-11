@@ -37,6 +37,9 @@ public:
 
     // 开始抓屏推流；captureMs = 抓帧间隔（默认 200ms = 5fps）
     void start(int captureMs = 200);
+    // 2026-10-11：已在推流时重新协商（新订阅的管理端也要拿到 offer）。
+    // 重置 m_offerSent 并重新 setLocalDescription → onLocalDescription 再发 signalOffer。
+    void renegotiate();
     void stop();
 
     bool active() const { return m_active; }
