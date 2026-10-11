@@ -975,6 +975,10 @@ void ViewerBackend::start()
     // 本机联调照旧设 STE_VIEWER_URL 覆盖就行，不要为了联调把默认值改回去。
     m_url = qEnvironmentVariable("STE_VIEWER_URL", kDefaultViewerUrl).trimmed();
     if (m_url.isEmpty()) m_url = kDefaultViewerUrl;
+#if defined(Q_OS_ANDROID) && defined(STE_VIEWER_URL_CMake)
+    if (m_url == kDefaultViewerUrl)   // Android 无 env；联调/隔离实例用宏覆盖
+        m_url = QString::fromUtf8(STE_VIEWER_URL_CMake).trimmed();
+#endif
     m_token = qEnvironmentVariable("STE_VIEWER_TOKEN", QString()).trimmed();
     // 2026-10-11：Android 无环境变量 → 用编译期宏注入（CMake ANDROID 分支传
     // -DSTE_VIEWER_TOKEN_CMake="…"，mobile 同款方案；方便未登录时连云端）

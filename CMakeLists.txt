@@ -323,6 +323,12 @@ if(STE_IS_ANDROID)
     else()
       message(WARNING "[viewer] 未设 STE_VIEWER_TOKEN_BUILD——Android 无静态令牌，未登录时云端会拒")
     endif()
+    # 2026-10-11：Android 云端地址覆盖（联调/隔离实例用；默认仍生产 wss）
+    if(DEFINED ENV{STE_VIEWER_URL_BUILD} AND NOT "$ENV{STE_VIEWER_URL_BUILD}" STREQUAL "")
+      target_compile_definitions(viewer-qt PRIVATE
+        "STE_VIEWER_URL_CMake=\"$ENV{STE_VIEWER_URL_BUILD}\"")
+      message(STATUS "[viewer] Android 云端地址已覆盖为 $ENV{STE_VIEWER_URL_BUILD}")
+    endif()
     message(STATUS "[viewer] Android ldc 已链入（mbedTLS 后端, RTC_STATIC）")
   else()
     message(FATAL_ERROR "[viewer] _probe/ldc_libs_android 缺失——先按 WebRTC-Android-构建配方交编译")
