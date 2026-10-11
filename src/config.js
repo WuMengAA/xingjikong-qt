@@ -71,8 +71,10 @@ export const SWEEP_INTERVAL_MS = Number(process.env.CLOUD_SWEEP_INTERVAL_MS || 5
 
 export const EV_LIMIT = Number(process.env.CLOUD_EV_LIMIT || 200);
 
-// 最近一帧只留在内存里给管理端拉（D4 会用），不落盘：截图属于机房敏感数据。
-export const KEEP_LAST_FRAME = true;
+// 最近一帧缓存：2026-10-11 用户裁决「不要云端缓存啊，这又不是监控」——
+// 云端不存帧（画面走实时转发 broadcastFrame，不是拉缓存）。置 false 后
+// addFrame 清 recentFrame，/api/frame 无缓存帧可拉（实时画面不受影响）。
+export const KEEP_LAST_FRAME = false;
 
 // 协议模式（Phase 1 · 协议 v1 的过渡开关）：
 //   v1-compat（默认）：认 v1 信封，也认旧扁平格式；对端发什么就回什么格式 —— 不破坏现有两端

@@ -1237,7 +1237,8 @@ wss.on('connection', (ws) => {
         pushEvent('error', '收到帧但设备不在表里（异常状态）', { uid });
         return;
       }
-      setRecentFrame(uid, f.payload);
+      // 2026-10-11 用户裁决「不要云端缓存」：不存 recentFrame（非监控），
+      // 帧直接实时转发给订阅的管理端（broadcastFrame），画面实时无陈旧。
       // 推给订阅了这个 uid 的管理端（谁订阅推谁，不群发）
       const r = broadcastFrame(uid, f.payload, seq);
       if (r.hits > 0) pushEvent('info', '帧已推给管理端', { uid, viewers: r.hits, bytes: r.bytes, seq });
