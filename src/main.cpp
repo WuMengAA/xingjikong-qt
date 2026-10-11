@@ -38,6 +38,7 @@
 #include <QDir>          // 2026-10-06 SPIKE：从磁盘加载 QML 需要定位 qml 目录
 #include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QString>
 #include <QSystemTrayIcon>
 #include <QMenu>
@@ -512,10 +513,21 @@ int main(int argc, char *argv[])
     // 2026-10-11：Android（手机 App 并入管理端）无磁盘 build 目录 → QML 走 qrc 嵌入
     //（CMake ANDROID 分支把 qml/ 整树嵌进 :/ 前缀，load("qrc:/Main.qml")）。
 #if defined(Q_OS_ANDROID)
-    // 2026-10-11 S2：手机 App 并入管理端 → Android 加载手机端布局
-    //（独立 QML 方案：qml/mobile/Main.qml + 页面组件；复用全部 components + viewerbackend）
-    const QString qmlUrl = QStringLiteral("qrc:/mobile/Main.qml");
-    engine.addImportPath(QStringLiteral("qrc:/"));
+    // 2026-10-11 一源响应式（用户裁决「手机定期拉取桌面端」）：
+    // 入口 = qrc:/Main.qml（与桌面同源，窄屏切 MobileShell）。
+    // 热更：云端 /api/qml-patch 拉下来的 zip 解压到本地 qml-live/，
+    // 存在即本地优先（改 UI 不用重出 APK）；无则回退 qrc。
+    const QString qmlLiveDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+        + QStringLiteral("/qml-live");
+    QString qmlUrl;
+    if (QFileInfo::exists(qmlLiveDir + QStringLiteral("/Main.qml"))) {
+        qmlUrl = QUrl::fromLocalFile(qmlLiveDir + QStringLiteral("/Main.qml")).toString();
+        engine.addImportPath(qmlLiveDir);
+        logf("[viewer] Android 加载本地热更 QML（%s）", qmlLiveDir.toUtf8().constData());
+    } else {
+        qmlUrl = QStringLiteral("qrc:/Main.qml");
+        engine.addImportPath(QStringLiteral("qrc:/"));
+    }
 #else
     const QString qmlDir = QDir(QCoreApplication::applicationDirPath())
         .absoluteFilePath(QStringLiteral("qml/Stelarith"));

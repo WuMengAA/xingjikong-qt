@@ -1,26 +1,20 @@
-// 星集控 · 手机端主界面入口（2026-10-11 · 独立 QML 方案落地）
+// 星集控 · 手机端布局壳（2026-10-11 · 一源响应式方案 A）
 //
-// 文档《手机端：独立 QML 还是响应式》落地：UI 层 mobile/ 独立，
-// C++ 层（viewerbackend）100% 共享；原子组件 components/ 共享。
-// 结构：qml/mobile/{Main, OverviewPage, DeviceListPage, MonitorPage,
-//                SettingsPage, DeviceDetailDrawer, BottomNav}.qml
+// 由 mobile/Main.qml（独立 ApplicationWindow 壳）改造而来：
+// 根类型 ApplicationWindow → Item，可嵌入桌面 Main.qml 的响应式分支
+// （窄屏时 Loader 挂载，盖住桌面布局）。内部四页 / Drawer / 弹窗不变。
 //
-// main.cpp：Android 加载 qrc:/mobile/Main.qml（桌面仍 qml/Stelarith/Main.qml）。
+// 用户裁决 2026-10-11：「不要各写各的了，做响应式，手机定期拉取桌面端」。
+// 一源响应式：桌面 Main.qml 为唯一入口，isMobile(<600px) 时挂本组件。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"
 import "."
 
-ApplicationWindow {
+Item {
     id: root
-    width: Math.min(430, Math.max(320, Screen.width))
-    height: Math.min(930, Math.max(640, Screen.height))
-    visible: true
-    title: "星集控 · 手机端"
-    color: root.th.win
-    // ⚠️ Fluent 风格下 ApplicationWindow 背景色由系统控制，这里显式铺一层
-    background: Rectangle { color: root.th.win }
+    anchors.fill: parent
 
     Theme { id: theme; dark: root.darkMode }
     readonly property var th: theme
@@ -199,8 +193,18 @@ ApplicationWindow {
         onTriggered: backend.requestDevices()
     }
 
+    // ── QML 热更检查（2026-10-11 一源响应式：手机定期拉桌面端）──
+    // 每小时查一次 /api/qml-patch；版本不同则下载解压到 qml-live/，下次启动生效。
+    Timer {
+        interval: 3600000
+        repeat: true
+        running: true
+        onTriggered: backend.checkQmlPatch()
+    }
+
     Component.onCompleted: {
         backend.requestDevices()
+        backend.checkQmlPatch()   // 启动查一次（后台更新，下次启动生效）
         // 监控摘要：录制列表回来 → 汇总
         backend.recordingsChanged.connect(function () { root.buildRecSummary() })
         backend.fetchRecordings()

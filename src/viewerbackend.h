@@ -421,6 +421,9 @@ public:
     Q_INVOKABLE void fetchRecordings();
     // 2026-10-11：拉事件流水（/api/events）——手机端告警页
     Q_INVOKABLE void fetchEvents();
+    // 2026-10-11：QML 热更（一源响应式）——查 /api/qml-patch 清单，版本不同则
+    // 下载 zip 解压到本地 qml-live/（下次启动本地优先；改 UI 不用重出 APK）
+    Q_INVOKABLE void checkQmlPatch();
     QJsonArray events() const { return m_events; }
     /** 录制列表（QML 读，QJsonObject：uid → 文件数组）。 */
     QJsonObject recordings() const { return m_recordings; }
@@ -820,6 +823,9 @@ private:
     // ── 班级监控（2026-10-07）──
     QJsonObject m_recordings;                 // recordings/<uid>/[文件] 分组缓存
     QJsonArray m_events;                      // 2026-10-11：/api/events 事件流水缓存
+
+    // 2026-10-11：store 模式 zip 解压（qml-patch 热更；无压缩，只读中央目录拷数据）
+    bool unzipStore(const QString &outDir, const QByteArray &zip);
 
     // ── 语音对讲下行（B6 · 2026-10-11）────────────────────────────────────
     // 学生端回传的 audio/pcm 帧（duplex 单播回老师）在管理端播放。
