@@ -703,7 +703,8 @@ static bool saveBoundCamera(const QString &dev)
  *  ⚠️ 设备名在**首对引号**里，类别在尾部括号里。别再抓行里第一个 '@' ——
  *     那是 `[in#0 @ 0x…]` 的地址标记，抓它解析必然为空（旧实现的 bug）。
  *  类别：video=摄像头；audio=麦克风；**none=虚拟摄像头（如 OBS），也算摄像头**。 */
-static void parseDshowDevices(const QString &txt, QJsonArray &cams, QJsonArray &mics)
+static void parseDshowDevices(const QString &txt, QJsonArray &cams, QJsonArray &mics,
+                              QJsonArray *details = nullptr)
 {
     static const QRegularExpression re(QStringLiteral("\\]\\s*\"([^\"]+)\"\\s*\\(([A-Za-z]+)\\)"));
     for (const QString &line : txt.split(QLatin1Char('\n'))) {
@@ -712,9 +713,59 @@ static void parseDshowDevices(const QString &txt, QJsonArray &cams, QJsonArray &
         const QString name = m.captured(1).trimmed();
         const QString kind = m.captured(2).toLower();
         if (name.isEmpty()) continue;
-        if (kind == QLatin1String("audio")) mics.append(name);
-        else                                cams.append(name);
+        if (kind == QLatin1String("audio")) { mics.append(name); continue; }
+        cams.append(name);
+        // 2026-10-12 · UI 评审第 4 条：kind 不是 `video` 的一律是**虚拟摄像头**
+        // （OBS Virtual Camera / Iriun Webcam 等）。它们打不出真实画面，却会被枚举出来、
+        // 被当作"真设备"逐个去开，于是刷一大片 `Error opening input file video=…`。
+        // 单列出来，界面据此标注「虚拟」，用户就不会选了半天发现没画面。
+        if (details) {
+            QJsonObject o;
+            o.insert(QStringLiteral("name"), name);
+            o.insert(QStringLiteral("kind"), kind);
+            o.insert(QStringLiteral("virtual"), kind != QLatin1String("video"));
+            details->append(o);
+        }
     }
+}
+
+/** 把 ffmpeg 的原始 stderr 归成**稳定错误码 + 教师看得懂的人话**（2026-10-12 · UI 评审第 4 条）。
+ *  ⚠️ 红线条文：`Unable to find a matching device` 这类 FFmpeg 原生输出**绝不能直接上界面**——
+ *     老师看不懂，只会判定"这软件坏了"。技术细节一律塞进 `errorRaw`，只进诊断页/日志。
+ *     错误码是**机器契约**：管理端靠它决定显示什么文案、要不要给「重试」按钮，
+ *     所以这里的字符串不许随手写改动（改了要同步改 CameraCenter.qml 的映射表）。 */
+struct CamErr { QString code; QString msg; bool retryable = false; };
+static CamErr classifyCamError(const QString &raw)
+{
+    const QString r = raw.toLower();
+    // 顺序有讲究：先判"被占用"再判"找不到"—— 部分驱动被占用时报的其实是 I/O error，
+    // 而 I/O error 也出现在设备不存在时，所以先看有没有明确的 busy 字样。
+    if (r.contains(QStringLiteral("device is busy"))
+        || r.contains(QStringLiteral("already in use"))
+        || r.contains(QStringLiteral("being used by another")))
+        return { QStringLiteral("device_busy"),
+                 QStringLiteral("摄像头被别的程序占用，请先关掉会议软件 / OBS / 系统相机"), true };
+    if (r.contains(QStringLiteral("unable to find a matching device"))
+        || r.contains(QStringLiteral("could not find"))
+        || r.contains(QStringLiteral("no such device"))
+        || r.contains(QStringLiteral("device not found"))
+        || r.contains(QStringLiteral("error opening input file")))
+        return { QStringLiteral("device_not_found"),
+                 QStringLiteral("没找到这个摄像头，可能已拔掉、换过接口或被禁用"), false };
+    if (r.contains(QStringLiteral("access is denied")) || r.contains(QStringLiteral("permission denied")))
+        return { QStringLiteral("permission"),
+                 QStringLiteral("没有权限打开摄像头，请检查系统相机权限 / 杀毒软件拦截"), true };
+    if (r.contains(QStringLiteral("i/o error")))
+        return { QStringLiteral("device_busy"),
+                 QStringLiteral("摄像头读写失败，多半正被别的程序占用"), true };
+    if (r.contains(QStringLiteral("invalid")) && r.contains(QStringLiteral("device")))
+        return { QStringLiteral("device_invalid"),
+                 QStringLiteral("这个摄像头名字无效了，请重新枚举并绑定"), false };
+    if (r.contains(QStringLiteral("timeout")) || r.contains(QStringLiteral("timed out")))
+        return { QStringLiteral("timeout"),
+                 QStringLiteral("摄像头响应超时，可能被占用或驱动异常"), true };
+    return { QStringLiteral("unknown"),
+             QStringLiteral("摄像头打不开（技术细节见诊断日志）"), true };
 }
 
 // ffplay 定位：与 ffmpeg 同目录优先（WinGet 装的俩在一处），再退回 PATH。
@@ -4015,10 +4066,15 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             return out;
         }
         const QString txt = QString::fromUtf8(p.readAll());
-        QJsonArray cams, mics;
-        parseDshowDevices(txt, cams, mics);
+        QJsonArray cams, mics, details;
+        parseDshowDevices(txt, cams, mics, &details);
+        int virt = 0;
+        for (const QJsonValue &v : details)
+            if (v.toObject().value(QStringLiteral("virtual")).toBool()) ++virt;
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("cameras"), cams);
+        out.data.insert(QStringLiteral("camerasDetailed"), details);   // 含 virtual 标记
+        out.data.insert(QStringLiteral("virtualCount"), virt);
         out.data.insert(QStringLiteral("microphones"), mics);
         out.data.insert(QStringLiteral("count"), cams.size());
         out.data.insert(QStringLiteral("boundDevice"), boundCamera());   // "" = 未绑定
@@ -4077,6 +4133,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             QFile::remove(path);
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("自检超时（%1ms，设备 %2）：设备被占用或不出帧").arg(elapsed).arg(dev);
+            out.data.insert(QStringLiteral("errorCode"), QStringLiteral("timeout"));
             out.data.insert(QStringLiteral("device"), dev);
             out.data.insert(QStringLiteral("elapsedMs"), (int)elapsed);
             return out;
@@ -4084,11 +4141,17 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         const qint64 bytes = QFileInfo::exists(path) ? QFileInfo(path).size() : 0;
         if (p.exitCode() != 0 || bytes == 0) {
             QFile::remove(path);
-            const QString err = QString::fromUtf8(p.readAllStandardError()).trimmed().left(300);
+            const QString raw = QString::fromUtf8(p.readAllStandardError()).trimmed();
+            // ⚠️ 2026-10-12：原来这里把 ffmpeg 原生 stderr 直接拼进 out.error 上报，
+            //    管理端界面于是显示 `Unable to find a matching device` 这种只有开发者看得懂的话。
+            //    现在：out.error 只给**人话**结论；errorCode 给界面决定要不要「重试」；
+            //    errorRaw 留给诊断页/日志，绝不上界面。
+            const CamErr ce = classifyCamError(raw);
             out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("自检失败（退出码 %1，设备 %2）：%3")
-                            .arg(p.exitCode()).arg(dev)
-                            .arg(err.isEmpty() ? QStringLiteral("ffmpeg 未给 stderr") : err);
+            out.error  = QStringLiteral("自检失败：%1（设备 %2）").arg(ce.msg, dev);
+            out.data.insert(QStringLiteral("errorCode"), ce.code);
+            out.data.insert(QStringLiteral("errorRaw"), raw.left(300));
+            out.data.insert(QStringLiteral("retryable"), ce.retryable);
             out.data.insert(QStringLiteral("device"), dev);
             out.data.insert(QStringLiteral("elapsedMs"), (int)elapsed);
             return out;
@@ -4135,12 +4198,14 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         }
         if (p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0) {
             QFile::remove(path);
-            const QString err = QString::fromUtf8(p.readAllStandardError()).trimmed().left(300);
+            const QString raw = QString::fromUtf8(p.readAllStandardError()).trimmed();
+            // 同上（2026-10-12）：FFmpeg 原生输出不上界面，只给分类后的人话 + 错误码。
+            const CamErr ce = classifyCamError(raw);
             out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("camera_snapshot: ffmpeg 失败（退出码 %1，设备 %2）%3")
-                            .arg(p.exitCode()).arg(dev)
-                            .arg(err.isEmpty() ? QStringLiteral("（ffmpeg 没给 stderr，看 ffmpeg 日志）")
-                                               : QStringLiteral("：%1").arg(err));
+            out.error  = QStringLiteral("抓拍失败：%1（设备 %2）").arg(ce.msg, dev);
+            out.data.insert(QStringLiteral("errorCode"), ce.code);
+            out.data.insert(QStringLiteral("errorRaw"), raw.left(300));
+            out.data.insert(QStringLiteral("retryable"), ce.retryable);
             return out;
         }
         if (!QFileInfo::exists(path) || QFileInfo(path).size() == 0) {
@@ -4202,7 +4267,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             delete g_recProc; g_recProc = nullptr;
             g_recOutPath.clear();
             out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("camera_record: 2 秒内没有写入任何数据（设备 %1 不存在/被占用？ffmpeg 已退出）—— 不是「正在录」").arg(dev);
+            out.error  = QStringLiteral("开录失败：2 秒内没拿到任何画面（设备 %1 没找到或被占用）—— 现在并没有在录").arg(dev);
+            out.data.insert(QStringLiteral("errorCode"), QStringLiteral("device_not_found"));
+            out.data.insert(QStringLiteral("retryable"), true);
             return out;
         }
         out.result = QStringLiteral("done");
