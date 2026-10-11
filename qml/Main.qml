@@ -388,8 +388,10 @@ ApplicationWindow {
                         Repeater {
                             model: [
                                 { k: "在线", v: backend.onlineCount },
-                                { k: "待办", v: backend.storage.pendingInstructions },
-                                { k: "离线", v: backend.storage.offlineDevices }
+                                // E5 占位：backend.storage 首拉前为空对象，pendingInstructions/offlineDevices 为 undefined，
+                                // 此时显「—」而非空白（storage 卡本身有 at===undefined 空态，这儿补顶行）。
+                                { k: "待办", v: (backend.storage.pendingInstructions !== undefined ? backend.storage.pendingInstructions : "—") },
+                                { k: "离线", v: (backend.storage.offlineDevices !== undefined ? backend.storage.offlineDevices : "—") }
                             ]
                             delegate: Row {
                                 spacing: 8

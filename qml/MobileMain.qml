@@ -27,7 +27,10 @@ ApplicationWindow {
 
     Theme { id: theme; dark: root.darkMode }
     readonly property var th: theme
-    property bool darkMode: false
+    // E4 同步：darkMode 由 backend.themeMode 派生（0 浅色 / 1 深色 / 2 跟随系统取 backend.systemDark）。
+    // 真源 = backend.themeMode（QSettings ui/themeMode，默认 0 浅色），界面只读 darkMode。
+    readonly property bool darkMode: (backend.themeMode === 1) ? true
+                                      : (backend.themeMode === 2 ? backend.systemDark : false)
 
     // 关机确认目标（轻指令共用弹窗）
     property string confirmTarget: ""
@@ -354,21 +357,28 @@ ApplicationWindow {
                 }
 
                 Text { text: "外观"; color: root.th.fg3; font.pixelSize: 12; anchors.topMargin: 6 }
+                // E4 同步：三档（浅色 / 深色 / 跟随系统），选中块边框走反白
                 Row {
                     spacing: 8
-                    Rectangle {
-                        width: 110; height: 34; radius: 17
-                        color: !root.darkMode ? root.th.inv : root.th.hover
-                        border.color: root.th.stroke; border.width: 1
-                        Text { anchors.centerIn: parent; text: "浅色"; color: !root.darkMode ? root.th.win : root.th.fg3; font.pixelSize: 12 }
-                        MouseArea { anchors.fill: parent; onClicked: root.darkMode = false }
-                    }
-                    Rectangle {
-                        width: 110; height: 34; radius: 17
-                        color: root.darkMode ? root.th.inv : root.th.hover
-                        border.color: root.th.stroke; border.width: 1
-                        Text { anchors.centerIn: parent; text: "深色"; color: root.darkMode ? root.th.win : root.th.fg3; font.pixelSize: 12 }
-                        MouseArea { anchors.fill: parent; onClicked: root.darkMode = true }
+                    Repeater {
+                        model: [
+                            { k: "浅色", m: 0 },
+                            { k: "深色", m: 1 },
+                            { k: "跟随系统", m: 2 }
+                        ]
+                        delegate: Rectangle {
+                            width: 100; height: 34; radius: 17
+                            color: (backend.themeMode === modelData.m) ? root.th.inv : root.th.hover
+                            border.color: root.th.stroke; border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData.k
+                                color: (backend.themeMode === modelData.m) ? root.th.win : root.th.fg3
+                                font.pixelSize: 12
+                                font.weight: (backend.themeMode === modelData.m) ? Font.Medium : Font.Normal
+                            }
+                            MouseArea { anchors.fill: parent; onClicked: backend.themeMode = modelData.m }
+                        }
                     }
                 }
 
