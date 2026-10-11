@@ -5552,9 +5552,21 @@ void captureAndSend(const QString &outDir)
             qInfo("[agent-qt] 云端不在，跳过抓屏（累计跳过 %d 次）", skipped);
         return;
     }
-    // 2026-10-11 用户「强制取消单图片推流在实时远程的使用」：
-    // RTC（libdatachannel）推流已开时停掉 WS 单图片帧 —— 实时画面走 RTC，
-    // WS 帧双路重复抓屏 + 推送，还让管理端可能收到陈旧单图。停 RTC 后恢复。
+    // 2026-10-12 用户命令「去掉轮询，只保留截图」：
+    // 周期性抓屏 → WS 单帧推送这条路**整体停用**（原来只在 RTC 推流时停）。
+    // 画面一律走 WebRTC 实时流；要看单张画面就用「截图」指令（回执带缩略图）。
+    //
+    // ⚠️ 连带影响（必须知道）：这条推送同时是「多班墙 / 快照」的画面来源之一。
+    //    停掉后，任何依赖 WS 单帧刷画面的界面都会没画面，需要改走 RTC 或改为按需单张截图。
+    //
+    // 逃生口：设 STE_ENABLE_WS_FRAME_PUSH=1 可临时恢复（排障 / A-B 对比用），默认关闭。
+    if (qgetenv("STE_ENABLE_WS_FRAME_PUSH") != "1") {
+        static int offSkipped = 0;
+        if (++offSkipped % 60 == 1)
+            qInfo("[agent-qt] WS 单帧轮询推送已停用（用户「只保留截图」），累计跳过 %d 次", offSkipped);
+        return;
+    }
+    // 逃生口打开时，仍保留原来的 RTC 优先逻辑
     if (g_rtcOn) return;
 
     QScreen *screen = QGuiApplication::primaryScreen();
