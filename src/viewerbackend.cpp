@@ -14,6 +14,7 @@
 #include <QPixmap>
 #include <QBuffer>
 #include <QGuiApplication>
+#include <QStyleHints>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QDesktopServices>
@@ -170,6 +171,20 @@ ViewerBackend::ViewerBackend(QObject *parent)
 {
     // 身份与提醒开关先落下来（QSettings），后面所有门控判断都基于它。
     loadPrefs();
+    // 主题三档（E4，2026-10-11）：0 浅色 / 1 深色 / 2 跟随系统。默认浅色，读自 QSettings。
+    {
+        QSettings s;
+        m_themeMode = qBound(0, s.value(QStringLiteral("ui/themeMode"), 0).toInt(), 2);
+    }
+    // 跟随系统：取 OS 配色并监听变化（Qt::ColorScheme::Dark 一档）
+    if (QStyleHints *sh = QGuiApplication::styleHints()) {
+        m_systemDark = (sh->colorScheme() == Qt::ColorScheme::Dark);
+        QObject::connect(sh, &QStyleHints::colorSchemeChanged, this,
+                         [this](Qt::ColorScheme cs) {
+                             const bool d = (cs == Qt::ColorScheme::Dark);
+                             if (d != m_systemDark) { m_systemDark = d; emit systemDarkChanged(d); }
+                         });
+    }
     // 文件推送的"发下一片"由回执驱动：收到一片 done 才发下一片。
     // 不这样写就只能靠定时器盲发，一旦被控端拒收一片，后面全乱序、越堆越多。
     QObject::connect(this, &ViewerBackend::resultReceived, this,
@@ -479,6 +494,16 @@ void ViewerBackend::loadPrefs()
     if (!m_procBlacklist.isEmpty())
         logf("[viewer] 已载入进程黑名单 %d 条：%s",
              m_procBlacklist.size(), m_procBlacklist.join(QLatin1String(", ")).toUtf8().constData());
+}
+
+void ViewerBackend::setThemeMode(int m)
+{
+    m = qBound(0, m, 2);
+    if (m == m_themeMode) return;
+    m_themeMode = m;
+    QSettings s;
+    s.setValue(QStringLiteral("ui/themeMode"), m);
+    emit themeModeChanged(m);
 }
 
 QStringList ViewerBackend::procBlacklist() const { return m_procBlacklist; }

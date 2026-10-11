@@ -73,6 +73,9 @@ class ViewerBackend : public QObject
      */
     Q_PROPERTY(int onlineCount READ onlineCount NOTIFY devicesChanged)
     Q_PROPERTY(QString currentUid READ currentUid WRITE setCurrentUid NOTIFY currentUidChanged)
+    // 主题三档（E4，2026-10-11）：0 浅色 / 1 深色 / 2 跟随系统。持久化在 QSettings ui/themeMode。
+    Q_PROPERTY(int themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
+    Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     /** 当前选中设备上报的指令能力全集（老版本被控端没这字段 → 空）。
      *  管端据此把不支持的按钮置灰，而不是让人点下去才吃到一句「未知指令」。 */
     Q_PROPERTY(QStringList capActions READ capActions NOTIFY capActionsChanged)
@@ -257,6 +260,11 @@ public:
     QString accountName() const;
     /** 当前身份："admin" / "teacher"。 */
     QString role() const;
+    /** 主题三档（E4）：0 浅色 / 1 深色 / 2 跟随系统。读来自 QSettings，写回即持久化。 */
+    int themeMode() const { return m_themeMode; }
+    void setThemeMode(int m);
+    /** 跟随系统档用的 OS 深色判定（监听 QStyleHints::colorSchemeChanged）。 */
+    bool systemDark() const { return m_systemDark; }
 
     /**
      * 用网站账号登录：拉起浏览器走授权页，回拨接住后自动换云端接入票并连上云端。
@@ -539,6 +547,10 @@ signals:
     void terminalExit(const QString &sid, int code, int ms);
     /** 会话关了（remote=管理端主动关 / idle=没人理自动关 / denied=本机拒绝 / agent-exit=被控端退了）。 */
     void terminalClosed(const QString &sid, const QString &reason);
+    /** 主题三档变化（E4，UI 据此切深 / 浅）。 */
+    void themeModeChanged(int);
+    /** OS 配色变化（跟随系统档用）。 */
+    void systemDarkChanged(bool);
 
 private:
     void setStatus(const QString &s, bool warn);
@@ -690,6 +702,9 @@ private:
     bool m_firstRunDone = false;                // 首启引导是否已完成（QSettings prefs/firstRunDone）
     bool m_notifyOnDone = true;
     bool m_notifyOnOffline = true;
+    // ── 主题三档（E4）──
+    int m_themeMode = 0;       // 0 浅色 / 1 深色 / 2 跟随系统，持久化在 QSettings ui/themeMode
+    bool m_systemDark = false; // 跟随系统档的 OS 深色判定
 
     QString m_statusText;
     bool m_statusWarn = false;

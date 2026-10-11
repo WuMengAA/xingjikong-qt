@@ -54,9 +54,12 @@ ApplicationWindow {
         anchors.fill: parent
     }
 
-    // ── 主题令牌（黑白默认黑；浅色为备选）──
+    // ── 主题令牌（E4：默认浅色 + 三档持久化）──
     // 页面里一律从 th 取色，不写死 —— 否则换主题必花。
-    property bool darkMode: true
+    // darkMode 由 backend.themeMode 派生：0 浅色 / 1 深色 / 2 跟随系统（取 backend.systemDark）。
+    // 真源 = backend.themeMode（QSettings ui/themeMode，默认 0 浅色），界面只读 darkMode。
+    readonly property bool darkMode: (backend.themeMode === 1) ? true
+                                      : (backend.themeMode === 2 ? backend.systemDark : false)
 
     // 主题 Token 单一真源：qml/components/Theme.qml（深 / 浅两套由 dark 切换）。
     // 2026-10-09 把原来内联的 darkTh / lightTh 两个 JS 对象抽到 Theme 组件，
@@ -378,15 +381,15 @@ ApplicationWindow {
                     anchors.margins: 18
                     spacing: 14
 
-                    // 稿上是「在线 / 待办 / 离线」三个数。待办和离线现在算不出来
-                    // （没有台账，离线设备云端也不下发），所以只留两个真有的；
-                    // 「云端」不再在这儿写第二遍 —— 顶条右侧已经写着连接状态（规则 4）。
+                    // 稿上是「在线 / 待办 / 离线」三个数。待办（待执行指令）与离线设备现在
+                    // 已由云端持久下发（backend.storage.*），故补齐这三个；已收帧移出顶部（属会话态指标）。
                     Row {
                         spacing: 32
                         Repeater {
                             model: [
-                                { k: "在线",   v: backend.onlineCount },
-                                { k: "已收帧", v: backend.frameCount }
+                                { k: "在线", v: backend.onlineCount },
+                                { k: "待办", v: backend.storage.pendingInstructions },
+                                { k: "离线", v: backend.storage.offlineDevices }
                             ]
                             delegate: Row {
                                 spacing: 8
@@ -1871,48 +1874,35 @@ ApplicationWindow {
                                 anchors.margins: 16
                                 spacing: 14
                                 Text { text: "外观"; color: th.fg3; font.pixelSize: 12 }
-                                // 稿 .pick：等宽两块，选中的那块边框走反白
+                                // E4：三档（浅色 / 深色 / 跟随系统），选中的那块边框走反白
                                 RowLayout {
                                     width: parent.width
-                                    spacing: 10
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 34
-                                        radius: th.rCtrl
-                                        color: "transparent"
-                                        border.color: root.darkMode ? th.inv : th.stroke
-                                        border.width: 1
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "黑白"
-                                            color: root.darkMode ? th.fg : th.fg3
-                                            font.pixelSize: 13
-                                            font.weight: root.darkMode ? Font.Medium : Font.Normal
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.darkMode = true
-                                        }
-                                    }
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 34
-                                        radius: th.rCtrl
-                                        color: "transparent"
-                                        border.color: root.darkMode ? th.stroke : th.inv
-                                        border.width: 1
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "浅色"
-                                            color: root.darkMode ? th.fg3 : th.fg
-                                            font.pixelSize: 13
-                                            font.weight: root.darkMode ? Font.Normal : Font.Medium
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.darkMode = false
+                                    spacing: 8
+                                    Repeater {
+                                        model: [
+                                            { k: "浅色", m: 0 },
+                                            { k: "深色", m: 1 },
+                                            { k: "跟随系统", m: 2 }
+                                        ]
+                                        delegate: Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 34
+                                            radius: th.rCtrl
+                                            color: "transparent"
+                                            border.color: (backend.themeMode === modelData.m) ? th.inv : th.stroke
+                                            border.width: 1
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData.k
+                                                color: (backend.themeMode === modelData.m) ? th.fg : th.fg3
+                                                font.pixelSize: 13
+                                                font.weight: (backend.themeMode === modelData.m) ? Font.Medium : Font.Normal
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: backend.themeMode = modelData.m
+                                            }
                                         }
                                     }
                                 }
@@ -2855,8 +2845,9 @@ ApplicationWindow {
             { name: "用网站账号登录",   keys: ["login", "denglu", "dl"], tip: "走星璃账号授权，不用填密钥", run: function () { backend.loginWithSite() } },
             { name: "切成管理员身份",   keys: ["admin", "guanliyuan"], tip: "能操作教室机（电源 / 远控）", run: function () { backend.setRole("admin") } },
             { name: "切成教师身份",     keys: ["teacher", "jiaoshi", "js"], tip: "只留看画面 / 发通知 / 推文件", run: function () { backend.setRole("teacher") } },
-            { name: "切到黑白外观",     keys: ["dark", "heibai", "hb"], tip: "默认外观", run: function () { root.darkMode = true } },
-            { name: "切到浅色外观",     keys: ["light", "qianse", "qs"], tip: "换个亮堂的", run: function () { root.darkMode = false } },
+            { name: "切到黑白外观",     keys: ["dark", "heibai", "hb"], tip: "默认外观", run: function () { backend.themeMode = 1 } },
+            { name: "切到浅色外观",     keys: ["light", "qianse", "qs"], tip: "换个亮堂的", run: function () { backend.themeMode = 0 } },
+            { name: "跟随系统外观",     keys: ["auto", "xitong", "xt"], tip: "跟着系统配色走", run: function () { backend.themeMode = 2 } },
             { name: "打开官网下载页",   keys: ["download", "xiazai", "xz"], tip: "在浏览器里打开 www.245959623.xyz/download", run: function () { backend.openExternal("https://www.245959623.xyz/download") } }
         ]
     }
