@@ -80,13 +80,16 @@ Item {
     // 展开态"标题 + 描述"占的头部高度（自适应字号后标题可达 64px，2 行 128px）。
     // 给列表/历史面板定位当 top 锚点，避免压到标题。
     readonly property int headH: root._expanded
-        ? Math.max(46, 10 + exTitle.height + 6 + exDesc.height)
+        // ⚠️ 传输中 exDesc 被隐藏（改由进度条呈现），不能再把它的高度算进来，
+        //    否则头部多算一块空白、把下面的历史区顶出去。
+        ? Math.max(46, 10 + exTitle.height + 6 + (root._ftActive ? 0 : exDesc.height))
         : 0
     readonly property int listH: (root._expanded && stList.rows > 0) ? stList.implicitHeight + 8 : 0
     // 历史面板高度：展开态 + 有历史 + 无活跃按钮时才给空间。
-    // 每条 44px + 头部 32px，封顶 200px（≈ 4 条），超出滚动。
+    // 2026-10-12 修「展开后太矮、历史显示不全」：每条 44→48px、封顶 200→300px，
+    // 头部按 histHeader 实际高度 32px 算（原来是拍脑袋的 36，与面板实高不一致）。
     readonly property int histH: (root._expanded && root._history.length > 0 && !root._showActionsNow)
-        ? Math.min(200, root._history.length * 44 + 36)
+        ? Math.min(300, root._history.length * 48 + 32)
         : 0
     readonly property int actH:  (root._actions.length > 0) ? 34 : 0
     // 文件传输进度条占的额外高度（展开态 + 传输中才给）
@@ -355,10 +358,12 @@ Item {
                 text: bridgeRef ? bridgeRef.descHtml : ""
                 textFormat: Text.RichText
                 color: root.th.sub
-                font.pixelSize: root.th.fsBody
+                // 2026-10-12 用户反馈「字数太少太小」：正文 13→15px，
+                // 行数上限 5→10（原来长通知第 6 行起就被 … 吃掉）。
+                font.pixelSize: root.th.fsBody + 2
                 font.family: "Microsoft YaHei UI, PingFang SC, sans-serif"
                 wrapMode: Text.WordWrap
-                maximumLineCount: 5
+                maximumLineCount: 10
                 elide: Text.ElideRight
                 lineHeight: 1.32
             }
@@ -493,7 +498,10 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: root.padH
         anchors.top: parent.top
-        anchors.topMargin: root.headH + (root._title !== "" ? 36 : root.padH)
+        // 2026-10-12 修「历史显示不全」：原写法 headH + 36，但 implicitHeight 预算里
+        // 顶部只算了 padH ⇒ 那 36 属于"预算外占位"，把历史面板整体往下顶、越顶越矮。
+        // 现在与预算同一套公式：从内容区（标题+描述+状态列表+进度条）之下开始。
+        anchors.topMargin: root.padH + root.headH + root.listH + root.ftH
         anchors.bottom: parent.bottom
         anchors.bottomMargin: root.padH
         z: 40
@@ -593,7 +601,8 @@ Item {
 
                 delegate: Item {
                     width: historyList.width
-                    height: 40
+                    // 2026-10-12：行高 40→48（配描述 2 行 + 字号放大），与 histH 的 48/条一致
+                    height: 48
 
                     // 每条独立行底色
                     Rectangle {
@@ -626,7 +635,8 @@ Item {
                         anchors.topMargin: 5
                         text: modelData.title || ""
                         color: root.th.fg
-                        font.pixelSize: 12
+                        // 2026-10-12「字太小」：标题 12→13
+                        font.pixelSize: 13
                         font.weight: Font.Medium
                         elide: Text.ElideRight
                     }
@@ -638,7 +648,10 @@ Item {
                         anchors.top: hTitle.bottom
                         text: modelData.desc || ""
                         color: root.th.sub
-                        font.pixelSize: 10
+                        // 2026-10-12「字数太少」：描述 10→12，并允许 2 行（原来一行就 … 截掉）
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: 2
                         elide: Text.ElideRight
                     }
 
@@ -650,7 +663,8 @@ Item {
                         anchors.topMargin: 5
                         text: modelData.timeStr || ""
                         color: root.th.sub
-                        font.pixelSize: 9
+                        // 2026-10-12：时间 9→11
+                        font.pixelSize: 11
                     }
 
                     MouseArea {
