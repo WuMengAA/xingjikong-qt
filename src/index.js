@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 import { currentAgentPackage, currentViewerPackage, buildProvisionBat, recordProvision,
   recentProvision, resolveAsset, agentWsUrl, viewerWsUrl } from './provision.js';
+import { ensureQmlPatch, qmlPatchManifest, qmlPatchZipPath } from './qml-patch.js';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
@@ -348,7 +349,8 @@ const server = http.createServer((req, res) => {
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
     u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
     u.pathname === '/api/ota/latest' || u.pathname.startsWith('/api/repairs') ||
-    u.pathname === '/api/recordings' || isAdminApi;
+    u.pathname === '/api/recordings' || u.pathname === '/api/qml-patch' ||
+    u.pathname === '/api/qml-patch/download' || isAdminApi;
   if (isManageApi) {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -394,6 +396,27 @@ const server = http.createServer((req, res) => {
     const channel = (u.searchParams.get('channel') || 'stable').trim();
     const latest = latestFor(product, channel);
     return send(200, { ok: true, product, channel, latest });
+  }
+
+  // ── QML 热更补丁（2026-10-11 · 一源响应式配套）──
+  // 手机端定期拉取与桌面一致的 QML 树：清单返回版本号（viewer-qt git HEAD），
+  // 客户端比对后下载 zip 解压到本地，加载时本地优先（改 UI 不用重出 APK）。
+  if (req.method === 'GET' && u.pathname === '/api/qml-patch') {
+    const m = ensureQmlPatch() || qmlPatchManifest();
+    if (!m) return send(404, { ok: false, error: 'qml-patch 未就绪（viewer-qt qml/ 目录不可达？）' });
+    return send(200, { ok: true, version: m.version, url: m.url, size: m.size, files: m.files, builtAt: m.builtAt });
+  }
+  if (req.method === 'GET' && u.pathname === '/api/qml-patch/download') {
+    const zipPath = qmlPatchZipPath();
+    if (!zipPath) return send(404, { ok: false, error: 'qml-patch 未生成' });
+    const zip = readFileSync(zipPath);
+    res.writeHead(200, {
+      'content-type': 'application/octet-stream',
+      'content-length': zip.length,
+      'cache-control': 'no-store',
+      'content-disposition': 'attachment; filename="qml-patch.zip"',
+    });
+    return res.end(zip);
   }
 
   // ── 班级监控 / 设备元数据 / 云端存储（2026-10-08）──
@@ -1302,6 +1325,9 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, HOST, () => {
   pushEvent('info', '云端已启动，等被控端接入', { host: HOST, port: PORT });
+  // 2026-10-11：启动时预打包 QML 补丁（手机热更用；失败不阻塞启动）
+  try { const m = ensureQmlPatch(); if (m) console.log(`[cloud] qml-patch 就绪 v${m.version}（${m.files} 文件）`); }
+  catch (e) { console.error(`[cloud] WARN qml-patch 预打包失败: ${e.message}`); }
   // 回跳服务要等 listen 完成才知道真端口（listen(0) 是让系统分配），所以在回调里建。
   const srv = createAdminOAuthServer((m) => console.log(m));
   if (srv) adminOAuth = { server: srv };
