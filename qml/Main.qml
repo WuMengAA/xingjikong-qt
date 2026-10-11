@@ -2622,41 +2622,79 @@ ApplicationWindow {
                     }
                 }
 
-                // ── 语音对讲（2026-10-07，设计文档 3.3 第一版）──
+                // ── 语音对讲（2026-10-07 设计 3.3 第一版，2026-10-11 改对话框式）──
                 // 老师→全班单向广播：开麦采集 PCM → 云端 fan-out → 学生端播放。
-                // 安全（3.3.6）：默认静音，只有点"开始讲话"才采集；停止即完全静音。
+                // 按住讲话：按下开麦、松开停（push-to-talk）；回传的班级语音自动播放
+                //（audio_playback，B6 已接——"自动接收播放班级语音"）。
                 Rectangle {
                     width: parent.width
-                    height: speakCol.height + 32
+                    height: speechCol.height + 32
                     radius: th.rCard
                     color: th.panel
                     border.color: th.card
                     border.width: 1
                     Column {
-                        id: speakCol
+                        id: speechCol
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.topMargin: 16
                         spacing: 10
-                        Text { text: "语音对讲（老师讲话，全班听）"; color: th.fg3; font.pixelSize: 12 }
-                        Text { text: "到点自动停，按钮显示剩余秒"; color: th.fg4; font.pixelSize: 12 }
                         Row {
-                            spacing: 8
-                            Button {
-                                text: backend.speaking ? ("停止讲话（剩 " + backend.speakLeftSec + " 秒）") : "开始讲话"
-                                onClicked: {
-                                    if (backend.speaking) {
-                                        backend.stopSpeaking()
-                                        root.toast("语音已停止（静音）")
-                                    } else {
-                                        if (backend.startSpeaking()) {
-                                            root.toast("正在讲话，全班可听；再次点击停止")
-                                        } else {
+                            width: parent.width
+                            Text { text: "语音对讲"; color: th.fg; font.pixelSize: 13; font.weight: Font.Medium }
+                            Rectangle {
+                                width: 6; height: 6; radius: 3; anchors.verticalCenter: parent.verticalCenter
+                                color: backend.speaking ? "#e74c3c" : th.fg4; anchors.left: parent.right; anchors.leftMargin: 8
+                                Timer {
+                                    running: backend.speaking; repeat: true; interval: 500
+                                    onTriggered: parent.opacity = parent.opacity === 1 ? 0.25 : 1
+                                }
+                            }
+                        }
+                        Text { text: "目标：" + (backend.currentUid !== "" ? backend.currentUid : "未选设备")
+                               color: th.fg3; font.pixelSize: 12 }
+                        // 时长：已讲秒数 = 180（kDefaultSpeakMaxMs 3 分钟）− 剩余；末尾同显剩余。
+                        Text { text: backend.speaking
+                                   ? ("时长：" + Math.max(0, 180 - backend.speakLeftSec) + " 秒（剩余 " + backend.speakLeftSec + " 秒）")
+                                   : (backend.speakError !== "" ? ("上次开麦失败：" + backend.speakError) : "时长：未通话")
+                               color: th.fg3; font.pixelSize: 12 }
+                        Row {
+                            spacing: 10
+                            // 按住讲话（push-to-talk）：按下说话、松开停；自动接收播放班级语音已内置。
+                            Rectangle {
+                                width: 170; height: 46; radius: th.rCtrl
+                                color: pushArea.pressed ? "#a93226" : (backend.speaking ? "#e74c3c" : th.brand)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: pushArea.pressed ? "松开结束" : (backend.speaking ? "正在讲话…" : "按住讲话")
+                                    color: "white"; font.pixelSize: 14; font.weight: Font.Medium
+                                }
+                                MouseArea {
+                                    id: pushArea
+                                    anchors.fill: parent
+                                    onPressed: {
+                                        if (!backend.startSpeaking())
                                             root.toast("开麦失败：" + backend.speakError)
-                                        }
+                                        else
+                                            root.toast("正在讲话…松开结束；班级语音自动播放")
+                                        root.refreshIsland()
                                     }
-                                    root.refreshIsland()   // 灵动岛语音胶囊跟手开/关
+                                    onReleased: {
+                                        if (backend.speaking) { backend.stopSpeaking(); root.toast("语音已停止（静音）") }
+                                        root.refreshIsland()
+                                    }
+                                }
+                            }
+                            // 手动停止（保险：按住的话忘记松开也能停；也符合原来点按钮停的习惯）
+                            Rectangle {
+                                visible: backend.speaking
+                                width: 96; height: 46; radius: th.rCtrl
+                                color: th.inv
+                                Text { anchors.centerIn: parent; text: "停止"; color: th.win; font.pixelSize: 14; font.weight: Font.Medium }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: { backend.stopSpeaking(); root.toast("语音已停止"); root.refreshIsland() }
                                 }
                             }
                         }
