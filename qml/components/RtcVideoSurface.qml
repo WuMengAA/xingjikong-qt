@@ -23,13 +23,22 @@ Item {
     property int framesReceived: 0      // 累计帧数（诊断）
     property bool connected: false
 
-    // 由接线层调用：每帧进来更新显示
+    // 自有 tick：每次有帧进来就 +1，驱动 image://frames/f?<tick> 重新取图。
+    // 2026-10-11 修 #171：原实现 `videoImg.source = img`（QImage 直赋）在 Qt 6.12
+    // 会报 "Cannot assign QImage to QUrl"，且 img.width 在 QML 侧取不到（QVariant 包装）。
+    // 改为复用已验证可用的 FrameImageProvider（image://frames/f），RTC 帧现在也会落进
+    // backend.m_frame（见 emitLdcFrame），所以这里照 jpeg 路径的取图方式即可显示。
+    property int tick: 0
+
+    // 由接线层调用：每帧进来 → 触发重取 provider 图
     function onFrame(img) {
-        if (img && img.width > 0) {
-            videoImg.source = ""
-            videoImg.source = img       // QImage 直接可作 Image.source（需 Qt6，QML 侧）
-            surf.framesReceived++
-        }
+        // img 可为 QImage（QVariant）或任意真值；只要非空就换 tick 拉新帧。
+        // 这里不再读 img.width（QVariant 包装的 QImage 取不到），改用 provider 自证：
+        // 帧有效时 backend 已写入 m_frame，provider 会回真实尺寸。
+        if (img === undefined || img === null) return
+        surf.tick++
+        surf.framesReceived++
+        videoImg.source = "image://frames/f?" + surf.tick
     }
 
     function onStateChanged(on) {
