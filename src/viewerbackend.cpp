@@ -2,6 +2,7 @@
 #include "viewerbackend.h"
 #include "oauthlogin.h"
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
+#include "audio_playback.h"  // B6（2026-10-11）：winmm waveOut 播放学生回传的 audio/pcm
 #include <cmath>             // std::isfinite：拦住 NaN/Inf 坐标（2026-10-11）
 #include <QAbstractSocket>
 #include <QDateTime>
@@ -1986,6 +1987,14 @@ void ViewerBackend::onBinaryMessage(const QByteArray &buf)
             const QJsonDocument hd = QJsonDocument::fromJson(buf.mid(3, hLen));
             if (!hd.isObject()) { logf("[viewer] FAIL 帧头解析失败（非 JSON）"); return; }
             const QJsonObject h = hd.object();
+            // B6（2026-10-11）：语音对讲下行 —— 学生端回传的 audio/pcm 与画面帧同为
+            // type:"frame"，仅 mime 不同。先按 mime 分流，别再拿 type 一刀切成"非帧丢弃"。
+            const QString mime = h.value(QStringLiteral("mime")).toString();
+            if (mime == QLatin1String("audio/pcm")) {
+                if (!m_audioPlayback) m_audioPlayback = new AudioPlayback(this);
+                m_audioPlayback->write(buf.mid(3 + hLen));
+                return;
+            }
             if (h.value(QStringLiteral("type")).toString() != QStringLiteral("frame")) {
                 logf("[viewer] FAIL 帧头 type 不是 frame");
                 return;
@@ -2348,6 +2357,9 @@ void ViewerBackend::stopSpeaking(QString why)
 {
     if (!m_speaking) return;
     if (m_audioCapture) m_audioCapture->stopCapture();
+    // B6（2026-10-11）：本人停止讲话 ⇒ 对端回传的音频也不该再放（会话结束）。
+    // 不停的话，waveOut 缓冲里剩的半帧、以及断线前在途的几帧会继续出声。
+    if (m_audioPlayback) m_audioPlayback->stop();
     m_speakLimit->stop();
     m_speaking = false;
     m_speakLeftMs = 0;

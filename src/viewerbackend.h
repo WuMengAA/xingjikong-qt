@@ -35,6 +35,7 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 #include <QVariantList>
 
 class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向声明，避免引入 mmsystem）
+class AudioPlayback; // B6：管理端播放（学生回传的 audio/pcm 帧）
 class LdcReceiver;  // 2026-10-09：WebRTC 收流（libdatachannel 替换 QWebEngine 离屏）
 
 class QDateTime;
@@ -819,6 +820,11 @@ private:
     // ── 班级监控（2026-10-07）──
     QJsonObject m_recordings;                 // recordings/<uid>/[文件] 分组缓存
     QJsonArray m_events;                      // 2026-10-11：/api/events 事件流水缓存
+
+    // ── 语音对讲下行（B6 · 2026-10-11）────────────────────────────────────
+    // 学生端回传的 audio/pcm 帧（duplex 单播回老师）在管理端播放。
+    // AudioPlayback 懒打开（第一帧才开设备，无通话不占喇叭），会话结束 stop()。
+    AudioPlayback *m_audioPlayback = nullptr;
 
     // ── 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）──
     QStringList m_thumbUids;                  // 当前订阅缩略图的设备 uid 列表

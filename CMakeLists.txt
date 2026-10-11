@@ -155,6 +155,11 @@ qt_add_executable(viewer-qt
   # 2026-10-11：Android 无 winmm → 编 stub（audio_capture_android.cpp）
   ${STE_AUDIO_CAPTURE_SRC}
   ${STE_AUDIO_CAPTURE_HDR}
+  # ── 语音对讲下行（B6 · 2026-10-11）：管理端 winmm waveOut 播放学生回传的 audio/pcm ──
+  # 桌面用 waveOut（audio_playback.cpp 内 #pragma comment(lib,"winmm.lib") 拉库）；
+  # Android 无 waveOut → 同文件内 Q_OS_ANDROID 分支留空桩（不破 Android 链接）。
+  src/audio_playback.cpp
+  src/audio_playback.h
   # ── 课表编辑器模块（2026-10-06 从 schedule-qt 并入）──
   src/schedule/profile_repository.cpp
   src/schedule/schedule_model.cpp
