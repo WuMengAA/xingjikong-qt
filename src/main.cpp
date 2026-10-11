@@ -1100,7 +1100,7 @@ void notifyUnconfiguredOnce()
     g_unconfiguredNotified = true;
     g_tray->showMessage(
         QStringLiteral("星集控 · 未配置"),
-        QStringLiteral("本机尚未接入集控：%1。\n右键托盘图标 →「配置…」填写后即可接入（也可手改 agent.env（配置目录，即数据目录））。")
+        QStringLiteral("本机尚未接入集控：%1。\n右键托盘图标 →「配置…」填好后即可接入。")
             .arg(unconfiguredReason()),
         QSystemTrayIcon::Warning, 10000);
 }
@@ -1611,10 +1611,10 @@ void applyUpdateInfo(const QJsonObject &pay)
             g_tray->showMessage(
                 QStringLiteral("星集控 · 被控端"),
                 g_updateMandatory
-                    ? QStringLiteral("云端要求升级到 v%1（当前 v%2）。\n这台机器会在联网后自动安装，不用手动点——"
-                                     "装的过程中被控端会短暂重启，一两分钟内回来。")
+                    ? QStringLiteral("云端要求升级到 v%1（当前 v%2）。\n联网后自动安装，不用手动点——"
+                                     "过程中会短暂重启，一两分钟回来。")
                           .arg(g_latestVer, QString::fromLatin1(kAppVersion))
-                    : QStringLiteral("有可用的新版本 v%1（当前 v%2）。\n右键托盘图标 →「设置与信息…」即可升级。")
+                    : QStringLiteral("有新版本 v%1（当前 v%2）。\n右键托盘图标 →「设置与信息…」即可升级。")
                           .arg(g_latestVer, QString::fromLatin1(kAppVersion)),
                 QSystemTrayIcon::Information, 12000);
         }
@@ -1991,7 +1991,7 @@ void openInfoDialog()
     QString latestText;
     const bool newer = g_updateChecked && !g_latestVer.isEmpty()
                        && compareVersion(g_latestVer, cur) > 0;
-    if (!g_updateChecked)            latestText = QStringLiteral("还没查到（等云端回执；没连上时会一直显示这项）");
+    if (!g_updateChecked)            latestText = QStringLiteral("还没查到（等云端回执）");
     else if (g_latestVer.isEmpty())  latestText = QStringLiteral("云端还没发布过版本");
     else if (newer)                  latestText = QStringLiteral("有新版本 v%1 可升级").arg(g_latestVer);
     else                             latestText = QStringLiteral("已是最新（云端 v%1）").arg(g_latestVer);
@@ -2024,13 +2024,13 @@ void openInfoDialog()
         const QString lastRes = st.value(QStringLiteral("lastResult")).toString();
 
         auto *modeLbl = new QLabel(g_updateMandatory
-                                       ? QStringLiteral("强制：到点自动装，不用老师点（装完重启一次）")
+                                       ? QStringLiteral("强制：到点自动装（装完重启一次）")
                                        : QStringLiteral("可选：只有点「立即升级」才装"));
         if (g_updateMandatory) modeLbl->setStyleSheet(QStringLiteral("color:#c0392b;font-weight:bold;"));
         form->addRow(QStringLiteral("升级方式"), modeLbl);
 
         otaAutoLbl = new QLabel(paused
-                                    ? QStringLiteral("已暂停（停机排查用；删掉 %1 即恢复）").arg(otaPausePath())
+                                    ? QStringLiteral("已暂停（删掉 %1 即恢复）").arg(otaPausePath())
                                     : QStringLiteral("到点自动装"));
         if (paused) otaAutoLbl->setStyleSheet(QStringLiteral("color:#c0392b;"));
         form->addRow(QStringLiteral("自动升级"), otaAutoLbl);
@@ -2059,12 +2059,12 @@ void openInfoDialog()
     {
         auto *chkAuto = new QCheckBox(QStringLiteral("开机自动启动（登录时拉起）"));
         chkAuto->setChecked(agentAutostartEnabled());
-        chkAuto->setToolTip(QStringLiteral("管理登录触发器计划任务 %1；改动需要管理员权限（会弹 UAC）。")
+        chkAuto->setToolTip(QStringLiteral("管理登录触发器计划任务 %1；改动需管理员权限（弹 UAC）。")
                                 .arg(QString::fromLatin1(kAgentTaskName)));
         QObject::connect(chkAuto, &QCheckBox::toggled, &dlg, [chkAuto](bool on) {
             if (!agentSetAutostart(on))
                 QMessageBox::warning(chkAuto, QStringLiteral("开机自启"),
-                                     QStringLiteral("没改成：多半是 UAC 被拒绝，或安装时没建过该计划任务。"));
+                                     QStringLiteral("没改成：多半是 UAC 被拒，或安装时没建该计划任务。"));
             chkAuto->blockSignals(true);
             chkAuto->setChecked(agentAutostartEnabled());
             chkAuto->blockSignals(false);
@@ -2073,11 +2073,11 @@ void openInfoDialog()
 
         auto *chkLnk = new QCheckBox(QStringLiteral("在公共桌面放快捷方式"));
         chkLnk->setChecked(agentDesktopShortcutExists());
-        chkLnk->setToolTip(QStringLiteral("公共桌面（所有登录用户都能看到）；改动需要管理员权限。"));
+        chkLnk->setToolTip(QStringLiteral("公共桌面（所有登录用户可见）；改动需管理员权限。"));
         QObject::connect(chkLnk, &QCheckBox::toggled, &dlg, [chkLnk](bool on) {
             if (!agentSetDesktopShortcut(on))
                 QMessageBox::warning(chkLnk, QStringLiteral("桌面快捷方式"),
-                                     QStringLiteral("没改成：多半是 UAC 被拒绝。"));
+                                     QStringLiteral("没改成：多半是 UAC 被拒。"));
             chkLnk->blockSignals(true);
             chkLnk->setChecked(agentDesktopShortcutExists());
             chkLnk->blockSignals(false);
@@ -2111,8 +2111,8 @@ void openInfoDialog()
     // 某个版本真把全校教室机搞挂时，这是现场唯一来得及做的止血动作。
     auto *btnPause = new QPushButton(otaPaused() ? QStringLiteral("恢复自动升级")
                                                  : QStringLiteral("暂停自动升级"));
-    btnPause->setToolTip(QStringLiteral("暂停只在本机生效：写入 %1 之后，这台机器不再自动升级，"
-                                        "但别人照常升。删掉该文件即恢复。")
+    btnPause->setToolTip(QStringLiteral("只在本机生效：写入 %1 后本机不再自动升级，"
+                                        "别人照常。删掉该文件即恢复。")
                              .arg(otaPausePath()));
     QObject::connect(btnPause, &QPushButton::clicked, &dlg, [btnPause, otaAutoLbl] {
         if (otaPaused()) {
@@ -2227,7 +2227,7 @@ void openConfigDialog()
         // 把设备票写进 agent.env（token 字段放票，与旧静态令牌同字段、云端按段数区分）
         if (!saveAgentEnv(wsUrl, ticket, uid, nameEdit ? nameEdit->text() : QString())) {
             err->setStyleSheet(QStringLiteral("color:#c03030;"));
-            err->setText(QStringLiteral("绑定成功但写配置失败（目录无写权限？）。请用管理员身份重装后再试。"));
+            err->setText(QStringLiteral("绑定成功，但写配置失败（目录无写权限？）。请用管理员身份重装后再试。"));
             err->show();
             bindBtn->setEnabled(true);
             return;
@@ -2263,7 +2263,7 @@ void openConfigDialog()
     });
 
     // 手动填的分隔线
-    auto *sep = new QLabel(QStringLiteral("── 或者手动填写（管理员给了你地址和令牌时用）──"));
+    auto *sep = new QLabel(QStringLiteral("── 或手动填写（管理员给了地址和令牌时用）──"));
     sep->setStyleSheet(QStringLiteral("color:#bbb;text-align:center;"));
     sep->setAlignment(Qt::AlignCenter);
     root->addWidget(sep);
@@ -2362,14 +2362,14 @@ void openConfigDialog()
         const QString url = cleanLine(urlEdit->text());
         if (url.isEmpty()) {
             err->setStyleSheet(QStringLiteral("color:#c03030;"));
-            err->setText(QStringLiteral("请先填写「云端地址」，再点测试。"));
+            err->setText(QStringLiteral("请先填写「云端地址」。"));
             err->show();
             return;
         }
         const QUrl u(url);
         if (!u.isValid() || u.host().isEmpty()) {
             err->setStyleSheet(QStringLiteral("color:#c03030;"));
-            err->setText(QStringLiteral("这个地址看起来不对，请检查是否形如 ws://主机:端口/ws/agent。"));
+            err->setText(QStringLiteral("地址看起来不对，应形如 ws://主机:端口/ws/agent。"));
             err->show();
             return;
         }
@@ -2385,13 +2385,13 @@ void openConfigDialog()
         QObject::connect(t, &QTimer::timeout, probe, [&, probe, t, testBtn] {
             probe->abort();
             err->setStyleSheet(QStringLiteral("color:#c03030;"));
-            err->setText(QStringLiteral("连接失败：等待超时。请确认地址正确、网络通畅、集控服务器已启动。"));
+            err->setText(QStringLiteral("连接超时。请核对地址、网络与服务器状态。"));
             testBtn->setEnabled(true);
         });
         QObject::connect(probe, &QWebSocket::connected, probe, [&, probe, t, testBtn] {
             t->stop();
             err->setStyleSheet(QStringLiteral("color:#1a7f37;"));
-            err->setText(QStringLiteral("地址可达：已连上服务器。（能否成功接入还要看令牌，保存后看托盘图标。）"));
+            err->setText(QStringLiteral("地址可达。（能否接入还要看令牌，保存后看托盘图标。）"));
             testBtn->setEnabled(true);
             probe->close();
         });
@@ -2400,7 +2400,7 @@ void openConfigDialog()
                              if (!t->isActive()) return;   // 已被 connected/timeout 分支处理
                              t->stop();
                              err->setStyleSheet(QStringLiteral("color:#c03030;"));
-                             err->setText(QStringLiteral("连接失败：连不上这个地址，请核对地址与服务器是否已启动。"));
+                             err->setText(QStringLiteral("连不上这个地址，请核对地址与服务器状态。"));
                              testBtn->setEnabled(true);
                          });
         t->start(5000);
@@ -2414,13 +2414,13 @@ void openConfigDialog()
         const QString uid = cleanLine(uidEdit->text());
         if (url.isEmpty() || token.isEmpty()) {
             err->setStyleSheet(QStringLiteral("color:#c03030;"));
-            err->setText(QStringLiteral("请先填写「云端地址」和「设备令牌」——这两项是接入集控必需的，缺一不可。"));
+            err->setText(QStringLiteral("请先填写「云端地址」和「设备令牌」，缺一不可。"));
             err->show();
             return;   // 原地提示，不关窗、不弹二次窗口
         }
         if (!saveAgentEnv(url, token, uid, nameEdit ? nameEdit->text() : QString())) {
             err->setStyleSheet(QStringLiteral("color:#c03030;"));
-            err->setText(QStringLiteral("写入配置文件失败（可能是程序目录没有写权限）。请用管理员身份重装后再试。"));
+            err->setText(QStringLiteral("写入配置失败（目录无写权限？）。请用管理员身份重装后再试。"));
             err->show();
             return;
         }
@@ -4333,7 +4333,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.data.insert(QStringLiteral("wasRunning"), wasRunning);
         if (!wasRunning)
             out.data.insert(QStringLiteral("note"),
-                            QStringLiteral("会话已清理：播放器进程此前已自行退出（播完 / 本机无可用输出设备），不是我们停的"));
+                            QStringLiteral("播放器此前已自行退出（播完或无输出设备），不是我们停的"));
         return out;
     }
 
@@ -4355,7 +4355,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         // 灵动岛形态非打扰式提示（#98：统一走灵动岛），不遮操作。
         // 时长给的比原来的 3 秒长一些：远控一整节课都在，学生错过前 3 秒就再没提示了。
         islandShow(QStringLiteral("屏幕正在被查看"),
-                   QStringLiteral("老师正在远程查看这台电脑的屏幕"), QStringLiteral("eye"), 8000);
+                   QStringLiteral("老师正在远程查看这台电脑"), QStringLiteral("eye"), 8000);
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("active"), true);
         out.data.insert(QStringLiteral("fps"), want);
@@ -4852,7 +4852,7 @@ static void rtcTickOnce()
         const qint64 limit = envIdle.isEmpty() ? 20000 : QString::fromLocal8Bit(envIdle).toLongLong();
         if (limit <= 0) return;
         if (off > limit) {
-            rtcStop(QStringLiteral("与云端断开 %1 秒，画面送不出去，先收采集页").arg(off / 1000));
+            rtcStop(QStringLiteral("与云端断开 %1 秒，先收采集页").arg(off / 1000));
             return;
         }
     }
@@ -5156,7 +5156,7 @@ static void openTerminal(const QString &id, const QJsonObject &params)
     } else {
         QMessageBox box(QMessageBox::Question,
                         QStringLiteral("远程终端请求"),
-                        QStringLiteral("有人要从管理端连这台机器的命令行（能执行任意命令）。\n允许吗？"),
+                        QStringLiteral("有人要从管理端连这台机器的命令行（可执行任意命令）。允许吗？"),
                         QMessageBox::Yes | QMessageBox::No,
                         nullptr);
         box.setButtonText(QMessageBox::Yes, QStringLiteral("允许"));
@@ -5563,7 +5563,7 @@ int main(int argc, char *argv[])
         appendLogFile(QStringLiteral("[agent-qt] 已有另一个被控端在跑（%1）→ 本次启动退出").arg(g_singleWhy));
         QMessageBox::information(nullptr,
             QStringLiteral("星集控 · 被控端"),
-            QStringLiteral("被控端已在运行（另一个实例正在工作）。\n本次启动自动退出，请勿重复启动。\n（%1）")
+            QStringLiteral("被控端已在运行。\n本次启动自动退出，请勿重复启动。\n（%1）")
                 .arg(g_singleWhy));
         return 0;
     }
