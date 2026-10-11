@@ -27,6 +27,7 @@
 #include <QScreen>
 #include <QStyleHints>
 #include <QSvgRenderer>
+#include <QTime>          // A3：空闲态时钟（HH:mm）
 
 // 2026-10-08 lucide(morphicons 同款) SVG 图标渲染：读取 qrc 内 /icons/<name>.svg，
 // 把 stroke/fill 的 currentColor 换成主题前景色后渲染成 QPixmap（深浅主题自动适配）。
@@ -139,6 +140,24 @@ IslandOverlay::IslandOverlay(QWidget *parent)
         if (m_expanded) setExpanded(false);
     });
 
+    // A3（2026-10-11）：空闲态时钟。空闲胶囊右侧画 HH:mm，得有个心跳让分钟跳变时重绘。
+    // 500ms 一跳（与 IslandClock 同口径），只在"空闲 + 可见"时 update()，其余情况直接返回，
+    // 不给活动态/隐藏态添任何重绘负担。
+    // A4 复用同一条心跳推进展开态的描述滚动（16px 步进 ≈ 32px/s，与 MarqueeText 默认 100px/s
+    // 相比更慢更克制 —— 展开态是给人"读"的，不是跑马灯；500ms 一跳的步长按 fps 折算即可）。
+    m_clockTick = new QTimer(this);
+    m_clockTick->setInterval(500);
+    connect(m_clockTick, &QTimer::timeout, this, [this]() {
+        if (m_idle && isVisible()) update();
+        // A4：展开态且文本溢出 → 每跳左移 16px；滚出后可读区再从右侧进场（循环）
+        if (m_expanded && isVisible() && m_marqueeRun && !m_desc.isEmpty()) {
+            m_marqueeX -= 16;
+            if (m_marqueeX + m_marqueeTextW < 0) m_marqueeX = rect().width();
+            update();
+        }
+    });
+    m_clockTick->start();
+
     hide();
 }
 
@@ -225,6 +244,11 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     m_hadContent = true;
     m_contentActive = true;
     m_closing = false;          // 新内容上屏：取消"淡出中"，否则淡入结束会被当成淡出去 hide
+    // A4：新内容重置滚动位置 —— 否则沿用上一条的 m_marqueeX（可能是"已滚出屏外"的负值），
+    //     新文案一上来就从中间/屏外开始画，看着像缺字。
+    m_marqueeX = 0;
+    m_marqueeRun = false;
+    m_marqueeTextW = 0;
     m_dismissGuard->stop();     // ⚠️ 必须停：上一条的兜底守卫是"给上一条用的"，
                                 //    不停的话它到点会把刚上屏的新提示打掉
     m_expandGuard->stop();      // 展开定时器同理（新内容回到收起态，不该继承上一条的回收时刻）
@@ -349,6 +373,9 @@ void IslandOverlay::enterIdle()
     m_expanded = false;
     m_contentActive = false;   // 内容这就算过去了，之后展开的是"最近一条"
     m_autoClose->stop();
+    // A4：收回空闲即停滚并归零
+    m_marqueeX = 0;
+    m_marqueeRun = false;
     clearOpenPath();
     m_actions.clear();         // 收回即清按钮，别让空闲态还留着上一条的"确认"
     m_onAction = nullptr;
@@ -375,6 +402,10 @@ void IslandOverlay::setExpanded(bool on)
 {
     if (m_expanded == on) return;
     m_expanded = on;
+
+    // A4：收起（含点击停住）即把滚动位置归零 —— 需求"滚动持续直到人为点击"，
+    //     点击 → 收起 → 下次再展开从头开始，不会停在半截。
+    if (!on) { m_marqueeX = 0; m_marqueeRun = false; }
 
     // 从空闲态展开：得有东西可看。从来没显示过内容就给一句占位话，
     // 否则展开是一块空白的黑底 —— 用户会觉得"点了没反应"。
@@ -624,17 +655,35 @@ void IslandOverlay::paintEvent(QPaintEvent *)
         // 不用 emoji/字体字符（U+2304 之类在不少字体里是豆腐块，手绘最稳）。
         // ⚠️ 前景不透明度别跟着底色一起压：浅色态原来是 alpha 170 的深灰叠在 alpha 150 的
         //    白胶囊上，实测糊成一团灰、看不出是"可以拉的把手"。底色退让、符号要清。
+        //
+        // 2026-10-11 · A3：空闲态右侧补一个 HH:mm 时钟（教室内学生抬头就知道点没到点）。
+        //   横杠+箭头从"居中"移到**左侧**，时间放右侧，两者各占一边，互不打架。
+        //   字体用 13px Medium（比活动态标题略小，空闲态要退到背景里不抢戏）。
         const QColor barCol = m_light ? QColor(0x16, 0x16, 0x16, 215) : QColor(0xFA, 0xFA, 0xFA, 225);
+        const QColor timeCol = m_light ? QColor(0x16, 0x16, 0x16, 200) : QColor(0xFA, 0xFA, 0xFA, 210);
+
+        // 时间（右半区）：HH:mm —— 复用 IslandClock::currentTimeText() 的格式口径
+        const QString timeText = QTime::currentTime().toString(QStringLiteral("HH:mm"));
+        QFont cf = font();
+        cf.setPixelSize(13);
+        cf.setWeight(QFont::Medium);
+        p.setFont(cf);
+        p.setPen(timeCol);
+        const QRect timeRect(rect().left() + rect().width() / 2 - 4, rect().top(),
+                             rect().width() / 2 - 10, rect().height());
+        p.drawText(timeRect, Qt::AlignVCenter | Qt::AlignRight, timeText);
+
+        // 横杠 + 箭头（左半区居中）：缩小并左移，给时间让位
         p.setPen(Qt::NoPen);
         p.setBrush(barCol);
-        const int cx = rect().center().x();
-        const int cy = rect().center().y() - 3;
-        p.drawRoundedRect(QRect(cx - 14, cy - 2, 28, 4), 2, 2);
+        const int cx = rect().left() + rect().width() / 4;
+        const int cy = rect().center().y() - 2;
+        p.drawRoundedRect(QRect(cx - 12, cy - 2, 24, 4), 2, 2);
 
         QPainterPath tri;
-        tri.moveTo(cx - 6, cy + 5);
-        tri.lineTo(cx + 6, cy + 5);
-        tri.lineTo(cx, cy + 12);
+        tri.moveTo(cx - 5, cy + 5);
+        tri.lineTo(cx + 5, cy + 5);
+        tri.lineTo(cx, cy + 11);
         tri.closeSubpath();
         p.drawPath(tri);
         return;
@@ -680,8 +729,27 @@ void IslandOverlay::paintEvent(QPaintEvent *)
             df.setPixelSize(13);
             p.setFont(df);
             p.setPen(sub);
-            p.drawText(QRect(x, rect().top() + 52, body.right() - x, 70),
-                       Qt::AlignLeft | Qt::TextWordWrap, m_desc);
+            // A4（2026-10-11 · §6.1）：长描述**横向滚动**（需求：展开后滚动展示、持续到点击）。
+            // 测量：文本宽 > 可视宽才滚；否则静态左对齐画（不用滚，别硬凑动效）。
+            const int descW = body.right() - x;
+            const QRect descRect(x, rect().top() + 52, descW, 70);
+            m_marqueeTextW = QFontMetrics(df).horizontalAdvance(m_desc);
+            if (m_marqueeTextW > descW) {
+                m_marqueeRun = true;
+                if (m_marqueeX == 0 && !m_idle) m_marqueeX = descW;   // 首次进入从右侧滚入
+                p.save();
+                p.setClipRect(descRect);   // 超出部分裁掉，别糊到胶囊外
+                // 垂直居中于 70px 高区
+                const int ty = descRect.top()
+                               + (descRect.height() - p.fontMetrics().height()) / 2
+                               + p.fontMetrics().ascent();
+                p.drawText(x + m_marqueeX, ty, m_desc);
+                p.restore();
+            } else {
+                m_marqueeRun = false;
+                m_marqueeX = 0;
+                p.drawText(descRect, Qt::AlignLeft | Qt::TextWordWrap, m_desc);
+            }
         }
     } else {
         // 收起态：标题左、描述右

@@ -161,6 +161,19 @@ private:
     QTimer *m_autoClose = nullptr;
     QTimer *m_dismissGuard = nullptr;   // dismiss 淡出的兜底：动画没走完也强制 hide
     QTimer *m_expandGuard = nullptr;    // 展开态硬回收：交互态展开不能被 m_autoClose 的守卫永远吞掉
+    // A3（2026-10-11）：空闲态时钟刷新。500ms 一跳、只在"空闲且可见"时 update()，
+    // 保证跨分不延迟（半秒一查足够），活动态/隐藏态下不做任何重绘（零开销）。
+    QTimer *m_clockTick = nullptr;
+
+    // ── A4（2026-10-11 · §6.1）：展开态长描述横向滚动（marquee）──
+    // 需求：展开后标题+正文**滚动式展示、持续直到人为点击**。
+    // ⚠️ 不引 MarqueeText 子控件：本岛是**纯手绘 QWidget、无子控件布局**（见本文件顶部
+    //    设计说明），塞子控件要自己管 geometry/主题/生命周期，反而破坏既有结构。
+    //    滚动直接做在 paintEvent 里：一个像素偏移 m_marqueeX，由 m_clockTick 推进，
+    //    起停跟随"展开态 + 文本是否溢出"，点击/收起即归零。
+    int  m_marqueeX = 0;            // 描述文本左缘相对绘制区左缘的偏移（负=已向左滚出）
+    int  m_marqueeTextW = 0;        // 当前描述文本的像素宽（判断要不要滚）
+    bool m_marqueeRun = false;      // 本条展开内容是否需要滚动（文本宽 > 可视宽）
     QPropertyAnimation *m_geoAnim = nullptr;
     QPropertyAnimation *m_fadeAnim = nullptr;
 

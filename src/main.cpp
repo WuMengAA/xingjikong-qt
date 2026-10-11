@@ -312,6 +312,10 @@ bool g_remoteControl = false;      // remote_control_start/stop 的真实会话�
 int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
 int g_frameDiffMs = -1;            // 上一帧耗时（毫秒），动态帧率控制器用它判断画面是否稳定
 
+// A6（2026-10-11）：噪音检测采集器。懒加载单例 —— 没收到 noise_monitor_start 前不 new，
+// 不占麦克风（教室机麦克风可能同时被语音对讲用，见 noise_monitor.cpp 顶部注释）。
+NoiseMonitor *g_noise = nullptr;
+
 // file_push 接收会话状态：一个文件一段会话（file_push 初始化 → 多次 file_chunk 追加 → file_done 收尾）
 QString g_fileRecvTarget;          // 目标文件绝对路径（file_push 时定下）
 QFile *g_fileRecvFile = nullptr;   // 接收文件句柄（WriteOnly）
@@ -2473,7 +2477,10 @@ bool enableShutdownPriv()
 //    COM 由 Qt 的 Windows 平台插件在主线程初始化（原同步版本能跑即是证明），此处不重复 CoInitialize。
 static ISpVoice *g_spVoice = nullptr;
 
-static void speakText(const QString &text)
+// SAPI 兜底朗读（原 speakText 本体，2026-10-11 更名保留）。
+// 现在由 speakText() 在 Edge TTS 不可用/失败时回调进来 —— 离线场景（无公网、
+// 无 ffmpeg、语音服务不通）只有它还能出声，所以**必须保留且行为不变**。
+static void speakTextSapi(const QString &text)
 {
     if (text.trimmed().isEmpty()) return;
     if (!g_spVoice) {
@@ -2495,6 +2502,55 @@ static void speakText(const QString &text)
     if (FAILED(hr))
         qWarning().noquote() << QStringLiteral("[agent-qt] TTS Speak 失败 HR=0x%1（通知已显示，朗读跳过）")
                                     .arg((uint)hr, 0, 16);
+}
+
+// ── TTS 统一入口（2026-10-11 · A5 接线 §6.4）────────────────────────────
+// 需求 §6.4：通知朗读**优先 Edge 神经语音**（联网时音色自然），失败自动**回退 SAPI**（离线兜底）。
+//
+// 为什么要回退：Edge TTS 走公网 WebSocket（speech.platform.bing.com），教室机
+//   · 无公网 / 弱网超时；· 没装 ffmpeg（mp3 解码链断掉）—— 这些都不是"崩"，是"读不出来"。
+//   fail-silent 红线：绝不假装读过了，而是**如实降级到 SAPI**，让通知至少能听见。
+//
+// ⚠️ Edge 的失败是**异步**的（连不上/超时/解码失败要等回调），所以不能"先问能不能用、
+//    再决定读哪条"（那个判断当场返回不了真话）。正确做法：**先让 Edge 读**，
+//    同时把它的 failed 接一根线 —— 真失败时再补一次 SAPI，且只补一次。
+// ⚠️ 去重护栏：failed 可能来自**上一条**朗读（Edge 单例，新的一条会打断旧的，
+//    被顶掉的那条也会 failed）。若不做判据，通知 A 的失败会把正在由通知 B 朗读的
+//    内容再念一遍。判据：发起朗读时把"本条 token"记进 g_ttsCurToken；
+//    failed 回调里若 g_ttsCurToken 已被更新（说明有更新的一条顶上），就**不**回退。
+static quint64 g_ttsSeq = 0;            // speakText 调用计数
+static quint64 g_ttsCurToken = 0;       // 当前"正在读"的那条的 token（0=没有）
+static QString g_ttsCurText;            // 当前"正在读"的文本（回退 SAPI 用）
+static bool g_ttsFallbackWired = false;
+
+static void speakText(const QString &text)
+{
+    const QString say = text.trimmed();
+    if (say.isEmpty()) return;
+
+    EdgeTts &edge = EdgeTts::instance();
+
+    // 只接一次：failed → 若仍是"当前这条"，回退 SAPI
+    if (!g_ttsFallbackWired) {
+        g_ttsFallbackWired = true;
+        QObject::connect(&edge, &EdgeTts::failed, qApp, [](const QString &reason) {
+            qWarning().noquote() << QStringLiteral("[agent-qt] Edge TTS 不可用（%1），回退 SAPI 朗读").arg(reason);
+            // 被更新的一条顶掉了（token 已换）⇒ 这条 failed 是"过期"的，不再出声，
+            // 否则会把正在由新一条朗读的内容重复念一遍。
+            if (g_ttsCurToken == 0 || g_ttsCurToken != g_ttsSeq) return;
+            const QString fallback = g_ttsCurText;
+            g_ttsCurToken = 0;   // 只回退一次
+            speakTextSapi(fallback);
+        });
+    }
+
+    // 记下"当前这条"：token = 本次调用号
+    const quint64 tok = ++g_ttsSeq;
+    g_ttsCurToken = tok;
+    g_ttsCurText  = say;
+
+    // 先让 Edge 读；它会异步报成功(finished)或失败(failed)
+    edge.speak(say);
 }
 
 // ── 灵动岛统一入口（2026-10-07 · #98）──────────────────────────────────
@@ -3028,6 +3084,21 @@ static void sendActionReceipt(const QString &id, const QString &action, const QS
     qInfo("[agent-qt] 📤 回执 id=%s action=%s result=%s%s",
           qPrintable(id), qPrintable(action), qPrintable(result),
           error.isEmpty() ? "" : qPrintable(" error=" + error));
+}
+
+// A6（2026-10-11）：**周期遥测**上报（噪音采样这类"没有指令 id、要持续吐数"的场景）。
+// ⚠️ 为什么不走 receipt：云端的 recordResult 是**按指令 id 落表**的（registry.js:636），
+//    遥测没有 id，硬塞 receipt 会在云端 results 表里塞一堆 id=undefined 的脏记录。
+//    云端对 type:"event" 已有处理（index.js:1284 → pushEvent 记进事件流水），
+//    所以遥测走 event，语义干净、也不污染指令结果表。
+static void sendEvent(const QString &level, const QString &msg, const QJsonObject &extra = QJsonObject())
+{
+    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;   // 没连就不发（遥测丢一拍无所谓）
+    QJsonObject p;
+    p.insert(QStringLiteral("level"), level);
+    p.insert(QStringLiteral("msg"), msg);
+    if (!extra.isEmpty()) p.insert(QStringLiteral("extra"), extra);
+    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("event"), p));
 }
 
 static void otaOnFinished();   // 前向声明（下载结束回调）
@@ -4308,6 +4379,63 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.data.insert(QStringLiteral("fps"), g_currentFps);
         out.data.insert(QStringLiteral("fpsWas"), was);
         qInfo("[agent-qt] 🟢 远控会话关闭，抓屏帧率恢复 5 fps");
+        return out;
+    }
+
+    // ── A6（2026-10-11）：噪音检测（§6.5）────────────────────────────────
+    // 收到指令才开采集（不常驻占麦）。采样周期由调用方给（默认 2s），每次分析完
+    // 通过 type:"event" 把 {db, active, seq} 吐给云端 → 管理端展示/告警。
+    // ⚠️ 如实说明：noise_monitor.cpp 的 captureRms() 目前是**能力骨架**（返回 0，
+    //    留了 WASAPI 集成 TODO），所以现在采出来的 db 恒为 0、active 恒为 false。
+    //    接线本身是对的（接口/链路就绪）；真机采集把 captureRms 的躯壳换掉即可，
+    //    这里不假装"已经在测噪音"。
+    if (action == QStringLiteral("noise_monitor_start")) {
+        if (!g_noise) {
+            g_noise = new NoiseMonitor(nullptr);   // 无 parent，单例式驻留（进程退出时随 Qt 清理）
+            QObject::connect(g_noise, &NoiseMonitor::noiseSample, g_ws,
+                             [](double db, bool active, int seq) {
+                                 QJsonObject extra;
+                                 extra.insert(QStringLiteral("db"), db);
+                                 extra.insert(QStringLiteral("active"), active);
+                                 extra.insert(QStringLiteral("seq"), seq);
+                                 sendEvent(QStringLiteral("info"), QStringLiteral("noise_sample"), extra);
+                             });
+            QObject::connect(g_noise, &NoiseMonitor::failed, g_ws, [](const QString &reason) {
+                qWarning().noquote() << QStringLiteral("[agent-qt] 噪音采集失败：%1").arg(reason);
+                sendEvent(QStringLiteral("warn"), QStringLiteral("noise_monitor_failed"),
+                          QJsonObject{ { QStringLiteral("reason"), reason } });
+            });
+        }
+        const int iv = qBound(500, params.value(QStringLiteral("intervalMs")).toInt(2000), 60000);
+        if (g_noise->running()) {
+            out.result = QStringLiteral("done");
+            out.data.insert(QStringLiteral("alreadyActive"), true);
+            out.data.insert(QStringLiteral("intervalMs"), iv);
+            return out;
+        }
+        g_noise->start(16000, iv);
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("active"), true);
+        out.data.insert(QStringLiteral("intervalMs"), iv);
+        // 采集骨架未接真机：如实告知调用方"链路已开，但指标暂为 0"
+        out.data.insert(QStringLiteral("captureStub"), true);
+        qInfo("[agent-qt] 🎙 噪音检测开启（每 %d ms 一次）", iv);
+        return out;
+    }
+
+    if (action == QStringLiteral("noise_monitor_stop")) {
+        if (!g_noise || !g_noise->running()) {
+            out.result = QStringLiteral("done");
+            out.data.insert(QStringLiteral("active"), false);
+            out.data.insert(QStringLiteral("wasActive"), false);
+            return out;
+        }
+        g_noise->stop();
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("active"), false);
+        out.data.insert(QStringLiteral("wasActive"), true);
+        out.data.insert(QStringLiteral("lastDb"), g_noise->lastDb());
+        qInfo("[agent-qt] 🔇 噪音检测停止");
         return out;
     }
 
