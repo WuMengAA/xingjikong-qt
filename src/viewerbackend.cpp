@@ -1977,7 +1977,11 @@ void ViewerBackend::onTextMessage(const QString &text)
         }
         // 「操作完成时提示」这个开关接在这儿：机器真做了（executed）才响，
         // 云端"收下了"不算 —— 收下了但机器没做，用户等到的却是"完成了"，那 worse than 不提示。
-        if (state == QStringLiteral("executed") && m_notifyOnDone) {
+        // 2026-10-11 用户「紧急锁定实则为学生回复（默认开启）」：锁屏（lock）是被控端
+        // 的回复确认，属于紧急动作，**不受 notifyOnDone 开关影响，永远通知**——
+        // 学生端回复"锁上了/没锁上"不能因为老师关了普通提示就被吞掉。
+        const bool lockReply = action == QStringLiteral("lock");
+        if (state == QStringLiteral("executed") && (m_notifyOnDone || lockReply)) {
             notifyPref(err.isEmpty()
                            ? QStringLiteral("%1 在 %2 上完成了").arg(action, uid)
                            : QStringLiteral("%1 在 %2 上失败：%3").arg(action, uid, err));
