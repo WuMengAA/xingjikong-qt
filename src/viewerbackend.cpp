@@ -30,6 +30,7 @@
 #include <QUrl>
 #include <QWebSocket>
 #include "ldc_rtc_bridge.h"   // 2026-10-10：WebRTC ldc 桥接（轻量前向声明，大文件不膨胀 C1060）
+#include "android_notify.h"   // 2026-10-11：手机系统通知栏横幅（桌面为空实现）
 
 #if defined(Q_OS_ANDROID)
 #include <QtCore/private/qandroidextras_p.h>   // 2026-10-11：手机开麦请求 RECORD_AUDIO（Qt 官方 Android 私有 API）
@@ -470,6 +471,11 @@ void ViewerBackend::notifyPref(const QString &text)
     setStatus(text, false);
     // 2026-10-09：一切通知统一走灵动岛（DynamicIsland.showNote），不再弹系统托盘气泡。
     // 状态行那一行仍写（setStatus）—— 就算窗口最小化了，状态也不会丢。
+    // 2026-10-11：手机 App 额外补一条**系统通知栏**横幅（后台/息屏也能看到）；
+    // 桌面端 androidSystemNotify 是空实现，行为不变。
+#if defined(Q_OS_ANDROID)
+    androidSystemNotify(QStringLiteral("星集控"), text);
+#endif
     emit islandNote(text, QString(), QStringLiteral("bell"));
 }
 /**

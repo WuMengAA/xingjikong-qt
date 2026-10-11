@@ -160,6 +160,9 @@ qt_add_executable(viewer-qt
   # Android 无 waveOut → 同文件内 Q_OS_ANDROID 分支留空桩（不破 Android 链接）。
   src/audio_playback.cpp
   src/audio_playback.h
+  # ── Android 系统通知（2026-10-11）：notifyPref 补通知栏横幅；桌面空实现──
+  src/android_notify.cpp
+  src/android_notify.h
   # ── 课表编辑器模块（2026-10-06 从 schedule-qt 并入）──
   src/schedule/profile_repository.cpp
   src/schedule/schedule_model.cpp
