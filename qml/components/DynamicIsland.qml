@@ -59,8 +59,12 @@ Item {
     // 尺寸：hidden 彻底消失（不是"看不见"，是真的不占地方）
     width:  isl.mode === "hidden" ? 0 : (isl.mode === "expanded" ? 400 : isl.capW)
     height: isl.mode === "hidden" ? 0 : (isl.mode === "expanded" ? isl.bodyH : 36)
-    readonly property int capW: 268
-    readonly property int bodyH: Math.min(300, 44 + Math.max(1, isl.n) * 34 + 30)
+    // capW：收起态胶囊宽。F4 加了时针（46px）后由 268 抬到 320，
+    // 保证「图标 + 状态文本 + 时钟 + 展开」四段都排得下（文本区 width 见 capMarquee）。
+    readonly property int capW: 320
+    // bodyH：展开态总高。F4 把头部从 18 → 42（腾出鲸鱼娘 40px 的位置），
+    // 所以头部预算由 44 抬到 68；仍受 300 上限约束（状态多时不无限长）。
+    readonly property int bodyH: Math.min(300, 68 + Math.max(1, isl.n) * 34 + 30)
 
     // 状态键 → 图标名（lucide/morphicons 同款 24×24 stroke SVG，见 components/SvgIcon.qml）
     readonly property var glyph: ({
@@ -112,16 +116,28 @@ Item {
                     width: 16
                     height: 16
                 }
-                Text {
-                    id: capText
+                // ── F4（2026-10-11）：状态文本走 MarqueeText（超长横向滚动）──
+                // 原来用 Text + elide 截断，长状态（如长文件路径/长设备名）看不全。
+                // MarqueeText 只在文本宽 > 容器宽时才滚，短文本与原来表现一致。
+                MarqueeText {
+                    id: capMarquee
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 78
+                    width: parent.width - 140     // 给左侧图标/右侧时钟+「展开」留位
+                    height: 20
                     text: (isl.noteActive ? "" : (isl.n > 1 ? (isl.n + " 项：") : "")) + isl.st.t
-                    color: isl.theme.fg || "#FAFAFA"
-                    font.pixelSize: 13
-                    elide: Text.ElideRight
+                    light: !isl.theme.dark
+                    // note 激活时暂停滚动（提示要立刻看清，别一边滚一边读）
+                    paused: isl.noteActive
                 }
                 Item { width: 4 }
+                // ── F4：时钟（HH:mm）── 收起态右侧常显，抬头即知时间
+                IslandClock {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 46
+                    height: 18
+                    timePx: 13
+                    light: !isl.theme.dark
+                }
                 Text {
                     // ⚠️ 2026-10-07 删了 anchors.right: parent.right ——
                     // Row 是定位器，子项不许自己指定 left/right/horizontalCenter/fill/centerIn
@@ -163,10 +179,27 @@ Item {
             anchors.margins: 12
             spacing: 6
 
+            // ── F4（2026-10-11）：鲸鱼娘上岛（展开态左上角）──
+            // 用户最初需求"添加鲸鱼娘"。素材 qrc:/whale/DSniang1.png（随 exe 走）。
+            // 放展开态而非收起态：收起态只有 36px 高、宽度也紧，塞角色会挤压状态文字。
+            // 40px 见方、带呼吸浮动；点一下 rua（组件内自带）。
             Item {
                 width: parent.width
-                height: 18
+                height: 42
+                WhaleMascot {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 40
+                    height: 40
+                    light: !isl.theme.dark
+                    imagePath: "qrc:/whale/DSniang1.png"
+                    // ⚠️ 不在这儿绑 bubble：WhaleMascot 内部点击时自己写 bubble="rua～"，
+                    //    外部再绑一个表达式 ⇒ 双向写同一属性 = Binding loop（QML 规矩）。
+                    //    台词交给组件自管（点击 rua），父级只给主题 + 素材路径。
+                }
                 Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 50
                     anchors.verticalCenter: parent.verticalCenter
                     text: "现在在做什么"
                     color: isl.theme.fg || "#FAFAFA"

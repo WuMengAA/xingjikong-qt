@@ -216,6 +216,14 @@ qt_add_qml_module(viewer-qt
 file(GLOB VIEWER_ICON_SVGS "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/*.svg")
 qt_add_resources(viewer-qt "viewericons" PREFIX "/icons" BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons" FILES ${VIEWER_ICON_SVGS})
 
+# 2026-10-11（F4）：鲸鱼娘素材编进 exe（qrc 前缀 /whale）。
+# 素材来自 dsh-whale-widget 原型包（DSniang1.png / rua.gif），cp 拷入不动源。
+# 编进 qrc 而非散放磁盘：与 icons 同思路，部署不带额外文件、跨机器路径稳定。
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/whale")
+  file(GLOB VIEWER_WHALE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/whale/*")
+  qt_add_resources(viewer-qt "viewerwhale" PREFIX "/whale" BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/whale" FILES ${VIEWER_WHALE_FILES})
+endif()
+
 # 2026-10-06：QML 不再编进 exe（见上面对 QML_FILES 的改动），改为构建后拷到
 # exe 同目录的 qml/Stelarith/，运行期由 main.cpp 从磁盘加载。
 # 放子目录而不是 qml/ 根：那里是 windeployqt 的 Qt 插件地盘（QtQuick.2/、QtQml/…），

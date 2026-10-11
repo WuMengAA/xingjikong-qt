@@ -23,7 +23,10 @@ import QtQuick
 Item {
     id: whale
 
-    property string imagePath: "C:/Users/Administrator/.dsh/profiles/web/node_modules/dsh-whale-widget/assets/DSniang1.png"
+    // 2026-10-11（F4）：默认改指 qrc 内素材（resources/whale/ 编进 exe，qrc:/whale/…）。
+    // 原路径指向 dsh 原型包（C:/Users/.../dsh-whale-widget/assets），只在开发机存在，
+    // 装到别的机器就是空白；qrc 版随 exe 走，跨机稳定。
+    property string imagePath: "qrc:/whale/DSniang1.png"
     property bool light: false
     property real floatAmplitude: 3        // 呼吸浮动幅度 px
     property int speakMs: 3000             // 气泡停留
