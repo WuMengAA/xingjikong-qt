@@ -81,6 +81,8 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QStringList capActions READ capActions NOTIFY capActionsChanged)
     Q_PROPERTY(QImage frame READ frame NOTIFY frameChanged)
     Q_PROPERTY(QJsonObject recordings READ recordings NOTIFY recordingsChanged)
+    // 2026-10-11：事件流水（/api/events，最近 50 条）——手机端告警页数据源
+    Q_PROPERTY(QJsonArray events READ events NOTIFY eventsChanged)
     // ⚠️ subscribeThumbnails 已挪进下面的 public: 段 —— 原来它写在这儿的**无访问说明符**位置，
     //    class 默认 private ⇒ QML 调不到（报 "Property 'subscribeThumbnails' of object
     //    ViewerBackend is not a function"），多班缩略图墙点一下就 TypeError。
@@ -416,6 +418,9 @@ public:
     // ── 班级监控（设计文档 3.6 第一版）──
     /** 拉取云端录制列表（recordings/<uid>/ 分组），emit recordingsChanged。 */
     Q_INVOKABLE void fetchRecordings();
+    // 2026-10-11：拉事件流水（/api/events）——手机端告警页
+    Q_INVOKABLE void fetchEvents();
+    QJsonArray events() const { return m_events; }
     /** 录制列表（QML 读，QJsonObject：uid → 文件数组）。 */
     QJsonObject recordings() const { return m_recordings; }
     /** 取某台设备的缩略图帧（多班面板；无则空图）。 */
@@ -492,6 +497,7 @@ signals:
     void statsChanged();
     void cloudUrlChanged();
     void recordingsChanged();
+    void eventsChanged();   // 2026-10-11：事件流水（告警页）
     /** 某台设备的缩略图帧更新了（多班面板缩略图墙）。uid 为空表示全部。 */
     void thumbnailChanged(const QString &uid = QString());
     /** 站点账号状态/文本变化（登录成功、失败、票换了、用户点了忘记）。 */
@@ -812,6 +818,7 @@ private:
 
     // ── 班级监控（2026-10-07）──
     QJsonObject m_recordings;                 // recordings/<uid>/[文件] 分组缓存
+    QJsonArray m_events;                      // 2026-10-11：/api/events 事件流水缓存
 
     // ── 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）──
     QStringList m_thumbUids;                  // 当前订阅缩略图的设备 uid 列表

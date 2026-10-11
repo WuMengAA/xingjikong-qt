@@ -39,6 +39,8 @@ ApplicationWindow {
     // ── 2026-10-11 P1 监控摘要：录制回放汇总 ──
     property bool recBusy: false
     property var recSummary: []   // [{uid, count, last}]，由 recordingsChanged 重算
+    // 2026-10-11：最近告警（/api/events 前几条）
+    property var recentEvents: [] // [{time, uid, action, result}]
 
     // backend 由 main.cpp 注入（ViewerBackend 实例，同一连接）
 
@@ -232,6 +234,15 @@ ApplicationWindow {
                                 }
                             }
                         }
+                        // 2026-10-11：整行点击 → 设备详情抽屉（Drawer 底部）
+                        MouseArea {
+                            anchors.fill: parent
+                            // 按钮区（右侧 Row）不触发详情
+                            onClicked: {
+                                deviceDrawer.dev = modelData
+                                deviceDrawer.open()
+                            }
+                        }
                     }
                 }
             }
@@ -398,6 +409,48 @@ ApplicationWindow {
                     }
                 }
 
+                // ── 2026-10-11 最近告警（/api/events 前 8 条）──
+                Text { text: "最近告警"; color: root.th.fg3; font.pixelSize: 12; anchors.topMargin: 6 }
+                Rectangle {
+                    width: parent.width; radius: root.th.rCard
+                    color: root.th.panel; border.color: root.th.stroke; border.width: 1
+                    implicitHeight: Math.max(evCol.height + 16, 40)
+                    Column {
+                        id: evCol
+                        anchors.left: parent.left; anchors.right: parent.right
+                        anchors.top: parent.top; anchors.margins: 12
+                        spacing: 8
+                        Repeater {
+                            model: root.recentEvents.slice(0, 8)
+                            delegate: Row {
+                                width: parent.width; spacing: 8
+                                // 级别点：error=红 / info=绿
+                                Rectangle {
+                                    width: 6; height: 6; radius: 3
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: (modelData.level === "error") ? root.th.err : root.th.ok
+                                }
+                                Column {
+                                    width: parent.width - 60
+                                    Text {
+                                        text: modelData.msg
+                                        color: root.th.fg; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width
+                                    }
+                                    Text {
+                                        text: (modelData.uid ? modelData.uid + " · " : "") + modelData.time
+                                        color: root.th.fg4; font.pixelSize: 10; elide: Text.ElideRight; width: parent.width
+                                    }
+                                }
+                            }
+                        }
+                        Text {
+                            visible: root.recentEvents.length === 0
+                            text: "暂无事件"
+                            color: root.th.fg4; font.pixelSize: 11
+                        }
+                    }
+                }
+
                 // ── 2026-10-11 P1 监控摘要：云端录制回放汇总 ──
                 // backend.recordings = { uid: [{name,bytes,url,mtimeMs}, ...] }
                 Text { text: "监控摘要 · 录制回放"; color: root.th.fg3; font.pixelSize: 12; anchors.topMargin: 6 }
@@ -522,6 +575,81 @@ ApplicationWindow {
         }
     }
 
+    // ── 设备详情抽屉（2026-10-11 · 手机端 Drawer 底部抽屉方案）──
+    // 点设备行打开：详情信息 + 轻指令操作（锁屏/关机/重启/停止画面）
+    Drawer {
+        id: deviceDrawer
+        edge: Qt.BottomEdge
+        width: parent.width
+        height: Math.min(420, root.height * 0.6)
+        modal: true
+        dragMargin: 0
+        background: Rectangle { color: root.th.panel }
+
+        property var dev: ({})   // 当前设备（delegate 点击时注入）
+
+        contentItem: Flickable {
+            contentHeight: ddCol.height + 40
+            clip: true
+            Column {
+                id: ddCol
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 18
+                spacing: 14
+
+                // 设备名 + 在线态
+                Row {
+                    width: parent.width; spacing: 10
+                    Rectangle {
+                        width: 10; height: 10; radius: 5
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: (deviceDrawer.dev.online !== false) ? root.th.ok : root.th.err
+                    }
+                    Text {
+                        text: (deviceDrawer.dev.name && deviceDrawer.dev.name !== "") ? deviceDrawer.dev.name : deviceDrawer.dev.uid
+                        color: root.th.fg; font.pixelSize: 18; font.weight: Font.Medium
+                    }
+                }
+                Text {
+                    text: "UID " + deviceDrawer.dev.uid + (deviceDrawer.dev.version ? "  ·  v" + deviceDrawer.dev.version : "")
+                    color: root.th.fg3; font.pixelSize: 12; wrapMode: Text.Wrap; width: parent.width
+                }
+                Rectangle { width: parent.width; height: 1; color: root.th.sepline }
+
+                // 操作：全宽触摸按钮（>40px 高）
+                Rectangle {
+                    width: parent.width; height: 44; radius: root.th.rCtrl
+                    color: root.th.hover; border.color: root.th.stroke; border.width: 1
+                    Text { anchors.centerIn: parent; text: "锁屏"; color: root.th.fg; font.pixelSize: 14 }
+                    MouseArea { anchors.fill: parent; onClicked: { backend.sendAction("lock", {}); deviceDrawer.close(); root.toast("已下发锁屏 → " + deviceDrawer.dev.uid) } }
+                }
+                Rectangle {
+                    width: parent.width; height: 44; radius: root.th.rCtrl
+                    color: root.th.hover; border.color: root.th.stroke; border.width: 1
+                    Text { anchors.centerIn: parent; text: "重启"; color: root.th.fg; font.pixelSize: 14 }
+                    MouseArea { anchors.fill: parent; onClicked: { backend.sendAction("restart", {}); deviceDrawer.close(); root.toast("已下发重启 → " + deviceDrawer.dev.uid) } }
+                }
+                Rectangle {
+                    width: parent.width; height: 44; radius: root.th.rCtrl
+                    color: root.th.hover; border.color: root.th.stroke; border.width: 1
+                    Text { anchors.centerIn: parent; text: "停止画面（关闭摄像头推流）"; color: root.th.fg; font.pixelSize: 14 }
+                    MouseArea { anchors.fill: parent; onClicked: { backend.sendAction("camera_stop", {}); deviceDrawer.close(); root.toast("已停止画面 → " + deviceDrawer.dev.uid) } }
+                }
+                Rectangle {
+                    width: parent.width; height: 44; radius: root.th.rCtrl
+                    color: root.th.err
+                    Text { anchors.centerIn: parent; text: "关机"; color: "#fff"; font.pixelSize: 14 }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { deviceDrawer.close(); root.confirmTarget = deviceDrawer.dev.uid; root.confirmAction = "shutdown"; confirmDialog.open() }
+                    }
+                }
+            }
+        }
+    }
+
     // ── 轻提示（复用灵动岛思路的简单 toast）──
     function toast(s) {
         tipText.text = s
@@ -567,6 +695,9 @@ ApplicationWindow {
         // 2026-10-11 P1 监控摘要：录制列表回来 → 汇总
         backend.recordingsChanged.connect(function () { root.buildRecSummary() })
         backend.fetchRecordings()
+        // 2026-10-11：最近告警（/api/events）
+        backend.eventsChanged.connect(function () { root.buildRecentEvents() })
+        backend.fetchEvents()
     }
 
     // ── 2026-10-11 P1 录制汇总：{uid: [{name,bytes,url,mtimeMs},...]} → [{uid,count,last}] ──
@@ -593,5 +724,24 @@ ApplicationWindow {
         // 按最近录制排序（新在前）
         out.sort(function (a, b) { return (recs[b.uid][0].mtimeMs || 0) - (recs[a.uid][0].mtimeMs || 0) })
         root.recSummary = out.slice(0, 12)
+    }
+
+    // ── 2026-10-11 最近告警：/api/events → [{id,time,level,msg,uid}] 前 20 条 ──
+    // 云端事件字段：{id, at(ISO), level(info/error), msg, ...extra}
+    function buildRecentEvents() {
+        var arr = backend.events || []
+        var out = []
+        for (var i = 0; i < arr.length && i < 20; ++i) {
+            var e = arr[i] || {}
+            var t = ""
+            if (e.at) {
+                var d = new Date(e.at)
+                t = (d.getMonth() + 1) + "-" + d.getDate() + " " +
+                    (d.getHours() < 10 ? "0" : "") + d.getHours() + ":" +
+                    (d.getMinutes() < 10 ? "0" : "") + d.getMinutes()
+            }
+            out.push({ id: e.id, time: t, level: e.level, msg: e.msg || "", uid: e.uid || "" })
+        }
+        root.recentEvents = out
     }
 }

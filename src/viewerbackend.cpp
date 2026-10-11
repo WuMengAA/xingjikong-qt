@@ -1402,6 +1402,39 @@ void ViewerBackend::setLdcRtcState(const QString &s)
 }
 void ViewerBackend::emitLdcFrame(const QImage &img)
 {
+    // ── 2026-10-11 修 #171 / E6「RTC 画面不显」──
+    // 老 WebEngine 路径（setRtcFrame → applyFrameBytes(RtcGrab)）本来就把 RTC 帧写进
+    // m_frame、经 frameChanged → QML 的 image://frames/f 上屏。换成 libdatachannel 后，
+    // 这条 emitLdcFrame 只 emit rtcFrameReady 就完事，漏了「落 m_frame」，于是：
+    //   ① image://frames/f 永远拿不到 RTC 帧（走 jpeg 路径的 screenImg 看不到画面）；
+    //   ② RtcVideoSurface.onFrame 里的 Image 直赋 QImage 在 Qt 6.12 报
+    //      "Cannot assign QImage to QUrl"，同样显不出来。
+    // 修法（路 A）：让 RTC 帧并入已验证可用的 frame 通道 —— 补上落 m_frame + emit。
+    if (img.isNull()) return;
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    m_rtcLastFrameMs = now;                 // RTC 优先：jpeg 轮询帧据此让行（见 applyFrameBytes）
+
+    const QString wantSource = QStringLiteral("rtc");
+    if (m_frameSource != wantSource) {
+        m_frameSource = wantSource;
+        emit frameSourceChanged();
+    }
+    m_frameCount++;
+    m_frame = img;
+    m_frameUid = m_currentUid;              // ldc 帧不带 uid，按"当前这台"记账
+    const quint64 fp = frameFingerprint(img);
+    m_sameFrameStreak = (fp == m_frameHash) ? (m_sameFrameStreak + 1) : 0;
+    m_frameHash = fp;
+    setStatic(m_sameFrameStreak >= kStaticStreak);
+    if (!m_screenStatic) emit frameChanged();
+    if (m_frameCount % 30 == 1) {
+        logf("[viewer] 画面在动[RTC]：第 %d 帧（%.1f fps，%dx%d）",
+             m_frameCount, m_fps, img.width(), img.height());
+    }
+    emit statsChanged();
+
+    // 兼容：老接线若仍监听 rtcFrameReady 也保留（不破坏既有消费者）。
     emit rtcFrameReady(img);
 }
 void ViewerBackend::onConnected()
@@ -2420,6 +2453,37 @@ int ViewerBackend::bcastLeftSec() const
 QString ViewerBackend::defaultCloudUrl()
 {
     return kDefaultViewerUrl;
+}
+
+// ── 2026-10-11：拉事件流水（/api/events，最近 50 条）→ m_events + eventsChanged ──
+// 手机端告警页数据源（桌面 NotifyDialog 已有本地通知，不需要它；仅手机端拉）。
+void ViewerBackend::fetchEvents()
+{
+    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    QString httpUrl = m_url;
+    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
+           .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0) httpUrl.truncate(wsIdx);
+    httpUrl += QStringLiteral("/api/events?limit=50");
+    QNetworkRequest req{ QUrl(httpUrl) };
+    const QByteArray token = !m_cloudTicket.isEmpty()
+        ? m_cloudTicket.toUtf8() : m_token.toUtf8();
+    if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 200) {
+            const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            if (doc.isObject()) {
+                m_events = doc.object().value(QStringLiteral("events")).toArray();
+                emit eventsChanged();
+            }
+        } else {
+            logf("[viewer] 拉事件流水失败（HTTP %d）", status);
+        }
+        reply->deleteLater();
+    });
 }
 
 QString ViewerBackend::autoNote() const
