@@ -3591,6 +3591,31 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.data.insert(QStringLiteral("bytes"), (int)QFileInfo(path).size());
         out.data.insert(QStringLiteral("width"), pm.width());
         out.data.insert(QStringLiteral("height"), pm.height());
+
+        // ── 2026-10-11 · #1「截图没有反馈」＝两端都要 ──────────────────────────
+        // ① 本机（被控端）知情提示：老师截的是这台机器的屏，使用者应当知道（隐私知情）。
+        //    以前截完悄无声息，学生完全不知道自己被截了图。
+        //    图标用 "eye"（与「屏幕正在被查看」同一枚，已在用、必然能渲染）。
+        islandShow(QStringLiteral("屏幕已被截取"),
+                   QStringLiteral("老师远程截取了这台电脑的屏幕"),
+                   QStringLiteral("eye"), 6000);
+
+        // ② 缩略图回传：管理端以前拿到的 path 是**学生机上的绝对路径**，老师根本
+        //    看不到图，等于「执行了但没反馈」。这里把原图缩到宽 640 的 JPEG 塞进
+        //    回执（base64），管理端拿到就能直接预览，不必再登学生机取文件。
+        {
+            const QPixmap thumb = (pm.width() > 640)
+                                      ? pm.scaledToWidth(640, Qt::SmoothTransformation)
+                                      : pm;
+            QByteArray jpg;
+            QBuffer buf(&jpg);
+            if (buf.open(QIODevice::WriteOnly) && thumb.save(&buf, "JPG", 70)) {
+                out.data.insert(QStringLiteral("thumb"), QString::fromLatin1(jpg.toBase64()));
+                out.data.insert(QStringLiteral("thumbBytes"), jpg.size());
+            } else {
+                qWarning("[agent-qt] 截图缩略图编码失败（回执不带 thumb，管理端仍可按 path 提示）");
+            }
+        }
         return out;
     }
 
@@ -5309,9 +5334,14 @@ void handleControlText(const QString &text)
                      pay.value(QStringLiteral("detail")).toString().toUtf8().constData());
             g_rtcForceReoffer = true;
         } else {
+            // ⚠️ 2026-10-11 修：`to` 是**数字**（云端 registry 返回 { ok, to: hits }），
+            //    而 QJsonValue::toString() 对数字恒返回**空串** ⇒ 以前打成
+            //    「已投给  个对端」（数字空白），成功和 0 命中看起来一模一样，
+            //    把 #7 的排障带偏了一轮。这里按类型分别取，数字走 toInt。
+            const QJsonValue tv = pay.value(QStringLiteral("to"));
+            const QString toStr = tv.isDouble() ? QString::number(tv.toInt()) : tv.toString();
             qInfo("[rtc] 云端回执：%s 已投给 %s 个对端",
-                  rtype.toUtf8().constData(),
-                  pay.value(QStringLiteral("to")).toString().toUtf8().constData());
+                  rtype.toUtf8().constData(), toStr.toUtf8().constData());
         }
         return;
     }
