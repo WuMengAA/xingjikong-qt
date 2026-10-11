@@ -887,7 +887,13 @@ function onViewerAuthed(ws, who) {
   //   ② 教室机后到（管理端先开机）  → autoSubscribeViewers 在设备上线时补（见 markConnected 之后那步）。
   const firstOnline = listDevices()[0]?.uid;
   if (firstOnline) {
-    if (subscribeViewer(ws, firstOnline)) snd(ws, 'subscribed', { uid: firstOnline, auto: true });
+    if (subscribeViewer(ws, firstOnline)) {
+      snd(ws, 'subscribed', { uid: firstOnline, auto: true });
+      // 2026-10-11 修复「WebRTC 从未生效」：自动订阅与手动 subscribe 一样
+      // 也要通知设备起 RTC 推流（此前只有手动分支 L969 发 rtc-start，自动订阅
+      // 只推 WS 帧 → 被控端从不 ldc 推流，RTC 链路永远走不起来）。
+      rtcSignalToAgent(firstOnline, 'rtc-start', { uid: firstOnline });
+    }
   }
   snd(ws, 'viewer-ready', { viewers: viewerCount() });
   snd(ws, 'devices', { devices: listDevices(), at: new Date().toISOString() });
