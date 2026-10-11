@@ -885,7 +885,8 @@ function onViewerAuthed(ws, who) {
   // 两条补订阅路径都要有，缺一条就黑屏：
   //   ① 管理端后到（教室机早就在线）→ 这里立刻订阅第一台；
   //   ② 教室机后到（管理端先开机）  → autoSubscribeViewers 在设备上线时补（见 markConnected 之后那步）。
-  const firstOnline = listDevices()[0]?.uid;
+  // 2026-10-11 修：必须选**在线**设备（listDevices 含离线 known 表，取 [0] 可能订到离线 → rtc-start 白发）。
+  const firstOnline = listDevices().find((d) => d.online)?.uid;
   if (firstOnline) {
     if (subscribeViewer(ws, firstOnline)) {
       snd(ws, 'subscribed', { uid: firstOnline, auto: true });
