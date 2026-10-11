@@ -48,6 +48,15 @@ Item {
     property var recordingGroup: ({})
     property string boundDev: ""        // 被控端回执的当前绑定（权威；空 = 未绑定）
 
+    // ── 2026-10-12 · UI 评审第 4 条：界面只给人话，技术日志不上界面 ──
+    //  被控端现在回三件套：error（人话，可直接显示）/ errorCode（机器码）/ errorRaw（FFmpeg 原生输出）。
+    //  ⚠️ 红线：errorRaw **只进 console（供导出日志/诊断）**，绝不能贴到界面上——
+    //     `Unable to find a matching device` 这类话老师看不懂，只会判定"软件坏了"。
+    property string errCode: ""         // device_not_found / device_busy / permission / timeout / …
+    property bool   canRetry: false     // 这个错误"再来一次有可能好" ⇒ 显示「重试」
+    property string lastAction: ""      // 「重试」要点名重发的动作
+    property var    camerasInfo: []     // 摄像头明细（含 virtual 标记）；为空时回落到 cc.cameras
+
     // ── 表头：第一行＝标题 + 设备选择；第二行＝动作按钮 ──
     // ⚠️ 2026-10-09 重做：原来一行硬塞「标题 + 原生 ComboBox + 4 个原生 Button」，
     //    ① 宽度必然溢出（520 的容器塞 ~575 的内容）—— 就是用户看到的"没放对位置"；
@@ -261,7 +270,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
                                 anchors.leftMargin: 8
-                                text: modelData
+                                text: cc.camLabel(index, modelData)
                                 color: camList.currentIndex === index
                                         ? (cc.theme.win || "#0A0A0A") : (cc.theme.fg || "#FAFAFA")
                                 font.pixelSize: 11
@@ -406,15 +415,32 @@ Item {
     }
 
     // ── 状态行 ──
+    // 2026-10-12 · UI 评审第 4 条：状态只显示**人话**结论，可恢复的错误旁边给一个「重试」。
+    // FFmpeg 原生输出已在 noteError() 里被拦下（只进 console），绝不会走到这一行。
     Text {
         id: statusLine
         anchors.bottom: parent.bottom
         anchors.left: parent.left
-        anchors.right: parent.right
+        anchors.right: retryBtn.visible ? retryBtn.left : parent.right
+        anchors.rightMargin: retryBtn.visible ? 8 : 0
+        height: retryBtn.visible ? 26 : implicitHeight
         text: cc.status
         color: cc.theme.fg4 || "#707070"
         font.pixelSize: 10
         elide: Text.ElideRight
+        verticalAlignment: Text.AlignVCenter
+    }
+    Btn {
+        id: retryBtn
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        visible: cc.canRetry
+        width: 64
+        height: 26
+        theme: cc.theme
+        text: "重试"
+        tip: "再试一次刚才没成功的操作"
+        onClicked: cc.retryLast()
     }
 
     // ── 逻辑 ──
@@ -444,10 +470,51 @@ Item {
         return d === "" ? {} : { device: d }
     }
 
+    /** 列表里显示的名字：虚拟摄像头（OBS / Iriun 之类）**打不出真实画面**，
+     *  标出来，免得老师选了半天发现"设备列出来了却没画面"（2026-10-12）。 */
+    function camLabel(i, nm) {
+        var inf = cc.camerasInfo
+        if (Array.isArray(inf) && i < inf.length && inf[i] && inf[i].virtual === true)
+            return nm + "（虚拟·无画面）"
+        return nm
+    }
+
+    /** 失败统一收口（2026-10-12 · UI 评审第 4 条）：
+     *  · 界面只吃 err —— 被控端现在给的 err 已经是**人话**，不再是 FFmpeg 原生输出；
+     *  · errorCode 决定要不要给「重试」；
+     *  · errorRaw 只进 console（导出日志/诊断用），**绝不贴到界面上**。
+     *  ⚠️ 旧版被控端没有 errorCode/retryable，走下面的兜底分支，不会崩。 */
+    function noteError(prefix, err, data) {
+        var code = (data && data.errorCode) ? String(data.errorCode) : ""
+        var raw  = (data && data.errorRaw)  ? String(data.errorRaw)  : ""
+        cc.errCode = code
+        if (data && data.retryable !== undefined) {
+            cc.canRetry = (data.retryable === true)
+        } else {
+            // 没给就猜：除了"拔掉了 / 名字失效"这两种"重来也没用"的，都给一次机会。
+            cc.canRetry = (code !== "device_not_found" && code !== "device_invalid")
+        }
+        if (raw !== "") console.warn("[camera] 错误码 " + code + " 原始输出：" + raw)
+        cc.status = prefix + (err || "未知原因")
+    }
+    /** 「重试」：把最后一次动作原样重发一次。 */
+    function retryLast() {
+        var a = cc.lastAction
+        if (a === "") return
+        cc.canRetry = false
+        if (a === "camera_list") cc.refreshCams()
+        else if (a === "camera_test") cc.testCam()
+        else if (a === "camera_snapshot") cc.snapshot()
+        else if (a === "camera_record_start") cc.startRec()
+    }
+
     function refreshCams() {
         if (cc.selUid === "") return
         cc.loadingCams = true
         cc.cameras = []
+        cc.camerasInfo = []
+        cc.errCode = ""; cc.canRetry = false
+        cc.lastAction = "camera_list"
         cc.status = "正在枚举 " + cc.selUid + " 的摄像头…"
         cc.backend.sendAction("camera_list", {})
         // 回执由接线层调 cc.onCams()（Main.qml 现有回执处理转发）
@@ -456,44 +523,64 @@ Item {
     function onCams(data) {
         cc.loadingCams = false
         var cams = (data && data.cameras) ? data.cameras : []
+        var info = (data && data.camerasDetailed) ? data.camerasDetailed : []
+        var virt = (data && data.virtualCount !== undefined) ? data.virtualCount : 0
+        cc.camerasInfo = Array.isArray(info) ? info : []
         if (data && typeof data.boundDevice === "string") cc.boundDev = data.boundDevice
         if (Array.isArray(cams) && cams.length) {
             cc.cameras = cams
+            cc.errCode = ""; cc.canRetry = false
             cc.status = "发现 " + cams.length + " 个摄像头"
+                     + (virt > 0 ? "（其中 " + virt + " 个是虚拟设备，无画面）" : "")
                      + (cc.boundDev !== "" ? "，已绑定 " + cc.boundDev : "（尚未绑定）")
         } else {
             cc.cameras = []
-            cc.status = "无摄像头或枚举失败（确认被控端装了 ffmpeg）"
+            cc.status = "没找到摄像头。请确认摄像头已插好、没被其它程序占用，然后点「摄像头列表」重新枚举"
+            cc.errCode = "no_devices"; cc.canRetry = true
         }
     }
     function onBindResult(ok, err, data) {
         if (ok) {
             if (data && typeof data.boundDevice === "string") cc.boundDev = data.boundDevice
+            cc.errCode = ""; cc.canRetry = false
             cc.status = "已绑定：" + (cc.boundDev !== "" ? cc.boundDev : "（已解绑）")
         } else {
-            cc.status = "绑定失败：" + (err || "未知原因")
+            cc.noteError("绑定失败：", err, data)
         }
     }
     function onTestResult(ok, err, data) {
         if (ok) {
             var ms = (data && data.elapsedMs !== undefined) ? data.elapsedMs : "?"
+            cc.errCode = ""; cc.canRetry = false
             cc.status = "自检通过：" + ((data && data.device) || "") + "，出帧 " + ms + "ms"
         } else {
-            cc.status = "自检失败：" + (err || "未知原因")
+            cc.noteError("自检失败：", err, data)
         }
     }
     function onShotResult(ok, msg) {
-        cc.status = ok ? "已抓拍（画面见右栏）" : ("抓拍失败：" + (msg || "未知原因"))
+        if (ok) {
+            cc.errCode = ""; cc.canRetry = false
+            cc.status = "已抓拍（画面见右栏）"
+        } else {
+            // 抓拍回执只带 msg 不带 data，拿不到错误码 ⇒ 一律给一次重试机会。
+            cc.noteError("抓拍失败：", msg, null)
+        }
     }
     function snapshot() {
+        cc.lastAction = "camera_snapshot"
+        cc.errCode = ""; cc.canRetry = false
         cc.status = "抓拍 " + cc.selUid + (cc.useDev() !== "" ? "（device=" + cc.useDev() + "）" : "") + "…"
         cc.backend.sendAction("camera_snapshot", cc.paramsWithDev())
     }
     function testCam() {
+        cc.lastAction = "camera_test"
+        cc.errCode = ""; cc.canRetry = false
         cc.status = "正在自检 " + cc.selUid + "…"
         cc.backend.sendAction("camera_test", cc.paramsWithDev())
     }
     function startRec() {
+        cc.lastAction = "camera_record_start"
+        cc.errCode = ""; cc.canRetry = false
         cc.status = "正在开录 " + cc.selUid + "…"
         cc.backend.sendAction("camera_record_start", cc.paramsWithDev())
         cc.recording = true
