@@ -319,6 +319,8 @@ QString g_fileRecvTarget;          // 目标文件绝对路径（file_push 时�
 QFile *g_fileRecvFile = nullptr;   // 接收文件句柄（WriteOnly）
 int g_fileRecvNext = 0;            // 下一个期望的分片序号（必须按序，乱序即失败）
 qint64 g_fileRecvBytes = 0;        // 累计已写入字节（file_done 时与声明值比对）
+QString g_fileRecvName;            // 接收文件名（进度卡显示用，file_push 时定下）
+qint64 g_fileRecvTotal = 0;        // 声明的总字节（file_done 比对 + 进度条分母）
 // 2026-10-11：接收会话"最后一次有动静"的时刻（毫秒）。用来清半截文件 ——
 // file_push 一进来就把目标 Truncate 成 0 字节，若对方半途断线再也不来 file_done，
 // 这个空文件就永久留在收件目录里（用户报的"推完的文件是空的"多半就是撞上它）。
@@ -4479,6 +4481,8 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         g_fileRecvBytes += data.size();
         g_fileRecvNext++;
         g_fileRecvLastMs = QDateTime::currentMSecsSinceEpoch();   // 会话还在动，别清理
+        // #198（2026-10-11）：每收一片就推一次进度到灵动岛（分母用声明总字节）。
+        IslandOverlay::instance()->setFileTransfer(g_fileRecvName, g_fileRecvBytes, g_fileRecvTotal);
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("seq"), seq);
         out.data.insert(QStringLiteral("bytes"), written);
@@ -4517,6 +4521,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             g_fileRecvNext = 0;
             g_fileRecvBytes = 0;
             g_fileRecvLastMs = 0;
+            IslandOverlay::instance()->clearFileTransfer();   // #198：取消 ⇒ 进度卡撤掉
             return out;
         }
         if (expect != g_fileRecvBytes) {
@@ -4528,6 +4533,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             g_fileRecvNext = 0;
             g_fileRecvBytes = 0;
             g_fileRecvFile = nullptr;   // 句柄前面已经关掉了
+            IslandOverlay::instance()->clearFileTransfer();   // #198：字节不符 ⇒ 进度卡撤掉
             return out;
         }
         out.result = QStringLiteral("done");
@@ -4546,6 +4552,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             islandShow(QStringLiteral("收到文件"), desc, QStringLiteral("download"), 6000,
                        true, shown);
             trayNotify(QStringLiteral("收到文件"), desc, QSystemTrayIcon::Information, 10000);
+            IslandOverlay::instance()->clearFileTransfer();   // #198：收全 ⇒ 进度卡撤掉，改显"收到文件"
         }
         qInfo("[agent-qt] ✅ 文件收全落盘：%s（%lld 字节 / %d 片）",
               qPrintable(g_fileRecvTarget), (long long)g_fileRecvBytes, g_fileRecvNext);
@@ -4579,6 +4586,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.error = QStringLiteral("file_push: 文件名不能带路径（收到 %1）").arg(fname);
             return out;
         }
+        // #198（2026-10-11）：进度卡用。先把名字/总字节记下来，开好句柄后在成功分支点亮灵动岛。
+        g_fileRecvName = clean;
+        g_fileRecvTotal = total;
         QDir().mkpath(g_recvDir);
         const QString target = g_recvDir + QStringLiteral("/") + clean;
         QFile::remove(target);   // 重名直接覆盖旧文件
@@ -4630,6 +4640,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.data.insert(QStringLiteral("target"), QDir::toNativeSeparators(alt));
             out.data.insert(QStringLiteral("totalBytes"), total);
             out.data.insert(QStringLiteral("ready"), true);
+            IslandOverlay::instance()->setFileTransfer(g_fileRecvName, 0, g_fileRecvTotal);
             // ⚠️ 这里**不提示**"收到文件"。此刻只是把接收句柄开好、目标刚被 Truncate 成
             // 0 字节，一片数据都还没到 —— 在这儿报"收到"就是让人去打开一个空文件
             // （2026-10-11 用户报的"推完的文件是空的"正是这条）。
@@ -4640,6 +4651,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.data.insert(QStringLiteral("target"), QDir::toNativeSeparators(target));
         out.data.insert(QStringLiteral("totalBytes"), total);
         out.data.insert(QStringLiteral("ready"), true);
+        IslandOverlay::instance()->setFileTransfer(g_fileRecvName, 0, g_fileRecvTotal);
         g_fileRecvLastMs = QDateTime::currentMSecsSinceEpoch();   // 同上：此刻不提示
         return out;
     }

@@ -74,6 +74,12 @@ class IslandBridge : public QObject
     // 每项格式：{title, desc, icon, ts, timeStr}
     Q_PROPERTY(QVariantList history  READ history  NOTIFY changed)
 
+    // ── 文件传输进度（2026-10-11 · #198 接收进度条）──
+    Q_PROPERTY(bool    fileTransferActive READ fileTransferActive NOTIFY changed)
+    Q_PROPERTY(QString fileTransferName   READ fileTransferName   NOTIFY changed)
+    Q_PROPERTY(qint64  fileTransferBytes  READ fileTransferBytes  NOTIFY changed)
+    Q_PROPERTY(qint64  fileTransferTotal  READ fileTransferTotal  NOTIFY changed)
+
 public:
     explicit IslandBridge(IslandOverlay *host, QObject *parent = nullptr);
 
@@ -101,6 +107,11 @@ public:
 
     // 历史通知
     QVariantList history() const;
+    // 文件传输进度
+    bool   fileTransferActive() const;
+    QString fileTransferName() const;
+    qint64  fileTransferBytes() const;
+    qint64  fileTransferTotal() const;
     // QML → C++：点历史项，恢复该通知到展开态
     Q_INVOKABLE void showHistoryItem(int index);
     // QML → C++：清空全部历史

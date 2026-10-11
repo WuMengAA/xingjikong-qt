@@ -33,6 +33,9 @@ QtObject {
     property color severityRemind: Qt.rgba(20/255, 140/255, 60/255, 205/255)
     property color severityNone:   "transparent"
 
+    // ── 品牌强调色（进度条 / 下载态等，#198 文件传输进度用）──
+    property color accent:    light ? "#0A84FF" : "#2997FF"
+
     function severityColor(s) {
         if (s === "urgent") return severityUrgent
         if (s === "inform") return severityInform

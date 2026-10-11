@@ -68,6 +68,13 @@ Item {
     readonly property var    _actions:    (bridgeRef && bridgeRef.actions) ? bridgeRef.actions : []
     readonly property var    _history:    (bridgeRef && bridgeRef.history) ? bridgeRef.history : []
 
+    // ── 文件传输进度（#198，桥 fileTransfer* 属性）──────────
+    // ⚠️ 同样是点访问绑定（不是 bridge["x"]），靠 bridge.changed() 一把全 NOTIFY 重读。
+    readonly property bool   _ftActive:   bridgeRef ? bridgeRef.fileTransferActive : false
+    readonly property qint64 _ftBytes:    bridgeRef ? bridgeRef.fileTransferBytes  : 0
+    readonly property qint64 _ftTotal:    bridgeRef ? bridgeRef.fileTransferTotal  : 0
+    readonly property real   _ftPct:      (root._ftTotal > 0) ? Math.min(1, root._ftBytes / root._ftTotal) : 0
+
     // ── 尺寸（显式，不靠隐式推导）───────────────────────────
     readonly property int padH: 14
     // 展开态"标题 + 描述"占的头部高度（自适应字号后标题可达 64px，2 行 128px）。
@@ -82,6 +89,8 @@ Item {
         ? Math.min(200, root._history.length * 44 + 36)
         : 0
     readonly property int actH:  (root._actions.length > 0) ? 34 : 0
+    // 文件传输进度条占的额外高度（展开态 + 传输中才给）
+    readonly property int ftH: (root._expanded && root._ftActive) ? 46 : 0
     readonly property int collapsedH: root.th.shapeCollapsed
 
     // 有动作按钮时：胶囊也走"加高"逻辑（Centered/Fullscreen 本来就高）
@@ -112,13 +121,21 @@ Item {
         }
         return root.th.fsTitleXs
     }
+
+    // #198：体积文案（与 C++ humanBytes 同 1024 进制，只到 GB）
+    function fxHumanBytes(n) {
+        if (n < 1024) return String(n) + " B"
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB"
+        if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB"
+        return (n / 1024 / 1024 / 1024).toFixed(2) + " GB"
+    }
     readonly property int exTitlePx: root.fitTitlePx((bridgeRef ? bridgeRef.title : ""))
 
     implicitWidth: root._idle ? root.th.shapeIdle * 3    // 4:3 比例 (44*3=132)
                                : (root._expanded ? 400 : 320)
     implicitHeight: root._idle ? root.th.shapeIdle
                                : (root._expanded
-                                  ? Math.max(140, root.padH + root.headH + root.listH + root.histH + root.actH + root.padH)
+                                  ? Math.max(140, root.padH + root.headH + root.listH + root.histH + root.ftH + root.actH + root.padH)
                                   : (root._showActionsNow
                                      ? Math.max(root.collapsedH + root.actH + 10, 90)
                                      : root.collapsedH))
@@ -334,6 +351,7 @@ Item {
                 anchors.right: exTitle.right
                 anchors.top: exTitle.bottom
                 anchors.topMargin: 6
+                visible: !root._ftActive   // #198：传输中隐藏 stale 的 "0%" 描述，改由进度条呈现
                 text: bridgeRef ? bridgeRef.descHtml : ""
                 textFormat: Text.RichText
                 color: root.th.sub
@@ -353,6 +371,66 @@ Item {
                 anchors.topMargin: 8
                 theme: root.th
                 items: root._states
+            }
+
+            // ── #198 文件接收进度条（展开态，传输中可见）──────
+            // 标题已是"正在接收 <name>"（C++ 设的），这里只补实时进度。
+            Item {
+                id: ftRow
+                visible: root._ftActive
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: stList.bottom
+                anchors.topMargin: root._ftActive ? 12 : 0
+                height: visible ? 40 : 0
+
+                // 进度槽
+                Rectangle {
+                    id: ftTrack
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 8
+                    radius: 4
+                    color: root.th.light ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(1, 1, 1, 0.14)
+                    clip: true
+
+                    // 已收部分（宽度随 _ftPct 实时变化）
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: Math.max(0, parent.width * root._ftPct)
+                        radius: 4
+                        color: root.th.accent
+                        Behavior on width { NumberAnimation { duration: 120 } }
+                    }
+                }
+
+                // 左：实时百分比 + 已收/总体积
+                Text {
+                    anchors.left: parent.left
+                    anchors.top: ftTrack.bottom
+                    anchors.topMargin: 5
+                    text: (root._ftTotal > 0
+                           ? Math.round(root._ftPct * 100) + "% · "
+                             + root.fxHumanBytes(root._ftBytes) + " / " + root.fxHumanBytes(root._ftTotal)
+                           : root.fxHumanBytes(root._ftBytes) + " · 大小未知")
+                    color: root.th.sub
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+
+                // 右：状态标
+                Text {
+                    anchors.right: parent.right
+                    anchors.top: ftTrack.bottom
+                    anchors.topMargin: 5
+                    text: "接收中"
+                    color: root.th.accent
+                    font.pixelSize: 11
+                    font.weight: Font.Medium
+                }
             }
         }
     }

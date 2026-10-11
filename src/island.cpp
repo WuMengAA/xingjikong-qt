@@ -401,7 +401,7 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
 {
     // ── 历史归档：上一条有内容的通知在被顶掉时进历史 ──
     // 判据：m_contentActive && m_title 非空（活动中的真通知被顶掉）
-    if (m_contentActive && !m_title.isEmpty())
+    if (m_contentActive && !m_title.isEmpty() && !m_ftActive)
         archiveToHistory();
 
     m_title = title;
@@ -488,6 +488,37 @@ void IslandOverlay::showWithActions(const QString &title, const QString &desc, c
     // ⚠️ showIsland 里已经 sync 过一次，但那时 m_actions 还是空的（第 303 行才回填）。
     //    QML 侧按钮行读的是 bridge.actions ⇒ 必须在这里**再 sync 一次**，
     //    否则"确认"按钮要到下一次状态变化才出现（表现为点了没按钮）。
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
+// ── 文件传输进度（2026-10-11 · #198 接收进度条）──
+// file_push 接收期间把进度推到岛。首次调用弹出常驻传输卡（不自动收起），
+// 之后只更新进度；file_done 字节比对通过后由调用方 clearFileTransfer()。
+void IslandOverlay::setFileTransfer(const QString &name, qint64 bytes, qint64 total)
+{
+    const bool first = !m_ftActive;
+    m_ftActive = true;          // 先置位：showIsland 的归档守卫看到 true ⇒ 不归档上一条内容
+    m_ftName = name;
+    m_ftBytes = bytes;
+    m_ftTotal = total;
+    if (first) {
+        // 常驻传输卡：duration 0 = 不自动收起；展开以容纳进度条。
+        showIsland(QStringLiteral("正在接收 ") + name, QStringLiteral("0%"),
+                   QStringLiteral("download"), 0, Form::Capsule);
+        setExpanded(true);      // 展开态才放得下进度条
+    }
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
+void IslandOverlay::clearFileTransfer()
+{
+    if (!m_ftActive && m_ftName.isEmpty()) return;
+    m_ftActive = false;
+    m_ftName.clear();
+    m_ftBytes = 0;
+    m_ftTotal = 0;
     if (m_bridge) m_bridge->sync();
     update();
 }

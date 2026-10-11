@@ -170,6 +170,12 @@ QVariantList IslandBridge::history() const
     return out;
 }
 
+// ── 文件传输进度（2026-10-11 · #198 接收进度条）──
+bool   IslandBridge::fileTransferActive() const { return m_host ? m_host->m_ftActive : false; }
+QString IslandBridge::fileTransferName() const  { return m_host ? m_host->m_ftName : QString(); }
+qint64  IslandBridge::fileTransferBytes() const { return m_host ? m_host->m_ftBytes : 0; }
+qint64  IslandBridge::fileTransferTotal() const { return m_host ? m_host->m_ftTotal : 0; }
+
 void IslandBridge::showHistoryItem(int index)
 {
     if (!m_host) return;

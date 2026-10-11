@@ -112,6 +112,13 @@ public:
     // 立即隐藏（不再等自动收起）。空闲态开启时改为"收回成半胶囊"而非彻底消失。
     void dismiss();
 
+    // ── 文件传输进度（2026-10-11 · #198 接收进度条）──
+    // file_push 接收期间把进度推到岛：name 文件名 / bytes 已收 / total 总字节（<=0 未知）。
+    // 首次调用弹出常驻传输卡（不自动收起），之后只更新进度；
+    // 收到 file_done 字节比对通过后由调用方 clearFileTransfer()（成功卡会顶掉它）。
+    void setFileTransfer(const QString &name, qint64 bytes, qint64 total);
+    void clearFileTransfer();
+
 signals:
     void expandedChanged(bool expanded);
 
@@ -186,6 +193,12 @@ private:
     QStringList m_actions;
     std::function<void(const QString &)> m_onAction;
     QString m_severity;           // 仅全屏形态配色：remind/inform/urgent（空=黑底）
+
+    // ── #198 文件传输进度 ──
+    bool   m_ftActive = false;    // 岛上是否正显示一条文件传输卡
+    QString m_ftName;             // 传输中的文件名
+    qint64 m_ftBytes = 0;         // 已接收字节
+    qint64 m_ftTotal = 0;         // 总字节（<=0 表示大小未知）
 
     QTimer *m_autoClose = nullptr;
     QTimer *m_dismissGuard = nullptr;   // dismiss 淡出的兜底：动画没走完也强制 hide
