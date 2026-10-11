@@ -17,6 +17,10 @@ Drawer {
     property var dev: ({})       // 当前设备（Main 打开时注入）
     signal shutdownRequested(string uid)
     signal toast(string msg)
+    // #5（2026-10-12）：手机端此前**完全没有文件传输入口**——FilePushDialog 只在桌面
+    // Main.qml 被实例化，MobileMain 从 Main.qml 拆出去时这条没跟着迁，于是手机上
+    // 「选系统文件」整个消失了。这里补入口：抽屉里发信号，由 mobile/Main.qml 弹窗。
+    signal filePushRequested(string uid)
 
     contentItem: Flickable {
         contentHeight: col.height + 40
@@ -66,6 +70,17 @@ Drawer {
                 color: drawer.th.hover; border.color: drawer.th.stroke; border.width: 1
                 Text { anchors.centerIn: parent; text: "停止画面（关闭摄像头推流）"; color: drawer.th.fg; font.pixelSize: 14 }
                 MouseArea { anchors.fill: parent; onClicked: { backend.sendAction("camera_stop", {}); drawer.close(); drawer.toast("已停止画面 → " + drawer.dev.uid) } }
+            }
+            // ── 传文件（#5）──
+            Rectangle {
+                width: parent.width; height: 44; radius: drawer.th.rCtrl
+                color: drawer.th.hover; border.color: drawer.th.stroke; border.width: 1
+                Text { anchors.centerIn: parent; text: "传文件"; color: drawer.th.fg; font.pixelSize: 14 }
+                MouseArea {
+                    anchors.fill: parent
+                    // 先关抽屉再发信号：否则抽屉盖在弹窗上面，弹窗点不到
+                    onClicked: { drawer.close(); drawer.filePushRequested(drawer.dev.uid) }
+                }
             }
             Rectangle {
                 width: parent.width; height: 44; radius: drawer.th.rCtrl
