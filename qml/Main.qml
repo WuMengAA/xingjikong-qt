@@ -101,34 +101,34 @@ ApplicationWindow {
     readonly property var changelogModel: [
         {
             version: "2026.10.08", date: "2026-10-08",
-            title: "星集控：分班制与离线设备可见",
-            highlight: "管理端现在能按班级筛选设备、看到离线教室机，概览页也多了云端存储概况。",
+            title: "分班制与离线设备可见",
+            highlight: "按班级筛选设备，离线机器不再消失。",
             items: [
-                { kind: "feat", text: "设备列表支持按班级筛选（分班制）：按班级维度管理设备与分组" },
-                { kind: "feat", text: "离线设备不再从列表消失：云端持久「已知设备表」，在线状态由连接派生" },
-                { kind: "feat", text: "概览页新增「云端存储概况」卡：已知/在线/离线设备数、班级数、待执行指令、事件落盘量" },
-                { kind: "feat", text: "管理端新增「更新日志」与「帮助」（与官网一致）" },
-                { kind: "change", text: "底部导航「控制」更名「集控」，原集控批量页并入主页后改叫「批量管控」" }
+                { kind: "feat", text: "设备列表按班级筛选" },
+                { kind: "feat", text: "离线设备常驻列表，状态由连接派生" },
+                { kind: "feat", text: "概览新增云端存储概况" },
+                { kind: "feat", text: "新增「更新日志」与「帮助」" },
+                { kind: "change", text: "「控制」更名「集控」" }
             ]
         },
         {
             version: "2026.10.06", date: "2026-10-06",
-            title: "星集控 0.6.2：管理端「集控」页上线",
-            highlight: "管理端把网页控制台的核心功能搬进桌面端：通知下发、定时任务、广播一条龙，课表编辑器也补全了撤销与导入导出。",
+            title: "集控页上线",
+            highlight: "通知、定时任务、广播集中到一页。",
             items: [
-                { kind: "feat", text: "管理端新增「集控」页：通知下发（普通/重要/紧急）、定时任务、广播" },
-                { kind: "feat", text: "课表编辑器补全：撤销/重做、CSV 导入导出、学期起点可配置" },
-                { kind: "fix", text: "管理端托盘常驻：关窗只隐藏到托盘，不再整程序退出" }
+                { kind: "feat", text: "集控页：通知、定时任务、广播" },
+                { kind: "feat", text: "课表编辑器：撤销重做、CSV 导入导出" },
+                { kind: "fix", text: "关窗只收进托盘" }
             ]
         },
         {
             version: "2026.10.06", date: "2026-10-06",
-            title: "星集控 0.6.0：被控端能自己升级，官网有了下载中心",
-            highlight: "教室机装上后就不必再一台台手动换包；下载页的版本号和校验值自动跟着云端走，不会再写错。",
+            title: "被控端自更新，官网下载中心",
+            highlight: "教室机可自行升级，下载页版本号自动同步。",
             items: [
-                { kind: "feat", text: "官网新增「下载中心」：版本号/体积/sha256 直接读云端发布清单" },
-                { kind: "feat", text: "被控端支持自更新（OTA）：托盘发现新版本点一下升级，先校验 sha256" },
-                { kind: "fix", text: "被控端只允许开一个：重复启动直接提示已在运行并退出" }
+                { kind: "feat", text: "官网下载中心，版本与校验值读云端" },
+                { kind: "feat", text: "被控端 OTA 自更新" },
+                { kind: "fix", text: "被控端只允许开一个" }
             ]
         }
     ]
@@ -1077,10 +1077,10 @@ ApplicationWindow {
                             ToolTip.visible: containsMouse
                             ToolTip.delay: 400
                             ToolTip.text: backend.frameSource === "rtc"
-                                          ? "WebRTC 实时流：被控端推的 video 轨，端到端延迟在百毫秒级"
+                                          ? "实时画面，延迟百毫秒级"
                                           : root.linkBusy
-                                            ? "正在和被控端建立 WebRTC 连接，成功后会自动切成实时"
-                                            : "JPEG 轮询：被控端定时截图推送，比实时慢一些"
+                                            ? "正在建立实时连接…"
+                                            : "轮询截图，比实时慢"
                         }
                     }
 
@@ -1676,9 +1676,8 @@ ApplicationWindow {
                                         width: parent.width
                                         wrapMode: Text.Wrap
                                         text: backend.role === "admin"
-                                              ? "管理员：能看画面，也能操作教室机（电源 / 远控 / 终端 / 广播）。"
-                                                + "右边看得到但点不动的按钮，就是这个身份之外的事。"
-                                              : "教师：能看画面、发通知、推文件；电源、远控、终端、广播这类动作要管理员。"
+                                              ? "管理员：可看画面、操作教室机。灰着的按钮是权限之外的操作。"
+                                              : "教师：可看画面、发通知、推文件。操作类动作需管理员。"
                                         color: th.fg3; font.pixelSize: 12
                                     }
                                     RowLayout {
@@ -1693,7 +1692,7 @@ ApplicationWindow {
                                             text: "换成管理员"
                                             strong: backend.role !== "admin"
                                             enabled: backend.role !== "admin"
-                                            tip: "切到管理员后，操作类按钮（电源/远控/终端/广播）才能点"
+                                            tip: "切到管理员才能用操作类按钮"
                                             onClicked: backend.setRole("admin")
                                         }
                                         Btn {
@@ -1843,7 +1842,7 @@ ApplicationWindow {
                                         width: parent.width
                                         theme: th
                                         text: "开机自动启动"
-                                        note: "登录 Windows 后自动打开管理端（写当前用户注册表，免管理员）"
+                                        note: "登录 Windows 后自动打开（免管理员）"
                                         checked: backend.autoStart
                                         onToggled: function (on) { backend.setAutoStart(on) }
                                     }
@@ -1932,7 +1931,7 @@ ApplicationWindow {
                                 spacing: 10
                                 Text { text: "课表编辑器"; color: th.fg3; font.pixelSize: 12 }
                                 Text {
-                                    text: "排课、时间轴、科目管理与多周轮换（数据格式兼容 ClassIsland）"
+                                    text: "排课、时间轴、科目与多周轮换（兼容 ClassIsland）"
                                     color: th.op; font.pixelSize: 13
                                     wrapMode: Text.Wrap
                                     width: parent.width
@@ -1991,9 +1990,9 @@ ApplicationWindow {
                                 Text {
                                     width: parent.width
                                     wrapMode: Text.Wrap
-                                    text: "被控端是另一台机器上的另一个程序（星集控被控端 / 绿色包），" +
-                                          "装到教室机上、登录同一个星璃账号之后，这台管理端就能看到它。" +
-                                          "这里切不出被控端 —— 要看哪台机器，就在控制页左边选。"
+                                    text: "被控端装在教室机上（星集控被控端），" +
+                                          "登录同一账号后就会出现在这里。" +
+                                          "要看某台机器，在控制页左边选。"
                                     color: th.fg3; font.pixelSize: 12
                                 }
                                 // 更新日志 / 帮助：把官网已有的「版本历史」与「帮助」能力搬进管理端（需求 #7）。
@@ -2051,7 +2050,7 @@ ApplicationWindow {
                                         Layout.preferredHeight: 26
                                         theme: th
                                         text: updater.busy ? "处理中…" : "检查更新"
-                                        tip: "向云端问一下有没有新版本"
+                                        tip: "检查云端是否有新版本"
                                         disabled: updater.busy
                                         onClicked: updater.checkForUpdate()
                                     }
@@ -2063,7 +2062,7 @@ ApplicationWindow {
                                         visible: updater.state === "available"
                                         strong: true
                                         text: updater.mandatory ? "必须更新" : "立即更新"
-                                        tip: "下载 → sha256 校验 → 解压 → 自动重启完成更新，不用手动覆盖"
+                                        tip: "下载、校验、解压、自动重启，全程无需手动操作"
                                         disabled: updater.busy
                                         onClicked: updater.installUpdate()
                                     }
@@ -2072,7 +2071,7 @@ ApplicationWindow {
                                         Layout.preferredHeight: 26
                                         theme: th
                                         text: "去官网下载页"
-                                        tip: "在浏览器里打开 www.245959623.xyz/download"
+                                        tip: "打开 www.245959623.xyz/download"
                                         onClicked: backend.openExternal("https://www.245959623.xyz/download")
                                     }
                                 }
@@ -2484,7 +2483,7 @@ ApplicationWindow {
             }
 
             Text {
-                text: "最多展示 9 台在线设备；点格子切换到该教室大画面。离线设备不占格。"
+                text: "最多 9 台在线；点格切换大画面"
                 color: th.fg3; font.pixelSize: 10; wrapMode: Text.Wrap
             }
         }
@@ -2828,7 +2827,7 @@ ApplicationWindow {
             { name: "选中全部在线设备", keys: ["selectall", "quanxuan", "qx"], tip: "Ctrl+A：把在线设备全选上", run: function () { root.selectAll() } },
             { name: "取消选择",         keys: ["clearpick", "quxiaoxuan", "qxz"], tip: "Esc/点空白：把选中的机器清掉", run: function () { root.clearPick() } },
             { name: "锁屏选中的设备",   keys: ["locksel", "suoxuan", "sx"], tip: "Ctrl+L：只锁刚才选中的那几台", run: function () { root.runOnPicked("lock") } },
-            { name: "锁屏全部在线设备", keys: ["lockall", "quanbu", "qb"], tip: "Ctrl+Shift+L：所有在线机器一起锁（要管理员身份）", run: function () { root.runOnPicked("") } },
+            { name: "锁屏全部在线设备", keys: ["lockall", "quanbu", "qb"], tip: "Ctrl+Shift+L：锁所有在线机器（需管理员）", run: function () { root.runOnPicked("") } },
             // ── 视图 ───────────────────────────────────────────────────
             { name: "切到概览",         keys: ["overview", "gailan", "gl"], tip: "在线设备 + 最近回执 + 今日课表", run: function () { root.page = 0 } },
             { name: "切到控制",         keys: ["control", "kongzhi", "kz"], tip: "看教室机画面 + 下发动作", run: function () { root.page = 1 } },
@@ -2850,7 +2849,7 @@ ApplicationWindow {
             { name: "切到黑白外观",     keys: ["dark", "heibai", "hb"], tip: "默认外观", run: function () { backend.themeMode = 1 } },
             { name: "切到浅色外观",     keys: ["light", "qianse", "qs"], tip: "换个亮堂的", run: function () { backend.themeMode = 0 } },
             { name: "跟随系统外观",     keys: ["auto", "xitong", "xt"], tip: "跟着系统配色走", run: function () { backend.themeMode = 2 } },
-            { name: "打开官网下载页",   keys: ["download", "xiazai", "xz"], tip: "在浏览器里打开 www.245959623.xyz/download", run: function () { backend.openExternal("https://www.245959623.xyz/download") } }
+            { name: "打开官网下载页",   keys: ["download", "xiazai", "xz"], tip: "打开 www.245959623.xyz/download", run: function () { backend.openExternal("https://www.245959623.xyz/download") } }
         ]
     }
 
@@ -3350,15 +3349,15 @@ ApplicationWindow {
                 Column {
                     spacing: 12
                     width: helpDlg.width - 36
-                    Text { width: parent.width; wrapMode: Text.Wrap; text: "星集控管理端用来统一管教室里的被控端（教室机）。下面是常见操作："; color: th.fg3; font.pixelSize: 13 }
+                    Text { width: parent.width; wrapMode: Text.Wrap; text: "管理端统一管教室机。常用操作："; color: th.fg3; font.pixelSize: 13 }
                     Repeater {
                         model: [
-                            { t: "看某台教室机的画面", d: "控制页（集控）左边选设备，画面出现在中间。" },
-                            { t: "给全班发通知 / 广播", d: "控制页右侧或集控页，发通知可选普通/重要/紧急，广播一次发全员。" },
-                            { t: "按班级筛选设备", d: "设备列表上方点「全部班级」切换班级，只显示该班机器。" },
-                            { t: "锁屏 / 重启 / 关机", d: "控制页右侧「电源」分组，需管理员身份。" },
-                            { t: "看版本更新历史", d: "设置页「更新日志」。" },
-                            { t: "快速跳页与触发动作", d: "用顶部的命令入口（或快捷键）直接跳到概览/集控/批量管控/设置，并触发常用动作。" }
+                            { t: "看某台教室机画面", d: "控制页左边选设备。" },
+                            { t: "发通知 / 广播", d: "集控页，通知可选普通/重要/紧急，广播发全员。" },
+                            { t: "按班级筛选设备", d: "设备列表上方点「全部班级」切换。" },
+                            { t: "锁屏 / 重启 / 关机", d: "控制页右侧「电源」，需管理员。" },
+                            { t: "查看更新历史", d: "设置页「更新日志」。" },
+                            { t: "跳页与触发动作", d: "顶部命令入口或快捷键。" }
                         ]
                         delegate: Column {
                             spacing: 3
@@ -3464,7 +3463,7 @@ ApplicationWindow {
                     visible: welcomeLayer.step === 1
                     width: parent.width; spacing: 12
                     Text { width: parent.width; wrapMode: Text.Wrap
-                        text: "登录网站账号，才能用云端票连设备（也可用 viewer.env 里的静态令牌，跳过这步）。"; color: th.fg3; font.pixelSize: 13 }
+                        text: "登录网站账号即可连接设备。"; color: th.fg3; font.pixelSize: 13 }
                     Rectangle {
                         width: 200; height: 32; radius: th.rCtrl; color: th.inv
                         Text { anchors.centerIn: parent; text: "登录网站账号"; color: th.win; font.pixelSize: 13 }
@@ -3479,11 +3478,11 @@ ApplicationWindow {
                     visible: welcomeLayer.step === 2
                     width: parent.width; spacing: 12
                     Text { width: parent.width; wrapMode: Text.Wrap
-                        text: "要不要让它开机就自己起来、顺手在桌面放个图标？（之后随时能在设置页改）"; color: th.fg3; font.pixelSize: 13 }
+                        text: "开机自动启动？桌面放个图标？（随时可在设置页改）"; color: th.fg3; font.pixelSize: 13 }
                     ToggleRow {
                         width: parent.width; theme: th
                         text: "开机自动启动"
-                        note: "登录 Windows 后自动打开（当前用户，免管理员）"
+                        note: "登录 Windows 后自动打开（免管理员）"
                         checked: backend.autoStart
                         onToggled: function (on) { backend.setAutoStart(on) }
                     }

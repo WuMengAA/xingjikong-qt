@@ -360,7 +360,7 @@ Popup {
                 }
                 Text {
                     visible: backend.procBlacklist.length === 0
-                    text: "（空）—— 在「正在运行」里选一行，点右边「加入黑名单」"
+                    text: "空 — 在「正在运行」里选一行加入黑名单"
                     color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
                     font.pixelSize: 11
                 }

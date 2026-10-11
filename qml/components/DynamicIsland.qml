@@ -236,11 +236,17 @@ Item {
                             anchors.leftMargin: 10
                             anchors.rightMargin: 10
                             spacing: 10
-                            Text {
+                            SvgIcon {
+                                // ⚠️ 2026-10-11（F4 复核）：原来这里是裸 Text 直接画
+                                //    isl.glyph[...]（图标**名字符串**）⇒ 展开态里出现
+                                //    "circle"/"layout-grid"/"triangle" 这样的明文。
+                                //    收起态用的是 SvgIcon（画图标），两处不一致；此处改回
+                                //    SvgIcon，与收起态同源同风格。
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: isl.glyph[modelData.k] || "•"
-                                color: (index === 0) ? (isl.theme.win || "#0A0A0A") : isl.islandFg4
-                                font.pixelSize: 14
+                                name: isl.glyph[modelData.k] || "circle"
+                                tint: (index === 0) ? (isl.theme.win || "#0A0A0A") : isl.islandFg4
+                                width: 16
+                                height: 16
                             }
                             Column {
                                 anchors.verticalCenter: parent.verticalCenter

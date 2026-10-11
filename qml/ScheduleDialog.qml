@@ -268,7 +268,7 @@ Popup {
                 x: 18
                 width: parent.width - 36
                 wrapMode: Text.WordWrap
-                text: "被控端到期**默认不会真关机**：装教室机时要把 STE_QT_ALLOW_SCHED_FIRE 设成 1（回执里会带 fireAllowed 说明当前状态）"
+                text: "到期默认只提醒、不真关机（需在教室机设 STE_QT_ALLOW_SCHED_FIRE=1）"
                 color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
                 font.pixelSize: 11
             }

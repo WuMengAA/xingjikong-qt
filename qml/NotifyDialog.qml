@@ -413,7 +413,7 @@ Popup {
                 color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
                 font.pixelSize: 11
                 text: "标题超 " + dlg.capTitle + " 字、正文超 " + dlg.capContent
-                      + " 字会被截断（语音也只读截断后的）。紧急锁定＝不自动消失，要学生在屏幕上点「确认」。"
+                      + " 字会被截断。紧急通知不自动消失，需学生点「确认」。"
             }
         }
     }

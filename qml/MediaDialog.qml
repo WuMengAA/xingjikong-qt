@@ -72,7 +72,7 @@ Popup {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
-                text: "点一行就删（进回收站，可恢复）；删媒体库外的文件会被被控端拒绝"
+                text: "点一行即删（进回收站）；媒体库外文件不可删"
                 color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
                 font.pixelSize: 11
             }
@@ -151,7 +151,7 @@ Popup {
                 x: 18
                 // QML 字符串里反斜杠是转义符，路径一律写双反斜杠，否则解析直接断在这行
                 text: dlg.mediaDir ? ("媒体库：" + dlg.mediaDir)
-                                   : "媒体库目录由被控端决定（本机默认 %LOCALAPPDATA%\\xingjikong\\media）"
+                                   : "媒体库目录由被控端决定"
                 color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
                 font.pixelSize: 11
                 elide: Text.ElideMiddle

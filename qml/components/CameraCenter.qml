@@ -463,7 +463,7 @@ Item {
                      + (cc.boundDev !== "" ? "，已绑定 " + cc.boundDev : "（尚未绑定）")
         } else {
             cc.cameras = []
-            cc.status = "该设备无摄像头或枚举失败（确认被控端装了 ffmpeg，且机器上有摄像头）"
+            cc.status = "无摄像头或枚举失败（确认被控端装了 ffmpeg）"
         }
     }
     function onBindResult(ok, err, data) {

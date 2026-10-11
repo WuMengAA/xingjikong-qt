@@ -173,9 +173,9 @@ Item {
                 anchors.right: parent.right
                 anchors.rightMargin: 10
                 text: backend.loggedIn
-                      ? (backend.role === "admin" ? "管理员身份：可以看画面，也能操作教室机"
-                                                  : "教师身份：可以看画面、发通知，操作类动作要管理员")
-                      : "登录后自动接入教室机，不用填任何密钥"
+                      ? (backend.role === "admin" ? "管理员：可看画面、操作教室机"
+                                                  : "教师：可看画面、发通知，操作类动作需管理员")
+                      : "登录后自动接入教室机"
                 wrapMode: Text.Wrap
                 color: acct.theme.fg3 || "#8A8A8A"
                 font.pixelSize: 12

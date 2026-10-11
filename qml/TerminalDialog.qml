@@ -229,7 +229,7 @@ Popup {
         // 否则按钮自己变回「开终端」，人不知道刚才为什么没连上。
         if (backend.termState === 1) return backend.termNote || "机器在问本机「允许吗」，等着就行"
         if (backend.termState === 2)
-            return "回车执行一条，30 秒不回自动断；敲 exit 或点关终端"
+            return "回车执行，30 秒无响应自动断开"
         // Idle：只有"上次没成"的时候才带原因（刚被拒绝 / 刚超时 / 刚被本机拒绝），
         // 没原因（第一次打开）就给开场的那句。
         return backend.termNote !== "" ? ("上次：" + backend.termNote)
