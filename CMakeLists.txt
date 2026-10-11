@@ -121,7 +121,7 @@ endif()
 # QuickControls2（2026-10-06 加）：main.cpp 要 QQuickStyle::setStyle("Basic")。
 # 不把这个模块挂上，QQuickStyle 头文件/链接都拿不到，默认风格那堆
 # "style does not support customization" 警告也就消不掉。
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets Widgets Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core CorePrivate Gui Quick QuickControls2 Network WebSockets Widgets Svg)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
@@ -235,6 +235,24 @@ add_custom_command(TARGET viewer-qt POST_BUILD
   VERBATIM)
 
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg)
+# 2026-10-11：Android 麦克风用 NDK AAudio（纯 C++、无 Multimedia 依赖——两 kit 都没装）；
+# sysroot 默认 API 21 库目录没有 libaaudio.so，显式找 API 26+（AAudio 最低要求）的系统库。
+# 桌面仍走 winmm waveIn（无需额外链接）。
+if(STE_IS_ANDROID)
+  # AAudio 库：sysroot 默认 API 21 目录没有；用 API 34（真机 Android 14 全 symbol；
+  # setInputPreset 之类 API 28+ 的符号在 26 缺）。链接 26 会产生 undefined symbol。
+  find_library(STE_AAUDIO_LIB aaudio
+    PATHS "$ENV{ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android/34"
+    "$ENV{ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android/28"
+    "$ENV{ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android/26"
+    NO_DEFAULT_PATH)
+  if(NOT STE_AAUDIO_LIB)
+    message(FATAL_ERROR "[viewer] Android AAudio 库找不到（NDK sysroot API34/28/26 无 libaaudio.so）")
+  endif()
+  target_link_libraries(viewer-qt PRIVATE ${STE_AAUDIO_LIB})
+  # RECORD_AUDIO 权限请求走 QtAndroidPrivate（QtCore 私有头）→ 链 QtCorePrivate 拿到 include 路径
+  target_link_libraries(viewer-qt PRIVATE Qt6::CorePrivate)
+endif()
 set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE OFF)
 
 # 2026-10-09：viewerbackend.cpp 2700+ 行单编译单元峰值超内存（C1060）。

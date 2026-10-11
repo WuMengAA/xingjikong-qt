@@ -392,7 +392,11 @@ public:
     /** 开始讲话：开麦克风采集 → 通知云端 audio.start → 每帧 PCM 二进制发出。
      *  带时长上限（m_speakMaxMs），到点自动停 —— 见 stopSpeaking 的 why 参数。 */
     Q_INVOKABLE bool startSpeaking();
-    /** 停止讲话：关麦 → audio.stop。why 非空 = 自动停（到点 / 断线），会多说一句人话。 */
+
+    /** 实际开麦采集（不查权限；Android 权限在 startSpeaking 里先进门）。
+     *  2026-10-11 拆出：startSpeaking 负责 Android 权限请求（异步），回调到这里。 */
+    bool startSpeakingCapture();
+
     Q_INVOKABLE void stopSpeaking(QString why = QString());
     /** 是否正在讲话。 */
     bool isSpeaking() const;

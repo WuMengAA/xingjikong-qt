@@ -6,12 +6,15 @@
     package="com.stelarith.viewer"
     android:installLocation="auto"
     android:versionCode="1"
-    android:versionName="0.6.24-rc.5">
+    android:versionName="0.6.24-rc.7">
     <!-- 网络：连云端 WS/HTTP（教室管理必需） -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
-    <!-- 语音对讲（winmm 桌面）在手机 stub 不支持；真实原因：音频不经此路 -->
+    <!-- 2026-10-11：手机语音对讲真实现（QAudioSource）需要录音权限；
+         CAMERA 供后续手机摄像头功能预留（当前采集不依赖，声明不启用无副作用）。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
 
     <supports-screens
         android:anyDensity="true"

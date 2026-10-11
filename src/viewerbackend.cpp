@@ -31,6 +31,11 @@
 #include <QWebSocket>
 #include "ldc_rtc_bridge.h"   // 2026-10-10：WebRTC ldc 桥接（轻量前向声明，大文件不膨胀 C1060）
 
+#if defined(Q_OS_ANDROID)
+#include <QtCore/private/qandroidextras_p.h>   // 2026-10-11：手机开麦请求 RECORD_AUDIO（Qt 官方 Android 私有 API）
+#include <QFutureWatcher>
+#endif
+
 #include <algorithm>   // std::sort（离线台账清理与排序，见 refreshDevices）
 // ── 语音对讲 / 屏幕广播的时长上限（2026-10-07，用户点名："没有时长限制"）──
 // 开麦采集和抓屏推流都是**持续吃资源**的 —— 没人关就一直占着输入设备、一直 3fps 烧 CPU
@@ -2318,7 +2323,34 @@ void ViewerBackend::sendAction(const QString &action, const QJsonObject &params)
 // 新增（2026-10-07）：硬时长上限 —— 到点自动停并如实回执（见文件头的 kDefaultSpeakMaxMs）。
 // 上限环境变量：STE_MAX_SPEAK_MS（毫秒，默认 3 分钟，最长 1 小时）。
 // ──────────────────────────────────────────────────────────────────────
+// Android 麦克风权限：Qt Multimedia 未装（QMicrophonePermission 是 minimal 无 status），
+// 改用 Qt 官方 QtAndroidPrivate::requestPermission 请求 RECORD_AUDIO；授权后才
+// startSpeakingCapture（否则 AAudio open 会报权限错误）。桌面（winmm）直接采。
 bool ViewerBackend::startSpeaking()
+{
+    if (m_speaking) return true;
+#if defined(Q_OS_ANDROID)
+    auto future = QtAndroidPrivate::requestPermission(QStringLiteral("android.permission.RECORD_AUDIO"));
+    auto *watcher = new QFutureWatcher<QtAndroidPrivate::PermissionResult>(this);
+    QObject::connect(watcher, &QFutureWatcher<QtAndroidPrivate::PermissionResult>::finished, this,
+                     [this, watcher] {
+        const auto res = watcher->result();
+        watcher->deleteLater();
+        if (res == QtAndroidPrivate::PermissionResult::Authorized) {
+            startSpeakingCapture();
+        } else {
+            m_speakError = QStringLiteral("麦克风权限被拒绝（系统设置里可开启录音权限）");
+            emit speakErrorChanged();
+            setStatus(QStringLiteral("开麦失败：") + m_speakError, true);
+        }
+    });
+    watcher->setFuture(future);
+    return false;   // 权限弹框等用户；授权回调里真正开麦
+#endif
+    return startSpeakingCapture();
+}
+
+bool ViewerBackend::startSpeakingCapture()
 {
     if (m_speaking) return true;
     if (!m_audioCapture) m_audioCapture = new AudioCapture(this);
