@@ -296,7 +296,11 @@ endif()
 # 静态库（_probe/ldc_libs_android，mbedTLS 后端，配方见 _probe/WebRTC-Android-构建配方-2026-10-11.md）。
 if(STE_IS_ANDROID)
   # ① QML 整树嵌入 qrc（递归 GLOB，杜绝手写漏项；PREFIX "/" + BASE qml → qrc:/Main.qml）
+  # 2026-10-11：`qml/*.qml` 只匹配根层 → mobile/ 子目录漏打包（手机壳加载不到）。
+  # 改 `qml/**/*.qml`（跨目录）+ 根层兜底。
   file(GLOB_RECURSE STE_VIEWER_QML_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/qml/**/*.qml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/qml/**/*.js"
     "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml"
     "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.js")
   qt_add_resources(viewer-qt "viewerqml" PREFIX "/" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
@@ -328,6 +332,11 @@ if(STE_IS_ANDROID)
       target_compile_definitions(viewer-qt PRIVATE
         "STE_VIEWER_URL_CMake=\"$ENV{STE_VIEWER_URL_BUILD}\"")
       message(STATUS "[viewer] Android 云端地址已覆盖为 $ENV{STE_VIEWER_URL_BUILD}")
+    endif()
+    # 2026-10-11 诊断：桌面 Main.qml 手机 GPU SIGABRT → 软件渲染测试（STE_SOFT_RENDER_BUILD=1）
+    if(DEFINED ENV{STE_SOFT_RENDER_BUILD} AND "$ENV{STE_SOFT_RENDER_BUILD}" STREQUAL "1")
+      target_compile_definitions(viewer-qt PRIVATE STE_SOFT_RENDER_BUILD)
+      message(STATUS "[viewer] Android 软件渲染已开启（QT_QUICK_BACKEND=software）")
     endif()
     message(STATUS "[viewer] Android ldc 已链入（mbedTLS 后端, RTC_STATIC）")
   else()

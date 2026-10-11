@@ -352,6 +352,14 @@ int main(int argc, char *argv[])
     // QApplication（不是 QGuiApplication）：托盘 QSystemTrayIcon 属 QtWidgets，
     // 只有 QApplication 才建得起来。Qt6Widgets.dll 与 styles/ 本来就在绿色包里（为了 QFileDialog），
     // 所以这一步不增加任何打包负担、也不需要动 CMakeLists 的依赖表。
+    // 2026-10-11 诊断：桌面 Main.qml 手机 GPU completion SIGABRT → 加软件渲染开关
+    //（STE_SOFT_RENDER=1 时 QT_QUICK_BACKEND=software；必须 app 创建前设置）。
+#if defined(Q_OS_ANDROID) && defined(STE_SOFT_RENDER_BUILD)
+    // 2026-10-11 诊断：桌面 Main.qml 手机 GPU completion SIGABRT → 软件渲染开关
+    //（CMake env STE_SOFT_RENDER_BUILD=1 注入宏；必须 app 创建前设置）。
+    qputenv("QT_QUICK_BACKEND", "software");
+    qputenv("QSG_RENDER_LOOP", "windows");
+#endif
     QApplication app(argc, argv);
     // 程序名必须显式定死：凭据（网站会话令牌 / 云端接入票）落在
     // AppLocalDataLocation，Windows 上就是 %LOCALAPPDATA%/<程序名>。
@@ -513,8 +521,8 @@ int main(int argc, char *argv[])
     // 2026-10-11：Android（手机 App 并入管理端）无磁盘 build 目录 → QML 走 qrc 嵌入
     //（CMake ANDROID 分支把 qml/ 整树嵌进 :/ 前缀，load("qrc:/Main.qml")）。
 #if defined(Q_OS_ANDROID)
-    // 2026-10-11 一源响应式（用户裁决「手机定期拉取桌面端」）：
-    // 入口 = qrc:/Main.qml（与桌面同源，窄屏切 MobileShell）。
+    // 2026-10-11 手机端定格：加载桌面同一套 UI（用户裁决——桌面 UI 手机
+    // 可用，独立壳方向错误）。入口 = qrc:/Main.qml（与桌面同源，热更同树）。
     // 热更：云端 /api/qml-patch 拉下来的 zip 解压到本地 qml-live/，
     // 存在即本地优先（改 UI 不用重出 APK）；无则回退 qrc。
     const QString qmlLiveDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
@@ -534,6 +542,12 @@ int main(int argc, char *argv[])
     const QString qmlUrl = qmlDir + QStringLiteral("/Main.qml");
     engine.addImportPath(qmlDir);
 #endif
+    // 2026-10-11：QML 加载错误打 qWarning（Android logcat 可见 tag Qt/qml；logf 不进 logcat）
+    QObject::connect(&engine, &QQmlApplicationEngine::warnings,
+                     [](const QList<QQmlError> &errs) {
+        for (const QQmlError &e : errs)
+            qWarning().noquote() << "[qml-warn]" << e.toString();
+    });
     engine.load(QUrl(qmlUrl));
 
     if (engine.rootObjects().isEmpty()) {

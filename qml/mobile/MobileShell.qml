@@ -16,6 +16,14 @@ Item {
     id: root
     anchors.fill: parent
 
+    // ⚠️ 2026-10-11：必须铺全屏不透明背景——本组件是 Item（非窗口），
+    // 透明时桌面 Main.qml 的布局会从空隙透出来 → 「UI 重叠」。z 放最底。
+    Rectangle {
+        anchors.fill: parent
+        z: -1
+        color: root.th.win
+    }
+
     Theme { id: theme; dark: root.darkMode }
     readonly property var th: theme
     // E4 同步：darkMode 由 backend.themeMode 派生（0 浅色 / 1 深色 / 2 跟随系统取 backend.systemDark）。
