@@ -1,4 +1,4 @@
-# 星集控手机 App · APK 打包脚本（2026-10-11）
+﻿# 星集控手机 App · APK 打包脚本（2026-10-11）
 # 保证步骤：Android 构建 → 拷 .so（viewer+OpenSSL）→ 强制 native 压缩 →
 # gradle assembleRelease → apksigner 签名 → 发布件 dist/星集控-手机端-manager-arm64-release.apk
 #
@@ -33,13 +33,27 @@ $qtcmake = 'D:\QTqwq\6.12.0\android_arm64_v8a\bin\qt-cmake.bat'
 # ── 1. configure（-SkipConfigure 时跳过；改过 qml/CMake/版本时必须 configure）──
 if (-not $SkipConfigure) {
     Write-Host "== configure（qt-cmake）=="
+    # ⚠️ 2026-10-12 修：CMake 会把 **Warning** 写到 stderr，而本脚本第 14 行
+    #    $ErrorActionPreference='Stop' 会把「原生命令往 stderr 写字」判成终止性错误
+    #    （NativeCommandError）——即使已经用 *> 重定向也照样中断，表现为
+    #    「configure 其实根本没失败，脚本却 exit 1」（实测卡在 QtPublicDependencyHelpers 那条 Warning）。
+    #    这里临时降为 Continue，成败交给下面的 $LASTEXITCODE 判断（真正的失败它不会是 0）。
+    $eapCfg = $ErrorActionPreference
+    if (-not $eapCfg) { $eapCfg = 'Stop' }   # 取不到就退回脚本开头设的 'Stop'
+    $ErrorActionPreference = 'Continue'
     & $qtcmake -S $root -B $bdir -G Ninja -DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=arm64-v8a *> "$env:TEMP\qtc-make.txt"
-    if ($LASTEXITCODE -ne 0) { Get-Content "$env:TEMP\qtc-make.txt" | Select-Object -Last 5; exit 1 }
+    $ErrorActionPreference = $eapCfg
+    if ($LASTEXITCODE -ne 0) { Get-Content "$env:TEMP\qtc-make.txt" | Select-Object -Last 20; exit 1 }
 }
 
 # ── 2. build（qml 改动会触发 qrc 重建；若上次 manual 改过要删 qrc 缓存则先删）──
 Write-Host "== build =="
+# 同上：构建期同样会有 Warning 走 stderr，别让 'Stop' 把它误判成失败。
+$eapBld = $ErrorActionPreference
+if (-not $eapBld) { $eapBld = 'Stop' }
+$ErrorActionPreference = 'Continue'
 $b = & $cmake --build $bdir 2>&1
+$ErrorActionPreference = $eapBld
 if ($LASTEXITCODE -ne 0) { $b | Select-String 'error:' | Select-Object -First 8; exit 1 }
 Write-Host "  build OK"
 
