@@ -384,6 +384,9 @@ public:
     //    "正在语音对讲 / 正在屏幕广播"。2026-10-07 截图 b1-page1.png 拍下了这个（见改动归档）。
     Q_PROPERTY(bool speaking READ isSpeaking NOTIFY speakingChanged)
     Q_PROPERTY(int speakLeftSec READ speakLeftSec NOTIFY limitsChanged)
+    // 2026-10-11：Android 录音权限是否已授予（checkSelfPermission 直查系统）。
+    // 非 Android 恒 true。语音对话框顶部据此显示「未授权→去设置」，不靠弹框猜。
+    Q_PROPERTY(bool audioPermGranted READ audioPermGranted NOTIFY audioPermChanged)
     Q_PROPERTY(bool broadcasting READ isBroadcasting NOTIFY broadcastingChanged)
     Q_PROPERTY(int bcastLeftSec READ bcastLeftSec NOTIFY limitsChanged)
     /** 自动停止（到时长上限 / 断线）时说人话的那句；空 = 没有新提示（QML 收到非空就弹一次）。 */
@@ -409,6 +412,13 @@ public:
     /** 最后一次开麦失败原因（QML 提示用）。 */
     Q_PROPERTY(QString speakError READ speakError NOTIFY speakErrorChanged)
     Q_INVOKABLE QString speakError() const;
+    /** 2026-10-11：Android 录音权限是否已授予（桌面恒 true）。 */
+    bool audioPermGranted() const;
+    /** 2026-10-11：主动再请求一次录音权限（弹系统框；已在设置授权时立即生效）。 */
+    Q_INVOKABLE void requestAudioPerm();
+    /** 2026-10-11：跳系统「应用权限设置页」——用户拒绝过一次后弹框不再出现，
+     *  只能从这里手动开（Android 13+ 对二次请求默认不再弹框）。 */
+    Q_INVOKABLE void openAudioSettings();
 
     // ── 屏幕广播（设计文档《屏幕广播-第一版设计》，2026-10-07）──
     /** 开始屏幕广播：抓屏 QTimer → 每帧 JPEG 二进制发云端 → broadcast.start。 */
@@ -551,6 +561,8 @@ signals:
     void roleChanged();
     /** 提醒开关变了（设置页那两个开关）。 */
     void notifyPrefChanged();
+    /** 2026-10-11：Android 录音权限状态变化（检查/授权回调后发）。 */
+    void audioPermChanged();
     /** 云端状态通知（断线重连 / 指令完成）：统一走灵动岛瞬态提示，不再弹系统托盘气泡。 */
     void islandNote(const QString &title, const QString &desc, const QString &icon);
     /** 首启引导是否已完成（标记位从 QSettings 读回；完成写标记后界面据此收起引导层）。 */

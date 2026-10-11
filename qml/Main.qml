@@ -2256,6 +2256,27 @@ ApplicationWindow {
             }
             Text { text: "目标：" + (backend.currentUid !== "" ? backend.currentUid : "未选设备")
                    color: th.fg3; font.pixelSize: 12 }
+            // 2026-10-11：Android 录音权限状态 —— 弹框没出现也要看得见「未授权」，
+            // 并给一个「去设置」手动开关的入口（Android 13+ 二次请求不再弹框，
+            // 只能从系统设置里开；代码里 startSpeaking 会自动请求，但拒绝过就得靠这里）
+            Rectangle {
+                visible: root.isPhone && !backend.audioPermGranted
+                width: parent.width; height: 34; radius: th.rCtrl
+                color: "#b03a2e"; opacity: 0.92
+                Row {
+                    anchors.left: parent.left; anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: "⚠ 麦克风权限未开启——按住讲话会弹系统授权框；若已拒绝请点这里去系统设置开启"
+                           color: "white"; font.pixelSize: 11; width: parent.width - 92; wrapMode: Text.Wrap }
+                    Rectangle {
+                        width: 76; height: 26; radius: 6; color: "white"
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text { anchors.centerIn: parent; text: "去设置"; color: "#b03a2e"; font.pixelSize: 12; font.weight: Font.Medium }
+                        MouseArea { anchors.fill: parent; onClicked: backend.openAudioSettings() }
+                    }
+                }
+            }
             Text { text: backend.speaking
                        ? ("时长：" + Math.max(0, 180 - backend.speakLeftSec) + " 秒（剩余 " + backend.speakLeftSec + " 秒）")
                        : (backend.speakError !== "" ? ("上次开麦失败：" + backend.speakError) : "时长：未通话")

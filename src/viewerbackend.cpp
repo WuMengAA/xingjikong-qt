@@ -2343,24 +2343,87 @@ bool ViewerBackend::startSpeaking()
 {
     if (m_speaking) return true;
 #if defined(Q_OS_ANDROID)
+    if (audioPermGranted())
+        return startSpeakingCapture();
+    // 权限未授权：发起请求（弹系统框），授权回调里开麦。
+    // 返回 **true**（"已受理"）——别让 QML 立刻报"开麦失败"，弹框正在等用户。
+    requestAudioPerm();
+    setStatus(QStringLiteral("请允许录音权限；授权后自动开麦"), false);
+    return true;
+#else
+    return startSpeakingCapture();
+#endif
+}
+
+bool ViewerBackend::audioPermGranted() const
+{
+#if defined(Q_OS_ANDROID)
+    const QJniObject ctx(QNativeInterface::QAndroidApplication::context().object());
+    if (!ctx.isValid()) return false;
+    const jint r = ctx.callMethod<jint>(
+        "checkSelfPermission", "(Ljava/lang/String;)I",
+        QJniObject::fromString(QStringLiteral("android.permission.RECORD_AUDIO"))
+            .object<jstring>());
+    return r == 0;   // PackageManager.PERMISSION_GRANTED == 0
+#else
+    return true;
+#endif
+}
+
+void ViewerBackend::requestAudioPerm()
+{
+#if defined(Q_OS_ANDROID)
+    // 已授权就不重复弹框
+    if (audioPermGranted()) {
+        emit audioPermChanged();
+        startSpeakingCapture();
+        return;
+    }
     auto future = QtAndroidPrivate::requestPermission(QStringLiteral("android.permission.RECORD_AUDIO"));
     auto *watcher = new QFutureWatcher<QtAndroidPrivate::PermissionResult>(this);
     QObject::connect(watcher, &QFutureWatcher<QtAndroidPrivate::PermissionResult>::finished, this,
                      [this, watcher] {
         const auto res = watcher->result();
         watcher->deleteLater();
+        emit audioPermChanged();
         if (res == QtAndroidPrivate::PermissionResult::Authorized) {
             startSpeakingCapture();
         } else {
-            m_speakError = QStringLiteral("麦克风权限被拒绝（系统设置里可开启录音权限）");
+            m_speakError = QStringLiteral("麦克风权限被拒绝——点「去设置」在系统里开启录音权限");
             emit speakErrorChanged();
             setStatus(QStringLiteral("开麦失败：") + m_speakError, true);
         }
     });
     watcher->setFuture(future);
-    return false;   // 权限弹框等用户；授权回调里真正开麦
 #endif
-    return startSpeakingCapture();
+}
+
+void ViewerBackend::openAudioSettings()
+{
+#if defined(Q_OS_ANDROID)
+    // ACTION_APPLICATION_DETAILS_SETTINGS：跳应用详情页，用户可手动开关「麦克风」
+    QJniObject intent("android/content/Intent",
+                      "(Ljava/lang/String;)V",
+                      QJniObject::fromString(QStringLiteral("android.settings.APPLICATION_DETAILS_SETTINGS"))
+                          .object<jstring>());
+    const QJniObject ctx(QNativeInterface::QAndroidApplication::context().object());
+    const QString pkg = ctx.callMethod<jstring>(
+                            "getPackageName", "()Ljava/lang/String;").toString();
+    // Uri.parse("package:<包名>")
+    QJniObject uri = QJniObject::callStaticObjectMethod(
+        "android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;",
+        QJniObject::fromString(QStringLiteral("package:") + pkg).object<jstring>());
+    if (uri.isValid() && intent.isValid()) {
+        intent.callObjectMethod("setData", "(Landroid/net/Uri;)Landroid/content/Intent;",
+                                uri.object());
+        QJniObject chooser = intent.callObjectMethod(
+            "createChooser",
+            "(Landroid/content/Intent;)Landroid/content/Intent;",
+            intent.object());
+        if (chooser.isValid())
+            QtAndroidPrivate::startActivity(chooser, 1002, [](int, jint, const QJniObject &) {});
+    }
+#endif
 }
 
 bool ViewerBackend::startSpeakingCapture()
