@@ -71,8 +71,11 @@ Item {
     // ── 文件传输进度（#198，桥 fileTransfer* 属性）──────────
     // ⚠️ 同样是点访问绑定（不是 bridge["x"]），靠 bridge.changed() 一把全 NOTIFY 重读。
     readonly property bool   _ftActive:   bridgeRef ? bridgeRef.fileTransferActive : false
-    readonly property qint64 _ftBytes:    bridgeRef ? bridgeRef.fileTransferBytes  : 0
-    readonly property qint64 _ftTotal:    bridgeRef ? bridgeRef.fileTransferTotal  : 0
+    // ⚠️ QML 没有 qint64 类型！用 real（double）承接 C++ 的 qint64 字节数属性。
+    //    之前写 qint64 在 Qt 6.8 下被宽松放过，Qt 6.12 严格化后直接拒载整个 IslandRoot
+    //    ⇒ 岛变透明空白（"灵动岛消失"）。2026-10-12 修。
+    readonly property real  _ftBytes:    bridgeRef ? bridgeRef.fileTransferBytes  : 0
+    readonly property real  _ftTotal:    bridgeRef ? bridgeRef.fileTransferTotal  : 0
     readonly property real   _ftPct:      (root._ftTotal > 0) ? Math.min(1, root._ftBytes / root._ftTotal) : 0
 
     // ── 尺寸（显式，不靠隐式推导）───────────────────────────
