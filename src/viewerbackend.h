@@ -185,6 +185,9 @@ public:
     void sendLdcSignal(const QString &type, const QJsonObject &payload);
     void setLdcRtcState(const QString &s);
     void emitLdcFrame(const QImage &img);
+    // 摄像头第二轨（2026-10-12 · 四·双画面）：mid="camera" 的 RTC 帧落到 m_camFrame，
+    // 经 cameraFrameChanged 通知 QML 刷 image://frames/cam（与屏幕帧互不干扰）。
+    void emitLdcCameraFrame(const QImage &img);
 
     // 帧的来源。以前两路都调同一个 applyFrameBytes 且不区分来源，结果被控端的 JPEG
     // 轮询帧和 WebRTC 抽出来的帧互相覆盖同一张 m_frame —— 画面在两个源之间来回跳、
@@ -220,7 +223,11 @@ public:
 
     QJsonArray classes() const { return m_classes; }
     QString currentClass() const { return m_currentClass; }
-    void setCurrentClass(const QString &c) { if (m_currentClass != c) { m_currentClass = c; emit classesChanged(); } }
+    // 2026-10-12 修：必须 Q_INVOKABLE —— 它是 Q_PROPERTY currentClass 的 WRITE，
+    // 但 QML 里写的是 `backend.setCurrentClass(code)`（**当函数调**），WRITE 只在
+    // 属性赋值时可用 ⇒ 原来报 "Property 'setCurrentClass' ... is not a function"，
+    // 班级筛选静默失效（与 setCurrentUid 同款坑，那边早修了这边漏了）。
+    Q_INVOKABLE void setCurrentClass(const QString &c) { if (m_currentClass != c) { m_currentClass = c; emit classesChanged(); } }
     QJsonObject storage() const { return m_storage; }
 
     /**
@@ -367,14 +374,12 @@ public:
      * @return 实际下发了几个关闭指令（0 = 一个都没匹配上，界面据此提示"没开着"）
      */
     Q_INVOKABLE int killBlacklisted(const QVariantList &items);
-    Q_INVOKABLE void sendPing();
     /** 发一次鼠标操控。button 是 left/right/middle —— 被控端按它选 MOUSEEVENTF_*DOWN/UP。
      *  ⚠️ 2026-10-11：这个参数以前**没有**，而 QML 一直在传第 4 个（btnOf 的结果），
      *     QML 侧报 `Too many arguments, ignoring 1`，按键被静默丢掉 ⇒ 被控端恒当左键
      *     （右键菜单点不出、中键自动滚全废）。补上签名，别再把按钮信息丢了。 */
     Q_INVOKABLE void sendPointer(const QString &kind, double nx, double ny,
                                  const QString &button = QStringLiteral("left"));
-    Q_INVOKABLE void sendType(const QString &text);
 
     // ── 语音对讲（设计文档 3.3，2026-10-07）──
     /** 开始讲话：开麦克风采集 → 通知云端 audio.start → 每帧 PCM 二进制发出。 */
@@ -409,9 +414,9 @@ public:
      *  ⚠️ 这行不能少：Q_PROPERTY 的 READ 指向它，moc 会生成 autoNote() 调用，
      *     只有 .cpp 定义、头文件不声明 ⇒ C2039 "autoNote": 不是成员（2026-10-07 编译事故）。 */
     QString autoNote() const;
-    /** 最后一次开麦失败原因（QML 提示用）。 */
+    /** 最后一次开麦失败原因（QML 提示用）。Q_PROPERTY READ 已声明，无需再 Q_INVOKABLE。 */
     Q_PROPERTY(QString speakError READ speakError NOTIFY speakErrorChanged)
-    Q_INVOKABLE QString speakError() const;
+    QString speakError() const;   // Q_PROPERTY 的 READ（moc 需要成员声明，非 Q_INVOKABLE）
     /** 2026-10-11：Android 录音权限是否已授予（桌面恒 true）。 */
     bool audioPermGranted() const;
     /** 2026-10-11：主动再请求一次录音权限（弹系统框；已在设置授权时立即生效）。 */
@@ -443,6 +448,9 @@ public:
     QJsonObject recordings() const { return m_recordings; }
     /** 取某台设备的缩略图帧（多班面板；无则空图）。 */
     QImage thumbFrame(const QString &uid) const { return m_thumbFrames.value(uid); }
+    /** 摄像头第二轨最新帧（2026-10-12 · 四·双画面；无则空图）。 */
+    QImage camFrame() const { return m_camFrame; }
+    int cameraFrameCount() const { return m_camFrameCount; }
     /** 当前订阅了缩略图的多台设备 uid 列表。 */
     QStringList thumbUids() const { return m_thumbUids; }
 
@@ -549,6 +557,9 @@ signals:
     void rtcStateChanged();
     /** 2026-10-09：libdatachannel 收流帧就绪（ldc_receiver.frameReady → QML）。 */
     void rtcFrameReady(const QImage &frame);
+    /** 2026-10-12 · 四·双画面：摄像头第二轨帧就绪（ldc_receiver.cameraFrameReady → QML）。
+     *  QML 收到就把 image://frames/cam 的 tick +1，摄像头格重取图。 */
+    void cameraFrameChanged();
     /** 画面来源切换（jpeg ↔ rtc）——界面上那个链路徽标靠它刷新。 */
     void frameSourceChanged();
     /** 终端状态四件套（state/sid/note/busy）共用一个信号。 */
@@ -830,13 +841,15 @@ private:
     int m_sameFrameStreak = 0;       // 连续多少帧指纹一致
     bool m_screenStatic = false;     // 静态区：画面没在动，界面别浪费重绘
     int m_frameCount = 0;
+    // 摄像头第二轨帧（2026-10-12 · 四·双画面）。与 m_frame 分开存，互不覆盖。
+    QImage m_camFrame;
+    int m_camFrameCount = 0;
     int m_framesSinceCheck = 0;
     int m_lastFrameBytes = 0;
     double m_fps = 0.0;
     qint64 m_lastFpsCheckMs = 0;
     qint64 m_pingSentMs = 0;
 
-    // ── 语音对讲（2026-10-07）──
     // ── 语音对讲（2026-10-07）──
     AudioCapture *m_audioCapture = nullptr;   // 麦克风采集（懒创建）
     bool m_speaking = false;                  // 当前是否在讲话

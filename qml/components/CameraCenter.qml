@@ -53,6 +53,9 @@ Item {
     // ⚠️ 当前 viewer 只有「屏幕」帧源（image://frames/<uid>），摄像头实时流（WebRTC 双路）
     //   尚未接入 ⇒ 摄像头格显示诚实占位，后端接入后只把那格 source 指向真实流即可。
     property int layoutMode: 0
+    // 摄像头第二轨状态（2026-10-12 · 方案 A：RTC second track "camera"）
+    property string camStreamUid: ""   // 当前已请求推流的设备（""=未请求）
+    property bool camHasFrame: false   // 是否已收到至少一帧（收到后隐藏占位）
 
     // ── 2026-10-12 · UI 评审第 4 条：界面只给人话，技术日志不上界面 ──
     //  被控端现在回三件套：error（人话，可直接显示）/ errorCode（机器码）/ errorRaw（FFmpeg 原生输出）。
@@ -447,24 +450,52 @@ Item {
                                         font.pixelSize: 11
                                     }
                                 }
-                                // 摄像头画面（待接入：当前 viewer 无摄像头实时流源）
+                                // 摄像头画面（2026-10-12 · 四·双画面 · 方案 A：RTC second track）
+                                //   帧源 = image://frames/cam（backend.camFrame()，来自 "camera" RTC 轨）。
+                                //   可见（双画面/仅摄像头 且 在实时页）⇒ 请被控端按需推流；不可见 ⇒ 停。
                                 Rectangle {
-                                    visible: cc.layoutMode !== 1
+                                    id: camPane
+                                    visible: cc.layoutMode !== 1 && tabs.currentIndex === 0
                                     width: cc.layoutMode === 0
                                            ? ((paneRow.width - 4) * 2 / 5)
                                            : paneRow.width
                                     height: paneRow.height
                                     color: "transparent"
                                     clip: true
+                                    Image {
+                                        id: camImg
+                                        anchors.fill: parent
+                                        anchors.margins: 2
+                                        fillMode: Image.PreserveAspectFit
+                                        cache: false
+                                        property int camTick: 0
+                                        source: (cc.camStreamUid !== "" && cc.camHasFrame)
+                                                ? ("image://frames/cam?t" + camTick) : ""
+                                        Connections {
+                                            target: cc.backend
+                                            function onCameraFrameChanged() {
+                                                cc.camHasFrame = true
+                                                camImg.camTick++
+                                            }
+                                        }
+                                    }
                                     Text {
                                         anchors.centerIn: parent
                                         width: parent.width - 16
                                         horizontalAlignment: Text.AlignHCenter
                                         wrapMode: Text.WrapAnywhere
-                                        text: "摄像头实时画面待接入\n（当前版本仅支持屏幕画面；\n摄像头双路流接入后此格自动点亮）"
+                                        visible: !cc.camHasFrame
+                                        text: cc.selUid === ""
+                                              ? "（选左侧设备看摄像头画面）"
+                                              : (cc.camStreamUid !== ""
+                                                 ? "摄像头画面连接中…\n（首次可能要等 1-2 秒；\n被控端无摄像头/被占用则无画面）"
+                                                 : "双画面 · 摄像头实时画面\n（打开此格即按需推流）")
                                         color: cc.theme.fg4 || "#707070"
                                         font.pixelSize: 11
                                     }
+                                    // 可见性变化（切标签/切单屏/切双画面）→ 同步推流状态
+                                    onVisibleChanged: cc.camSync()
+                                    Component.onCompleted: cc.camSync()
                                 }
                             }
                         }
@@ -770,4 +801,21 @@ Item {
         cc.backend.sendAction("camera_record_stop", {})
         cc.recording = false
     }
+
+    // ── 摄像头实时画面（2026-10-12 · 四·双画面 · 方案 A：RTC second track）──
+    // 按需启停单一收口：期望推流设备 = 摄像头格可见且有选中设备时的 selUid，
+    // 否则为空。camSync() 比较期望与实际，只在变化时发 start/stop（隐私红线：不看不采）。
+    // 由 camPane.visible 变化 / selUid 变化 / 首次挂载三处触发。
+    function camSync() {
+        var want = (camPane.visible && cc.selUid !== "") ? cc.selUid : ""
+        if (want === cc.camStreamUid) return
+        if (cc.camStreamUid !== "") cc.backend.sendAction("camera_stream_stop", {})
+        cc.camStreamUid = want
+        cc.camHasFrame = false
+        if (want !== "") {
+            cc.backend.sendAction("camera_stream_start", cc.paramsWithDev())
+            cc.status = "正在开摄像头（" + want + "）…"
+        }
+    }
+    onSelUidChanged: cc.camSync()
 }

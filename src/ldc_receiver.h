@@ -35,6 +35,9 @@ public:
 
 signals:
     void frameReady(const QImage &frame);      // 每帧解码完成（QML Image source 用）
+    // 摄像头第二轨（2026-10-12 · 四·双画面）：mid="camera" 的轨解出的帧，
+    // 与屏幕轨分开抛，接线层据此喂管理端摄像头格（screen 仍走 frameReady）。
+    void cameraFrameReady(const QImage &frame);
     void stateChanged(bool connected);
     void failed(const QString &reason);
     // 信令出站（接线层转发到云端 → 被控端）：answer / candidate
@@ -48,6 +51,7 @@ private:
     // libdatachannel 对象 shared_ptr 语义：裸 new 后无持有者会立即析构（0xC0000005）
     std::shared_ptr<void> m_pc;   // rtc::PeerConnection*
     QMutex m_mu;                  // 保护 m_track/m_pc（onTrack 回调线程 vs 主线程）
-    void *m_track = nullptr;      // rtc::Track*
+    void *m_track = nullptr;      // rtc::Track*（screen 轨）
+    void *m_camTrack = nullptr;   // rtc::Track*（camera 轨，2026-10-12 四·双画面）
     std::atomic<bool> m_connected{false};   // 回调线程写，主线程读
 };

@@ -1453,6 +1453,9 @@ void ViewerBackend::emitLdcFrame(const QImage &img)
     }
     m_frameCount++;
     m_frame = img;
+    // 2026-10-12 修（审计 #13）：以前 RTC 帧不更新 m_lastFrameBytes → 界面帧信息
+    // 一直显示上一次 JPEG 的大小，RTC 模式下数字恒不动，看不出画面在变。补上。
+    m_lastFrameBytes = (int)img.sizeInBytes();
     m_frameUid = m_currentUid;              // ldc 帧不带 uid，按"当前这台"记账
     const quint64 fp = frameFingerprint(img);
     m_sameFrameStreak = (fp == m_frameHash) ? (m_sameFrameStreak + 1) : 0;
@@ -1467,6 +1470,20 @@ void ViewerBackend::emitLdcFrame(const QImage &img)
 
     // 兼容：老接线若仍监听 rtcFrameReady 也保留（不破坏既有消费者）。
     emit rtcFrameReady(img);
+}
+// ── 摄像头第二轨帧（2026-10-12 · 四·双画面）──────────────────────────────
+// 与 emitLdcFrame（屏幕）分开：不碰 m_frame / m_frameSource / m_screenStatic，
+// 只落自己的 m_camFrame 并通知 QML 刷 image://frames/cam。这样屏幕与摄像头互不干扰。
+void ViewerBackend::emitLdcCameraFrame(const QImage &img)
+{
+    if (img.isNull()) return;
+    m_camFrame = img;
+    m_camFrameCount++;
+    if (m_camFrameCount % 30 == 1) {
+        logf("[viewer] 摄像头画面在动[RTC]：第 %d 帧（%dx%d）",
+             m_camFrameCount, img.width(), img.height());
+    }
+    emit cameraFrameChanged();
 }
 void ViewerBackend::onConnected()
 {
@@ -1597,6 +1614,10 @@ void ViewerBackend::setCurrentUid(const QString &uid)
     const QString prev = m_currentUid;
     m_currentUid = uid;
     refreshCapActions();          // 换机器 = 换一套能力，门控要立刻跟着变
+    // 2026-10-12 修（审计 #12）：从 RTC 设备 A 切到 JPEG 设备 B 时，m_rtcLastFrameMs
+    // 还是 A 的时刻——B 的 JPEG 帧到后 1.5s 内被当"RTC 还活着"吞掉，用户看到
+    // "切了设备 1.5 秒后才有画面"。切设备即清空 RTC 计时，让 JPEG 帧立刻可上屏。
+    m_rtcLastFrameMs = 0;
 
     // ⚠️ 2026-10-08 修「切了设备画面还是第一台」的两个源头，两个都要治：
     //
@@ -1708,6 +1729,9 @@ void ViewerBackend::subscribeThumbnails(const QVariantList &uids)
         QJsonObject sp;
         sp.insert(QStringLiteral("uid"), uid);
         sendEnvelope(QStringLiteral("unsubscribe"), sp);
+        // 2026-10-12 修（审计 #7/#19）：缓存帧随订阅一起清——原来 m_thumbFrames
+        // 只增不减，机房换 uid/缩略图墙从 30 台切到 3 台后老图像一直挂着，内存无上界。
+        m_thumbFrames.remove(uid);
     }
     // 新订阅
     for (const QString &uid : want) {
@@ -1716,6 +1740,10 @@ void ViewerBackend::subscribeThumbnails(const QVariantList &uids)
         QJsonObject sp;
         sp.insert(QStringLiteral("uid"), uid);
         sendEnvelope(QStringLiteral("subscribe"), sp);
+    }
+    // 上限兜底（LRU 意识：超 32 台只留最新的那批），防 m_thumbUids 无限涨
+    while (m_thumbFrames.size() > 32) {
+        m_thumbFrames.erase(m_thumbFrames.begin());
     }
     m_thumbUids = want;
     emit thumbnailChanged();
@@ -2518,7 +2546,10 @@ void ViewerBackend::stopSpeaking(QString why)
     m_speakLeftMs = 0;
     m_speakLeftSec = 0;
     sendEnvelope(QStringLiteral("audio.stop"), QJsonObject());
-    if (!m_leftTick->isActive()) m_leftTick->stop();
+    // 2026-10-12 修：原 `if (!m_leftTick->isActive()) m_leftTick->stop()` 条件写反
+    // （inactive 时 stop 是空操作、active 时进不来）——恒不执行。正确判据：
+    // 语音和广播都没在跑了才停倒计时 tick（与 m_leftTick 的 timeout lambda 同款）。
+    if (!m_speaking && !m_broadcasting) m_leftTick->stop();
     if (why.isEmpty()) {
         setStatus(QStringLiteral("语音已停止（静音）"), false);
         qInfo("[viewer] 🎤 语音对讲结束");
@@ -2594,7 +2625,8 @@ void ViewerBackend::stopBroadcast(QString why)
     m_bcastLeftMs = 0;
     m_bcastLeftSec = 0;
     sendEnvelope(QStringLiteral("broadcast.stop"), QJsonObject());
-    if (!m_leftTick->isActive()) m_leftTick->stop();
+    // 2026-10-12 修：同 stopSpeaking —— 条件写反恒不执行，改为"语音广播都停了才停 tick"
+    if (!m_speaking && !m_broadcasting) m_leftTick->stop();
     if (why.isEmpty()) {
         setStatus(QStringLiteral("屏幕广播已停止"), false);
         qInfo("[viewer] 📺 屏幕广播结束");
@@ -2718,6 +2750,25 @@ void ViewerBackend::checkQmlPatch()
 // 格式：中央目录每条 46 字节头（sig 0x02014b50）+ 名字 + 本地文件头 30 字节 + 数据。
 bool ViewerBackend::unzipStore(const QString &outDir, const QByteArray &zip)
 {
+    // ⚠️ 2026-10-12 修（安全审计 #4/#5）：zip slip 任意路径写 + 越界读。
+    //   · name 直接取自 zip 中央目录，原来没做路径规范化 —— 一个名称含
+    //     `../../../Start Menu/Programs/Startup/evil.bat` 的 zip 能在任意路径落文件。
+    //   · cdOff/cdSize/lho/compSize 全来自内容，原来无边界检查可直接越界读内存。
+    const QString root = QDir::cleanPath(outDir);
+    const int rootLen = root.length();
+
+    // 路径必须落在 outDir 内（含反斜杠当分隔符规范化；首段不允许 ..）
+    auto pathInside = [&root, rootLen](const QString &raw) -> QString {
+        // 反斜杠（Windows 分隔符）也当分隔符处理 → replace('/') 后 cleanPath 统一
+        QString p = raw;
+        p.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        const QString canon = QDir::cleanPath(root + QLatin1Char('/') + p);
+        if (!canon.startsWith(root + QLatin1Char('/')) && canon != root) return QString();
+        // 绝对路径（如 C:/x）会被 cleanPath 冲掉前缀 → 必然不 startsWith root → 上面已拒
+        if (QDir::isAbsolutePath(raw)) return QString();
+        return canon;
+    };
+
     // 找 EOCD（结尾 22+ 字节，sig 0x06054b50）
     for (int i = zip.size() - 22; i >= 0; --i) {
         if (zip.size() - i < 22) break;
@@ -2726,6 +2777,9 @@ bool ViewerBackend::unzipStore(const QString &outDir, const QByteArray &zip)
             quint32 cdSize, cdOff;
             memcpy(&cdSize, p + 12, 4);
             memcpy(&cdOff, p + 16, 4);
+            // 中央目录偏移/大小必须整段落在 zip 内
+            if ((qint64)cdOff > zip.size() || (qint64)cdSize > zip.size() - (qint64)cdOff)
+                return false;
             // 解析中央目录
             int pos = (int)cdOff;
             const int cdEnd = pos + (int)cdSize;
@@ -2744,11 +2798,17 @@ bool ViewerBackend::unzipStore(const QString &outDir, const QByteArray &zip)
                 pos += 46 + (int)nameLen + (int)extraLen + (int)commentLen;
                 if (name.isEmpty() || name.endsWith('/')) continue;   // 目录项跳过
                 if (method != 0) continue;                            // 非 store 跳过
-                // 本地头在 lho：30 字节头 + 名字 + 数据
-                if (lho + 30 + (quint32)nameLen + compSize > (quint32)zip.size()) continue;
+                // 本地头在 lho：30 字节头 + 名字 + 数据 —— qint64 比较防 32 位溢出绕过
+                const qint64 need = (qint64)lho + 30 + (qint64)nameLen + (qint64)compSize;
+                if (need > zip.size()) continue;
                 const uchar *lh = (const uchar *)zip.constData() + lho;
                 const char *data = zip.constData() + lho + 30 + (int)nameLen;
-                const QString out = outDir + QLatin1Char('/') + QString::fromUtf8(name);
+                // zip slip：路径必须留在 outDir 内，越界（.. / 绝对路径）整条丢弃
+                const QString out = pathInside(QString::fromUtf8(name));
+                if (out.isEmpty()) {
+                    logf("[viewer] 拒绝解压越界路径：%.200s", QString::fromUtf8(name).toUtf8().constData());
+                    continue;
+                }
                 QDir().mkpath(QFileInfo(out).absolutePath());
                 QFile wf(out);
                 if (wf.open(QIODevice::WriteOnly)) wf.write(data, (qint64)compSize);
@@ -2959,19 +3019,6 @@ void ViewerBackend::termClose()
     // 收口：被控端不回 terminal_closed（会话早死了/网络断了）时，2.5 秒后按已关处理，
     // 否则状态永远停在 Pending ⇒ 这台再也开不了新终端（#95 的"关不掉"那一半）。
     m_termCloseWait->start();
-}
-void ViewerBackend::sendPing()
-{
-    if (m_currentUid.isEmpty()) {
-        setStatus(QStringLiteral("还没选设备，探活没发"), true);
-        return;
-    }
-    m_pingSentMs = QDateTime::currentMSecsSinceEpoch();
-    QJsonObject p;
-    p.insert(QStringLiteral("uid"), m_currentUid);
-    p.insert(QStringLiteral("action"), QStringLiteral("ping"));
-    sendEnvelope(QStringLiteral("instruction"), p);
-    setStatus(QStringLiteral("已向 %1 发探活，等它回话…").arg(m_currentUid), false);
 }
 void ViewerBackend::sendPointer(const QString &kind, double nx, double ny, const QString &button)
 {
@@ -3366,17 +3413,4 @@ void ViewerBackend::cancelPush()
     m_fileError = QStringLiteral("已取消");
     logf("[viewer] 文件推送已取消（被控端已关会话并删掉半截文件，收件目录不留残骸）");
     emit fileProgressChanged();
-}
-void ViewerBackend::sendType(const QString &text)
-{
-    if (m_currentUid.isEmpty()) { logf("[viewer] FAIL 没选设备不发打字"); return; }
-    QJsonObject params;
-    params.insert(QStringLiteral("kind"), QStringLiteral("type"));
-    params.insert(QStringLiteral("text"), text);
-    QJsonObject p;
-    p.insert(QStringLiteral("uid"), m_currentUid);
-    p.insert(QStringLiteral("action"), QStringLiteral("input"));
-    p.insert(QStringLiteral("params"), params);
-    sendEnvelope(QStringLiteral("instruction"), p);
-    logf("[viewer] 操控→ 打字 %d 字符", text.size());
 }

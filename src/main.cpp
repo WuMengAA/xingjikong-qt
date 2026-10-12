@@ -250,6 +250,8 @@ public:
         QImage img;
         if (base == QLatin1String("f") || base.isEmpty()) {
             img = m_backend->frame();
+        } else if (base == QLatin1String("cam")) {
+            img = m_backend->camFrame();          // 摄像头第二轨（四·双画面）
         } else {
             img = m_backend->thumbFrame(base);
         }

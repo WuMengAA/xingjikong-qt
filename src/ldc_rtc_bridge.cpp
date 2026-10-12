@@ -40,6 +40,10 @@ void ldcInitRtc(ViewerBackend *backend)
     QObject::connect(&r, &LdcReceiver::frameReady, backend,
         [backend](const QImage &img) { backend->emitLdcFrame(img); },
         Qt::UniqueConnection);
+    // 摄像头第二轨帧（2026-10-12 · 四·双画面）：落 m_camFrame → QML 摄像头格
+    QObject::connect(&r, &LdcReceiver::cameraFrameReady, backend,
+        [backend](const QImage &img) { backend->emitLdcCameraFrame(img); },
+        Qt::UniqueConnection);
 
     backend->setLdcRtcState(QStringLiteral("ldc"));
 }

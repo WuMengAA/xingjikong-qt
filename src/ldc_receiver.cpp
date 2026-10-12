@@ -68,20 +68,26 @@ void LdcReceiver::createPc(const QByteArray &payload)
                 emit failed(QStringLiteral("PeerConnection Failed"));
         });
 
-        // 收流：track 的每个 message 是 RTP 包（RtpHeader + JPEG 载荷），剥头解 JPEG
+        // 收流：track 的每个 message 是 RTP 包（RtpHeader + JPEG 载荷），剥头解 JPEG。
+        // 2026-10-12 四·双画面：按 track mid 分流 —— "camera" 轨走 cameraFrameReady，
+        // 其余（"screen"）走 frameReady，屏幕路径行为不变。
         pc->onTrack([this](std::shared_ptr<rtc::Track> track) {
+            const bool isCam = (track->mid() == "camera");
             {
                 QMutexLocker lock(&m_mu);
-                m_track = track.get();
+                if (isCam) m_camTrack = track.get();
+                else       m_track = track.get();
             }
-            track->onMessage([this](rtc::binary data) {
+            track->onMessage([this, isCam](rtc::binary data) {
                 const auto *raw = reinterpret_cast<const unsigned char *>(data.data());
                 const size_t n = data.size();
                 if (n < 12) return;   // RTP 固定头至少 12B
                 const QByteArray bytes(reinterpret_cast<const char *>(raw + 12), int(n - 12));
                 QImage img;
-                if (img.loadFromData(bytes, "JPEG"))
-                    emit frameReady(img);
+                if (img.loadFromData(bytes, "JPEG")) {
+                    if (isCam) emit cameraFrameReady(img);
+                    else       emit frameReady(img);
+                }
             }, nullptr);
         });
 
@@ -124,6 +130,7 @@ void LdcReceiver::stop()
         QMutexLocker lock(&m_mu);
         m_pc.reset();
         m_track = nullptr;
+        m_camTrack = nullptr;
     }
     emit stateChanged(false);
 }
