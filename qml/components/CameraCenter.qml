@@ -228,7 +228,7 @@ Item {
         anchors.bottomMargin: 6
         spacing: 8
 
-        TabBar {
+        StTabBar {
             id: tabs
             theme: cc.theme
             width: parent.width

@@ -96,29 +96,38 @@ static void writeLogBytes(const QByteArray &bytes)
     fflush(g_log);
 }
 
+/** 首次调用时打开日志文件（幂等）。失败必须喊出来（fail-silent 红线）。
+ *  2026-10-12 修：日志此前**从不落盘**——初始化在 writeLog 里，而 logf /
+ *  installMessageHandler 都直接调 writeLogBytes（g_log 恒 null 直接 return），
+ *  writeLog 全文无调用点。双击启动的 Windows GUI 无控制台 ⇒ 一个字的日志
+ *  都不写。抽成这里，所有日志出口先 ensureLogOpen() 再写。 */
+static void ensureLogOpen()
+{
+    if (g_log || g_logTried) return;
+    g_logTried = true;
+    // 路径必须本机编码：fopen 不吃 UTF-8
+    const QByteArray pathLocal = logFilePath().toLocal8Bit();
+    g_log = fopen(pathLocal.constData(), "a");
+    if (!g_log) {
+        // 写不进必须**喊出来**：静默丢日志的时候，现场只剩下"好像跑了但什么都没记"，
+        // 比压根没日志还贵。控制台跑这一步一定看得见。
+        const QByteArray m =
+            QStringLiteral("[viewer] FAIL 日志写不进 %1 —— 后面所有日志都会丢，请改用控制台运行")
+                .arg(logFilePath()).toLocal8Bit();
+        fwrite(m.constData(), 1, m.size(), stderr);
+        fputc('\n', stderr);
+        fflush(stderr);
+        return;
+    }
+    const QByteArray head =
+        QStringLiteral("=== viewer-qt 启动，日志=%1 ===").arg(logFilePath()).toLocal8Bit();
+    writeLogBytes(head);
+}
+
 /** 写一行日志。入参约定：**UTF-8**（源文件中文字面量就是 UTF-8）。 */
 static void writeLog(const char *s)
 {
-    if (!g_log && !g_logTried) {
-        g_logTried = true;
-        // 路径必须本机编码：fopen 不吃 UTF-8
-        const QByteArray pathLocal = logFilePath().toLocal8Bit();
-        g_log = fopen(pathLocal.constData(), "w");
-        if (!g_log) {
-            // 写不进必须**喊出来**：静默丢日志的时候，现场只剩下"好像跑了但什么都没记"，
-            // 比压根没日志还贵。控制台跑这一步一定看得见。
-            const QByteArray m =
-                QStringLiteral("[viewer] FAIL 日志写不进 %1 —— 后面所有日志都会丢，请改用控制台运行")
-                    .arg(logFilePath()).toLocal8Bit();
-            fwrite(m.constData(), 1, m.size(), stderr);
-            fputc('\n', stderr);
-            fflush(stderr);
-            return;
-        }
-        const QByteArray head =
-            QStringLiteral("=== viewer-qt 启动，日志=%1 ===").arg(logFilePath()).toLocal8Bit();
-        writeLogBytes(head);
-    }
+    ensureLogOpen();
     writeLogBytes(QString::fromUtf8(s).toLocal8Bit());
 }
 
@@ -126,9 +135,18 @@ void logf(const char *fmt, ...)
 {
     char buf[2048];
     va_list ap; va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
+    const int n = vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
+    // 2026-10-12 修：vsnprintf 返回值 ≥ 缓冲区大小 = 被静默截断（之前直接丢），
+    // 超长时留个标记，不然排查时看到半截句子以为是 bug。
+    if (n >= (int)sizeof(buf)) {
+        const QByteArray trunc = QStringLiteral("[truncated]").toLocal8Bit();
+        fwrite(trunc.constData(), 1, trunc.size(), stderr);
+        fputc('\n', stderr);
+        fflush(stderr);
+    }
     // buf 是 UTF-8（源文件中的中文字面量）；转成本机编码再写盘、再打控制台
     const QByteArray local = QString::fromUtf8(buf).toLocal8Bit();
+    ensureLogOpen();   // 2026-10-12 修：日志此前从不落盘（见 ensureLogOpen 注释）
     writeLogBytes(local);
     fwrite(local.constData(), 1, local.size(), stdout);
     fputc('\n', stdout);
@@ -152,6 +170,7 @@ static void installMessageHandler()
         fwrite(local.constData(), 1, local.size(), stdout);
         fputc('\n', stdout);
         fflush(stdout);
+        ensureLogOpen();   // 2026-10-12 修：日志此前从不落盘（见 ensureLogOpen 注释）
         writeLogBytes(local);
     });
 }
@@ -548,7 +567,9 @@ int main(int argc, char *argv[])
         for (const QQmlError &e : errs)
             qWarning().noquote() << "[qml-warn]" << e.toString();
     });
-    engine.load(QUrl(qmlUrl));
+    // 2026-10-12 修复：本地 QML 必须用 QUrl::fromLocalFile 加载——
+    // 原 QUrl(qmlUrl) 在 Windows 路径下被误当 scheme 静默丢弃，导致 Main.qml 永远加载失败。
+    engine.load(QUrl::fromLocalFile(qmlUrl));
 
     if (engine.rootObjects().isEmpty()) {
         logf("[viewer] FAIL QML 没能加载（qml/Main.qml 有问题？）—— 退出");

@@ -5,8 +5,10 @@
 // 未选中用次文字（fg3），悬停用 hover 底——和 Btn 四态一个语言。
 //
 // 用法：
-//   TabBar { theme: th; width: parent.width; model: ["实时","录制回放","诊断"]; currentIndex: 0 }
+//   StTabBar { theme: th; width: parent.width; model: ["实时","录制回放","诊断"]; currentIndex: 0 }
 //   读 currentIndex；点选由组件内部改 currentIndex（父级 onCurrentIndexChanged 接）。
+//   ⚠️ 命名特意加 St 前缀：避免与 QtQuick.Controls 自带的 TabBar 冲突（后者无 model 属性，
+//     同名会导致 CameraCenter 里 model: 赋值报 "Cannot assign to non-existent property"）。
 import QtQuick
 
 Rectangle {
