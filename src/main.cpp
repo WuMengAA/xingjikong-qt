@@ -573,7 +573,13 @@ int main(int argc, char *argv[])
     });
     // 2026-10-12 修复：本地 QML 必须用 QUrl::fromLocalFile 加载——
     // 原 QUrl(qmlUrl) 在 Windows 路径下被误当 scheme 静默丢弃，导致 Main.qml 永远加载失败。
-    engine.load(QUrl::fromLocalFile(qmlUrl));
+    // ⚠️ 但 Android 分支 qmlUrl 可能是 "qrc:/Main.qml"（资源前缀），fromLocalFile 会把它
+    //   当本地文件路径（qrc:/Main.qml 不存在）→ 崩溃。按来源分支：
+    //   · qrc:/ 前缀 → QUrl(qmlUrl)（Qt 资源 URL 的合法写法）
+    //   · 本地磁盘路径 → QUrl::fromLocalFile
+    engine.load(qmlUrl.startsWith(QLatin1String("qrc:"))
+                    ? QUrl(qmlUrl)
+                    : QUrl::fromLocalFile(qmlUrl));
 
     if (engine.rootObjects().isEmpty()) {
         logf("[viewer] FAIL QML 没能加载（qml/Main.qml 有问题？）—— 退出");
