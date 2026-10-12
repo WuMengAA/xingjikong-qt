@@ -517,6 +517,11 @@ int main(int argc, char *argv[])
     // —— Fluent 管交互控件，自绘管视觉主区，二者共存。
     // 写进程环境而非 QQuickStyle::setStyle：风格插件加载时读，越早设越好。
     qputenv("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3");
+    // 2026-10-12 审计 #19 记录：FluentWinUI3 是 Qt 6.12 才支持的风格，而 CMake
+    // 声明的最低版本是 6.5——落在 [6.5, 6.12) 的构建环境会被静默忽略（无报错）。
+    // 运行时核对（QQuickStyle::name()）需链接 QtQuickControls2 C++ 库，当前工程
+    // 是 QML 插件加载方式不直链它 → 放弃核对，留此注释：构建机务必用 Qt ≥ 6.12
+    // （本项目已固定 D:\QTqwq\6.12.0，故实际恒生效；换机时注意）。
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
