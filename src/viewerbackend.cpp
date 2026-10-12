@@ -35,7 +35,8 @@
 #include "android_notify.h"   // 2026-10-11：手机系统通知栏横幅（桌面为空实现）
 
 #if defined(Q_OS_ANDROID)
-#include <QtCore/private/qandroidextras_p.h>   // 2026-10-11：手机开麦请求 RECORD_AUDIO（Qt 官方 Android 私有 API）
+#include <QPermissions>                        // 2026-10-13：开麦权限走 Qt 官方 QPermission（QMicrophonePermission，QtCore 自带，无需 Multimedia）
+#include <QtCore/private/qandroidextras_p.h>   // 2026-10-11：手机文件选择器 startActivity（Qt 官方 Android 私有 API）
 #include <QFutureWatcher>
 #include <QJniArray>                          // 2026-10-11：文件传输 SAF——读 content:// 用
 #include <QSaveFile>                          // 复制到缓存目录（写完才算成功，避免半截坏文件）
@@ -2414,11 +2415,39 @@ bool ViewerBackend::startSpeaking()
 {
     if (m_speaking) return true;
 #if defined(Q_OS_ANDROID)
-    if (audioPermGranted())
+    // 2026-10-13 修（用户 #111 · Android 运行时权限模型）：
+    // 旧写法直接调 QtAndroidPrivate::requestPermission —— **每次都请求**。而 Android
+    // 在用户拒过一次后就**不再弹框**，于是变成"请求 → 立刻 Denied → 报失败"的死循环，
+    // 永远卡在"没权限"（dsh 10-11 记的"弹框只出现一次"就是这个症状，不是根因）。
+    // 正确模型是先 checkPermission 分三态：
+    //   Granted      → 直接开麦；
+    //   Denied       → 已拒/勾了"不再询问"，**再请求也不会弹** ⇒ 不浪费请求，直接引导去系统设置；
+    //   Undetermined → 才轮到系统请求框（第一次、也是唯一该弹的一次）。
+    QMicrophonePermission mic;
+    switch (qApp->checkPermission(mic)) {
+    case Qt::PermissionStatus::Granted:
         return startSpeakingCapture();
-    // 权限未授权：发起请求（弹系统框），授权回调里开麦。
-    // 返回 **true**（"已受理"）——别让 QML 立刻报"开麦失败"，弹框正在等用户。
-    requestAudioPerm();
+    case Qt::PermissionStatus::Denied:
+        m_speakError = QStringLiteral("麦克风权限被拒绝——请到「设置 → 应用 → 星集控 → 权限」里开启麦克风");
+        emit speakErrorChanged();
+        setStatus(m_speakError, true);
+        return false;
+    case Qt::PermissionStatus::Undetermined:
+    default:
+        break;
+    }
+    // 首次请求：弹系统框，回调里开麦。返回 **true**（"已受理"）——
+    // 别让 QML 立刻报"开麦失败"，框还开着等用户点呢。
+    qApp->requestPermission(mic, this, [this](const QPermission &p) {
+        emit audioPermChanged();
+        if (p.status() == Qt::PermissionStatus::Granted) {
+            startSpeakingCapture();
+        } else {
+            m_speakError = QStringLiteral("麦克风权限被拒绝——请到「设置 → 应用 → 星集控 → 权限」里开启麦克风");
+            emit speakErrorChanged();
+            setStatus(m_speakError, true);
+        }
+    });
     setStatus(QStringLiteral("请允许录音权限；授权后自动开麦"), false);
     return true;
 #else
@@ -2429,13 +2458,10 @@ bool ViewerBackend::startSpeaking()
 bool ViewerBackend::audioPermGranted() const
 {
 #if defined(Q_OS_ANDROID)
-    const QJniObject ctx(QNativeInterface::QAndroidApplication::context().object());
-    if (!ctx.isValid()) return false;
-    const jint r = ctx.callMethod<jint>(
-        "checkSelfPermission", "(Ljava/lang/String;)I",
-        QJniObject::fromString(QStringLiteral("android.permission.RECORD_AUDIO"))
-            .object<jstring>());
-    return r == 0;   // PackageManager.PERMISSION_GRANTED == 0
+    // 2026-10-13：改用 Qt 官方 QPermission（跨平台、不再手写 JNI checkSelfPermission）。
+    // 注意语义：**只有 Granted 才算"有权限"** —— Undetermined（没问过）对界面来说
+    // 同样是"还没有权限"，红条该显示（提示用户点一下会弹框）。
+    return qApp->checkPermission(QMicrophonePermission()) == Qt::PermissionStatus::Granted;
 #else
     return true;
 #endif
@@ -2444,28 +2470,9 @@ bool ViewerBackend::audioPermGranted() const
 void ViewerBackend::requestAudioPerm()
 {
 #if defined(Q_OS_ANDROID)
-    // 已授权就不重复弹框
-    if (audioPermGranted()) {
-        emit audioPermChanged();
-        startSpeakingCapture();
-        return;
-    }
-    auto future = QtAndroidPrivate::requestPermission(QStringLiteral("android.permission.RECORD_AUDIO"));
-    auto *watcher = new QFutureWatcher<QtAndroidPrivate::PermissionResult>(this);
-    QObject::connect(watcher, &QFutureWatcher<QtAndroidPrivate::PermissionResult>::finished, this,
-                     [this, watcher] {
-        const auto res = watcher->result();
-        watcher->deleteLater();
-        emit audioPermChanged();
-        if (res == QtAndroidPrivate::PermissionResult::Authorized) {
-            startSpeakingCapture();
-        } else {
-            m_speakError = QStringLiteral("麦克风权限被拒绝——点「去设置」在系统里开启录音权限");
-            emit speakErrorChanged();
-            setStatus(QStringLiteral("开麦失败：") + m_speakError, true);
-        }
-    });
-    watcher->setFuture(future);
+    // 2026-10-13：权限请求逻辑已并入 startSpeaking（三态检查 + 首次才弹框），
+    // 这里保留 Q_INVOKABLE 入口只为不破接口，语义等同"走一次开麦请求"。
+    startSpeaking();
 #endif
 }
 
