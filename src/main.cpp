@@ -620,6 +620,10 @@ int main(int argc, char *argv[])
         tray->setToolTip(QStringLiteral("星集控 · 管理端 v%1").arg(QString::fromLatin1(kViewerVersion)));
         g_notifyTray = tray;   // 登记：设置页那两个「提醒」开关的气泡走它
 
+        // 托盘菜单：QSystemTrayIcon::setContextMenu **不接管所有权**，而这里也没有可用的
+        // QWidget 父（QMenu 的 parent 必须是 QWidget*，tray 是 QSystemTrayIcon、app 是
+        // QApplication，都挂不上）⇒ menu 是**进程级故意不释放**的（退出时随进程回收）。
+        // ⚠️ 别"顺手"加 delete：菜单在托盘点开时还要用，提前释放会崩（2026-10-12 审计 #7）。
         auto *menu = new QMenu();
         auto *actStatus = menu->addAction(QStringLiteral("状态：运行中"));
         actStatus->setEnabled(false);                       // 只显示，不可点
@@ -661,7 +665,7 @@ int main(int argc, char *argv[])
 
         tray->setContextMenu(menu);
         // 点击托盘图标：主窗口 显示↔隐藏 切换（常驻托盘的标准交互）
-        QObject::connect(tray, &QSystemTrayIcon::activated, &app, [&engine, tray](QSystemTrayIcon::ActivationReason reason) {
+        QObject::connect(tray, &QSystemTrayIcon::activated, &app, [&engine](QSystemTrayIcon::ActivationReason reason) {
             if (reason != QSystemTrayIcon::Trigger && reason != QSystemTrayIcon::DoubleClick)
                 return;
             auto *win = engine.rootObjects().isEmpty() ? nullptr : qobject_cast<QWindow *>(engine.rootObjects().first());
@@ -676,7 +680,6 @@ int main(int argc, char *argv[])
                 win->raise();
                 win->requestActivate();
             }
-            Q_UNUSED(tray);
         });
         tray->show();          // 先设图标再 show，避免 "No Icon set" 警告
         logf("[viewer] 托盘已就绪（v%s）", kViewerVersion);

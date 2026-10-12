@@ -256,7 +256,10 @@ if(STE_IS_ANDROID)
   # RECORD_AUDIO 权限请求走 QtAndroidPrivate（QtCore 私有头）→ 链 QtCorePrivate 拿到 include 路径
   target_link_libraries(viewer-qt PRIVATE Qt6::CorePrivate)
 endif()
-set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE OFF)
+# 2026-10-12 修（审计）：管理端是老师机**双击运行**的桌面程序，OFF = 控制台子系统 ⇒
+# 双击时弹一个黑窗口（用户观感"这软件怎么带个 DOS 框"）。日志现已落盘（main.cpp 的
+# ensureLogOpen → viewer-run.log），不再依赖控制台看输出 ⇒ 改 ON（GUI 子系统，不弹窗口）。
+set_target_properties(viewer-qt PROPERTIES WIN32_EXECUTABLE ON)
 
 # 2026-10-09：viewerbackend.cpp 2700+ 行单编译单元峰值超内存（C1060）。
 # 只此文件降优化（/Od），其余文件保持 Release 优化——编译内存峰值降下来，功能零影响。
