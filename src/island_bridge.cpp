@@ -2,7 +2,6 @@
 #include "island.h"
 #include "whale_audio.h"
 
-#include <QDebug>
 #include <QRegularExpression>
 #include <QSettings>
 

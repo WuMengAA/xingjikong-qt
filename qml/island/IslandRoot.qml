@@ -13,7 +13,7 @@ import "."
 //   bridge.fireAction(label)   QML → C++ 回调
 //   bridge.requestExpand(bool) 手势 → C++
 //   bridge.history     [{title,desc,icon,ts,timeStr}]  历史通知列表
-//   bridge.dismissHistory(index)              清除一条历史
+//   bridge.showHistoryItem(index)             查看/恢复某条历史（点击历史项）
 //   bridge.clearHistory()                     清空全部历史
 //
     // ── 尺寸模型 ───────────────────────────────────────────
