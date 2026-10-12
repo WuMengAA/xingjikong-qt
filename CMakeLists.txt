@@ -274,7 +274,14 @@ endif()
 # ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
 #    STE_USE_LDC_RTC=1 默认走 ldc，=0 回退 WebEngine）────────────────────
 # 2026-10-11：桌面专用（MSVC .lib + PG OpenSSL）；Android 走文件尾的 ldc_libs_android 分支
+# 2026-10-13 审计 #26：OpenSSL 路径从硬编码 PostgreSQL 默认改为可覆盖——
+#   STE_OPENSSL_ROOT 指向含 libssl.lib/libcrypto.lib 的目录（默认仍 PG 17 路径，
+#   兼容现有构建机；别的机器设 env 即可，不再要求必须装在默认位置）。
 if(NOT STE_IS_ANDROID AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
+  set(STE_OPENSSL_ROOT "$ENV{STE_OPENSSL_ROOT}" CACHE PATH "OpenSSL lib 目录（含 libssl.lib/libcrypto.lib）")
+  if(NOT STE_OPENSSL_ROOT)
+    set(STE_OPENSSL_ROOT "C:/Program Files/PostgreSQL/17/lib" CACHE PATH "" FORCE)
+  endif()
   target_include_directories(viewer-qt PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
   target_link_libraries(viewer-qt PRIVATE
@@ -282,8 +289,8 @@ if(NOT STE_IS_ANDROID AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_l
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/srtp2.lib"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/juice.lib"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/usrsctp.lib"
-    "C:/Program Files/PostgreSQL/17/lib/libssl.lib"
-    "C:/Program Files/PostgreSQL/17/lib/libcrypto.lib"
+    "${STE_OPENSSL_ROOT}/libssl.lib"
+    "${STE_OPENSSL_ROOT}/libcrypto.lib"
     ws2_32 bcrypt crypt32 userenv secur32)
   target_compile_definitions(viewer-qt PRIVATE RTC_STATIC)
   message(STATUS "[viewer] libdatachannel 已链入（RTC_STATIC）")
