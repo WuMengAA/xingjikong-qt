@@ -194,6 +194,23 @@ QString IslandBridge::fileTransferName() const  { return m_host ? m_host->m_ftNa
 qint64  IslandBridge::fileTransferBytes() const { return m_host ? m_host->m_ftBytes : 0; }
 qint64  IslandBridge::fileTransferTotal() const { return m_host ? m_host->m_ftTotal : 0; }
 
+// ── §6.3 语音频谱（2026-10-13）──
+QVariantList IslandBridge::spectrumBands() const
+{
+    QVariantList out;
+    if (!m_host) return out;
+    out.reserve(m_host->m_spectrumBands.size());
+    for (float b : m_host->m_spectrumBands) out.append(double(b));
+    return out;
+}
+bool IslandBridge::spectrumActive() const { return m_host ? m_host->m_spectrumOn : false; }
+
+void IslandBridge::syncSpectrum()
+{
+    // 只发频谱那一路：高频（每帧一次），不能拖累全量 changed（见头文件里的说明）
+    emit spectrumChanged();
+}
+
 void IslandBridge::showHistoryItem(int index)
 {
     if (!m_host) return;

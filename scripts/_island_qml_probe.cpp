@@ -29,6 +29,7 @@
 #include <QFontDatabase>
 #include <QTextStream>
 #include <QTimer>
+#include <cmath>   // §6.3 频谱探针：std::sin
 
 // 从岛的子控件里找 QQuickWidget（island.h 没有公开 getter，这里按类型找）
 static QQuickWidget *findQuick(QWidget *w)
@@ -68,7 +69,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    bool idle = false, expand = false, actions = false, light = false;
+    bool idle = false, expand = false, actions = false, light = false, spectrum = false;
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
@@ -76,6 +77,7 @@ int main(int argc, char *argv[])
         if (a == QLatin1String("--expand"))    expand = true;
         if (a == QLatin1String("--actions"))   actions = true;
         if (a == QLatin1String("--light"))     light = true;
+        if (a == QLatin1String("--spectrum"))  spectrum = true;   // §6.3 频谱态（2026-10-13）
         if (a == QLatin1String("--out") && i + 1 < argc)
             outPath = QString::fromLocal8Bit(argv[++i]);
     }
@@ -100,6 +102,32 @@ int main(int argc, char *argv[])
                              },
                              0);
         if (expand) isl->setExpanded(true);
+    } else if (spectrum) {
+        // §6.3 语音频谱（2026-10-13）：对讲中岛展开 + 展开态画 16 条。
+        // 造一段 16kHz/16bit/20ms 的合成 PCM（多频叠加，让各带强弱不同），
+        // 用 40ms 节拍**反复喂** —— 只喂一次的话，岛心跳（500ms）会把条按"静音"衰减归零。
+        isl->showIsland(QStringLiteral("老师正在讲话"),
+                        QStringLiteral("老师正在通过语音对讲广播"),
+                        QStringLiteral("mic"), 0);
+        isl->setExpanded(true);
+        auto *pcm = new QByteArray();
+        {
+            const int n = 320;   // 16kHz × 20ms
+            pcm->resize(n * 2);
+            auto *s = reinterpret_cast<qint16 *>(pcm->data());
+            for (int i = 0; i < n; ++i) {
+                double v = 0.0;
+                for (int b = 0; b < 10; ++b)
+                    v += (0.35 / (b + 1)) * std::sin(2.0 * 3.14159265358979
+                                                     * (i * (b + 1) * 2.0 / double(n)));
+                s[i] = qint16(qBound(-32767.0, v * 32767.0, 32767.0));
+            }
+        }
+        auto *tick = new QTimer(&app);
+        tick->setInterval(40);
+        QObject::connect(tick, &QTimer::timeout, isl, [isl, pcm]() { isl->feedSpectrum(*pcm); });
+        tick->start();
+        isl->feedSpectrum(*pcm);
     } else {
         isl->showIsland(QStringLiteral("老师正在讲话"),
                         QStringLiteral("请保持安静，认真听讲，有问题举手"),
@@ -165,6 +193,7 @@ int main(int argc, char *argv[])
             dumpProp("_light");
             dumpProp("_interactive");
             dumpProp("_severity");
+            dumpProp("_spectrumActive");   // §6.3：频谱态（2026-10-13）
             dumpProp("implicitWidth");
             dumpProp("implicitHeight");
             dumpProp("width");
@@ -174,6 +203,8 @@ int main(int argc, char *argv[])
             QVariant ac = ri->property("_actions");
             out << "  root._states.count = " << st.toList().size() << "\n";
             out << "  root._actions.count = " << ac.toList().size() << "\n";
+            QVariant sb = ri->property("_spectrumBands");
+            out << "  root._spectrumBands.count = " << sb.toList().size() << "\n";
         }
 
         // ⚠️ 关键：QML 内容必须用 grabFramebuffer()，普通 grab() 拿到空白。

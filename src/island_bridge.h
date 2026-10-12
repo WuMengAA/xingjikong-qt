@@ -80,6 +80,13 @@ class IslandBridge : public QObject
     Q_PROPERTY(qint64  fileTransferBytes  READ fileTransferBytes  NOTIFY changed)
     Q_PROPERTY(qint64  fileTransferTotal  READ fileTransferTotal  NOTIFY changed)
 
+    // ── §6.3 语音频谱（2026-10-13 · 修「频谱显示到窗口去了」）──────────
+    // 对讲中岛在**展开态**画 16 条频谱（spectrumBands 是 16 个 0..1）。
+    // ⚠️ 单独一个 NOTIFY（spectrumChanged），**不挂全量 changed**：频谱每来一帧就变
+    //    （~50Hz），跟着 changed 走会让 QML 所有绑定（含 history/states）每秒重算几十次。
+    Q_PROPERTY(QVariantList spectrumBands  READ spectrumBands  NOTIFY spectrumChanged)
+    Q_PROPERTY(bool         spectrumActive READ spectrumActive NOTIFY spectrumChanged)
+
 public:
     explicit IslandBridge(IslandOverlay *host, QObject *parent = nullptr);
 
@@ -112,6 +119,12 @@ public:
     QString fileTransferName() const;
     qint64  fileTransferBytes() const;
     qint64  fileTransferTotal() const;
+
+    // §6.3 语音频谱
+    QVariantList spectrumBands() const;
+    bool spectrumActive() const;
+    // 频谱状态变了就调这个：**只发频谱那一路**（高频，别用全量 sync()）。
+    void syncSpectrum();
     // QML → C++：点历史项，恢复该通知到展开态
     Q_INVOKABLE void showHistoryItem(int index);
     // QML → C++：清空全部历史
@@ -138,6 +151,8 @@ private:
 
 signals:
     void changed();
+    // §6.3 语音频谱专用通道（高频，见上面 Q_PROPERTY 注释）。
+    void spectrumChanged();
 };
 
 #endif // STELARITH_ISLAND_BRIDGE_H

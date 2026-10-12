@@ -81,6 +81,13 @@ Item {
     readonly property real  _ftTotal:    bridgeRef ? bridgeRef.fileTransferTotal  : 0
     readonly property real   _ftPct:      (root._ftTotal > 0) ? Math.min(1, root._ftBytes / root._ftTotal) : 0
 
+    // ── §6.3 语音频谱（桥 spectrumActive / spectrumBands）──────────
+    // 2026-10-13 修 bug「被控端频谱显示到窗口去了」：频谱改由岛自己画。
+    // ⚠️ 这条走**独立信号** spectrumChanged（约 50Hz），不是 changed() —— 别在这里
+    //    依赖 bridge.changed 的"一把全 NOTIFY"。
+    readonly property bool _spectrumActive: bridgeRef ? bridgeRef.spectrumActive : false
+    readonly property var  _spectrumBands:  (bridgeRef && bridgeRef.spectrumBands) ? bridgeRef.spectrumBands : []
+
     // ── 尺寸（显式，不靠隐式推导）───────────────────────────
     readonly property int padH: 14
     // 展开态"标题 + 描述"占的头部高度（自适应字号后标题可达 64px，2 行 128px）。
@@ -98,12 +105,17 @@ Item {
     // 面板高度按**最多 3 条**算（不再随条数一路涨到 300）—— 多于 3 条靠列表内滚动看，
     // 面板本身稳在 3 条的高度，展开态总高才钉得住 320。
     readonly property int histVisibleMax: 3
-    readonly property int histH: (root._expanded && root._history.length > 0 && !root._showActionsNow)
+    // 2026-10-13：语音对讲中（频谱态）不显示历史面板 —— 频谱区与历史区都在展开态，
+    // 同屏会挤，且对讲本身就是临时的。收起频谱后历史照常出来。
+    readonly property int histH: (root._expanded && root._history.length > 0 && !root._showActionsNow
+                                  && !root._spectrumActive)
         ? Math.min(root.histVisibleMax, root._history.length) * 48 + 32
         : 0
     readonly property int actH:  (root._actions.length > 0) ? 34 : 0
     // 文件传输进度条占的额外高度（展开态 + 传输中才给）
     readonly property int ftH: (root._expanded && root._ftActive) ? 46 : 0
+    // §6.3 语音频谱区占的额外高度（展开态 + 对讲中才给；= 34 高 + 12 上边距）
+    readonly property int specH: (root._expanded && root._spectrumActive) ? 46 : 0
     readonly property int collapsedH: root.th.shapeCollapsed
 
     // 有动作按钮时：胶囊也走"加高"逻辑（Centered/Fullscreen 本来就高）
@@ -152,7 +164,7 @@ Item {
                                : (root._expanded ? 640 : 320)
     implicitHeight: root._idle ? root.th.shapeIdle
                                : (root._expanded
-                                  ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.actH + root.padH)
+                                  ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.specH + root.actH + root.padH)
                                   : (root._showActionsNow
                                      ? Math.max(root.collapsedH + root.actH + 10, 90)
                                      : root.collapsedH))
@@ -451,6 +463,63 @@ Item {
                     font.weight: Font.Medium
                 }
             }
+
+            // ── §6.3 语音频谱（展开态 · 对讲中）────────────────────────
+            // 2026-10-13 修 bug「被控端频谱显示到窗口去了」：原实现是 C++ 里 `new
+            // SpectrumWidget()`（**无 parent**）+ show() ⇒ 桌面 (20,20) 弹独立顶层窗口。
+            // 规格 §6.3 要求「语音对讲 → 岛展开；展开态显示 16 位频谱」⇒ 现在由岛自己画。
+            // 数据走独立信号 spectrumChanged（~50Hz），不依赖 changed()。
+            Item {
+                id: specRow
+                visible: root._expanded && root._spectrumActive
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: ftRow.bottom
+                anchors.topMargin: visible ? 12 : 0
+                height: visible ? 34 : 0
+
+                Text {
+                    id: specLabel
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    // ⚠️ 不用 "♪" 之类的符号字形：教室机字体不全时会渲染成豆腐块。
+                    //    中文一定有（岛里其它文案全是中文）。
+                    text: "语音"
+                    color: root.th.sub
+                    font.pixelSize: 11
+                }
+
+                Row {
+                    id: specBarsRow
+                    anchors.left: specLabel.right
+                    anchors.leftMargin: 8
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    spacing: 3
+
+                    Repeater {
+                        id: specBars
+                        // 长度由 C++ 给（kSpectrumBands = 16）；空数组时不渲染。
+                        model: root._spectrumBands
+                        delegate: Item {
+                            // 等分剩余宽度（给 label + 间隙留位）
+                            width: Math.max(2, (specBarsRow.width - (specBars.count - 1) * 3)
+                                               / Math.max(1, specBars.count))
+                            height: specBarsRow.height
+                            Rectangle {
+                                anchors.bottom: parent.bottom
+                                width: parent.width
+                                height: Math.max(2, parent.height
+                                                    * (typeof modelData === "number" ? modelData : 0))
+                                radius: 1.5
+                                color: root.th.accent
+                                Behavior on height { NumberAnimation { duration: 60 } }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -507,6 +576,7 @@ Item {
     Item {
         id: historyPanel
         visible: root._expanded && root._history.length > 0 && !root._showActionsNow
+                 && !root._spectrumActive   // 2026-10-13：对讲频谱态不显示历史（见 histH 注释）
         anchors.left: parent.left
         anchors.leftMargin: root.padH
         anchors.right: parent.right

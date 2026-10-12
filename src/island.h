@@ -31,6 +31,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <QByteArray>
 #include <QPointer>
 #include <QTimer>
 #include <QPropertyAnimation>
@@ -125,6 +126,19 @@ public:
     void setFileTransfer(const QString &name, qint64 bytes, qint64 total);
     void clearFileTransfer();
 
+    // ── §6.3 语音频谱（2026-10-13）────────────────────────────────────
+    // 喂一小段语音对讲 PCM → 岛在**展开态**画 16 位频谱（16 条随幅度跳动，静音归零）。
+    // ⚠️ 2026-10-13 修 bug「被控端频谱显示到窗口去了」：原实现是 main.cpp 里
+    //    `g_spectrum = new SpectrumWidget()`（**无 parent**）+ `show()` ⇒ 频谱在桌面
+    //    (20,20) 弹出一个**独立顶层窗口**，挡在课件上、看着像野窗口。
+    //    规格 §6.3 明写「语音对讲 → 被控端灵动岛**展开**；展开态显示 16 位频谱」
+    //    ⇒ 现在频谱由岛自己画（QML），不再有任何独立窗口。
+    //    feedSpectrum() 会顺带保证岛处于展开态（否则展开态那块频谱区看不到）。
+    void feedSpectrum(const QByteArray &pcm, int sampleRate = 16000, int bits = 16);
+    // 对讲结束（audio.stop）→ 频谱归零收起（并让岛回到收起/空闲）。
+    void setSpectrumActive(bool on);
+    bool spectrumActive() const { return m_spectrumOn; }
+
 signals:
     void expandedChanged(bool expanded);
 
@@ -165,6 +179,7 @@ private:
     };
     QVector<HistoryItem> m_history;
     static constexpr int kMaxHistory = 50;   // 最多保留 50 条，超出按 FIFO 清旧
+    static constexpr int kSpectrumBands = 16;   // §6.3 语音频谱带数（QML 按 bands 长度渲染）
     // 2026-10-13（用户「每条消息保存时间为一周，一周后清除历史」）：超过 7 天的历史
     // 在加载/归档时剔除（loadHistory 与 archiveToHistory 都过一遍 pruneHistory）。
     static constexpr qint64 kHistoryKeepSecs = 7 * 24 * 3600;
@@ -211,6 +226,11 @@ private:
     QString m_ftName;             // 传输中的文件名
     qint64 m_ftBytes = 0;         // 已接收字节
     qint64 m_ftTotal = 0;         // 总字节（<=0 表示大小未知）
+
+    // ── §6.3 语音频谱（2026-10-13）──
+    bool m_spectrumOn = false;        // 对讲中（展开态显示频谱区）
+    QVector<float> m_spectrumBands;   // 16 个 0..1 能量（IslandBridge 读它给 QML）
+    qint64 m_spectrumLastMs = 0;      // 最近一次有数据的时刻（静音 800ms 归零，与旧件同口径）
 
     QTimer *m_autoClose = nullptr;
     QTimer *m_dismissGuard = nullptr;   // dismiss 淡出的兜底：动画没走完也强制 hide

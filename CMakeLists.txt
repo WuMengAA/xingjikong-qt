@@ -128,8 +128,6 @@ add_executable(stelarith-agent-qt
   src/danmaku.h
   src/loop_reminder.cpp
   src/loop_reminder.h
-  src/spectrum_widget.cpp
-  src/spectrum_widget.h
   src/noise_monitor.cpp
   src/noise_monitor.h
   src/notification_gate.cpp

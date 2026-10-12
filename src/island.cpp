@@ -54,6 +54,7 @@
 #include <QJsonArray>
 #include <QStandardPaths>
 #include <QDateTime>
+#include <QtMath>          // §6.3 语音频谱：qSqrt
 
 // 2026-10-08 lucide(morphicons 同款) SVG 图标渲染：读取 qrc 内 /icons/<name>.svg，
 // 把 stroke/fill 的 currentColor 换成主题前景色后渲染成 QPixmap（深浅主题自动适配）。
@@ -187,6 +188,19 @@ IslandOverlay::IslandOverlay(QWidget *parent)
             m_marqueeX -= 16;
             if (m_marqueeX + m_marqueeTextW < 0) m_marqueeX = rect().width();
             update();
+        }
+        // §6.3 语音频谱：对讲中若**这一跳没有新帧**（老师停顿/没声音），条高缓慢回落，
+        // 别让频谱"冻"在最后一个幅度上（旧 SpectrumWidget 的 decay 定时器同口径）。
+        // 有新帧时不动 —— 结果由 feedSpectrum 的 0.7/0.3 平滑负责，避免两处互相打架。
+        if (m_spectrumOn && !m_spectrumBands.isEmpty() && isVisible()
+            && (m_spectrumLastMs == 0
+                || QDateTime::currentMSecsSinceEpoch() - m_spectrumLastMs > 400)) {
+            bool changed = false;
+            for (float &b : m_spectrumBands) {
+                if (b > 0.02f) { b *= 0.55f; changed = true; }
+                else if (b != 0.f) { b = 0.f; changed = true; }
+            }
+            if (changed && m_bridge) m_bridge->syncSpectrum();
         }
     });
     m_clockTick->start();
@@ -553,6 +567,74 @@ void IslandOverlay::clearFileTransfer()
     m_ftBytes = 0;
     m_ftTotal = 0;
     if (m_bridge) m_bridge->sync();
+    update();
+}
+
+// ── §6.3 语音频谱（2026-10-13 · 修「频谱显示到窗口去了」）──────────────────
+// 从一段 PCM 算 16 段能量（**时域分段 RMS** —— 与旧 SpectrumWidget 同口径：语音
+// 看的是包络起伏，不追求精确谱；也免引 FFT 依赖）。
+// ⚠️ bits/sampleRate 只用于解包；分带按"样本序"线性切，不依赖采样率。
+void IslandOverlay::feedSpectrum(const QByteArray &pcm, int sampleRate, int bits)
+{
+    Q_UNUSED(sampleRate);
+    if (pcm.isEmpty()) return;
+
+    // 第一次来帧：置位并通知 QML 显示频谱区。
+    if (!m_spectrumOn) {
+        m_spectrumOn = true;
+        if (m_bridge) m_bridge->syncSpectrum();
+    }
+    // 频谱画在**展开态**里：保证岛是展开的。
+    // （已展开时 setExpanded(true) 会早退，不会打断用户；收起时自动展开，对讲期间保持可见。）
+    if (isVisible() && !m_expanded) setExpanded(true);
+
+    // 解包 → float（-1..1）
+    QVector<float> frame;
+    if (bits == 16 && pcm.size() >= 2) {
+        const auto *s = reinterpret_cast<const qint16 *>(pcm.constData());
+        const int n = int(pcm.size() / 2);
+        frame.resize(n);
+        for (int i = 0; i < n; ++i) frame[i] = float(s[i]) / 32768.f;
+    } else if (bits == 32 && pcm.size() >= 4) {
+        const auto *f = reinterpret_cast<const float *>(pcm.constData());
+        const int n = int(pcm.size() / 4);
+        frame.resize(n);
+        for (int i = 0; i < n; ++i) frame[i] = f[i];
+    } else {
+        return;   // 不认识的格式：忽略（不假装有频谱）
+    }
+    if (frame.isEmpty()) return;
+
+    if (m_spectrumBands.size() != kSpectrumBands)
+        m_spectrumBands.fill(0.f, kSpectrumBands);
+
+    const int n = frame.size();
+    for (int b = 0; b < kSpectrumBands; ++b) {
+        const int lo = (b * n) / kSpectrumBands;
+        const int hi = ((b + 1) * n) / kSpectrumBands;
+        double sum = 0.0;
+        int c = 0;
+        for (int i = lo; i < hi && i < n; ++i) {
+            sum += double(frame[i]) * double(frame[i]);
+            ++c;
+        }
+        const float e = c > 0 ? float(qSqrt(sum / double(c))) : 0.f;
+        const float target = qMin(1.f, e * 6.f);   // 增益：语音幅度偏小
+        m_spectrumBands[b] = 0.7f * m_spectrumBands[b] + 0.3f * target;   // 平滑，避免条形乱跳
+    }
+    m_spectrumLastMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_bridge) m_bridge->syncSpectrum();
+}
+
+void IslandOverlay::setSpectrumActive(bool on)
+{
+    if (m_spectrumOn == on) return;
+    m_spectrumOn = on;
+    if (!on) {
+        m_spectrumBands.fill(0.f, kSpectrumBands);
+        m_spectrumLastMs = 0;
+    }
+    if (m_bridge) m_bridge->syncSpectrum();
     update();
 }
 

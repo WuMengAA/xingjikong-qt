@@ -54,7 +54,6 @@
 #include "danmaku.h"           // §1.2 弹幕：字幕式横向滚动
 #include "loop_reminder.h"     // §1.2 loopRemind：未确认循环提醒
 #include "notification_gate.h" // §6.2 考试模式禁一切通知与监视
-#include "spectrum_widget.h"   // §6.3 语音通知 16 位频谱
 #include "edge_tts.h"          // §6.4 Edge 语音 TTS（管理端可选）
 #include "noise_monitor.h"     // §6.5 噪音检测
 #include "microphone.h"        // 语音通话：mic 会话内采集
@@ -253,7 +252,8 @@ DanmakuWidget *g_danmaku = nullptr;          // 弹幕（懒建：实际用弹�
 LoopReminder g_loopReminder;                 // 循环提醒（无 UI，纯逻辑）
 NotificationGate g_notifGate;                // 通知门控（考试模式禁通知）
 Microphone g_microphone;                     // 语音通话 mic 采集（会话内开关）
-SpectrumWidget *g_spectrum = nullptr;        // §6.3 语音频谱（懒建：有语音才出现）
+// §6.3 语音频谱（2026-10-13）：不再有独立 SpectrumWidget 窗口 —— 频谱由灵动岛在
+// **展开态**画（IslandOverlay::feedSpectrum）。原 `g_spectrum`（无 parent 的顶层窗口）已删。
 // 2026-10-08：断线灵动岛去重。退避重连期间每次 disconnected 都会再弹一条「连接中断」，
 // 首连快速重试（500ms）下等于每半秒闪一次，用户看到的就是"一直显示连接中断"。
 // 规则：同一段离线只弹第一条；云端回 registered（真的又连上了）才把闸门放开。
@@ -5732,6 +5732,9 @@ void handleControlText(const QString &text)
     if (type == QStringLiteral("audio.stop")) {
         g_audioHintShown = true;   // 结束后不再提示
         g_audioPlayer.closePlayer();
+        // §6.3：频谱停 + 收起"老师正在讲话"（这条 duration 给了 0，不会自己关）
+        IslandOverlay::instance()->setSpectrumActive(false);
+        IslandOverlay::instance()->dismiss();
         if (g_microphone.running()) {
             g_microphone.stop();
             qInfo("[agent-qt] 🔊 语音通话结束（学生 mic 已关闭）");
@@ -6239,21 +6242,21 @@ int main(int argc, char *argv[])
             // 语音对讲（设计文档 3.3.6）：老师讲话学生可见（每会话一次，不刷屏）
             if (!g_audioHintShown) {
                 g_audioHintShown = true;
-                // #98：同样改走灵动岛（顶部胶囊，不摊在桌面正中挡课件）
+                // #98：走灵动岛（顶部，不摊在桌面正中挡课件）。
+                // 2026-10-13：时长给 0（不自动关）—— 对讲期间岛要一直开着放频谱（§6.3），
+                // 结束由 audio.stop 收（见下）。原来 4000ms 会在讲话中途自己收起。
                 islandShow(QStringLiteral("老师正在讲话"),
-                           QStringLiteral("老师正在通过语音对讲广播"), QStringLiteral("mic"), 4000);
+                           QStringLiteral("老师正在通过语音对讲广播"), QStringLiteral("mic"), 0);
+                // 频谱画在展开态 ⇒ 显式展开（已展开时该调用早退，不打断用户）
+                IslandOverlay::instance()->setExpanded(true);
             }
             if (!g_audioPlayer.isOpen()) g_audioPlayer.open();
             g_audioPlayer.write(payload);
-            // §6.3 语音频谱：对讲帧喂 16 位频谱（懒建窗口，只在有语音时出现）
-            if (!g_spectrum) {
-                g_spectrum = new SpectrumWidget();
-                g_spectrum->resize(240, 48);
-                g_spectrum->move(20, 20);
-                g_spectrum->setLightMode(false);
-            }
-            g_spectrum->pushPcm(payload);
-            g_spectrum->show();
+            // §6.3 语音频谱：喂给灵动岛在**展开态**画 16 条。
+            // 2026-10-13 修 bug「频谱显示到窗口去了」：原实现这里 `new SpectrumWidget()`
+            // 无 parent 直接 show() ⇒ 桌面上弹出一个独立顶层窗口（挡课件）。
+            // 规格 §6.3 是「展开态显示」⇒ 现由岛自己画，不再有独立窗口。
+            IslandOverlay::instance()->feedSpectrum(payload);
             return;
         }
         if (mime == QLatin1String("image/jpeg")) {
