@@ -22,6 +22,8 @@
 #include <QPixmap>
 #include <QScreen>
 #include <QMutex>
+#include <QProcess>
+#include <QString>
 #include <memory>
 #include <atomic>
 
@@ -45,10 +47,21 @@ public:
     bool active() const { return m_active; }
     bool connected() const { return m_connected.load(); }
 
+    // ── 摄像头第二轨（2026-10-12 · UI 评审四·双画面 · 方案 A：RTC 第二 track）──
+    //   「摄像头实时画面」：屏幕走 "screen" 轨（既有），摄像头走 "camera" 轨（本条）。
+    //   摄像头**按需**：只有管理端打开摄像头格时才 startCamera()（隐私红线：不看不采）。
+    //   ffmpeg 连续输出 MJPEG → 按 SOI/EOI 切帧 → 经 camera track 发 RTP。
+    //   ⚠️ 需 RTC 已 start()（PC/轨道已建）。device 空则回落 video0；ffmpegBin 由接线层传入。
+    void startCamera(const QString &device, const QString &ffmpegBin);
+    void stopCamera();
+    bool cameraActive() const { return m_camActive; }
+
 signals:
     void stateChanged(bool active);
     void frameSent(int seq);
     void failed(const QString &reason);
+    // 摄像头轨就绪/停止（接线层可据此回执管理端「摄像头已开/已关」）
+    void cameraStateChanged(bool active);
     // 信令出站（接线层转发到云端 → 管理端）：offer / candidate
     void signalOffer(const QByteArray &sdp);
     void signalCandidate(const QByteArray &candidate);
@@ -59,11 +72,14 @@ private:
     void captureAndSend();   // 抓一帧 → JPEG → 发 track
     QByteArray encodeJpeg(const QPixmap &pm);
 
+    void onCamStdout();                       // ffmpeg stdout → 按 SOI/EOI 切帧 → 发 camera track
+    void sendCameraFrame(const QByteArray &jpeg);
+
     // libdatachannel 对象是 shared_ptr 语义（enable_shared_from_this），
     // 必须用 shared_ptr 持有，裸 new 后无持有者会立即析构（0xC0000005）
     std::shared_ptr<void> m_pc;   // rtc::PeerConnection*
     QMutex m_mu;                  // 保护 m_track/m_dc/m_pc（回调线程 vs 主线程）
-    void *m_track = nullptr;      // rtc::Track*（由 PC 持有生命周期）
+    void *m_track = nullptr;      // rtc::Track*（screen 轨；由 PC 持有生命周期）
     void *m_dc = nullptr;         // rtc::DataChannel*（同上）
     bool m_offerSent = false;     // 首个 offer 已发出（只发一次）
     QTimer m_capture;
@@ -72,4 +88,11 @@ private:
     std::atomic<bool> m_connected{false};   // libdatachannel 回调线程写，主线程读
     int m_seq = 0;
     int m_captureMs = 200;
+    // ── 摄像头第二轨（2026-10-12）──
+    void *m_camTrack = nullptr;   // rtc::Track*（camera 轨；由 PC 持有）
+    QProcess *m_camProc = nullptr;  // ffmpeg -f mjpeg pipe（连续采集）
+    bool m_camActive = false;
+    int m_camSeq = 0;
+    QByteArray m_camBuf;          // MJPEG 切帧缓冲（跨 readyRead 保留半帧）
+    QString m_camDevice;
 };

@@ -101,9 +101,16 @@ void LdcStreamer::start(int captureMs)
         rtc::Description::Video media("screen", rtc::Description::Direction::SendOnly);
         media.addH264Codec(96);
         auto trk = pc->addTrack(media);
+        // 摄像头 track（"camera"）：与屏幕同一 PC，随首个 offer 一起协商（不额外 renegotiate）。
+        // ⚠️ 只建轨、不推帧——摄像头帧要等管理端按需 startCamera() 才发（隐私红线：不看不采）。
+        //    用不同 payload type（97）避免与屏幕轨的 96 在 SDP 里撞车。
+        rtc::Description::Video camMedia("camera", rtc::Description::Direction::SendOnly);
+        camMedia.addH264Codec(97);
+        auto camTrk = pc->addTrack(camMedia);
         {
             QMutexLocker lock(&m_mu);
             m_track = trk.get();
+            m_camTrack = camTrk.get();
             m_dc = pc->createDataChannel("rtc").get();
             m_pc = pc;
         }
@@ -156,6 +163,7 @@ void LdcStreamer::stop()
     if (!m_active && !m_pc) return;
     m_active = false;
     m_capture.stop();
+    stopCamera();            // 先杀 ffmpeg 采集进程（否则推流停了它还占着摄像头）
     m_connected = false;
     if (m_pc) {
         auto *pc = static_cast<rtc::PeerConnection *>(m_pc.get());
@@ -164,6 +172,7 @@ void LdcStreamer::stop()
         try { pc->close(); } catch (...) {}
         m_pc.reset();
         m_track = nullptr;
+        m_camTrack = nullptr;
         m_dc = nullptr;
     }
     emit stateChanged(false);
@@ -211,5 +220,125 @@ void LdcStreamer::captureAndSend()
         emit frameSent(m_seq);
     } catch (const std::exception &e) {
         emit failed(QStringLiteral("track send: %1").arg(QString::fromLocal8Bit(e.what())));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 摄像头第二轨（2026-10-12 · UI 评审四·双画面 · 方案 A：RTC 第二 track）
+//
+// 与屏幕轨同一 PC、同一 RTP 发法（payload=整帧 JPEG、marker=1），差别只在：
+//   · mid = "camera"（管理端按 mid 分流到摄像头格）
+//   · 帧来自 ffmpeg 连续 MJPEG 管道（非 QScreen::grabWindow）
+//   · 按需启停（管理端打开摄像头格才 startCamera —— 隐私红线：不看不采）
+// ═══════════════════════════════════════════════════════════════════════════
+
+void LdcStreamer::startCamera(const QString &device, const QString &ffmpegBin)
+{
+    if (m_camActive) return;
+    if (!m_active || !m_pc) {
+        emit failed(QStringLiteral("startCamera: RTC 未启动（先 rtc-start）"));
+        return;
+    }
+    if (!m_camTrack) {
+        emit failed(QStringLiteral("startCamera: camera 轨未建立"));
+        return;
+    }
+    const QString ff = ffmpegBin.isEmpty() ? QStringLiteral("ffmpeg") : ffmpegBin;
+    m_camDevice = device.trimmed().isEmpty() ? QStringLiteral("video0") : device.trimmed();
+
+    m_camBuf.clear();
+    m_camSeq = 0;
+    m_camProc = new QProcess(this);
+    m_camProc->setProcessChannelMode(QProcess::SeparateChannels);
+    QObject::connect(m_camProc, &QProcess::readyReadStandardOutput,
+                     this, &LdcStreamer::onCamStdout);
+    QObject::connect(m_camProc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                     this, [this](int, QProcess::ExitStatus) {
+                         if (m_camActive)
+                             qWarning("[rtc-ldc] 摄像头采集进程退出（设备 %s）", qPrintable(m_camDevice));
+                     });
+    // -f mjpeg → stdout 是连续 JPEG（按 FFD8…FFD9 切）；-r 10 控帧率，-q:v 7 控体积。
+    // 通道分着收（SeparateChannels）：stderr 里的设备错误要单独拿得到，便于回执人话原因。
+    m_camProc->start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                           QStringLiteral("error"), QStringLiteral("-f"),
+                           QStringLiteral("dshow"), QStringLiteral("-i"),
+                           QStringLiteral("video=%1").arg(m_camDevice),
+                           QStringLiteral("-f"), QStringLiteral("mjpeg"),
+                           QStringLiteral("-q:v"), QStringLiteral("7"),
+                           QStringLiteral("-r"), QStringLiteral("10"),
+                           QStringLiteral("pipe:1") });
+    m_camActive = true;
+    emit cameraStateChanged(true);
+    qInfo("[rtc-ldc] 摄像头采集已开（device=%s）", qPrintable(m_camDevice));
+}
+
+void LdcStreamer::stopCamera()
+{
+    if (!m_camActive && !m_camProc) return;
+    m_camActive = false;
+    if (m_camProc) {
+        QObject::disconnect(m_camProc, nullptr, this, nullptr);
+        if (m_camProc->state() != QProcess::NotRunning) {
+            m_camProc->terminate();
+            if (!m_camProc->waitForFinished(2000)) { m_camProc->kill(); m_camProc->waitForFinished(1500); }
+        }
+        delete m_camProc;
+        m_camProc = nullptr;
+    }
+    m_camBuf.clear();
+    emit cameraStateChanged(false);
+    qInfo("[rtc-ldc] 摄像头采集已停");
+}
+
+void LdcStreamer::onCamStdout()
+{
+    if (!m_camProc) return;
+    m_camBuf += m_camProc->readAllStandardOutput();
+    // MJPEG 切帧：找 SOI(FFD8)…EOI(FFD9)。跨 readyRead 保留半帧。
+    for (;;) {
+        const int soi = m_camBuf.indexOf(QByteArrayLiteral("\xFF\xD8"));
+        if (soi < 0) {
+            if (m_camBuf.size() > 1) m_camBuf = m_camBuf.right(1);   // 只留可能的首字节
+            break;
+        }
+        if (soi > 0) m_camBuf.remove(0, soi);
+        const int eoi = m_camBuf.indexOf(QByteArrayLiteral("\xFF\xD9"), 2);
+        if (eoi < 0) break;                       // 半帧，等下次 readyRead
+        const QByteArray jpeg = m_camBuf.left(eoi + 2);
+        m_camBuf.remove(0, eoi + 2);
+        sendCameraFrame(jpeg);
+        if (m_camBuf.size() > (4 << 20)) m_camBuf.clear();   // 脏数据护栏
+    }
+}
+
+void LdcStreamer::sendCameraFrame(const QByteArray &jpeg)
+{
+    if (!m_camActive || !m_connected.load() || jpeg.isEmpty()) return;
+    rtc::Track *track = nullptr;
+    {
+        QMutexLocker lock(&m_mu);
+        track = static_cast<rtc::Track *>(m_camTrack);
+    }
+    if (!track) return;
+    bool open = false;
+    try { open = track->isOpen(); } catch (...) { open = false; }
+    if (!open) return;
+
+    constexpr size_t kRtpHead = 12;
+    QByteArray pkt;
+    pkt.resize(int(kRtpHead) + jpeg.size());
+    auto *rtp = reinterpret_cast<rtc::RtpHeader *>(pkt.data());
+    rtp->preparePacket();
+    rtp->setPayloadType(97);
+    rtp->setMarker(true);
+    rtp->setSsrc(43);                              // 与屏幕轨(42)区分
+    rtp->setSeqNumber(uint16_t(m_camSeq));
+    rtp->setTimestamp(uint32_t(m_camSeq) * 9000);  // 90kHz：10fps → 每帧 1/10s
+    std::memcpy(pkt.data() + kRtpHead, jpeg.constData(), size_t(jpeg.size()));
+    try {
+        track->send(reinterpret_cast<const std::byte *>(pkt.constData()), size_t(pkt.size()));
+        ++m_camSeq;
+    } catch (const std::exception &e) {
+        emit failed(QStringLiteral("camera track send: %1").arg(QString::fromLocal8Bit(e.what())));
     }
 }

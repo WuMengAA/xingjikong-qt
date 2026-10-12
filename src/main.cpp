@@ -480,6 +480,7 @@ void scheduleReconnect()
  * 以后 executeAction 加分支，这张表也得跟着加，否则设备会自称会做却做不了（或反之）。 */
 static const char *kActionNames[] = {
     "camera_bind", "camera_list", "camera_record_start", "camera_record_stop", "camera_snapshot", "camera_test",
+    "camera_stream_start", "camera_stream_stop",
     "cancel_schedule", "file_chunk", "file_done", "file_push",
     "input", "launch_app", "list_schedules", "list_shortcut_candidates",
     "lock", "log_tail", "media_delete", "media_list",
@@ -4349,6 +4350,36 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         // 班级监控（设计文档 3.6 第一版）：录制完成后自动上传到云端 recordings/，
         // 供管理端列表 + 回放。上传失败不改变回执（本地文件仍在，可手工取）。
         uploadRecordingAsync(g_recOutPath);
+        return out;
+    }
+
+    // ── 摄像头实时画面（2026-10-12 · UI 评审四·双画面 · 方案 A：RTC 第二 track）──
+    // 管理端打开摄像头格 → 发 camera_stream_start（带 device）→ 被控端起 ffmpeg 连续
+    // MJPEG，经 LdcStreamer 的 "camera" RTC 轨推给管理端；关卡 → camera_stream_stop。
+    // ⚠️ 需 RTC 已 start（管理端看画面时 rtc-start 已触发）。按需启停 = 隐私红线。
+    if (action == QStringLiteral("camera_stream_start")) {
+        QString dev = params.value(QStringLiteral("device")).toString().trimmed();
+        if (dev.isEmpty()) dev = boundCamera();
+        if (dev.isEmpty()) dev = QStringLiteral("video0");
+        if (!g_rtcOn) {
+            out.result = QStringLiteral("failed");
+            out.error  = QStringLiteral("摄像头推流失败：RTC 未启动（管理端需先在看画面）");
+            out.data.insert(QStringLiteral("errorCode"), QStringLiteral("rtc_off"));
+            out.data.insert(QStringLiteral("retryable"), true);
+            return out;
+        }
+        const QString ff = ffmpegBin();
+        if (ff.isEmpty()) { out.result = QStringLiteral("failed"); out.error = QStringLiteral("找不到 ffmpeg"); return out; }
+        LdcStreamer::instance().startCamera(dev, ff);
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("device"), dev);
+        out.data.insert(QStringLiteral("streaming"), true);
+        return out;
+    }
+    if (action == QStringLiteral("camera_stream_stop")) {
+        LdcStreamer::instance().stopCamera();
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("streaming"), false);
         return out;
     }
 
