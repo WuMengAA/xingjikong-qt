@@ -812,54 +812,62 @@ ApplicationWindow {
 
                 // 分班制（需求 #4）：按班级维度筛选设备。班级来自云端 /api/classes（界面只消费
                 // backend.classes），当前选中写 backend.currentClass，filteredDevices 已按它过滤。
-                // 班级可能不止几个，用 Flickable 兜住横向滚动，不挤占下面的设备列表宽度。
+                // 班级网格：2 列平铺每格班名+设备数，点格按该班过滤下方列表（与设备列表共用面板高度，无独立滚动）。
                 // ⚠️ 2026-10-11 修「选中班级是灰的、看不见字」：
                 //   旧写法是 Item + Rectangle + Text，宽度写 `clsLbl.width + 16`，而 clsLbl
                 //   又是 `anchors.centerIn: parent` —— 宽度绕回自己身上算，chip 被压到几乎没有
                 //   宽度，文字全被裁掉，只剩一条灰边（看着就是"灰的、没字"）。
                 //   改成 Rectangle 自己当 chip，宽度取 Text 的 **implicitWidth**（纯内容宽，
                 //   不依赖布局），并给未选中态一个淡底，选中/未选中一眼可分。
-                Flickable {
-                    width: 168
-                    height: 26
-                    contentWidth: Math.max(clsRow.implicitWidth, clsRow.width)
-                    clip: true
-                    Row {
-                        id: clsRow
-                        spacing: 4
-                        leftPadding: 10
-                        Repeater {
-                            model: (function () {
-                                var arr = [{ code: "", name: "全部班级" }]
-                                var cs = backend.classes || []
-                                for (var i = 0; i < cs.length; ++i) {
-                                    arr.push({ code: cs[i].code, name: (cs[i].name || cs[i].code) })
-                                }
-                                return arr
-                            })()
-                            delegate: Rectangle {
-                                height: 22
-                                width: clsLbl.implicitWidth + 16
-                                radius: th.rCtrl
-                                color: (backend.currentClass === modelData.code) ? th.inv
-                                                                                : th.hover2
-                                border.color: (backend.currentClass === modelData.code) ? th.inv
-                                                                                        : th.stroke
-                                border.width: 1
+                // 分班制（需求 #4）班级网格：类平铺成 2 列网格，每格班名(过长省略)+设备数；
+                // 点格即按该班过滤下方设备列表(filteredDevices 已按 backend.currentClass 过滤)。
+                Grid {
+                    x: 10
+                    width: 158
+                    columns: 2
+                    spacing: 4
+                    Repeater {
+                        model: (function () {
+                            var devs = backend.devices || []
+                            var byCls = {}
+                            for (var i = 0; i < devs.length; ++i) {
+                                var c = devs[i] ? (devs[i].classCode || "") : ""
+                                byCls[c] = (byCls[c] || 0) + 1
+                            }
+                            var arr = [{ code: "", name: "全部班级", cnt: devs.length }]
+                            var cs = backend.classes || []
+                            for (var j = 0; j < cs.length; ++j) {
+                                arr.push({ code: cs[j].code, name: (cs[j].name || cs[j].code), cnt: byCls[cs[j].code] || 0 })
+                            }
+                            return arr
+                        })()
+                        delegate: Rectangle {
+                            width: 73; height: 38; radius: th.rCtrl
+                            color: (backend.currentClass === modelData.code) ? th.inv : th.hover2
+                            border.color: (backend.currentClass === modelData.code) ? th.inv : th.stroke
+                            border.width: 1
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 1
                                 Text {
-                                    id: clsLbl
-                                    anchors.centerIn: parent
+                                    width: 65; elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter
                                     text: modelData.name
                                     color: (backend.currentClass === modelData.code) ? th.win : th.fg3
                                     font.pixelSize: 11
                                     font.weight: (backend.currentClass === modelData.code)
                                                  ? Font.DemiBold : Font.Normal
                                 }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: backend.setCurrentClass(modelData.code)
+                                Text {
+                                    width: 65; horizontalAlignment: Text.AlignHCenter
+                                    text: (modelData.cnt !== undefined ? modelData.cnt : 0) + " 台"
+                                    color: (backend.currentClass === modelData.code) ? th.win : th.fg4
+                                    font.pixelSize: 10
                                 }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.setCurrentClass(modelData.code)
                             }
                         }
                     }
