@@ -126,7 +126,7 @@ function sndErr(ws, code, detail) {
 import {
   pushEvent, markConnected, markDisconnected, addFrame, setRecentFrame,
   listDevices, getDevice, sendInstruction, listEvents, listPending, ensureEventsFile,
-  relayTerminalFrame,
+  relayTerminalFrame, relayToSubscribers,
   addViewer, removeViewer, subscribeViewer, unsubscribeViewer, pinViewer, autoSubscribeViewers,
   broadcastFrame, broadcastDevices, broadcastToViewers, recordResult, getResult, viewerCount,
   touchHeartbeat, sweepStale,
@@ -1291,6 +1291,18 @@ wss.on('connection', (ws) => {
       // 存活信号：与帧解耦（按需拉流后没人看的机器不推帧，帧不能当存活依据）
       const ok = touchHeartbeat(uid);
       if (!ok) pushEvent('error', '收到心跳但设备不在在线表里（异常状态）', { uid });
+      return;
+    }
+
+    if (p.type === 'noise_sample' || p.type === 'noise_alert') {
+      // 噪音检测 / 自习模式（2026-10-13）：只投给订阅了这台的管理端（同抓屏/终端的规矩）。
+      // ⚠️ **不走 pushEvent 事件流水** —— 噪音样本 2s 一条，塞进"最近 50 条"的流水会把它
+      //    刷爆、把真正的运维事件挤掉。所以走订阅中继、实时直达在看这台的管理端。
+      const hits = relayToSubscribers(uid, p.type, { uid, ...(p.payload || {}) });
+      if (p.type === 'noise_alert') {
+        pushEvent('info', `噪音告警（${p.payload?.event || '?'}）已推给管理端`,
+          { uid, viewers: hits, count: p.payload?.count ?? null });
+      }
       return;
     }
 
