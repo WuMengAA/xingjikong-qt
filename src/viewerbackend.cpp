@@ -24,6 +24,8 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QFile>
+#include <QClipboard>     // 诊断与反馈：复制诊断信息到剪贴板
+#include <QSysInfo>       // 诊断与反馈：系统信息
 #include <QProcess>
 #include <QTemporaryFile>
 #include <QTimer>
@@ -2687,6 +2689,63 @@ void ViewerBackend::fetchEvents()
 // 手机端定期拉与桌面一致的 QML 树：GET /api/qml-patch → {version,url}，
 // 与本地 qml-live/.version 不同 → 下载 zip → QZipReader 解压到 qml-live/
 // （下次启动 main.cpp 本地优先加载）。改 UI 不用重出 APK。
+// ── 诊断与反馈（2026-10-12 · GUI 子系统后没控制台，出错要看界面）─────────────
+QString ViewerBackend::viewerLogTail(int maxLines) const
+{
+    if (m_logPath.isEmpty()) return QStringLiteral("（未知日志路径）");
+    QFile f(m_logPath);
+    if (!f.exists()) return QStringLiteral("（日志文件还不存在：%1）").arg(m_logPath);
+    if (!f.open(QIODevice::ReadOnly)) return QStringLiteral("（日志打不开：%1）").arg(f.errorString());
+    // 只读尾部：日志可能不小，从末尾最多回读 512KB，够几百行。
+    const qint64 sz = f.size();
+    const qint64 cap = 512 * 1024;
+    const qint64 start = qMax<qint64>(0, sz - cap);
+    f.seek(start);
+    const QByteArray raw = f.readAll();
+    f.close();
+    QStringList lines = QString::fromLocal8Bit(raw).split(QLatin1Char('\n'));   // 日志以本机编码落盘
+    if (start > 0 && !lines.isEmpty()) lines.removeFirst();                      // 首行可能被截断
+    if (maxLines > 0 && lines.size() > maxLines)
+        lines = lines.mid(lines.size() - maxLines);
+    return lines.join(QLatin1Char('\n'));
+}
+
+QString ViewerBackend::diagnosticsSummary() const
+{
+    QStringList out;
+    out << QStringLiteral("星集控 · 管理端 诊断信息");
+    out << QStringLiteral("版本：%1").arg(m_version);
+    out << QStringLiteral("时间：%1").arg(QDateTime::currentDateTime().toString(Qt::ISODate));
+    out << QStringLiteral("系统：%1（%2）").arg(QSysInfo::prettyProductName(), QSysInfo::currentCpuArchitecture());
+    out << QStringLiteral("云端地址：%1").arg(m_url);
+    out << QStringLiteral("连接：%1 ｜ 鉴权：%2")
+               .arg(m_connected ? QStringLiteral("已连接") : QStringLiteral("未连接"),
+                    m_authed ? QStringLiteral("已鉴权") : QStringLiteral("未鉴权"));
+    out << QStringLiteral("身份：%1").arg(m_role.isEmpty() ? QStringLiteral("（无）") : m_role);
+    out << QStringLiteral("设备数：%1（在线 %2）").arg(m_devices.size()).arg(onlineCount());
+    out << QStringLiteral("当前设备：%1").arg(m_currentUid.isEmpty() ? QStringLiteral("（未选）") : m_currentUid);
+    out << QStringLiteral("日志文件：%1").arg(m_logPath);
+    return out.join(QLatin1Char('\n'));
+}
+
+void ViewerBackend::copyToClipboard(const QString &text) const
+{
+    if (QClipboard *cb = QGuiApplication::clipboard()) cb->setText(text);
+}
+
+void ViewerBackend::openLogFolder() const
+{
+    const QString dir = m_logPath.isEmpty()
+            ? QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+            : QFileInfo(m_logPath).absolutePath();
+    if (!dir.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+}
+
+void ViewerBackend::requestDiagFeedback()
+{
+    emit diagFeedbackRequested();
+}
+
 void ViewerBackend::checkQmlPatch()
 {
 #if defined(Q_OS_ANDROID)

@@ -2052,6 +2052,19 @@ ApplicationWindow {
                                         Text { anchors.centerIn: parent; text: "帮助"; color: th.fg; font.pixelSize: 13 }
                                         MouseArea { id: hpHover; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: openOnly("help") }
                                     }
+                                    // 诊断与反馈：出错时唯一能把信息交出去的地方（GUI 子系统后没控制台）
+                                    Rectangle {
+                                        width: 110; height: 30; radius: th.rCtrl
+                                        color: dgHover.containsMouse ? th.hover : th.panel
+                                        border.color: th.stroke; border.width: 1
+                                        Text { anchors.centerIn: parent; text: "诊断与反馈"; color: th.fg; font.pixelSize: 13 }
+                                        MouseArea {
+                                            id: dgHover
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: { diagDlg.refreshLog(); diagDlg.open() }
+                                        }
+                                    }
                                 }
                                 // ── 更新（2026-10-08）──
                                 // 状态机在 C++ 的 Updater 里，界面只做三件事：把 updater.message 原样显示、
@@ -2358,6 +2371,13 @@ ApplicationWindow {
         candidates: root.candidates
     }
     LogDialog { id: logDlg; theme: root.th }
+    // 诊断与反馈（2026-10-12）：GUI 子系统后没控制台，出错看这里；托盘菜单也会拉起它。
+    DiagFeedbackDialog { id: diagDlg; theme: root.th }
+    // 托盘「诊断与反馈…」→ 打开弹窗（C++ 发信号，QML 收）
+    Connections {
+        target: backend
+        function onDiagFeedbackRequested() { diagDlg.refreshLog(); diagDlg.open() }
+    }
     TerminalDialog { id: termDlg; theme: root.th }
 
     MediaDialog { id: mediaDlg; theme: root.th }

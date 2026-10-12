@@ -443,6 +443,22 @@ public:
     // 2026-10-11：QML 热更（一源响应式）——查 /api/qml-patch 清单，版本不同则
     // 下载 zip 解压到本地 qml-live/（下次启动本地优先；改 UI 不用重出 APK）
     Q_INVOKABLE void checkQmlPatch();
+
+    // ── 诊断与反馈（2026-10-12 · GUI 子系统后没有控制台，出错要看界面）──
+    // 管理端 WIN32_EXECUTABLE 改 ON（双击不弹黑窗）后，stdout 不再可见；出错只能靠
+    // 本机日志文件（viewer-run.log）与界面。这一组给"诊断与反馈"弹窗提供数据与动作。
+    /** 注入本机日志文件路径（main.cpp 启动时调一次；backend 自己不知道路径）。 */
+    void setLogFilePath(const QString &p) { m_logPath = p; }
+    /** 本机日志尾部（最多 maxLines 行，从末尾取）。用于弹窗里给人看最近发生了什么。 */
+    Q_INVOKABLE QString viewerLogTail(int maxLines = 300) const;
+    /** 诊断摘要：版本 / 云端地址 / 连接与鉴权 / 身份 / 设备数 / 日志路径 / 系统。 */
+    Q_INVOKABLE QString diagnosticsSummary() const;
+    /** 复制文本到系统剪贴板（QML 无直接剪贴板访问）。 */
+    Q_INVOKABLE void copyToClipboard(const QString &text) const;
+    /** 用文件管理器打开日志所在目录。 */
+    Q_INVOKABLE void openLogFolder() const;
+    /** 托盘「诊断与反馈」入口 → 通知 QML 打开对话框。 */
+    Q_INVOKABLE void requestDiagFeedback();
     QJsonArray events() const { return m_events; }
     /** 录制列表（QML 读，QJsonObject：uid → 文件数组）。 */
     QJsonObject recordings() const { return m_recordings; }
@@ -566,6 +582,8 @@ signals:
     void termStateChanged();
     /** 帧没画成（解码失败等）——界面可以往屏幕上说明一句，别让画面无声无息不动。 */
     void frameDropped(const QString &reason);
+    /** 托盘「诊断与反馈」入口触发的开对话框请求（QML Main.qml 连接它开弹窗）。 */
+    void diagFeedbackRequested();
     /** 鉴权被拒：界面应停止重连并把原因显示出来。 */
     void authFailed(const QString &reason);
     /** 角色变了（顶栏徽标、按钮置灰都要跟着动）。 */
@@ -844,6 +862,8 @@ private:
     // 摄像头第二轨帧（2026-10-12 · 四·双画面）。与 m_frame 分开存，互不覆盖。
     QImage m_camFrame;
     int m_camFrameCount = 0;
+    // 本机日志文件路径（诊断与反馈；main.cpp 启动时注入）。
+    QString m_logPath;
     int m_framesSinceCheck = 0;
     int m_lastFrameBytes = 0;
     double m_fps = 0.0;

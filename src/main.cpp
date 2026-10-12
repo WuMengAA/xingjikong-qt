@@ -426,6 +426,8 @@ int main(int argc, char *argv[])
     if (envN > 0) logf("[viewer] 已从 viewer.env 读入 %d 项配置（exe 同目录）", envN);
 
     ViewerBackend backend;
+    // 诊断与反馈：把本机日志路径注入 backend（它自己不知道；弹窗读尾部 + 开目录要用）。
+    backend.setLogFilePath(logFilePath());
 
     // ── 自更新（2026-10-08）────────────────────────────────────────────
     // 界面「设置 → 关于」里的「检查更新 / 立即更新」走它（QML 里的 `updater`）。
@@ -658,6 +660,12 @@ int main(int argc, char *argv[])
         QObject::connect(actLog, &QAction::triggered, &app, [] {
             QDesktopServices::openUrl(
                 QUrl::fromLocalFile(QFileInfo(logFilePath()).absolutePath()));
+        });
+        // 诊断与反馈（2026-10-12）：GUI 子系统后没有控制台，出错要靠界面看/反馈。
+        // 托盘↔主界面常缩着，所以这个入口必须挂在这里（设置页的「关于」卡也有一个）。
+        auto *actDiag = menu->addAction(QStringLiteral("诊断与反馈…"));
+        QObject::connect(actDiag, &QAction::triggered, &backend, [&backend] {
+            backend.requestDiagFeedback();   // → diagFeedbackRequested() → Main.qml 开弹窗
         });
         menu->addSeparator();
         auto *actQuit = menu->addAction(QStringLiteral("退出管理端"));
