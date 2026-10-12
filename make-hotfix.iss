@@ -57,6 +57,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "build\stelarith-agent-qt.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\libssl-3-x64.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\libcrypto-3-x64.dll"; DestDir: "{app}"; Flags: ignoreversion
+; ── 灵动岛 QML（2026-10-12 补：岛是磁盘加载的 QML，热修须带 island/ 才能生效；
+;    只带 island 子目录，不整包 qml——目标机已有 Qt QML 运行时，缺的只是岛视觉层）──
+Source: "build\qml\island\*"; DestDir: "{app}\qml\island"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);

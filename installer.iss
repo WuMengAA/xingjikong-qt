@@ -98,6 +98,10 @@ Source: "build\tls\*"; DestDir: "{app}\tls"; Flags: ignoreversion recursesubdirs
 Source: "build\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\translations\*"; DestDir: "{app}\translations"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\position\*"; DestDir: "{app}\position"; Flags: ignoreversion recursesubdirs createallsubdirs
+; ── 灵动岛 QML（2026-10-12 补：Inno 迁移时漏了这条，导致干净装机没有 qml/、岛加载失败）──
+; ⚠️ build\qml 含 app 的 island/Main.qml 等 + windeployqt 补的 Qt QML 运行时（QtQuick/QtQml），
+;    二者都是 QQuickWidget 加载岛所必需的，必须整目录带上（不通杀 build\*，只取 qml）。
+Source: "build\qml\*"; DestDir: "{app}\qml"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; ── deploy/ 独有（构建不产出），点名取，不通杀 deploy\* ──────────────────────
 ; ⚠️ deploy/ 是个雷区：含旧快照 Qt6*.dll、154MB 的 Qt6WebEngineCore.dll、
 ;    **还有含真实设备令牌的 deploy\agent.env**。绝不通杀，只取下面这几样安全文件。
