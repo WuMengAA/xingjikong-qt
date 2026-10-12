@@ -991,17 +991,51 @@ BOOL CALLBACK enumWindowsCb(HWND hwnd, LPARAM lp)
     auto *acc = reinterpret_cast<QVector<QPair<HWND, quint32>> *>(lp);
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
-    if (pid != 0 && GetWindowTextLengthW(hwnd) > 0) acc->append({ hwnd, (quint32)pid });
+    if (pid == 0) return TRUE;
+    // 非阻塞取标题长度：挂起（无响应）窗口用 GetWindowTextLengthW 会卡死整条枚举，
+    // 必须改用 SendMessageTimeout + SMTO_ABORTIFHUNG（与 windowIconBase64 取图标同一策略）。
+    DWORD_PTR len = 0;
+    if (!SendMessageTimeoutW(hwnd, WM_GETTEXTLENGTH, 0, 0, SMTO_ABORTIFHUNG, 60, &len) || len == 0)
+        return TRUE;
+    acc->append({ hwnd, (quint32)pid });
     return TRUE;
+}
+
+// 进程快照 + 可见窗口枚举的短时效缓存：管理端开「软件」弹窗会连发
+// process_list 与 list_shortcut_candidates 两条，原本各自独立枚举一遍窗口
+// （每条还要逐窗口非阻塞取标题）。两条间隔通常 <100ms，缓存 1.5s 让第二条
+// 直接复用，省掉一次完整枚举，避免拖慢弹窗响应。
+struct WinCache {
+    qint64 at = 0;
+    QHash<quint32, QString> names;
+    QVector<QPair<HWND, quint32>> wins;
+};
+static WinCache g_winCache;
+constexpr qint64 kWinCacheTtlMs = 1500;
+
+static const WinCache &visibleWindowsCached()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!g_winCache.names.isEmpty() && now - g_winCache.at < kWinCacheTtlMs)
+        return g_winCache;
+    g_winCache.names = snapshotProcessNames();
+    g_winCache.wins.clear();
+    if (!g_winCache.names.isEmpty())
+        EnumWindows(enumWindowsCb, reinterpret_cast<LPARAM>(&g_winCache.wins));
+    g_winCache.at = now;
+    return g_winCache;
 }
 
 QString windowTitleOf(HWND hwnd)
 {
-    const int len = GetWindowTextLengthW(hwnd);
-    if (len <= 0) return QString();
-    QVector<wchar_t> buf(len + 1, 0);
-    const int n = GetWindowTextW(hwnd, buf.data(), len + 1);
-    return n > 0 ? QString::fromWCharArray(buf.constData(), n) : QString();
+    // 非阻塞取标题：GetWindowTextW 对挂起（无响应）窗口会卡住整条枚举，
+    // 必须改用 SendMessageTimeout + ABORTIFHUNG（与 enumWindowsCb 一致）。
+    wchar_t buf[1024] = { 0 };
+    DWORD_PTR n = 0;
+    if (!SendMessageTimeoutW(hwnd, WM_GETTEXT, (WPARAM)(sizeof(buf) / sizeof(wchar_t)),
+                             (LPARAM)buf, SMTO_ABORTIFHUNG, 60, &n) || n == 0)
+        return QString();
+    return QString::fromWCharArray(buf, (int)n);
 }
 
 /** 进程工作集内存（MB）。取不到返回 0 —— 权限不足是常态，不算失败。 */
@@ -3715,10 +3749,10 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     if (action == QStringLiteral("process_list")) {
         const int lim = params.value(QStringLiteral("limit")).toInt(kProcessListLimit);
         const int cap = lim > 0 ? qMin(lim, 500) : kProcessListLimit;
-        const QHash<quint32, QString> names = snapshotProcessNames();
-        if (names.isEmpty()) { out.result = QStringLiteral("failed"); out.error = QStringLiteral("无法获取进程快照"); return out; }
-        QVector<QPair<HWND, quint32>> wins;
-        EnumWindows(enumWindowsCb, reinterpret_cast<LPARAM>(&wins));
+        const auto &snap = visibleWindowsCached();
+        if (snap.names.isEmpty()) { out.result = QStringLiteral("failed"); out.error = QStringLiteral("无法获取进程快照"); return out; }
+        const QHash<quint32, QString> &names = snap.names;
+        const auto &wins = snap.wins;
         QJsonArray items;
         bool truncated = false;
         for (const auto &w : wins) {
@@ -3837,9 +3871,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     if (action == QStringLiteral("list_shortcut_candidates")) {
         QJsonArray apps;
         {
-            const QHash<quint32, QString> names = snapshotProcessNames();
-            QVector<QPair<HWND, quint32>> wins;
-            EnumWindows(enumWindowsCb, reinterpret_cast<LPARAM>(&wins));
+            const auto &snap = visibleWindowsCached();
+            const QHash<quint32, QString> &names = snap.names;
+            const auto &wins = snap.wins;
             QSet<QString> seen;
             for (const auto &w : wins) {
                 const auto it = names.constFind(w.second);
