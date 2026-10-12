@@ -494,6 +494,11 @@ static const char *kActionNames[] = {
     "terminal_close", "terminal_input", "terminal_open",
     // 考试模式（2026-10-06，设计文档 3.7 第一版）：全屏拦截 + 黑名单轮询 + 计时。
     "exam_mode", "exam_mode_stop",
+    // 噪音 / 自习（2026-10-13）：noise_monitor_* 是底层采集开关（只测不录）；
+    // study_mode_* 是上层模式（周期测噪 + 连续超阈自动录一段摄像头并上传）。
+    // ⚠️ noise_monitor_* 之前一直漏登记 —— 设备实际能做却自称不会，本轮补上。
+    "noise_monitor_start", "noise_monitor_stop",
+    "study_mode_start", "study_mode_stop",
 };
 static const int kActionCount = (int)(sizeof(kActionNames) / sizeof(kActionNames[0]));
 
@@ -3484,6 +3489,177 @@ void uploadRecordingAsync(const QString &mp4Path)
     });
 }
 
+// ── 录像启停（2026-10-13 抽出，供 camera_record_* 与自习模式自动录制共用）──────
+// 这两段逻辑原本只在 executeAction 的 camera_record_* 分支里各一份；自习模式的
+// "噪音异常自动录制"要复用它们 —— 若不抽出就会变成"两处各写一遍、改一处漏一处"
+// （跨端审计报告点过这个坑）。行为与原地逐字一致，只把结果从 out.xxx 换成返回值。
+static QString beginRecording(const QString &dev, int maxSec)
+{
+    const QString ff = ffmpegBin();
+    if (ff.isEmpty()) return QStringLiteral("找不到 ffmpeg");
+    if (g_recProc && g_recProc->state() != QProcess::NotRunning) {
+        return QStringLiteral("已有一条录像在进行中（%1），请先 record_stop").arg(
+            QDir::toNativeSeparators(g_recOutPath));
+    }
+    QDir().mkpath(g_shotDir);
+    g_recOutPath = g_shotDir + QStringLiteral("/rec-%1.mp4").arg(QDateTime::currentMSecsSinceEpoch());
+    g_recProc = new QProcess();
+    g_recProc->setProcessChannelMode(QProcess::MergedChannels);
+    g_recProc->start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                           QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
+                           QStringLiteral("dshow"), QStringLiteral("-i"),
+                           QStringLiteral("video=%1").arg(dev),
+                           QStringLiteral("-t"), QString::number(maxSec),
+                           QStringLiteral("-c:v"), QStringLiteral("libx264"), QStringLiteral("-preset"),
+                           QStringLiteral("ultrafast"), QStringLiteral("-crf"), QStringLiteral("28"),
+                           QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+                           QStringLiteral("-r"), QStringLiteral("15"), g_recOutPath });
+    if (!g_recProc->waitForStarted(4000)) {
+        const int code = g_recProc->exitCode();
+        delete g_recProc; g_recProc = nullptr;
+        return QStringLiteral("ffmpeg 启动失败（退出码 %1，设备 %2）").arg(code).arg(dev);
+    }
+    return QString();
+}
+
+// 停止录像：返回 true = 有有效文件（并已发起上传）；bytes/code/err 为明细。
+// ⚠️ 容忍 ffmpeg 因 -t 到点**自己结束**（那时 state 已是 NotRunning，但文件是好的）——
+//    自习模式的自动录制到点常走这条；不能因为"进程已退出"就当成"没有录像"。
+static bool endRecording(qint64 *outBytes, QString *outErr, int *outCode = nullptr)
+{
+    if (!g_recProc) {
+        if (outErr) *outErr = QStringLiteral("当前没有录像在进行");
+        return false;
+    }
+    if (g_recProc->state() != QProcess::NotRunning) {
+        g_recProc->terminate();
+        if (!g_recProc->waitForFinished(5000)) { g_recProc->kill(); g_recProc->waitForFinished(2000); }
+    } else {
+        g_recProc->waitForFinished(1000);   // 已自然结束，等它彻底收尾
+    }
+    const int code = g_recProc->exitCode();
+    const qint64 bytes = QFileInfo(g_recOutPath).exists() ? QFileInfo(g_recOutPath).size() : 0;
+    delete g_recProc; g_recProc = nullptr;
+    if (outCode) *outCode = code;
+    if (bytes <= 0) {
+        QFile::remove(g_recOutPath);
+        if (outErr) *outErr = QStringLiteral("没有产生有效文件（退出码 %1）").arg(code);
+        return false;
+    }
+    if (outBytes) *outBytes = bytes;
+    uploadRecordingAsync(g_recOutPath);   // 完成后自动上传云端 recordings/（上传失败不改本函数结论）
+    return true;
+}
+
+// ── 自习模式（2026-10-13）：噪音检测 + 噪音异常自动录制 ──────────────────────
+// 定位：**静默监控**，不干扰学生（区别于考试模式的全屏拦截）。
+//   · 进模式：周期测教室噪音（noise_monitor 短窗口：开→录→关，不常占麦、不驻留录音）
+//     → 每拍把 dB 实时回传管理端（type:noise_sample，走订阅中继，不进事件流水）。
+//   · 判异常：dB **连续 N 拍**都高于阈值才算（一次瞬时爆音不算，防误报）。
+//   · 触发：自动录一段摄像头（recordSec 秒）→ 停 → 上传云端 → 上报 noise_alert。
+static bool    g_studyOn = false;
+static double  g_studyThreshDb = -45.0;    // 阈值（dB）
+static int     g_studyStreakNeed = 3;      // 连续超阈拍数
+static int     g_studyRecordSec = 30;      // 触发后录多久（秒）
+static int     g_studyStreak = 0;          // 当前连续超阈计数
+static int     g_studyAlertCount = 0;      // 本次自习累计触发次数
+static QTimer *g_studyRecTimer = nullptr;  // 自动录制到点停
+
+static void sendNoiseSample(const QJsonObject &p)
+{
+    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
+    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("noise_sample"), p));
+}
+static void sendNoiseAlert(const QJsonObject &p)
+{
+    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
+    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("noise_alert"), p));
+}
+
+static void studyOnSample(double db);      // 前向
+static void studyTriggerRecord();          // 前向
+
+// 懒建噪音采集器：noise_monitor_start 与 study_mode_start 共用（避免两处各 new 一份，
+// 两份实例会同时抢麦且各报各的）。采集在 noise_monitor 内部异步做，不阻塞主线程。
+static void ensureNoise()
+{
+    if (g_noise) return;
+    g_noise = new NoiseMonitor(nullptr);   // 无 parent，单例式驻留（进程退出随 Qt 清理）
+    QObject::connect(g_noise, &NoiseMonitor::noiseSample, g_ws, [](double db, bool active, int seq) {
+        QJsonObject p;
+        p.insert(QStringLiteral("db"), db);
+        p.insert(QStringLiteral("active"), active);
+        p.insert(QStringLiteral("seq"), seq);
+        p.insert(QStringLiteral("study"), g_studyOn);
+        p.insert(QStringLiteral("captureOk"), g_noise ? g_noise->captureAvailable() : false);
+        if (g_studyOn) p.insert(QStringLiteral("thresholdDb"), g_studyThreshDb);
+        sendNoiseSample(p);                 // 实时回传管理端（订阅中继）
+        if (g_studyOn) studyOnSample(db);   // 自习模式：超阈判定
+    });
+    QObject::connect(g_noise, &NoiseMonitor::failed, g_ws, [](const QString &reason) {
+        qWarning().noquote() << QStringLiteral("[agent-qt] 噪音采集失败：%1").arg(reason);
+        sendEvent(QStringLiteral("warn"), QStringLiteral("noise_monitor_failed"),
+                  QJsonObject{ { QStringLiteral("reason"), reason } });
+    });
+}
+
+static void studyOnSample(double db)
+{
+    if (db > g_studyThreshDb) {
+        ++g_studyStreak;
+        if (g_studyStreak >= g_studyStreakNeed) {
+            g_studyStreak = 0;   // 触发后复位：持续噪声不会每拍都再触发（下轮要重新攒）
+            studyTriggerRecord();
+        }
+    } else {
+        g_studyStreak = 0;       // 一安静就断链，必需"连续"才算异常
+    }
+}
+
+static void studyTriggerRecord()
+{
+    QString dev = boundCamera();
+    if (dev.isEmpty()) dev = QStringLiteral("video0");
+    const QString err = beginRecording(dev, g_studyRecordSec);
+    if (!err.isEmpty()) {
+        // 起不来自动录制（如手动录制占着 / 设备被占）：如实上报，不静默吞
+        sendEvent(QStringLiteral("warn"), QStringLiteral("noise_alert_record_failed"),
+                  QJsonObject{ { QStringLiteral("reason"), err }, { QStringLiteral("device"), dev } });
+        return;
+    }
+    ++g_studyAlertCount;
+    {
+        QJsonObject e;
+        e.insert(QStringLiteral("event"), QStringLiteral("record_start"));
+        e.insert(QStringLiteral("device"), dev);
+        e.insert(QStringLiteral("seconds"), g_studyRecordSec);
+        e.insert(QStringLiteral("thresholdDb"), g_studyThreshDb);
+        e.insert(QStringLiteral("count"), g_studyAlertCount);
+        e.insert(QStringLiteral("path"), QDir::toNativeSeparators(g_recOutPath));
+        sendNoiseAlert(e);
+    }
+    qInfo("[study] 噪音异常，自动录制开始（%d 秒，设备 %s）", g_studyRecordSec, qPrintable(dev));
+
+    if (!g_studyRecTimer) {
+        g_studyRecTimer = new QTimer();
+        g_studyRecTimer->setSingleShot(true);
+        QObject::connect(g_studyRecTimer, &QTimer::timeout, [] {
+            qint64 bytes = 0; int code = 0; QString err2;
+            const bool ok = endRecording(&bytes, &err2, &code);
+            QJsonObject e;
+            e.insert(QStringLiteral("event"), QStringLiteral("record_stop"));
+            e.insert(QStringLiteral("ok"), ok);
+            e.insert(QStringLiteral("bytes"), double(bytes));
+            e.insert(QStringLiteral("count"), g_studyAlertCount);
+            if (!ok) e.insert(QStringLiteral("reason"), err2);
+            sendNoiseAlert(e);
+            if (ok) qInfo("[study] 噪音异常录制完成：%lld 字节，已上传云端", (long long)bytes);
+            else    qWarning("[study] 噪音异常录制失败：%s", qPrintable(err2));
+        });
+    }
+    g_studyRecTimer->start(g_studyRecordSec * 1000 + 3000);   // 留 3s 余量（ffmpeg 自身 -t 也在计时）
+}
+
 ExecOut executeAction(const QString &action, const QJsonObject &params)
 {
     ExecOut out;
@@ -4269,37 +4445,15 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
 
     // 开始录像：后台起 ffmpeg 进程写 mp4。已经在录就如实报 failed（不静默换文件）。
     if (action == QStringLiteral("camera_record_start")) {
-        const QString ff = ffmpegBin();
-        if (ff.isEmpty()) { out.result = QStringLiteral("failed"); out.error = QStringLiteral("找不到 ffmpeg"); return out; }
-        if (g_recProc && g_recProc->state() != QProcess::NotRunning) {
-            out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("camera_record: 已有一条录像在进行中（%1），请先 record_stop").arg(
-                QDir::toNativeSeparators(g_recOutPath));
-            return out;
-        }
         // 设备：显式 device > 本机绑定的摄像头 > video0（2026-10-09）
         QString dev = params.value(QStringLiteral("device")).toString().trimmed();
         if (dev.isEmpty()) dev = boundCamera();
         if (dev.isEmpty()) dev = QStringLiteral("video0");
         const int maxSec = qBound(1, params.value(QStringLiteral("duration_sec")).toInt(300), 3600);
-        QDir().mkpath(g_shotDir);
-        g_recOutPath = g_shotDir + QStringLiteral("/rec-%1.mp4").arg(QDateTime::currentMSecsSinceEpoch());
-        g_recProc = new QProcess();
-        g_recProc->setProcessChannelMode(QProcess::MergedChannels);
-        g_recProc->start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
-                               QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
-                               QStringLiteral("dshow"), QStringLiteral("-i"),
-                               QStringLiteral("video=%1").arg(dev),
-                               QStringLiteral("-t"), QString::number(maxSec),
-                               QStringLiteral("-c:v"), QStringLiteral("libx264"), QStringLiteral("-preset"),
-                               QStringLiteral("ultrafast"), QStringLiteral("-crf"), QStringLiteral("28"),
-                               QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
-                               QStringLiteral("-r"), QStringLiteral("15"), g_recOutPath });
-        if (!g_recProc->waitForStarted(4000)) {
-            const int code = g_recProc->exitCode();
-            delete g_recProc; g_recProc = nullptr;
+        const QString startErr = beginRecording(dev, maxSec);
+        if (!startErr.isEmpty()) {
             out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("camera_record: ffmpeg 启动失败（退出码 %1，设备 %2）").arg(code).arg(dev);
+            out.error = QStringLiteral("camera_record: ") + startErr;
             return out;
         }
         // 光"进程起来了"不算数：ffmpeg 遇到不存在的 dshow 设备会**自己立刻退出**，
@@ -4329,28 +4483,26 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
 
     // 停止录像。回执给实际字节数——0 字节就是失败，不许报 done。
     if (action == QStringLiteral("camera_record_stop")) {
-        if (!g_recProc || g_recProc->state() == QProcess::NotRunning) {
+        if (!g_recProc) {
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("camera_record_stop: 当前没有录像在进行");
             return out;
         }
-        g_recProc->terminate();
-        if (!g_recProc->waitForFinished(5000)) { g_recProc->kill(); g_recProc->waitForFinished(2000); }
-        const int code = g_recProc->exitCode();
-        const qint64 bytes = QFileInfo(g_recOutPath).exists() ? QFileInfo(g_recOutPath).size() : 0;
-        delete g_recProc; g_recProc = nullptr;
-        if (bytes == 0) {
-            QFile::remove(g_recOutPath);
+        const QString recPath = g_recOutPath;
+        qint64 bytes = 0; QString err2;
+        // ⚠️ 2026-10-13：不再要求"进程必须还在跑"才停。ffmpeg 带 -t 到点会**自己结束**，
+        //    那时 state 已是 NotRunning，但文件是完整的 —— 旧写法会把这种"已录好的文件"
+        //    判成"没有录像在进行"而丢掉（自习模式自动录制到点常走这条）。endRecording 容忍它。
+        if (!endRecording(&bytes, &err2)) {
             out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("camera_record_stop: 没有产生有效文件（退出码 %1）").arg(code);
+            out.error = QStringLiteral("camera_record_stop: ") + err2;
             return out;
         }
         out.result = QStringLiteral("done");
-        out.data.insert(QStringLiteral("path"), QDir::toNativeSeparators(g_recOutPath));
-        out.data.insert(QStringLiteral("bytes"), (qint64)bytes);
-        // 班级监控（设计文档 3.6 第一版）：录制完成后自动上传到云端 recordings/，
+        out.data.insert(QStringLiteral("path"), QDir::toNativeSeparators(recPath));
+        out.data.insert(QStringLiteral("bytes"), bytes);
+        // 班级监控（设计文档 3.6 第一版）：录制完成后自动上传到云端 recordings/（endRecording 内已发起），
         // 供管理端列表 + 回放。上传失败不改变回执（本地文件仍在，可手工取）。
-        uploadRecordingAsync(g_recOutPath);
         return out;
     }
 
@@ -4593,30 +4745,12 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
-    // ── A6（2026-10-11）：噪音检测（§6.5）────────────────────────────────
-    // 收到指令才开采集（不常驻占麦）。采样周期由调用方给（默认 2s），每次分析完
-    // 通过 type:"event" 把 {db, active, seq} 吐给云端 → 管理端展示/告警。
-    // ⚠️ 如实说明：noise_monitor.cpp 的 captureRms() 目前是**能力骨架**（返回 0，
-    //    留了 WASAPI 集成 TODO），所以现在采出来的 db 恒为 0、active 恒为 false。
-    //    接线本身是对的（接口/链路就绪）；真机采集把 captureRms 的躯壳换掉即可，
-    //    这里不假装"已经在测噪音"。
+    // ── A6（2026-10-11 起）：噪音检测（§6.5）。2026-10-13 captureRms 已真实现 ──
+    // 收到指令才开采集（不常驻占麦）。采样周期由调用方给（默认 2s），每拍把
+    // {db, active, seq} 经 type:"noise_sample" 实时回传（订阅该设备的管理端）。
+    // 短窗口采集：每拍"开→录 150ms→关"，不驻留录音、不受语音对讲长期占用。
     if (action == QStringLiteral("noise_monitor_start")) {
-        if (!g_noise) {
-            g_noise = new NoiseMonitor(nullptr);   // 无 parent，单例式驻留（进程退出时随 Qt 清理）
-            QObject::connect(g_noise, &NoiseMonitor::noiseSample, g_ws,
-                             [](double db, bool active, int seq) {
-                                 QJsonObject extra;
-                                 extra.insert(QStringLiteral("db"), db);
-                                 extra.insert(QStringLiteral("active"), active);
-                                 extra.insert(QStringLiteral("seq"), seq);
-                                 sendEvent(QStringLiteral("info"), QStringLiteral("noise_sample"), extra);
-                             });
-            QObject::connect(g_noise, &NoiseMonitor::failed, g_ws, [](const QString &reason) {
-                qWarning().noquote() << QStringLiteral("[agent-qt] 噪音采集失败：%1").arg(reason);
-                sendEvent(QStringLiteral("warn"), QStringLiteral("noise_monitor_failed"),
-                          QJsonObject{ { QStringLiteral("reason"), reason } });
-            });
-        }
+        ensureNoise();
         const int iv = qBound(500, params.value(QStringLiteral("intervalMs")).toInt(2000), 60000);
         if (g_noise->running()) {
             out.result = QStringLiteral("done");
@@ -4628,8 +4762,6 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("active"), true);
         out.data.insert(QStringLiteral("intervalMs"), iv);
-        // 采集骨架未接真机：如实告知调用方"链路已开，但指标暂为 0"
-        out.data.insert(QStringLiteral("captureStub"), true);
         qInfo("[agent-qt] 🎙 噪音检测开启（每 %d ms 一次）", iv);
         return out;
     }
@@ -4647,6 +4779,44 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.data.insert(QStringLiteral("wasActive"), true);
         out.data.insert(QStringLiteral("lastDb"), g_noise->lastDb());
         qInfo("[agent-qt] 🔇 噪音检测停止");
+        return out;
+    }
+
+    // ── 自习模式（2026-10-13）：噪音检测 + 噪音异常自动录制 ──
+    // 与 noise_monitor_start 的分工：那个是"只测不录"的底层开关；这个是上层**模式**——
+    // 除周期回传 dB 外，还带"连续超阈 → 自动录一段 → 上传云端 → 上报 noise_alert"的闭环。
+    if (action == QStringLiteral("study_mode_start")) {
+        const double th = params.value(QStringLiteral("thresholdDb")).toDouble(-45.0);
+        const int need = qBound(1, params.value(QStringLiteral("streakNeed")).toInt(3), 60);
+        const int recSec = qBound(5, params.value(QStringLiteral("recordSec")).toInt(30), 300);
+        const int iv = qBound(500, params.value(QStringLiteral("intervalMs")).toInt(2000), 60000);
+        ensureNoise();
+        g_studyOn = true;
+        g_studyThreshDb = th;
+        g_studyStreakNeed = need;
+        g_studyRecordSec = recSec;
+        g_studyStreak = 0;
+        g_studyAlertCount = 0;
+        if (!g_noise->running()) g_noise->start(16000, iv);
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("study"), true);
+        out.data.insert(QStringLiteral("thresholdDb"), th);
+        out.data.insert(QStringLiteral("streakNeed"), need);
+        out.data.insert(QStringLiteral("recordSec"), recSec);
+        out.data.insert(QStringLiteral("intervalMs"), iv);
+        qInfo("[study] 📖 自习模式开启：阈值 %.1f dB / 连续 %d 拍 / 触发录 %d 秒", th, need, recSec);
+        return out;
+    }
+
+    if (action == QStringLiteral("study_mode_stop")) {
+        g_studyOn = false;
+        g_studyStreak = 0;
+        if (g_studyRecTimer) g_studyRecTimer->stop();
+        if (g_noise && g_noise->running()) g_noise->stop();
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("study"), false);
+        out.data.insert(QStringLiteral("alertCount"), g_studyAlertCount);
+        qInfo("[study] 📖 自习模式关闭（本次共触发 %d 次异常录制）", g_studyAlertCount);
         return out;
     }
 
