@@ -1488,6 +1488,85 @@ void ViewerBackend::emitLdcCameraFrame(const QImage &img)
     }
     emit cameraFrameChanged();
 }
+
+// ── 自习模式（2026-10-13）：噪音检测 + 异常录制 ────────────────────────────
+// 被控端每拍回传一份噪音样本（db/active/study/captureOk…，见 agent main.cpp）。
+// 这里只做"聚合成 QML 能直接画的东西"：最新 dB + 最近 N 个样本 + 开关状态。
+// 异常/录制记录（noise_alert）单独进 m_noiseAlerts。
+static constexpr int kNoiseSamplesMax = 60;   // 曲线/条带保留的样本数（2s 一拍 ≈ 2 分钟窗口）
+static constexpr int kNoiseAlertsMax  = 50;   // 异常记录保留条数
+
+void ViewerBackend::handleNoiseSample(const QJsonObject &pay)
+{
+    // 只认**当前选中设备**的噪音。管理端可能同时订阅了缩略图墙的多台设备，
+    // 别的机器若也在跑噪音检测，样本会一起飘过来 —— 不能混进当前这台的曲线。
+    const QString uid = pay.value(QStringLiteral("uid")).toString();
+    if (!uid.isEmpty() && !m_currentUid.isEmpty() && uid != m_currentUid) return;
+
+    m_noiseDb = pay.value(QStringLiteral("db")).toDouble();
+    m_noiseActive = pay.value(QStringLiteral("active")).toBool();
+    // captureOk：老版本被控端没这字段 → 默认 true（别把"无此字段"误判成"采不到"）
+    m_noiseCaptureOk = pay.value(QStringLiteral("captureOk")).toBool(true);
+
+    QVariantMap s;
+    s.insert(QStringLiteral("db"), m_noiseDb);
+    s.insert(QStringLiteral("active"), m_noiseActive);
+    s.insert(QStringLiteral("t"), double(QDateTime::currentMSecsSinceEpoch()));
+    m_noiseSamples.append(s);
+    while (m_noiseSamples.size() > kNoiseSamplesMax) m_noiseSamples.removeFirst();
+
+    // 开关状态以被控端每拍回报的 study 标志为准（比本地乐观置位可靠 —— 别的老师
+    // 开/关、或本地下发失败，这里都能自愈）。
+    const bool study = pay.value(QStringLiteral("study")).toBool(false);
+    if (study != m_studyActive) {
+        m_studyActive = study;
+        logf("[viewer] 自习模式 %s", study ? "已开启" : "已关闭");
+        emit studyChanged();
+    }
+    emit noiseChanged();
+}
+
+void ViewerBackend::handleNoiseAlert(const QJsonObject &pay)
+{
+    const QString uid = pay.value(QStringLiteral("uid")).toString();
+    if (!uid.isEmpty() && !m_currentUid.isEmpty() && uid != m_currentUid) return;
+
+    QVariantMap a;
+    a.insert(QStringLiteral("event"), pay.value(QStringLiteral("event")).toString());
+    a.insert(QStringLiteral("count"), pay.value(QStringLiteral("count")).toInt());
+    a.insert(QStringLiteral("ok"), pay.value(QStringLiteral("ok")).toBool(true));
+    a.insert(QStringLiteral("bytes"), pay.value(QStringLiteral("bytes")).toDouble());
+    a.insert(QStringLiteral("seconds"), pay.value(QStringLiteral("seconds")).toInt());
+    a.insert(QStringLiteral("device"), pay.value(QStringLiteral("device")).toString());
+    a.insert(QStringLiteral("path"), pay.value(QStringLiteral("path")).toString());
+    a.insert(QStringLiteral("reason"), pay.value(QStringLiteral("reason")).toString());
+    a.insert(QStringLiteral("t"), double(QDateTime::currentMSecsSinceEpoch()));
+    m_noiseAlerts.prepend(a);   // 新在头：列表自上而下就是时间倒序
+    while (m_noiseAlerts.size() > kNoiseAlertsMax) m_noiseAlerts.removeLast();
+    emit noiseAlertsChanged();
+    logf("[viewer] 噪音告警：%s（第 %d 次）", a.value(QStringLiteral("event")).toString().toUtf8().constData(),
+         a.value(QStringLiteral("count")).toInt());
+}
+
+void ViewerBackend::startStudyMode(const QVariantMap &opts)
+{
+    QJsonObject p;
+    const char *keys[] = { "thresholdDb", "streakNeed", "recordSec", "intervalMs" };
+    for (const char *k : keys) {
+        const QString key = QString::fromLatin1(k);
+        if (opts.contains(key)) p.insert(key, QJsonValue::fromVariant(opts.value(key)));
+    }
+    // 乐观置位（界面立刻反映）；真状态以被控端每拍回报的 study 标志为准。
+    if (!m_studyActive) { m_studyActive = true; emit studyChanged(); }
+    sendAction(QStringLiteral("study_mode_start"), p);
+}
+
+void ViewerBackend::stopStudyMode()
+{
+    if (m_studyActive) { m_studyActive = false; emit studyChanged(); }
+    sendAction(QStringLiteral("study_mode_stop"), QJsonObject());
+}
+
 void ViewerBackend::onConnected()
 {
     m_connected = true;
@@ -2066,6 +2145,12 @@ void ViewerBackend::onTextMessage(const QString &text)
         // 这里显式收口（本轮不改变订阅状态机，只把回执认下来）。
         logf("[viewer] 云端已确认退订（%s）",
              pay.value(QStringLiteral("uid")).toString().toUtf8().constData());
+    } else if (type == QStringLiteral("noise_sample")) {
+        // 自习模式/噪音检测：被控端每拍回传的噪音样本（走订阅中继，不进事件流水）
+        handleNoiseSample(pay);
+    } else if (type == QStringLiteral("noise_alert")) {
+        // 自习模式：噪音异常 → 自动录制 的开始/结束记录
+        handleNoiseAlert(pay);
     } else {
         logf("[viewer] 收到未处理的云端消息 type=%s", type.toUtf8().constData());
     }

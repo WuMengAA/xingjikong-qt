@@ -57,6 +57,11 @@ Item {
     property string camStreamUid: ""   // 当前已请求推流的设备（""=未请求）
     property bool camHasFrame: false   // 是否已收到至少一帧（收到后隐藏占位）
 
+    // ── 自习模式配置（2026-10-13）：噪音检测阈值 + 异常自动录制 ──
+    property real studyThresholdDb: -45   // 噪音阈值（dB；教室安静≈-60，说话≈-35，越小越灵敏）
+    property int  studyStreakNeed: 3      // 连续几个采样都超阈才算"异常"（防瞬时爆音误报）
+    property int  studyRecordSec: 30      // 判异常后自动录多久
+
     // ── 2026-10-12 · UI 评审第 4 条：界面只给人话，技术日志不上界面 ──
     //  被控端现在回三件套：error（人话，可直接显示）/ errorCode（机器码）/ errorRaw（FFmpeg 原生输出）。
     //  ⚠️ 红线：errorRaw **只进 console（供导出日志/诊断）**，绝不能贴到界面上——
@@ -241,7 +246,7 @@ Item {
             id: tabs
             theme: cc.theme
             width: parent.width
-            model: ["实时", "录制回放", "诊断"]
+            model: ["实时", "录制回放", "自习", "诊断"]
             currentIndex: 0
         }
 
@@ -568,11 +573,273 @@ Item {
                 }
             }
 
+            // ── 自习（2026-10-13）：噪音检测 + 噪音异常自动录制 ──
+            // 静默监控：周期测教室噪音；**连续 N 拍超阈**才判异常 → 自动录一段摄像头
+            // 并上传云端 → 记一条异常。不干扰学生（区别于考试模式的全屏拦截）。
+            Rectangle {
+                visible: tabs.currentIndex === 2
+                anchors.fill: parent
+                radius: cc.theme.rCard || 12
+                color: cc.theme.panel || "#181818"
+                border.color: cc.theme.stroke || "#2A2A2A"
+                border.width: 1
+
+                Column {
+                    id: studyTop
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.topMargin: 12
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 10
+
+                    // ① 标题 + 状态 + 开关
+                    Item {
+                        width: parent.width
+                        height: 30
+                        Row {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 8
+                            Text {
+                                text: "自习模式"
+                                color: cc.theme.fg || "#FAFAFA"
+                                font.pixelSize: 14; font.bold: true
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Rectangle {
+                                width: 52; height: 20; radius: 10
+                                color: cc.backend.studyActive ? (cc.theme.cream || "#141414") : "transparent"
+                                border.color: cc.theme.stroke || "#2A2A2A"; border.width: 1
+                                anchors.verticalCenter: parent.verticalCenter
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: cc.backend.studyActive ? "监测中" : "未开启"
+                                    color: cc.backend.studyActive ? (cc.theme.fg || "#FAFAFA") : (cc.theme.fg4 || "#707070")
+                                    font.pixelSize: 10
+                                }
+                            }
+                            Text {
+                                text: cc.selUid === "" ? "（先在「实时」页选设备）" : "· " + cc.selUid
+                                color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 11
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+                        Btn {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 88
+                            theme: cc.theme
+                            text: cc.backend.studyActive ? "关闭自习" : "开启自习"
+                            strong: !cc.backend.studyActive
+                            disabled: cc.selUid === ""
+                            tip: cc.selUid === "" ? "先在「实时」页选一台设备"
+                                                  : "周期测教室噪音；连续超阈自动录一段摄像头并上传"
+                            onClicked: {
+                                if (cc.backend.studyActive) {
+                                    cc.backend.stopStudyMode()
+                                } else {
+                                    cc.backend.startStudyMode({
+                                        "thresholdDb": cc.studyThresholdDb,
+                                        "streakNeed": cc.studyStreakNeed,
+                                        "recordSec": cc.studyRecordSec,
+                                        "intervalMs": 2000
+                                    })
+                                }
+                            }
+                        }
+                    }
+
+                    // ② 配置行：阈值 / 连续拍数 / 录制时长
+                    Row {
+                        spacing: 8
+                        Text { text: "阈值"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                        InputField {
+                            id: thIn
+                            th: cc.theme
+                            width: 64; height: 28
+                            text: String(cc.studyThresholdDb)
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            onEditingFinished: {
+                                var v = parseFloat(thIn.text)
+                                if (!isNaN(v) && v <= 0 && v >= -96) { cc.studyThresholdDb = v; cc.status = "阈值 → " + v + " dB" }
+                                else thIn.text = String(cc.studyThresholdDb)
+                            }
+                        }
+                        Text { text: "dB"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: "连续"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                        InputField {
+                            id: stIn
+                            th: cc.theme
+                            width: 44; height: 28
+                            text: String(cc.studyStreakNeed)
+                            inputMethodHints: Qt.ImhDigitsOnly
+                            onEditingFinished: {
+                                var v = parseInt(stIn.text)
+                                if (!isNaN(v) && v >= 1 && v <= 60) cc.studyStreakNeed = v
+                                else stIn.text = String(cc.studyStreakNeed)
+                            }
+                        }
+                        Text { text: "拍后录"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                        InputField {
+                            id: rsIn
+                            th: cc.theme
+                            width: 44; height: 28
+                            text: String(cc.studyRecordSec)
+                            inputMethodHints: Qt.ImhDigitsOnly
+                            onEditingFinished: {
+                                var v = parseInt(rsIn.text)
+                                if (!isNaN(v) && v >= 5 && v <= 300) cc.studyRecordSec = v
+                                else rsIn.text = String(cc.studyRecordSec)
+                            }
+                        }
+                        Text { text: "秒"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                    }
+
+                    // ③ 当前噪音：大字 dB + 电平条（白线=阈值）
+                    Rectangle {
+                        width: parent.width; height: 56
+                        radius: 8
+                        color: cc.theme.cream || "#141414"
+                        border.color: cc.theme.stroke || "#2A2A2A"; border.width: 1
+                        Row {
+                            anchors.left: parent.left; anchors.leftMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 8
+                            Text {
+                                text: cc.backend.noiseCaptureOk
+                                      ? (cc.backend.noiseDb <= -90 ? "静" : cc.backend.noiseDb.toFixed(1))
+                                      : "—"
+                                color: cc.theme.fg || "#FAFAFA"
+                                font.pixelSize: 20
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                text: "dB"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 11
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                text: !cc.backend.noiseCaptureOk ? "采不到（无麦或被语音占用）"
+                                    : (cc.backend.noiseActive ? "偏高" : "正常")
+                                color: cc.backend.noiseActive ? (cc.theme.rCtrl || "#E5534B") : (cc.theme.fg3 || "#8A8A8A")
+                                font.pixelSize: 11
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+                        Item {
+                            anchors.right: parent.right; anchors.rightMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width * 0.40; height: 10
+                            Rectangle {
+                                anchors.fill: parent; radius: 5
+                                color: cc.theme.stroke || "#2A2A2A"
+                            }
+                            Rectangle {
+                                height: parent.height; radius: 5
+                                width: parent.width * Math.max(0, Math.min(1, (cc.backend.noiseDb + 96) / 96))
+                                color: cc.backend.noiseActive ? (cc.theme.rCtrl || "#E5534B") : (cc.theme.fg3 || "#8A8A8A")
+                            }
+                            Rectangle {
+                                x: parent.width * Math.max(0, Math.min(1, (cc.studyThresholdDb + 96) / 96)) - 1
+                                width: 2; height: parent.height + 6; y: -3
+                                color: cc.theme.fg || "#FAFAFA"
+                                opacity: 0.75
+                            }
+                        }
+                    }
+
+                    // ④ 最近噪音样本条带
+                    Text { text: "最近噪音（每拍一柱，白线=阈值）"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 10 }
+                    Row {
+                        width: parent.width
+                        height: 38
+                        spacing: 1
+                        Repeater {
+                            model: cc.backend.noiseSamples
+                            delegate: Item {
+                                width: Math.max(1, (parent.width - (cc.backend.noiseSamples.length || 1)) / Math.max(1, cc.backend.noiseSamples.length))
+                                height: parent.height
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    width: parent.width
+                                    height: parent.height * Math.max(0, Math.min(1, (modelData.db + 96) / 96))
+                                    color: modelData.active ? (cc.theme.rCtrl || "#E5534B") : (cc.theme.fg3 || "#8A8A8A")
+                                    opacity: 0.85
+                                }
+                            }
+                        }
+                        Text {
+                            visible: (cc.backend.noiseSamples.length || 0) === 0
+                            text: "（开启自习模式后才有数据）"
+                            color: cc.theme.fg4 || "#707070"; font.pixelSize: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    Text { text: "异常记录"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 10 }
+                }
+
+                // ⑤ 异常记录列表（占满剩余高度）
+                Flickable {
+                    anchors.top: studyTop.bottom
+                    anchors.topMargin: 6
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    anchors.bottomMargin: 12
+                    clip: true
+                    contentHeight: altCol.height
+                    Column {
+                        id: altCol
+                        width: parent.width
+                        spacing: 4
+                        Repeater {
+                            model: cc.backend.noiseAlerts
+                            delegate: Rectangle {
+                                width: altCol.width
+                                height: 26
+                                radius: 6
+                                color: cc.theme.cream || "#141414"
+                                Row {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10; anchors.rightMargin: 10
+                                    spacing: 8
+                                    Text {
+                                        text: Qt.formatTime(new Date(modelData.t), "hh:mm:ss")
+                                        color: cc.theme.fg4 || "#707070"; font.pixelSize: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: modelData.event === "record_start"
+                                              ? "检测到噪音异常 · 开始录制"
+                                              : (modelData.ok ? "录制完成（" + Math.round((modelData.bytes || 0) / 1024) + " KB，已上传）"
+                                                              : "录制失败：" + (modelData.reason || "未知"))
+                                        color: (modelData.event === "record_stop" && modelData.ok === false)
+                                               ? (cc.theme.rCtrl || "#E5534B") : (cc.theme.fg || "#FAFAFA")
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+                            }
+                        }
+                        Text {
+                            visible: (cc.backend.noiseAlerts.length || 0) === 0
+                            text: "暂无异常（噪音连续超阈会自动录一段并记在这里）"
+                            color: cc.theme.fg4 || "#707070"; font.pixelSize: 10
+                        }
+                    }
+                }
+            }
+
             // ── 诊断 ──
             // 把"设备连接状态 / 绑定 / 摄像头枚举 / 最近错误（人话）+ 错误码 / 重试"聚到一屏，
             // 老师排障时不用在动作区翻找（UI 评审一.2：诊断独立成档）。
             Rectangle {
-                visible: tabs.currentIndex === 2
+                visible: tabs.currentIndex === 3
                 anchors.fill: parent
                 radius: cc.theme.rCard || 12
                 color: cc.theme.panel || "#181818"

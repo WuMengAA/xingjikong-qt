@@ -33,6 +33,7 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
 
 class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向声明，避免引入 mmsystem）
 class AudioPlayback; // B6：管理端播放（学生回传的 audio/pcm 帧）
@@ -84,6 +85,18 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QJsonObject recordings READ recordings NOTIFY recordingsChanged)
     // 2026-10-11：事件流水（/api/events，最近 50 条）——手机端告警页数据源
     Q_PROPERTY(QJsonArray events READ events NOTIFY eventsChanged)
+    // ── 自习模式（2026-10-13）：噪音检测 + 异常录制 ──
+    // 被控端每拍回传一份噪音样本（type=noise_sample，走订阅中继），这里聚合成：
+    //   noiseDb      最新 dB（-96..0，越大越吵；< -90 视作安静）
+    //   noiseSamples 最近 N 个样本（画条/曲线用，{db,t} 新在尾）
+    //   noiseAlerts  异常/录制记录（{event,count,path,ok,bytes,ts}）
+    //   studyActive  自习模式是否在跑（agent 每拍回报的 study 标志，最可靠）
+    Q_PROPERTY(double noiseDb READ noiseDb NOTIFY noiseChanged)
+    Q_PROPERTY(bool noiseActive READ noiseActive NOTIFY noiseChanged)
+    Q_PROPERTY(bool noiseCaptureOk READ noiseCaptureOk NOTIFY noiseChanged)
+    Q_PROPERTY(QVariantList noiseSamples READ noiseSamples NOTIFY noiseChanged)
+    Q_PROPERTY(QVariantList noiseAlerts READ noiseAlerts NOTIFY noiseAlertsChanged)
+    Q_PROPERTY(bool studyActive READ studyActive NOTIFY studyChanged)
     // ⚠️ subscribeThumbnails 已挪进下面的 public: 段 —— 原来它写在这儿的**无访问说明符**位置，
     //    class 默认 private ⇒ QML 调不到（报 "Property 'subscribeThumbnails' of object
     //    ViewerBackend is not a function"），多班缩略图墙点一下就 TypeError。
@@ -188,6 +201,9 @@ public:
     // 摄像头第二轨（2026-10-12 · 四·双画面）：mid="camera" 的 RTC 帧落到 m_camFrame，
     // 经 cameraFrameChanged 通知 QML 刷 image://frames/cam（与屏幕帧互不干扰）。
     void emitLdcCameraFrame(const QImage &img);
+    // 自习模式（2026-10-13）：收 agent 的噪音样本 / 异常记录
+    void handleNoiseSample(const QJsonObject &pay);
+    void handleNoiseAlert(const QJsonObject &pay);
 
     // 帧的来源。以前两路都调同一个 applyFrameBytes 且不区分来源，结果被控端的 JPEG
     // 轮询帧和 WebRTC 抽出来的帧互相覆盖同一张 m_frame —— 画面在两个源之间来回跳、
@@ -467,6 +483,13 @@ public:
     /** 摄像头第二轨最新帧（2026-10-12 · 四·双画面；无则空图）。 */
     QImage camFrame() const { return m_camFrame; }
     int cameraFrameCount() const { return m_camFrameCount; }
+    // ── 自习模式（2026-10-13）getter ──
+    double noiseDb() const { return m_noiseDb; }
+    bool noiseActive() const { return m_noiseActive; }
+    bool noiseCaptureOk() const { return m_noiseCaptureOk; }
+    QVariantList noiseSamples() const { return m_noiseSamples; }
+    QVariantList noiseAlerts() const { return m_noiseAlerts; }
+    bool studyActive() const { return m_studyActive; }
     /** 当前订阅了缩略图的多台设备 uid 列表。 */
     QStringList thumbUids() const { return m_thumbUids; }
 
@@ -527,6 +550,12 @@ public:
     /** 主动关会话。 */
     Q_INVOKABLE void termClose();
 
+    // ── 自习模式（2026-10-13）──
+    /** 下发 study_mode_start。opts: {thresholdDb, streakNeed, recordSec, intervalMs}（都可省）。 */
+    Q_INVOKABLE void startStudyMode(const QVariantMap &opts = QVariantMap());
+    /** 下发 study_mode_stop。 */
+    Q_INVOKABLE void stopStudyMode();
+
     TermState termState() const { return m_termState; }
     QString termSid() const { return m_termSid; }
     QString termNote() const { return m_termNote; }
@@ -576,6 +605,13 @@ signals:
     /** 2026-10-12 · 四·双画面：摄像头第二轨帧就绪（ldc_receiver.cameraFrameReady → QML）。
      *  QML 收到就把 image://frames/cam 的 tick +1，摄像头格重取图。 */
     void cameraFrameChanged();
+    // ── 自习模式（2026-10-13）──
+    /** 噪音样本更新（db/active/samples 一起变）。 */
+    void noiseChanged();
+    /** 自习模式异常/录制记录更新。 */
+    void noiseAlertsChanged();
+    /** 自习模式开关状态变化（agent 每拍回报 study 标志）。 */
+    void studyChanged();
     /** 画面来源切换（jpeg ↔ rtc）——界面上那个链路徽标靠它刷新。 */
     void frameSourceChanged();
     /** 终端状态四件套（state/sid/note/busy）共用一个信号。 */
@@ -862,6 +898,13 @@ private:
     // 摄像头第二轨帧（2026-10-12 · 四·双画面）。与 m_frame 分开存，互不覆盖。
     QImage m_camFrame;
     int m_camFrameCount = 0;
+    // 自习模式（2026-10-13）：噪音样本聚合 + 异常记录
+    double m_noiseDb = 0.0;
+    bool m_noiseActive = false;
+    bool m_noiseCaptureOk = true;
+    bool m_studyActive = false;
+    QVariantList m_noiseSamples;   // 最近 kNoiseSamplesMax 个 {db,t}（新在尾）
+    QVariantList m_noiseAlerts;    // 最近 kNoiseAlertsMax 条异常/录制记录（新在头）
     // 本机日志文件路径（诊断与反馈；main.cpp 启动时注入）。
     QString m_logPath;
     int m_framesSinceCheck = 0;
