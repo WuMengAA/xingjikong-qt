@@ -3336,7 +3336,9 @@ QString ViewerBackend::copyContentUriToCache(const QString &uriStr,
         env->DeleteLocalRef(jstreamObj);
         return QString();
     }
-    jbyte data[CHUNK];
+    // 2026-10-12 修（审计 #20）：栈上 jbyte data[CHUNK] 是 64KB——Android 部分设备
+    // 线程栈可能只有 1MB（还有别的局部变量），可能栈溢出。改堆分配（QByteArray 预分配 + GetByteArrayRegion 直填）。
+    QByteArray data; data.resize(CHUNK);
     qint64 total = 0;
     for (;;) {
         const jint n = env->CallIntMethod(jstreamObj, mRead, buf);
@@ -3346,8 +3348,8 @@ QString ViewerBackend::copyContentUriToCache(const QString &uriStr,
             break;
         }
         if (n <= 0) break;   // EOF / -1 / 0
-        env->GetByteArrayRegion(buf, 0, n, data);
-        if (out.write(reinterpret_cast<const char *>(data), n) != n) {
+        env->GetByteArrayRegion(buf, 0, n, reinterpret_cast<jbyte *>(data.data()));
+        if (out.write(data.constData(), n) != n) {
             logf("[viewer] FAIL 文件推送：写缓存失败（%s）",
                  out.errorString().toUtf8().constData());
             env->DeleteLocalRef(buf);
