@@ -48,6 +48,12 @@ Item {
     property var recordingGroup: ({})
     property string boundDev: ""        // 被控端回执的当前绑定（权威；空 = 未绑定）
 
+    // ── 四·双画面：布局模式 ──
+    // 0=双画面（屏幕 60% + 摄像头 40%）；1=仅屏幕；2=仅摄像头。
+    // ⚠️ 当前 viewer 只有「屏幕」帧源（image://frames/<uid>），摄像头实时流（WebRTC 双路）
+    //   尚未接入 ⇒ 摄像头格显示诚实占位，后端接入后只把那格 source 指向真实流即可。
+    property int layoutMode: 0
+
     // ── 2026-10-12 · UI 评审第 4 条：界面只给人话，技术日志不上界面 ──
     //  被控端现在回三件套：error（人话，可直接显示）/ errorCode（机器码）/ errorRaw（FFmpeg 原生输出）。
     //  ⚠️ 红线：errorRaw **只进 console（供导出日志/诊断）**，绝不能贴到界面上——
@@ -339,7 +345,9 @@ Item {
                     }
                 }
 
-                // 右：实时画面
+                // 右：实时画面（四·双画面：屏幕 + 摄像头 左右分屏 + 三模式切换）
+                // ⚠️ 当前 viewer 只有「屏幕」帧源（image://frames/<uid>）；摄像头实时流
+                //    （WebRTC 双路）尚未接入 ⇒ 摄像头格显示诚实占位，待后端接入后只改 source。
                 Rectangle {
                     width: parent.width * 0.58
                     height: parent.height
@@ -351,39 +359,113 @@ Item {
                         anchors.fill: parent
                         anchors.margins: 12
                         spacing: 8
-                        Text {
-                            text: "实时画面"
-                            color: cc.theme.fg3 || "#8A8A8A"
-                            font.pixelSize: 11
-                        }
-                        // 实时帧（缩略图墙订阅的那台的帧）
-                        Rectangle {
+                        // 顶行：标题 + 三模式切换（双画面 / 仅屏幕 / 仅摄像头）
+                        Row {
                             width: parent.width
-                            height: parent.height - 40
+                            height: 28
+                            spacing: 8
+                            Text {
+                                text: "实时画面"
+                                color: cc.theme.fg3 || "#8A8A8A"
+                                font.pixelSize: 11
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Item { width: 6; height: 1 }
+                            // 分段切换（自绘，避开原生 Button；选中走 theme.inv）
+                            Repeater {
+                                model: ["双画面", "仅屏幕", "仅摄像头"]
+                                delegate: Rectangle {
+                                    height: 24
+                                    width: Math.max(56, segTxt.width + 18)
+                                    radius: 6
+                                    color: cc.layoutMode === index
+                                           ? (cc.theme.inv || "#F0F0F0")
+                                           : (segMa.containsMouse ? (cc.theme.hover2 || "#232323") : "transparent")
+                                    border.color: cc.theme.stroke || "#2A2A2A"
+                                    border.width: 1
+                                    Text {
+                                        id: segTxt
+                                        anchors.centerIn: parent
+                                        text: modelData
+                                        color: cc.layoutMode === index
+                                               ? (cc.theme.win || "#0A0A0A")
+                                               : (cc.theme.fg || "#FAFAFA")
+                                        font.pixelSize: 12
+                                    }
+                                    MouseArea {
+                                        id: segMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: cc.layoutMode = index
+                                    }
+                                }
+                            }
+                        }
+                        // 画面区：屏幕 + 摄像头 左右分屏（双画面 60/40；单模式占满）
+                        Rectangle {
+                            id: paneBox
+                            width: parent.width
+                            height: parent.height - 44
                             radius: 8
                             color: cc.theme.cream || "#141414"
                             border.color: cc.theme.stroke || "#2A2A2A"
                             border.width: 1
                             clip: true
-                            Image {
+                            Row {
+                                id: paneRow
                                 anchors.fill: parent
                                 anchors.margins: 4
-                                fillMode: Image.PreserveAspectFit
-                                cache: false
-                                property int tick: 0
-                                source: cc.selUid ? ("image://frames/" + cc.selUid + "?t" + tick) : ""
-                                Connections {
-                                    target: cc.backend
-                                    function onThumbnailChanged(uid) {
-                                        if (uid === cc.selUid || uid === "") parent.tick++
+                                spacing: 4
+                                // 屏幕画面（真实源 image://frames/<uid>）
+                                Rectangle {
+                                    visible: cc.layoutMode !== 2
+                                    width: cc.layoutMode === 0
+                                           ? ((paneRow.width - 4) * 3 / 5)
+                                           : paneRow.width
+                                    height: paneRow.height
+                                    color: "transparent"
+                                    clip: true
+                                    Image {
+                                        anchors.fill: parent
+                                        anchors.margins: 2
+                                        fillMode: Image.PreserveAspectFit
+                                        cache: false
+                                        property int tick: 0
+                                        source: cc.selUid ? ("image://frames/" + cc.selUid + "?t" + tick) : ""
+                                        Connections {
+                                            target: cc.backend
+                                            function onThumbnailChanged(uid) {
+                                                if (uid === cc.selUid || uid === "") parent.tick++
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: cc.selUid === "" ? "（选左侧设备看实时画面）" : ""
+                                        color: cc.theme.fg4 || "#707070"
+                                        font.pixelSize: 11
                                     }
                                 }
-                            }
-                            Text {
-                                anchors.centerIn: parent
-                                text: cc.selUid === "" ? "（选左侧设备看实时画面）" : ""
-                                color: cc.theme.fg4 || "#707070"
-                                font.pixelSize: 11
+                                // 摄像头画面（待接入：当前 viewer 无摄像头实时流源）
+                                Rectangle {
+                                    visible: cc.layoutMode !== 1
+                                    width: cc.layoutMode === 0
+                                           ? ((paneRow.width - 4) * 2 / 5)
+                                           : paneRow.width
+                                    height: paneRow.height
+                                    color: "transparent"
+                                    clip: true
+                                    Text {
+                                        anchors.centerIn: parent
+                                        width: parent.width - 16
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WrapAnywhere
+                                        text: "摄像头实时画面待接入\n（当前版本仅支持屏幕画面；\n摄像头双路流接入后此格自动点亮）"
+                                        color: cc.theme.fg4 || "#707070"
+                                        font.pixelSize: 11
+                                    }
+                                }
                             }
                         }
                     }
