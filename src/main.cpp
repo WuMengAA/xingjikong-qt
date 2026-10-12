@@ -259,6 +259,7 @@ SpectrumWidget *g_spectrum = nullptr;        // §6.3 语音频谱（懒建：�
 // 规则：同一段离线只弹第一条；云端回 registered（真的又连上了）才把闸门放开。
 static bool g_islandOfflineShown = false;
 static qint64 g_lastOfflineToastMs = 0;  // 2026-10-08：上一条"连接中断"灵动岛的时间戳（秒级冷却，防抖动时反复弹）
+static qint64 g_lastOfflineAt = 0;       // 2026-10-12：最近一次断线的时刻（0=在线或首连）。registered 时用来报「已恢复」
 int g_frameSeq = 0;
 qint64 g_frameBytes = 0;      // 累计发出的 JPEG 净荷（不含帧头）——与云端 bytesIn 对账用这个
 int g_instructionSeq = 0;
@@ -551,10 +552,20 @@ void sendRegister()
 // 心跳：告诉云端"我还活着"。
 // 硬约束：必须在 registered 之后才发 —— 云端握手阶段只认 register，
 // 那期间发任何别的消息都会被当成非法握手踢掉（AUTH_REQUIRED / close 4003）。
+// 2026-10-12 修「20-30 分钟自动重连」：实测云端 events.log 里 N7 是「设备掉线」
+// （TCP 断）而非「心跳超时踢」→ 中间设备（Cloudflare 隧道/防火墙）对**空闲连接**
+// 的 idle timeout 静默断。应用层 heartbeat（10s 一条文本）在隧道看来可能不算
+// 活跃流量，故每次心跳**同时发一条 WS 协议级 Ping 帧**（RFC6455，纯网络活动），
+// 让中间设备认为连接活跃，不触发 idle 回收。云端 node-ws 会自动回 Pong，无需改。
 void sendHeartbeat()
 {
     if (!g_registered) return;   // 还没通过云端校验，先别发（发了会被踢）
     if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
+
+    // 协议级 Ping 帧：对抗隧道/防火墙对空闲长连接的 idle timeout。
+    // 应用层 heartbeat 是"业务消息"，隧道可能不把它当活跃证据；Ping 是纯协议
+    // 帧，任何 WS 实现都处理，必然产生双向网络活动，连接不会被中间设备判闲。
+    try { g_ws->ping(); } catch (...) { /* ping 失败由 disconnected 兜底重连 */ }
 
     QJsonObject p;
     p.insert(QStringLiteral("seq"), ++g_heartbeatSeq);
@@ -5406,6 +5417,18 @@ void handleControlText(const QString &text)
         // 而升级前的成功标记必须带着"我当前这一版是好的"这个事实走。
         otaMarkStartedOk();
         updateTray(TrayState::Connected, QStringLiteral("已连接"));
+        // 2026-10-12「灵动岛一直处于重连状态」：断线弹「连接中断」后，恢复时若
+        // 只悄悄连上，用户看到的只有反复的「连接中断」→ 像"一直在重连"。这里在
+        // **重连成功**（曾断过、不是首连）时补一条「已恢复」，让断/连成对出现，
+        // 用户能明确知道"刚断过、现已恢复"，而不是只被断的提示反复刷。
+        if (g_lastOfflineAt > 0) {
+            const qint64 dur = (QDateTime::currentMSecsSinceEpoch() - g_lastOfflineAt) / 1000;
+            g_lastOfflineAt = 0;
+            islandShow(QStringLiteral("已重新连接"),
+                       dur >= 60 ? QStringLiteral("刚才断开约 %1 分钟，现已恢复").arg(dur / 60)
+                                 : QStringLiteral("刚才断开约 %1 秒，现已恢复").arg(dur),
+                       QStringLiteral("check-circle"), 2500);
+        }
         qInfo("[agent-qt] ✅ 云端已确认注册 v1（uid=%s，server=%s，心跳 %d ms，超时 %d ms）",
               qPrintable(pay.value(QStringLiteral("uid")).toString()),
               qPrintable(pay.value(QStringLiteral("server")).toString()),
@@ -5965,6 +5988,7 @@ int main(int argc, char *argv[])
         // 2026-10-08 去重：退避重连期间这一段离线只弹第一条；且与上一条离线提示间隔 < 20s
         // 不重弹，避免断线抖动（连上→又断）时胶囊反复出现、看着像"一直显示连接中断"。
         const qint64 nowOffline = QDateTime::currentMSecsSinceEpoch();
+        g_lastOfflineAt = nowOffline;   // 2026-10-12：记断线时刻，恢复时报「已重新连接」
         if (!g_islandOfflineShown && nowOffline - g_lastOfflineToastMs > 20000) {
             g_islandOfflineShown = true;
             g_lastOfflineToastMs = nowOffline;

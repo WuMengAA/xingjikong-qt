@@ -4,6 +4,7 @@
 
 #include <QDebug>
 #include <QRegularExpression>
+#include <QSettings>
 
 IslandBridge::IslandBridge(IslandOverlay *host, QObject *parent)
     : QObject(parent), m_host(host)
@@ -148,8 +149,10 @@ QString IslandBridge::whaleBubble() const
 
 bool IslandBridge::whaleAudioOn() const
 {
-    // 音效默认开。将来可接 QSettings 持久化开关。
-    return true;
+    // 2026-10-12 用户裁决「通知/状态/灵动岛音效**默认关闭**」：默认静音，避免
+    // 教室日常被通知音打断。QSettings 持久化开关（settings/whaleAudioOn），
+    // 界面（若有）改它即可；不改就一直是静音。
+    return QSettings().value(QStringLiteral("settings/whaleAudioOn"), false).toBool();
 }
 
 // ── 历史通知（2026-10-11 · 持久化）──────────────────────────────

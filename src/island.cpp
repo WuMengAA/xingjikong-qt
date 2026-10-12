@@ -468,10 +468,20 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     update();
 
     // ── 通知上岛音效 ──
-    // 新通知上屏时播一声 minecraft-exp-orb.wav（清脆、不刺耳）。
-    // 带确认按钮的通知（showWithActions）也走这条路 → showIsland 先播，再回填按钮。
-    if (m_bridge && m_bridge->whaleAudioOn())
-        WhaleAudio::instance()->play(WhaleAudio::Sound::Notify, 0.8);
+    // 2026-10-12 用户裁决：
+    //   ①「通知/状态/灵动岛音效**默认关闭**」→ 总开关 whaleAudioOn() 已默认 false
+    //     （QSettings settings/whaleAudioOn 可开）；
+    //   ②「低优先级通知不需要也不可以添加音效」→ 只有**通知型**（bell 图标族）
+    //     上岛才可能播音效；状态类（连接/文件/考试/截图等）一律不播；
+    //   ③ 开时音量 = 正常通知的 25%（0.8 → 0.2）。
+    // 判定：icon 以 bell / notify / alert 开头 = 通知型；其它 icon（check-circle/
+    // triangle-alert/download/camera…）是状态型，静音。与 setSeverity 的 remind/
+    // inform（低优先级）无关——低优先级通知本来就不该响。
+    const bool isNotifyIcon = m_icon.startsWith(QLatin1String("bell"))
+        || m_icon.startsWith(QLatin1String("notify"))
+        || m_icon.startsWith(QLatin1String("alert"));
+    if (isNotifyIcon && m_bridge && m_bridge->whaleAudioOn())
+        WhaleAudio::instance()->play(WhaleAudio::Sound::Notify, 0.2);
 }
 
 // 带交互按钮的通知（确认/快捷回复）。先切交互态再走 showIsland：
