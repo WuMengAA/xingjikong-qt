@@ -5757,6 +5757,14 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);   // 要托盘 → QApplication（托盘在 QtWidgets 里）
 
+    // 2026-10-12 修（跨端对齐报告 #2）：以前**没设**应用名/组织名 → QSettings 和
+    // QStandardPaths::writableLocation(AppLocalDataLocation) 定位不到稳定落点，
+    // IslandOverlay::historyPath() 里那种"返回空→手拼兜底 xingjikong/"的怪癖就是它造成的。
+    // 与管理端 main.cpp 同款三行（见管理端为什么这么写的注释）。QLockFile 路径也受益。
+    QCoreApplication::setApplicationName(QStringLiteral("Stelarith Agent"));
+    QCoreApplication::setOrganizationName(QStringLiteral("Stelarith"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("stelarith.local"));
+
     // ── 日志 / 数据目录（2026-10-06 提到 main 最前面）──────────────────────
     // ⚠️ 必须**早于单例守卫**（守卫就在下面几行）：守卫拦下第二个实例时会调
     //    appendLogFile() 记录"为什么被拦"，而 appendLogFile 在 g_logPath 为空时

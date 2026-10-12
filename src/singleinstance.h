@@ -37,8 +37,11 @@
 
 #include <QString>
 
+// 2026-10-11：Android target 手机 App 无 Windows 互斥体；HANDLE 占位 void*。
+#ifndef Q_OS_ANDROID
 // HANDLE 就位（头文件要声明 HANDLE 成员，不能等 cpp 再带 windows.h）
 #include <windows.h>
+#endif
 
 // ② 文件锁那道闸的类（Qt6 里 QLockFile 派生自 QObject，头文件就得带上）
 #include <QLockFile>
@@ -67,6 +70,8 @@ public:
     void release();
 
 private:
+#ifndef Q_OS_ANDROID
     HANDLE m_mutex = nullptr;      // ① 互斥体句柄（nullptr = 极端受限上下文里没起起来，只靠文件锁）
+#endif
     QLockFile *m_lock = nullptr;   // ② 文件锁（acquire 里按路径 new；release 里 unlock+delete）
 };
