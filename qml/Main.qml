@@ -32,6 +32,10 @@ ApplicationWindow {
     // 2026-10-11：手机端（Android）隐藏桌面专属（开机自启/屏幕广播等）。
     // 桌面/手机同源一套 Main.qml，桌面功能零影响。
     readonly property bool isPhone: Qt.platform.os === "android"
+    // 响应式（三·响应式增量层，2026-10-12）：窗口窄到 < 1040 进入 compact，左「设备」栏自动收起
+    // （监控画面吃满宽度），由中栏「设备列表」按钮按需展开。完整三栏重排属 dsh S2 Main.qml 重构。
+    readonly property bool compact: root.width < 1040
+    property bool devOpen: false
     // 字体兜底：没显式写 font.pixelSize 的文字走这一档（"正"）。
     // 页面里该显式写还是要显式写 —— 这里只是保证"漏写"不会掉回系统默认的小字。
     font.pixelSize: 13
@@ -760,10 +764,11 @@ ApplicationWindow {
 
             // ───── 左：设备（配角）─────
             Column {
-                Layout.preferredWidth: 160
-                // 硬上限。RowLayout 里"没写 preferredWidth 的项"会被内容顶大，
-                // 而画面是靠 fillWidth 吃剩余的 —— 谁被顶大，画面就少一截。
-                Layout.maximumWidth: 184
+                // 响应式（三·响应式增量层）：窄窗且未手动展开时收起，监控画面吃满宽度；
+                // 展开时给 200 更舒服。完整三栏重排属 dsh S2 Main.qml 重构，本层不抢。
+                Layout.preferredWidth: root.compact ? (root.devOpen ? 200 : 0) : 160
+                Layout.maximumWidth: root.compact ? (root.devOpen ? 220 : 0) : 184
+                visible: !(root.compact && !root.devOpen)
                 Layout.fillHeight: true
                 spacing: 2
 
@@ -1018,6 +1023,16 @@ ApplicationWindow {
                 Layout.preferredWidth: 640
                 Layout.fillHeight: true
                 spacing: 10
+
+                // 响应式（三·响应式增量）：窄窗时左「设备」栏自动收起，这里给入口展开/收起
+                Rectangle {
+                    visible: root.compact
+                    width: 96; height: 30; radius: th.rCtrl
+                    color: devToggleMa.containsMouse ? th.hover2 : th.panel
+                    border.color: th.stroke; border.width: 1
+                    Text { anchors.centerIn: parent; text: root.devOpen ? "收起设备" : "设备列表"; color: th.fg; font.pixelSize: 13 }
+                    MouseArea { id: devToggleMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.devOpen = !root.devOpen }
+                }
 
                 RowLayout {
                     Layout.fillWidth: true
