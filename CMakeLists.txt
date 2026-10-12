@@ -121,8 +121,11 @@ endif()
 # QuickControls2（2026-10-06 加）：main.cpp 要 QQuickStyle::setStyle("Basic")。
 # 不把这个模块挂上，QQuickStyle 头文件/链接都拿不到，默认风格那堆
 # "style does not support customization" 警告也就消不掉。
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core CorePrivate Gui Quick QuickControls2 Network WebSockets Widgets Svg)
-qt_standard_project_setup(REQUIRES 6.5)
+# ⚠️ 2026-10-13 审计 #25：Qt 最低版本 6.5 → 6.12 —— FluentWinUI3 风格是 6.12 才支持的
+# （此前声明 6.5 而代码用 FluentWinUI3，落在 [6.5,6.12) 的构建环境会静默回落默认风格）。
+# 项目实际固定 D:\QTqwq\6.12.0，声明对齐到实际，杜绝"配置能过、运行时风格不对"。
+find_package(Qt6 6.12 REQUIRED COMPONENTS Core CorePrivate Gui Quick QuickControls2 Network WebSockets Widgets Svg)
+qt_standard_project_setup(REQUIRES 6.12)
 
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
 # 2026-10-11：Android target 手机 App 并入 —— 桌面临时专属件（app.rc / winmm 采集 /
