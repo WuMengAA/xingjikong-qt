@@ -214,206 +214,303 @@ Item {
         }
     }
 
-    // ── 主体：左＝摄像头绑定 / 右＝回放 ──
-    Row {
+    // ── 主体：TabBar（实时 / 录制回放 / 诊断）──
+    // 一.2 UI 评审（2026-10-12）：监控中心拆标签页。原来左＝绑定 / 右＝实时+回放 平铺一屏，
+    // 评审要求拆成「实时 / 录制回放 / 诊断」三档——默认看实时，回放与诊断不再挤在同一屏。
+    // 新增组件 qml/components/TabBar.qml（令牌化，不用 Qt 原生 TabBar）。
+    Column {
+        id: body
         anchors.top: head.bottom
         anchors.topMargin: 10
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: statusLine.top
         anchors.bottomMargin: 6
-        spacing: 12
+        spacing: 8
 
-        // 左：摄像头列表 + 绑定
-        Rectangle {
-            width: parent.width * 0.42
-            height: parent.height
-            radius: cc.theme.rCard || 12
-            color: cc.theme.panel || "#181818"
-            border.color: cc.theme.stroke || "#2A2A2A"
-            border.width: 1
-            Column {
-                anchors.fill: parent
-                anchors.margins: 12
-                spacing: 8
-                Text {
-                    text: "摄像头 · " + cc.selUid
-                    color: cc.theme.fg3 || "#8A8A8A"
-                    font.pixelSize: 11
-                    elide: Text.ElideRight
-                    width: parent.width
-                }
-                // 摄像头列表
-                Rectangle {
-                    width: parent.width
-                    height: 120
-                    color: cc.theme.cream || "#141414"
-                    radius: 8
-                    border.color: cc.theme.stroke || "#2A2A2A"
-                    border.width: 1
-                    ListView {
-                        id: camList
-                        anchors.fill: parent
-                        anchors.margins: 2
-                        clip: true
-                        model: cc.cameras
-                        delegate: Item {
-                            width: camList.width
-                            height: 26
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: 4
-                                color: camList.currentIndex === index
-                                        ? (cc.theme.inv || "#F0F0F0") : "transparent"
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: 8
-                                text: cc.camLabel(index, modelData)
-                                color: camList.currentIndex === index
-                                        ? (cc.theme.win || "#0A0A0A") : (cc.theme.fg || "#FAFAFA")
-                                font.pixelSize: 11
-                                elide: Text.ElideRight
-                                width: parent.width - 16
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: camList.currentIndex = index
-                            }
-                        }
-                    }
-                }
-                Text {
-                    text: cc.loadingCams ? "正在枚举…"
-                         : (cc.cameras.length === 0 ? "（无摄像头或未枚举：点「摄像头列表」）" : cc.cameras.length + " 个摄像头")
-                    color: cc.theme.fg4 || "#707070"
-                    font.pixelSize: 10
-                }
-                Text {
-                    text: "当前绑定：" + (cc.boundDev !== "" ? cc.boundDev
-                                        : (cc.currentDev() !== "" ? cc.currentDev() + "（本地缓存）" : "（未绑定，默认 video0）"))
-                    color: cc.theme.fg3 || "#8A8A8A"
-                    font.pixelSize: 11
-                    elide: Text.ElideRight
-                    width: parent.width
-                }
-                Btn {
-                    theme: cc.theme
-                    width: parent.width
-                    text: "绑定选中的摄像头"
-                    disabled: camList.currentIndex < 0
-                    onClicked: {
-                        if (cc.selUid === "" || camList.currentIndex < 0) return
-                        var dev = cc.cameras[camList.currentIndex]
-                        // 权威绑定落在**被控端**（只有它能枚举/打开摄像头）；本地 Settings
-                        // 只留一份镜像给 CameraBindDialog 复用同一个 key（2026-10-09）。
-                        var map = store.bindings || {}
-                        map[cc.selUid] = dev
-                        store.bindings = map
-                        cc.backend.sendAction("camera_bind", { device: dev })
-                        cc.status = "正在绑定 " + dev + " …"
-                    }
-                }
-            }
+        TabBar {
+            id: tabs
+            theme: cc.theme
+            width: parent.width
+            model: ["实时", "录制回放", "诊断"]
+            currentIndex: 0
         }
 
-        // 右：实时画面 + 回放列表
-        Rectangle {
-            width: parent.width * 0.58
-            height: parent.height
-            radius: cc.theme.rCard || 12
-            color: cc.theme.panel || "#181818"
-            border.color: cc.theme.stroke || "#2A2A2A"
-            border.width: 1
-            Column {
+        // 页面容器：三档互斥显示
+        Item {
+            width: parent.width
+            height: parent.height - tabs.height - body.spacing
+
+            // ── 实时：左＝摄像头绑定 / 右＝实时画面 ──
+            Row {
+                visible: tabs.currentIndex === 0
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 8
-                // 实时帧（缩略图墙订阅的那台的帧）
+                spacing: 12
+
+                // 左：摄像头列表 + 绑定
                 Rectangle {
-                    width: parent.width
-                    height: 120
-                    radius: 8
-                    color: cc.theme.cream || "#141414"
+                    width: parent.width * 0.42
+                    height: parent.height
+                    radius: cc.theme.rCard || 12
+                    color: cc.theme.panel || "#181818"
                     border.color: cc.theme.stroke || "#2A2A2A"
                     border.width: 1
-                    clip: true
-                    Image {
-                        anchors.fill: parent
-                        anchors.margins: 4
-                        fillMode: Image.PreserveAspectFit
-                        cache: false
-                        property int tick: 0
-                        source: cc.selUid ? ("image://frames/" + cc.selUid + "?t" + tick) : ""
-                        Connections {
-                            target: cc.backend
-                            function onThumbnailChanged(uid) {
-                                if (uid === cc.selUid || uid === "") parent.tick++
-                            }
-                        }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: cc.selUid === "" ? "（选左侧设备看实时画面）" : ""
-                        color: cc.theme.fg4 || "#707070"
-                        font.pixelSize: 11
-                    }
-                }
-                Text {
-                    text: "录制回放（本机）"
-                    color: cc.theme.fg3 || "#8A8A8A"
-                    font.pixelSize: 11
-                }
-                // 回放列表（按 uid 分组）
-                Flickable {
-                    width: parent.width
-                    height: parent.height - 200
-                    clip: true
-                    contentHeight: recCol.height
                     Column {
-                        id: recCol
-                        width: parent.width
-                        spacing: 6
-                        Repeater {
-                            model: Object.keys(cc.backend.recordings || {}).sort()
-                            delegate: Rectangle {
-                                width: parent.width
-                                height: 30
-                                radius: 6
-                                color: cc.theme.cream || "#141414"
-                                Row {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 10
-                                    spacing: 8
-                                    Text {
-                                        text: modelData + " · "
-                                        color: cc.theme.fg || "#FAFAFA"
-                                        font.pixelSize: 11
-                                        width: 130
-                                        elide: Text.ElideRight
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 8
+                        Text {
+                            text: "摄像头 · " + cc.selUid
+                            color: cc.theme.fg3 || "#8A8A8A"
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                            width: parent.width
+                        }
+                        // 摄像头列表
+                        Rectangle {
+                            width: parent.width
+                            height: 120
+                            color: cc.theme.cream || "#141414"
+                            radius: 8
+                            border.color: cc.theme.stroke || "#2A2A2A"
+                            border.width: 1
+                            ListView {
+                                id: camList
+                                anchors.fill: parent
+                                anchors.margins: 2
+                                clip: true
+                                model: cc.cameras
+                                delegate: Item {
+                                    width: camList.width
+                                    height: 26
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 4
+                                        color: camList.currentIndex === index
+                                                ? (cc.theme.inv || "#F0F0F0") : "transparent"
                                     }
                                     Text {
-                                        text: ((cc.backend.recordings[modelData] || []).length || 0) + " 段"
-                                        color: cc.theme.fg3 || "#8A8A8A"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 8
+                                        text: cc.camLabel(index, modelData)
+                                        color: camList.currentIndex === index
+                                                ? (cc.theme.win || "#0A0A0A") : (cc.theme.fg || "#FAFAFA")
                                         font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                        width: parent.width - 16
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: camList.currentIndex = index
                                     }
                                 }
                             }
                         }
                         Text {
-                            visible: Object.keys(cc.backend.recordings || {}).length === 0
-                            text: "暂无回放（点「开录」让被控端录一段并自动上传）"
+                            text: cc.loadingCams ? "正在枚举…"
+                                 : (cc.cameras.length === 0 ? "（无摄像头或未枚举：点「摄像头列表」）" : cc.cameras.length + " 个摄像头")
                             color: cc.theme.fg4 || "#707070"
                             font.pixelSize: 10
+                        }
+                        Text {
+                            text: "当前绑定：" + (cc.boundDev !== "" ? cc.boundDev
+                                                : (cc.currentDev() !== "" ? cc.currentDev() + "（本地缓存）" : "（未绑定，默认 video0）"))
+                            color: cc.theme.fg3 || "#8A8A8A"
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                            width: parent.width
+                        }
+                        Btn {
+                            theme: cc.theme
+                            width: parent.width
+                            text: "绑定选中的摄像头"
+                            disabled: camList.currentIndex < 0
+                            onClicked: {
+                                if (cc.selUid === "" || camList.currentIndex < 0) return
+                                var dev = cc.cameras[camList.currentIndex]
+                                var map = store.bindings || {}
+                                map[cc.selUid] = dev
+                                store.bindings = map
+                                cc.backend.sendAction("camera_bind", { device: dev })
+                                cc.status = "正在绑定 " + dev + " …"
+                            }
+                        }
+                    }
+                }
+
+                // 右：实时画面
+                Rectangle {
+                    width: parent.width * 0.58
+                    height: parent.height
+                    radius: cc.theme.rCard || 12
+                    color: cc.theme.panel || "#181818"
+                    border.color: cc.theme.stroke || "#2A2A2A"
+                    border.width: 1
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 8
+                        Text {
+                            text: "实时画面"
+                            color: cc.theme.fg3 || "#8A8A8A"
+                            font.pixelSize: 11
+                        }
+                        // 实时帧（缩略图墙订阅的那台的帧）
+                        Rectangle {
+                            width: parent.width
+                            height: parent.height - 40
+                            radius: 8
+                            color: cc.theme.cream || "#141414"
+                            border.color: cc.theme.stroke || "#2A2A2A"
+                            border.width: 1
+                            clip: true
+                            Image {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                fillMode: Image.PreserveAspectFit
+                                cache: false
+                                property int tick: 0
+                                source: cc.selUid ? ("image://frames/" + cc.selUid + "?t" + tick) : ""
+                                Connections {
+                                    target: cc.backend
+                                    function onThumbnailChanged(uid) {
+                                        if (uid === cc.selUid || uid === "") parent.tick++
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                text: cc.selUid === "" ? "（选左侧设备看实时画面）" : ""
+                                color: cc.theme.fg4 || "#707070"
+                                font.pixelSize: 11
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 录制回放 ──
+            Rectangle {
+                visible: tabs.currentIndex === 1
+                anchors.fill: parent
+                radius: cc.theme.rCard || 12
+                color: cc.theme.panel || "#181818"
+                border.color: cc.theme.stroke || "#2A2A2A"
+                border.width: 1
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
+                    Text {
+                        text: "录制回放（本机）"
+                        color: cc.theme.fg3 || "#8A8A8A"
+                        font.pixelSize: 11
+                    }
+                    // 回放列表（按 uid 分组）
+                    Flickable {
+                        width: parent.width
+                        height: parent.height - 40
+                        clip: true
+                        contentHeight: recCol.height
+                        Column {
+                            id: recCol
+                            width: parent.width
+                            spacing: 6
+                            Repeater {
+                                model: Object.keys(cc.backend.recordings || {}).sort()
+                                delegate: Rectangle {
+                                    width: parent.width
+                                    height: 30
+                                    radius: 6
+                                    color: cc.theme.cream || "#141414"
+                                    Row {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 10
+                                        spacing: 8
+                                        Text {
+                                            text: modelData + " · "
+                                            color: cc.theme.fg || "#FAFAFA"
+                                            font.pixelSize: 11
+                                            width: 130
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            text: ((cc.backend.recordings[modelData] || []).length || 0) + " 段"
+                                            color: cc.theme.fg3 || "#8A8A8A"
+                                            font.pixelSize: 11
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                visible: Object.keys(cc.backend.recordings || {}).length === 0
+                                text: "暂无回放（点「开录」让被控端录一段并自动上传）"
+                                color: cc.theme.fg4 || "#707070"
+                                font.pixelSize: 10
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 诊断 ──
+            // 把"设备连接状态 / 绑定 / 摄像头枚举 / 最近错误（人话）+ 错误码 / 重试"聚到一屏，
+            // 老师排障时不用在动作区翻找（UI 评审一.2：诊断独立成档）。
+            Rectangle {
+                visible: tabs.currentIndex === 2
+                anchors.fill: parent
+                radius: cc.theme.rCard || 12
+                color: cc.theme.panel || "#181818"
+                border.color: cc.theme.stroke || "#2A2A2A"
+                border.width: 1
+                Flickable {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    contentHeight: diagCol.height
+                    clip: true
+                    Column {
+                        id: diagCol
+                        width: parent.width
+                        spacing: 10
+                        Row { spacing: 8
+                            Text { text: "选中设备"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
+                            Text { text: cc.selUid !== "" ? cc.selUid : "（未选设备）"; color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12 }
+                        }
+                        Row { spacing: 8
+                            Text { text: "当前绑定"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
+                            Text { text: cc.boundDevice() !== "" ? cc.boundDevice()
+                                        : (cc.currentDev() !== "" ? cc.currentDev() + "（本地缓存）" : "（未绑定，默认 video0）")
+                                   color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12; elide: Text.ElideRight; width: parent.width - 120 }
+                        }
+                        Row { spacing: 8
+                            Text { text: "摄像头"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
+                            Text { text: cc.loadingCams ? "枚举中…" : (cc.cameras.length + " 个"); color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12 }
+                        }
+                        Column { spacing: 2
+                            Text { text: "最近状态"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
+                            Text { text: cc.status !== "" ? cc.status : "（无）"
+                                   color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12; width: parent.width; wrapMode: Text.WrapAnywhere }
+                        }
+                        Row { visible: cc.errCode !== ""
+                            spacing: 8
+                            Text { text: "错误码"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
+                            Text { text: cc.errCode; color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12 }
+                        }
+                        Btn {
+                            visible: cc.canRetry
+                            theme: cc.theme
+                            width: 80
+                            text: "重试"
+                            tip: "再试一次刚才没成功的操作"
+                            onClicked: cc.retryLast()
                         }
                     }
                 }
             }
         }
     }
-
     // ── 状态行 ──
     // 2026-10-12 · UI 评审第 4 条：状态只显示**人话**结论，可恢复的错误旁边给一个「重试」。
     // FFmpeg 原生输出已在 noteError() 里被拦下（只进 console），绝不会走到这一行。
