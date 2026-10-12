@@ -12,7 +12,10 @@ import "."
 //   bridge.actions    [{label, role}]
 //   bridge.fireAction(label)   QML → C++ 回调
 //   bridge.requestExpand(bool) 手势 → C++
-//   bridge.history     [{title,desc,icon,ts,timeStr}]  历史通知列表
+//   bridge.history     [{title,desc,icon,ts,timeStr,fromAdmin}]  历史通知列表
+//                      2026-10-13：**后端已按显示序排好** —— 管理端下发(fromAdmin)在前、
+//                      本地事件在后（组内保持原时间序）。多于 3 条时面板只显示前 3 条的高度
+//                      （histVisibleMax=3，其余靠列表内滚动）。
 //   bridge.showHistoryItem(index)             查看/恢复某条历史（点击历史项）
 //   bridge.clearHistory()                     清空全部历史
 //
@@ -91,8 +94,12 @@ Item {
     // 历史面板高度：展开态 + 有历史 + 无活跃按钮时才给空间。
     // 2026-10-12 修「展开后太矮、历史显示不全」：每条 44→48px、封顶 200→300px，
     // 头部按 histHeader 实际高度 32px 算（原来是拍脑袋的 36，与面板实高不一致）。
+    // 2026-10-13 用户「看不见历史通知 → 默认折叠 3 条以上，保留 3 条显示」：
+    // 面板高度按**最多 3 条**算（不再随条数一路涨到 300）—— 多于 3 条靠列表内滚动看，
+    // 面板本身稳在 3 条的高度，展开态总高才钉得住 320。
+    readonly property int histVisibleMax: 3
     readonly property int histH: (root._expanded && root._history.length > 0 && !root._showActionsNow)
-        ? Math.min(300, root._history.length * 48 + 32)
+        ? Math.min(root.histVisibleMax, root._history.length) * 48 + 32
         : 0
     readonly property int actH:  (root._actions.length > 0) ? 34 : 0
     // 文件传输进度条占的额外高度（展开态 + 传输中才给）
@@ -115,7 +122,7 @@ Item {
               : (n >= 5)  ? root.th.fsTitleXl
               :             root.th.fsTitleXxl
         if (n === 0) return fs
-        var w = (root._expanded ? 400 : 320) - root.padH * 2 - 48
+        var w = (root._expanded ? 640 : 320) - root.padH * 2 - 48
         // 从 fs 往下探，找到"单行或两行能进宽"的最大字号
         for (; fs >= root.th.fsTitleXs; fs -= 2) {
             tm.font.pixelSize = fs
@@ -137,11 +144,15 @@ Item {
     }
     readonly property int exTitlePx: root.fitTitlePx((bridgeRef ? bridgeRef.title : ""))
 
+    // 2026-10-13 用户「界面太小了放大到 640x320」：展开态 400×自适应 → **640**（宽）× 高度下限 **320**。
+    // ⚠️ 宽度是主导：宿主 QQuickWidget 走 SizeRootObjectToView，view 按 root implicit 走
+    //    （见下方注释），所以改这里就等于改实际窗口宽；C++ Shape::Expanded 已同步 168→320。
+    //    高度取 max(320, 内容预算)：内容比 320 高时不裁掉，正常就稳在 320（正好放 3 条历史）。
     implicitWidth: root._idle ? root.th.shapeIdle * 3    // 4:3 比例 (44*3=132)
-                               : (root._expanded ? 400 : 320)
+                               : (root._expanded ? 640 : 320)
     implicitHeight: root._idle ? root.th.shapeIdle
                                : (root._expanded
-                                  ? Math.max(140, root.padH + root.headH + root.listH + root.histH + root.ftH + root.actH + root.padH)
+                                  ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.actH + root.padH)
                                   : (root._showActionsNow
                                      ? Math.max(root.collapsedH + root.actH + 10, 90)
                                      : root.collapsedH))

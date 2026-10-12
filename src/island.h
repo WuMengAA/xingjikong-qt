@@ -52,7 +52,10 @@ public:
     // Idle = 空闲时的矮胶囊（2026-10-07 用户要求"无任务、通知则收回顶部，显示半胶囊+横杠箭头"）。
     // 空闲态不隐藏、不消失：收成顶部一条常驻的半胶囊，中间一根横杠+箭头，
     // 点一下 / 往下一拉（触屏）就展开看最近那条活动。
-    enum Shape { Idle = 44, Collapsed = 56, Expanded = 168 };
+    // 2026-10-13 用户「界面太小了放大到 640x320」：展开态高度 168 → 320。
+    // （宽度在 QML implicitWidth：IslandRoot.qml expanded 400 → 640；宿主 QQuickWidget
+    //   走 SizeRootObjectToView，宽度以 root implicit 为准，C++ 这里的注释同步说明。）
+    enum Shape { Idle = 44, Collapsed = 56, Expanded = 320 };
 
     // ── 呈现形态（2026-10-09 · #98 ClassIsland 式）──────────────────────────
     // 用户原话："弹窗则居中，全屏则放大全屏，要有过渡。"
@@ -64,9 +67,12 @@ public:
     enum class Form { Capsule, Centered, Fullscreen };
 
     // 显示一条（icon 为 lucide 图标名；title 主文案，desc 次文案）
+    // fromAdmin（2026-10-13）：这条是**管理端**下发的通知 —— 归档进历史时打标，
+    //   历史列表把管理端通知排在最前（用户「历史通知第一位优先显示管理端通知」）。
     void showIsland(const QString &title, const QString &desc = QString(),
                     const QString &icon = QString(),
-                    int durationMs = 5000, Form form = Form::Capsule);
+                    int durationMs = 5000, Form form = Form::Capsule,
+                    bool fromAdmin = false);
     Form form() const { return m_form; }
 
     // ── 带交互按钮的通知（2026-10-09 · 把「确认」并入灵动岛本体）───────────────
@@ -77,7 +83,7 @@ public:
     void showWithActions(const QString &title, const QString &desc, const QString &icon,
                          Form form, const QStringList &actions,
                          std::function<void(const QString &)> onAction,
-                         int durationMs = 0);
+                         int durationMs = 0, bool fromAdmin = false);
     // 仅全屏形态的配色档（remind/inform/urgent），空 = 默认黑底。与旧 NotifyWindow 同白名单。
     void setSeverity(const QString &severity);
 
@@ -155,17 +161,23 @@ private:
         QString icon;
         qint64  ts = 0;           // Unix 时间戳（秒）
         QString timeStr;          // 预格式化时间串（"HH:mm" 或 "昨天 HH:mm" 或 "M/d HH:mm"）
+        bool    fromAdmin = false; // 2026-10-13：管理端下发（历史排序时置顶）
     };
     QVector<HistoryItem> m_history;
     static constexpr int kMaxHistory = 50;   // 最多保留 50 条，超出按 FIFO 清旧
+    // 2026-10-13（用户「每条消息保存时间为一周，一周后清除历史」）：超过 7 天的历史
+    // 在加载/归档时剔除（loadHistory 与 archiveToHistory 都过一遍 pruneHistory）。
+    static constexpr qint64 kHistoryKeepSecs = 7 * 24 * 3600;
     void archiveToHistory();     // 把当前 m_title/m_desc/m_icon 归档
     void loadHistory();          // 从 JSON 加载
     void saveHistory() const;    // 写 JSON
+    void pruneHistory();         // 剔除超期（>7 天）条目；不落盘，调用方决定何时 save
     QString historyPath() const; // LOCALAPPDATA/xingjikong/island_history.json
 
     QString m_title;
     QString m_desc;
     QString m_icon;
+    bool m_fromAdmin = false;   // 2026-10-13：当前这条是否来自管理端（归档时写进 HistoryItem）
     int m_durationMs = 5000;
     bool m_expanded = false;
     Form m_form = Form::Capsule;

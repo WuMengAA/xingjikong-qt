@@ -156,17 +156,33 @@ bool IslandBridge::whaleAudioOn() const
 
 // ── 历史通知（2026-10-11 · 持久化）──────────────────────────────
 // 从 IslandOverlay 的 m_history 取，桥不缓存。
+QVector<int> IslandBridge::historyOrder() const
+{
+    QVector<int> order;
+    if (!m_host) return order;
+    const int n = m_host->m_history.size();
+    order.reserve(n);
+    for (int i = 0; i < n; ++i)
+        if (m_host->m_history.at(i).fromAdmin) order.append(i);   // 第一批：管理端下发
+    for (int i = 0; i < n; ++i)
+        if (!m_host->m_history.at(i).fromAdmin) order.append(i);  // 第二批：本机事件
+    return order;
+}
+
 QVariantList IslandBridge::history() const
 {
     QVariantList out;
     if (!m_host) return out;
-    for (const auto &h : m_host->m_history) {
+    const QVector<int> order = historyOrder();
+    for (int idx : order) {
+        const auto &h = m_host->m_history.at(idx);
         QVariantMap m;
         m.insert(QStringLiteral("title"), h.title);
         m.insert(QStringLiteral("desc"), h.desc);
         m.insert(QStringLiteral("icon"), h.icon);
         m.insert(QStringLiteral("ts"), h.ts);
         m.insert(QStringLiteral("timeStr"), h.timeStr);
+        m.insert(QStringLiteral("fromAdmin"), h.fromAdmin);   // 2026-10-13：QML 可据此加"管理端"标记
         out.append(m);
     }
     return out;
@@ -181,10 +197,13 @@ qint64  IslandBridge::fileTransferTotal() const { return m_host ? m_host->m_ftTo
 void IslandBridge::showHistoryItem(int index)
 {
     if (!m_host) return;
-    if (index < 0 || index >= m_host->m_history.size()) return;
-    const auto &h = m_host->m_history.at(index);
-    // 把历史项恢复为岛的通知（纯展示，不自动关）
-    m_host->showIsland(h.title, h.desc, h.icon, 0, IslandOverlay::Form::Capsule);
+    // ⚠️ index 是**显示序**（historyOrder）里的位置，**不是** m_history 的下标 ——
+    //    两列表在"管理端置顶"后不再相同，直接拿 index 索引 m_history 会点开错的条。
+    const QVector<int> order = historyOrder();
+    if (index < 0 || index >= order.size()) return;
+    const auto &h = m_host->m_history.at(order.at(index));
+    // 把历史项恢复为岛的通知（纯展示，不自动关）；来源标记一并带回去（再归档时不丢标）
+    m_host->showIsland(h.title, h.desc, h.icon, 0, IslandOverlay::Form::Capsule, h.fromAdmin);
 }
 
 void IslandBridge::clearHistory()

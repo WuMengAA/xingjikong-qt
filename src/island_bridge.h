@@ -129,6 +129,11 @@ public:
     Q_INVOKABLE void requestExpand(bool on);
 
 private:
+    // 2026-10-13（用户「历史通知第一位优先显示管理端通知」）：历史**显示序** ——
+    // 管理端在前、本地事件在后，组内保持原有先后（**稳定**，不重排时间序）。
+    // history() 与 showHistoryItem() 必须共用它，否则「看到的第 N 条」≠「点开的第 N 条」。
+    QVector<int> historyOrder() const;
+
     IslandOverlay *m_host = nullptr;   // 不持有（IslandOverlay 是单例，活得比本对象久）
 
 signals:

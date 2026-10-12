@@ -339,6 +339,11 @@ void IslandOverlay::loadHistory()
     // 限制条数
     while (m_history.size() > kMaxHistory)
         m_history.removeFirst();
+    // 2026-10-13：加载时顺手剔除超期（>7 天）条目 —— 用户「每条消息保存时间为一周，
+    // 一周后清除历史」。启动即清，落盘一次（下次读到的就是干净的）。
+    const int before = m_history.size();
+    pruneHistory();
+    if (m_history.size() != before) saveHistory();
 }
 
 void IslandOverlay::saveHistory() const
@@ -362,6 +367,19 @@ void IslandOverlay::saveHistory() const
     }
 }
 
+// 2026-10-13（用户「每条消息保存时间为一周，一周后清除历史」）：剔除超期条目。
+// ⚠️ ts<=0 的条目（老数据/字段缺失）**保留** —— 宁可多留一条，也别把用户的历史误删。
+// 本函数只动内存，是否落盘交给调用方（loadHistory/archiveToHistory 各自决定）。
+void IslandOverlay::pruneHistory()
+{
+    const qint64 cutoff = QDateTime::currentSecsSinceEpoch() - kHistoryKeepSecs;
+    for (int i = m_history.size() - 1; i >= 0; --i) {
+        const qint64 ts = m_history.at(i).ts;
+        if (ts > 0 && ts < cutoff)
+            m_history.removeAt(i);
+    }
+}
+
 void IslandOverlay::archiveToHistory()
 {
     // 有标题才归档（空内容/空闲态不该进历史）
@@ -378,6 +396,7 @@ void IslandOverlay::archiveToHistory()
     h.desc = m_desc;
     h.icon = m_icon;
     h.ts = QDateTime::currentSecsSinceEpoch();
+    h.fromAdmin = m_fromAdmin;   // 2026-10-13：管理端通知打标（历史排序置顶用）
 
     // 格式化时间串
     const QDateTime dt = QDateTime::fromSecsSinceEpoch(h.ts);
@@ -393,11 +412,13 @@ void IslandOverlay::archiveToHistory()
     m_history.append(h);
     while (m_history.size() > kMaxHistory)
         m_history.removeFirst();
+    pruneHistory();   // 2026-10-13：追加后也清一次超期条目（与 loadHistory 同一口径）
     saveHistory();
 }
 
 void IslandOverlay::showIsland(const QString &title, const QString &desc,
-                               const QString &icon, int durationMs, Form form)
+                               const QString &icon, int durationMs, Form form,
+                               bool fromAdmin)
 {
     // ── 历史归档：上一条有内容的通知在被顶掉时进历史 ──
     // 判据：m_contentActive && m_title 非空（活动中的真通知被顶掉）
@@ -407,6 +428,7 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     m_title = title;
     m_desc = desc;
     m_icon = icon;
+    m_fromAdmin = fromAdmin;   // 2026-10-13：跟着这条内容走，归档时写进 HistoryItem
     m_durationMs = durationMs;
     m_form = form;
     // 普通 showIsland 一律无按钮：清掉上一条确认态残留的按钮/回调。
@@ -488,11 +510,12 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
 // 这样 showIsland 内部算"要不要自动收"时看到的是"交互中" ⇒ 不会自己跑掉。
 void IslandOverlay::showWithActions(const QString &title, const QString &desc, const QString &icon,
                                     Form form, const QStringList &actions,
-                                    std::function<void(const QString &)> onAction, int durationMs)
+                                    std::function<void(const QString &)> onAction, int durationMs,
+                                    bool fromAdmin)
 {
     const bool inter = !actions.isEmpty();
     if (inter) setInteractive(true);
-    showIsland(title, desc, icon, inter ? 0 : durationMs, form);
+    showIsland(title, desc, icon, inter ? 0 : durationMs, form, fromAdmin);
     m_actions = actions;
     m_onAction = onAction;
     // ⚠️ showIsland 里已经 sync 过一次，但那时 m_actions 还是空的（第 303 行才回填）。

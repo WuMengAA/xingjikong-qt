@@ -2706,14 +2706,15 @@ static void speakText(const QString &text)
 static void islandShow(const QString &title, const QString &desc = QString(),
                        const QString &icon = QString(), int ms = 5000, bool interactive = false,
                        const QString &openPath = QString(),
-                       IslandOverlay::Form form = IslandOverlay::Form::Capsule)
+                       IslandOverlay::Form form = IslandOverlay::Form::Capsule,
+                       bool fromAdmin = false)   // 2026-10-13：管理端下发（历史置顶用）
 {
     IslandOverlay *isl = IslandOverlay::instance();
     if (openPath.isEmpty()) isl->clearOpenPath();
     else                    isl->setOpenPath(openPath);
     // 交互态（可点）清掉旧的 openPath，免得下一条提示点一下去翻上一份文件。
     isl->setInteractive(interactive);
-    isl->showIsland(title, desc, icon, ms, form);
+    isl->showIsland(title, desc, icon, ms, form, fromAdmin);
 }
 
 // 托盘气泡兜底：灵动岛是贴桌面顶层的胶囊，被控端缩进托盘 / 教室投影投在别处 /
@@ -3091,7 +3092,7 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
             IslandOverlay::instance()->setSeverity(severity);
             IslandOverlay::instance()->showWithActions(title, content, QStringLiteral("bell"),
                                                        IslandOverlay::Form::Centered, loopActs,
-                                                       loopConfirm, 0);
+                                                       loopConfirm, 0, true);
         }
         if (tts)
             speakText(content.trimmed().isEmpty() ? title
@@ -3147,7 +3148,7 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
 
     const bool needsInteraction = needConfirm || emergency;
     if (!needsInteraction) {
-        islandShow(title, content, QStringLiteral("bell"), durMs, false, QString(), f);
+        islandShow(title, content, QStringLiteral("bell"), durMs, false, QString(), f, true);
     } else {
         // 确认 / 紧急：按钮行（「确认」+ 快捷回复），点哪枚回哪句。
         // ⚠️ 胶囊那档太矮放不下按钮 ⇒ 升到 Centered（全屏仍是 Fullscreen）。
@@ -3157,7 +3158,7 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
         for (const QString &rr : replies)
             if (!rr.trimmed().isEmpty() && !acts.contains(rr)) acts << rr;
         IslandOverlay::instance()->showWithActions(title, content, QStringLiteral("bell"),
-                                                   f, acts, onConfirm, 0);
+                                                   f, acts, onConfirm, 0, true);
     }
 
     // TTS（调用方要求时）：读「标题：正文」，与旧 NotifyWindow 的行为保持一致
