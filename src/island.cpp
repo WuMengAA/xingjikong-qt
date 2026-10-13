@@ -920,8 +920,10 @@ void IslandOverlay::paintBigForm()
     QColor bg = m_light ? QColor(250, 250, 250, full ? 248 : 235)
                         : QColor(16, 16, 18, full ? 243 : 228);
     // 全屏配色档（remind/inform/urgent 三档白名单 + 黑底回落，与旧 NotifyWindow 一致）
+    // 2026-10-13 MD3 唯一模板：urgent 对齐 baseline error #B3261E(=179,38,30)，
+    // 与 IslandTheme.qml severityUrgent 逐字一致（QML/C++ 双绘 parity 铁律）。
     if (full) {
-        if      (m_severity == QLatin1String("urgent")) bg = QColor(180, 20, 20, 210);
+        if      (m_severity == QLatin1String("urgent")) bg = QColor(179, 38, 30, 210);
         else if (m_severity == QLatin1String("inform")) bg = QColor(200, 140, 10, 205);
         else if (m_severity == QLatin1String("remind")) bg = QColor(20, 140, 60, 205);
     }

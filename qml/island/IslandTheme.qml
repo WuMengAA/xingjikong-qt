@@ -27,14 +27,18 @@ QtObject {
     property color fg:        light ? "#161616" : "#FAFAFA"
     property color sub:       light ? "#6E6E6E" : "#C8C8C8"
 
-    // ── 严重度（island.cpp 556-558，逐字）───────────────────
-    property color severityUrgent: Qt.rgba(180/255, 20/255, 20/255, 210/255)
+    // ── 严重度（island.cpp 556-558，逐字；2026-10-13 urgent 归 MD3 error 色系）──
+    // MD3 唯一模板（用户 2026-10-13 批准）：urgent 对齐 baseline error #B3261E。
+    // inform（琥珀）/ remind（绿）为协议语义档，MD3 baseline 未定义语义状态色，保留原值。
+    property color severityUrgent: Qt.rgba(179/255, 38/255, 30/255, 210/255)
     property color severityInform: Qt.rgba(200/255, 140/255, 10/255, 205/255)
     property color severityRemind: Qt.rgba(20/255, 140/255, 60/255, 205/255)
     property color severityNone:   "transparent"
 
     // ── 品牌强调色（进度条 / 下载态等，#198 文件传输进度用）──
-    property color accent:    light ? "#0A84FF" : "#2997FF"
+    // 2026-10-13 MD3 唯一模板：accent 由系统蓝 #0A84FF/#2997FF 改 MD3 primary
+    // #6750A4（浅）/ #D0BCFF（深）。island.cpp 无 accent（只 QML 侧用）。
+    property color accent:    light ? "#6750A4" : "#D0BCFF"
 
     function severityColor(s) {
         if (s === "urgent") return severityUrgent

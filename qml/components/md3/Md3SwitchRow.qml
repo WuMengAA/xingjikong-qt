@@ -1,0 +1,66 @@
+// MD3 开关行：label + 52×32 轨道开关。selected 轨道 primary、thumb onPrimary；
+// 未选轨道 surfaceVariant + outline 描边、thumb outline。thumb 16→24 带 emphasized 缓动。
+import QtQuick
+
+Item {
+    id: root
+    property var md3: ({})
+    property string text: ""
+    property bool checked: false
+    property string supporting: ""
+    signal toggled(bool value)
+
+    implicitWidth: 320
+    implicitHeight: supporting === "" ? 56 : 72
+
+    Text {
+        anchors.left: parent.left
+        anchors.right: switchBox.left
+        anchors.rightMargin: 16
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.text
+        font.pixelSize: md3.bodyL
+        color: md3.cOnSurface
+        elide: Text.ElideRight
+    }
+    Text {
+        anchors.left: parent.left
+        anchors.right: switchBox.left
+        anchors.rightMargin: 16
+        anchors.top: parent.top
+        anchors.topMargin: 34
+        visible: root.supporting !== ""
+        text: root.supporting
+        font.pixelSize: md3.bodyS
+        color: md3.cOnSurfaceVar
+        elide: Text.ElideRight
+    }
+    Item {
+        id: switchBox
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        width: 52; height: 32
+        Rectangle {
+            anchors.fill: parent
+            radius: 16
+            color: root.checked ? md3.cPrimary : md3.cSurfaceVar
+            border.width: root.checked ? 0 : 2
+            border.color: md3.cOutline
+            Behavior on color { ColorAnimation { duration: md3.durShort } }
+        }
+        Rectangle {
+            x: root.checked ? 24 : 6
+            anchors.verticalCenter: parent.verticalCenter
+            width: root.checked ? 24 : 16
+            height: width
+            radius: width / 2
+            color: root.checked ? md3.cOnPrimary : md3.cOutline
+            Behavior on x { NumberAnimation { duration: md3.durShort; easing.type: Easing.Bezier; easing.bezierCurve: md3.easeEmph } }
+            Behavior on width { NumberAnimation { duration: md3.durShort; easing.type: Easing.Bezier; easing.bezierCurve: md3.easeEmph } }
+        }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: { root.checked = !root.checked; root.toggled(root.checked) }
+        }
+    }
+}
