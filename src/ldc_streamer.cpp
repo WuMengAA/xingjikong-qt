@@ -5,6 +5,8 @@
 #include <QImage>
 #include <QBuffer>
 #include <QElapsedTimer>
+#include <QEventLoop>
+#include <QTimer>
 #include <QDebug>
 #include <cstring>
 
@@ -280,7 +282,26 @@ void LdcStreamer::stopCamera()
         QObject::disconnect(m_camProc, nullptr, this, nullptr);
         if (m_camProc->state() != QProcess::NotRunning) {
             m_camProc->terminate();
-            if (!m_camProc->waitForFinished(2000)) { m_camProc->kill(); m_camProc->waitForFinished(1500); }
+            // 2026-10-13 登记项：waitForFinished 停事件循环（推帧线程/心跳全停 3.5s）。
+            // 改 QEventLoop 内等：函数语义不变（同步等到退出/超时），事件循环照转。
+            QEventLoop loop;
+            QTimer t;
+            t.setSingleShot(true);
+            QObject::connect(&t, &QTimer::timeout, &loop, &QEventLoop::quit);
+            QObject::connect(m_camProc, &QProcess::finished, &loop, &QEventLoop::quit);
+            QObject::connect(m_camProc, &QProcess::errorOccurred, &loop, &QEventLoop::quit);
+            t.start(2000);
+            loop.exec();
+            if (m_camProc->state() != QProcess::NotRunning) {
+                m_camProc->kill();
+                QEventLoop loop2;
+                QTimer t2;
+                t2.setSingleShot(true);
+                QObject::connect(&t2, &QTimer::timeout, &loop2, &QEventLoop::quit);
+                QObject::connect(m_camProc, &QProcess::finished, &loop2, &QEventLoop::quit);
+                t2.start(1500);
+                loop2.exec();
+            }
         }
         delete m_camProc;
         m_camProc = nullptr;

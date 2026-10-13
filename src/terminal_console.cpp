@@ -7,12 +7,17 @@
 #include <QProcess>
 #include <QTimer>
 #include <QDir>
+#include <QFileInfo>
+#include <QRegularExpression>
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QElapsedTimer>
 #include <QDebug>
 
 // 信封封装走共享声明（cloud_proto.h）：别在这边另写一份，格式一变两端就对不上。
+
+// cd 词法解析（定义在文件尾，runLine 里要先判"这行有没有 cd"）
+static bool termParseCdTarget(const QString &raw, bool powershell, QString *outTarget, QString *outErr);
 
 TerminalConsole &TerminalConsole::inst()
 {
@@ -168,6 +173,12 @@ void TerminalConsole::runLine(const QString &line)
     const QString trimmed = line.trimmed();
     if (trimmed.isEmpty()) { flushPending(); return; }   // 空回车：只回显，不启进程
 
+    // 记下这行 + 有没有 cd（命令跑通后由 applyCwdChange 换目录 —— 见文件尾注释）
+    m_lastLine = trimmed;
+    QString cdTarget;
+    m_lastLineHadCd = termParseCdTarget(trimmed,
+        m_shell.compare(QStringLiteral("powershell"), Qt::CaseInsensitive) == 0, &cdTarget, nullptr);
+
     m_busy = true;
     m_cmdTimer.start(m_cmdMs);
 
@@ -240,23 +251,93 @@ void TerminalConsole::onProcFinished(int code)
     sendFrame("terminal_exit", p);
 
     m_busy = false;
-    if (code == 0) refreshCwd();          // 跑通了才问当前目录（cd 成功才该改提示符）
+    if (code == 0 && m_lastLineHadCd) applyCwdChange();   // 跑通了才换目录（cd 失败整体码非 0）
 
     m_proc->deleteLater();
     m_proc = nullptr;
     m_idleTimer.start(m_idleMs);
 }
 
-void TerminalConsole::refreshCwd()
+// ── cd 持久化（2026-10-13 登记项重写）─────────────────────────────────────
+// 根因：每条命令都是 cmd.exe /c <line> 的**全新进程**，进程里的 cd 改的是它自己的
+// 当前目录，进程一退就没了；原 refreshCwd 再开一个新进程去问 `cd`，问回来的永远是
+// setWorkingDirectory(m_cwd) 设进去的旧值 —— 所以提示符恒不更新。
+// 修法：不再问子进程，改成 agent 侧**词法解析**这行命令里有没有 cd，有就在本地把
+// m_cwd 解析出来（下一条命令 setWorkingDirectory 用新值，等于目录在会话里持久了）。
+//   cmd:  cd[/d] [X]  / chdir[/d] [X] / cd..（cmd 特有的无空格写法） / X:（切盘符）
+//   ps:   cd / Set-Location / sl / chdir [X]（含 -Path X）
+// 解析不了（网络路径重定向、pushd、多命令里的 cd 失败等）就不动 m_cwd ——
+// 宁可提示符旧一点，也不能指错。同时不再起子进程查询，原先那 3 秒主线程阻塞一并消灭。
+static bool termParseCdTarget(const QString &raw, bool powershell, QString *outTarget, QString *outErr)
 {
-    // 同步问一次当前目录：比解析"cd 命令长什么样"可靠（cd /d X && dir 这类也认）
-    QProcess p;
-    p.start(QStringLiteral("cmd.exe"), QStringList { QStringLiteral("/c"), QStringLiteral("cd") });
-    p.waitForFinished(3000);
-    const QString out = QString::fromLocal8Bit(p.readAllStandardOutput()).trimmed();
-    if (!out.isEmpty() && out != m_cwd) {
-        m_cwd = out;
+    const QString line = raw.trimmed();
+    if (line.isEmpty()) return false;
+
+    // 只看第一个命令段：被 && / & / | 隔开的第一段里找 cd（`cd x && dir` 是常见写法）
+    QString head = line;
+    static const QRegularExpression segSplit(QStringLiteral("[&|]"));
+    const QStringList segs = line.split(segSplit);
+    if (!segs.isEmpty()) head = segs.first().trimmed();
+    if (head.isEmpty()) return false;
+
+    // cmd 特有：`cd..`、`cd\`（无空格也能跑）
+    if (!powershell) {
+        if (head.compare(QStringLiteral("cd.."), Qt::CaseInsensitive) == 0) {
+            *outTarget = QStringLiteral(".."); return true;
+        }
+        if (head.compare(QStringLiteral("cd\\"), Qt::CaseInsensitive) == 0) {
+            *outTarget = QStringLiteral("\\"); return true;
+        }
+    }
+
+    static const QRegularExpression cdCmd(
+        QStringLiteral("^(?:cd|chdir|set-location|sl)(?:\\s+(?:-path|-literalpath))?\\s+(.+)$"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto m = cdCmd.match(head);
+    if (!m.hasMatch()) {
+        // 裸 `cd`（cmd 里是"打印当前目录"，ps 里是"回 home"）不是"换目录"
+        return false;
+    }
+    QString arg = m.captured(1).trimmed();
+    arg.remove(QLatin1Char('"'));
+    if (arg.isEmpty()) return false;
+    // cmd 的 `cd /d X`：参数段可能整个是 "/d X" —— 把开头的 /d 标志摘掉
+    if (!powershell && arg.startsWith(QStringLiteral("/d "), Qt::CaseInsensitive))
+        arg = arg.mid(3).trimmed();
+    if (arg.isEmpty()) return false;
+    *outTarget = arg;
+    return true;
+}
+
+void TerminalConsole::applyCwdChange()
+{
+    QString target, why;
+    if (!termParseCdTarget(m_lastLine, m_shell.compare(QStringLiteral("powershell"), Qt::CaseInsensitive) == 0,
+                           &target, &why)) {
+        return;   // 没有 cd / 解析不了 → 目录不变（不是错误）
+    }
+
+    // 相对路径 → 基于 m_cwd 解析；`..`/`.` 由 cleanPath 归一
+    QString candidate;
+    const QFileInfo fi(target);
+    if (fi.isAbsolute()) candidate = QDir::cleanPath(target);
+    else if (QRegularExpression(QRegularExpression::anchoredPattern(QStringLiteral("[A-Za-z]:"))).match(target).hasMatch())
+        candidate = QDir::cleanPath(target);   // `C:` 或 `C:xx` 这类盘符形态
+    else
+        candidate = QDir::cleanPath(m_cwd + QLatin1Char('/') + target);
+
+    // 目标不存在/不是目录 → 不换（cd 打不开时 cmd 退出码非 0，正常到不了这；双保险）
+    if (!QDir(candidate).exists()) {
+        qInfo("[term] cd 目标不存在，目录不变：%s", qPrintable(candidate));
+        return;
+    }
+    if (candidate != m_cwd) {
+        m_cwd = candidate;
         qInfo("[term] 提示符随目录更新：%s", qPrintable(m_cwd));
+        QJsonObject p; p.insert(QStringLiteral("sid"), m_sid);
+        p.insert(QStringLiteral("cwd"), m_cwd);
+        p.insert(QStringLiteral("prompt"), termPrompt(m_cwd));
+        sendFrame("terminal_data", p);   // 把新提示符推给管理端（单独一帧，无输出混排）
     }
 }
 

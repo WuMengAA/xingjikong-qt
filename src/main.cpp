@@ -32,6 +32,7 @@
 #include <QPainter>
 #include <QDesktopServices>
 #include <QTimer>
+#include <QEventLoop>
 #include <QScreen>
 #include <QPixmap>
 #include <QDateTime>
@@ -230,7 +231,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.29";
+constexpr const char *kAppVersion = "0.6.30";
 
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
@@ -588,7 +589,7 @@ void sendHeartbeat()
     const QString hb = makeEnvelope(QStringLiteral("heartbeat"), p);
     const qint64 n = g_ws->sendTextMessage(hb);
     if (n <= 0)
-        fprintf(stderr, "[agent-qt] FAIL: 心跳发送失败（写了 %lld 字节）—— 云端可能已断\n", n);
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 心跳发送失败（写了 %1 字节）—— 云端可能已断").arg(n);
     else
         qInfo("[agent-qt] 💓 心跳 #%d", g_heartbeatSeq);
 }
@@ -851,8 +852,7 @@ static void saveSchedules(const QVector<SchedTask> &tasks)
         f.write(QJsonDocument(arr).toJson(QJsonDocument::Compact));
         f.close();
     } else {
-        fprintf(stderr, "[agent-qt] FAIL: 调度任务持久化失败（写 %s 打不开）—— 本机重启后这批定时任务会丢\n",
-                qPrintable(g_schedFile));
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 调度任务持久化失败（写 %1 打不开）—— 本机重启后这批定时任务会丢").arg(g_schedFile);
     }
 }
 
@@ -864,8 +864,7 @@ static QVector<SchedTask> loadSchedules()
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
     f.close();
     if (!doc.isArray()) {
-        fprintf(stderr, "[agent-qt] FAIL: 调度文件不是合法 JSON 数组：%s（已忽略，不当成功）\n",
-                qPrintable(g_schedFile));
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 调度文件不是合法 JSON 数组：%1（已忽略，不当成功）").arg(g_schedFile);
         return out;
     }
     for (const auto &v : doc.array()) {
@@ -919,8 +918,7 @@ static void fireScheduledTask(const QString &taskId, const QString &what)
     const DWORD flags = (what == QStringLiteral("reboot") ? EWX_REBOOT : EWX_SHUTDOWN) | EWX_FORCE;
     const BOOL ok = ExitWindowsEx(flags, SHTDN_REASON_FLAG_PLANNED);
     if (!ok)
-        fprintf(stderr, "[agent-qt] FAIL: 定时 %s 的 ExitWindowsEx 失败，错误码 %d\n",
-                qPrintable(what), (int)GetLastError());
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 定时 %1 的 ExitWindowsEx 失败，错误码 %2").arg(what).arg((int)GetLastError());
     // 进程即将被系统杀掉；等一小会儿让日志刷出去
     QCoreApplication::processEvents();
     if (ok) QCoreApplication::exit(0);
@@ -2036,12 +2034,32 @@ static bool runElevatedWait(const QString &file, const QString &params, int time
     return code == 0;
 }
 
+// 2026-10-13 登记项：主线程 QProcess::waitForFinished 会把**整个事件循环**停掉 ——
+// 心跳不发、推帧停摆、WS pong 回不了；camera_test 最长等 9 秒，弱机教室机上就是一次肉眼可见的假死。
+// procWaitFinished：保持"同步等到退出"的函数语义（调用方代码一行不改），但等待在
+// QEventLoop 里转 —— 期间心跳照发、指令照收、定时器照跑。
+// 重入说明：等待期间云端再派同一动作（如连发两次抓拍）时，各用独立 QProcess/独立临时
+// 文件名（毫秒戳），无共享态，安全；云端本来也要等本动作回执后才标记完成。
+static bool procWaitFinished(QProcess &p, int timeoutMs)
+{
+    if (p.state() == QProcess::NotRunning) return true;
+    QEventLoop loop;
+    QTimer t;
+    t.setSingleShot(true);
+    QObject::connect(&t, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&p, &QProcess::finished, &loop, &QEventLoop::quit);
+    QObject::connect(&p, &QProcess::errorOccurred, &loop, &QEventLoop::quit);
+    t.start(timeoutMs);
+    loop.exec();
+    return p.state() == QProcess::NotRunning;
+}
+
 static bool agentAutostartEnabled()
 {
     QProcess p;
     p.start(QStringLiteral("schtasks"),
             {QStringLiteral("/Query"), QStringLiteral("/TN"), QString::fromLatin1(kAgentTaskName)});
-    if (!p.waitForFinished(4000)) { p.kill(); return false; }
+    if (!procWaitFinished(p, 4000)) { p.kill(); return false; }
     return p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
 
@@ -3304,6 +3322,17 @@ static void startSelfUpdate(const QString &id, const QJsonObject &params)
     // 护栏④：只当安装包用，且只落在 ota 目录里的 .exe
     if (base.isEmpty() || !base.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive))
         base = QStringLiteral("stelarith-agent-update.exe");
+    // 护栏④b（2026-10-13 登记）：文件名白名单。QUrl::fileName() 挡得住 '/'，但挡不住 '\'
+    //   —— Windows 上 QFile 把 '\' 也当路径分隔符，`a\..\..\evil.exe` 就能逃出 ota 目录
+    //   （url 里塞反斜杠即可任意写盘 = 云端被攻破后升级通道变任意文件写入）。
+    //   ':' 会命中 NTFS ADS（x.exe:stream 同样能写到别处），`.`/`..` 是目录自身/父目录。
+    //   一律收紧成 [A-Za-z0-9._-]{1,80}，不合白名单就换默认名 —— 下载与 sha256 都不受影响。
+    static const QRegularExpression otaSafeName(QStringLiteral("^[A-Za-z0-9._-]{1,80}$"));
+    if (base == QStringLiteral(".") || base == QStringLiteral("..")
+        || !otaSafeName.match(base).hasMatch()) {
+        qWarning().noquote() << QStringLiteral("[agent-qt] OTA url 文件名不进白名单，改用默认名：%1").arg(base);
+        base = QStringLiteral("stelarith-agent-update.exe");
+    }
     g_otaPath = dir + QLatin1Char('/') + base;
 
     g_otaFile = new QFile(g_otaPath);
@@ -3546,9 +3575,9 @@ static bool endRecording(qint64 *outBytes, QString *outErr, int *outCode = nullp
     }
     if (g_recProc->state() != QProcess::NotRunning) {
         g_recProc->terminate();
-        if (!g_recProc->waitForFinished(5000)) { g_recProc->kill(); g_recProc->waitForFinished(2000); }
+        if (!procWaitFinished(*g_recProc, 5000)) { g_recProc->kill(); procWaitFinished(*g_recProc, 2000); }
     } else {
-        g_recProc->waitForFinished(1000);   // 已自然结束，等它彻底收尾
+        procWaitFinished(*g_recProc, 1000);   // 已自然结束，等它彻底收尾
     }
     const int code = g_recProc->exitCode();
     const qint64 bytes = QFileInfo(g_recOutPath).exists() ? QFileInfo(g_recOutPath).size() : 0;
@@ -4350,9 +4379,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                       QStringLiteral("true"), QStringLiteral("-f"),
                       QStringLiteral("dshow"), QStringLiteral("-i"),
                       QStringLiteral("dummy") });
-        if (!p.waitForFinished(4000)) {
+        if (!procWaitFinished(p, 4000)) {
             p.kill();
-            p.waitForFinished(1500);
+            procWaitFinished(p, 1500);
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("ffmpeg 枚举设备超时（DirectShow 可能不可用）");
             return out;
@@ -4417,11 +4446,11 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                       QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video=%1").arg(dev),
                       QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-q:v"),
                       QStringLiteral("2"), path });
-        const bool finished = p.waitForFinished(9000);
+        const bool finished = procWaitFinished(p, 9000);
         const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - t0;
         if (!finished) {
             p.kill();
-            p.waitForFinished(1500);
+            procWaitFinished(p, 1500);
             QFile::remove(path);
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("自检超时（%1ms，设备 %2）：设备被占用或不出帧").arg(elapsed).arg(dev);
@@ -4480,9 +4509,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                       QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video=%1").arg(dev),
                       QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-q:v"),
                       QStringLiteral("2"), path });
-        if (!p.waitForFinished(8000)) {
+        if (!procWaitFinished(p, 8000)) {
             p.kill();
-            p.waitForFinished(1500);
+            procWaitFinished(p, 1500);
             QFile::remove(path);
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("camera_snapshot: ffmpeg 超时（设备 %1）").arg(dev);
@@ -4532,7 +4561,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         const bool reallyRecording = QFileInfo::exists(g_recOutPath) && QFileInfo(g_recOutPath).size() > 0;
         if (!reallyRecording) {
             g_recProc->kill();
-            g_recProc->waitForFinished(3000);
+            procWaitFinished(*g_recProc, 3000);
             QFile::remove(g_recOutPath);
             delete g_recProc; g_recProc = nullptr;
             g_recOutPath.clear();
@@ -4723,7 +4752,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         }
         if (g_playProc && g_playProc->state() != QProcess::NotRunning) {
             g_playProc->terminate();
-            if (!g_playProc->waitForFinished(3000)) g_playProc->kill();
+            if (!procWaitFinished(*g_playProc, 3000)) g_playProc->kill();
             delete g_playProc;
             g_playProc = nullptr;
         }
@@ -4756,7 +4785,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         const bool wasRunning = (g_playProc->state() != QProcess::NotRunning);
         if (wasRunning) {
             g_playProc->terminate();
-            if (!g_playProc->waitForFinished(3000)) g_playProc->kill();
+            if (!procWaitFinished(*g_playProc, 3000)) g_playProc->kill();
         }
         delete g_playProc; g_playProc = nullptr;
         out.result = QStringLiteral("done");
@@ -5662,7 +5691,7 @@ void handleControlText(const QString &text)
     }
     const QJsonDocument doc = QJsonDocument::fromJson(raw);
     if (!doc.isObject()) {
-        fprintf(stderr, "[agent-qt] FAIL: 云端消息不是合法 JSON：%s\n", qPrintable(text.left(200)));
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 云端消息不是合法 JSON：%1").arg(text.left(200));
         return;
     }
     const QJsonObject o = doc.object();
@@ -5778,10 +5807,10 @@ void handleControlText(const QString &text)
         // 统一错误通道：云端拒绝必须看得见（fail-silent 红线）。code 是机器可读的，message 是人话。
         // 错误码体系（2026-10-06）：ecode = 数字码（AU1001/CM4001…），code = 语义码兼容。
         const QString ecode = pay.value(QStringLiteral("ecode")).toString();
-        fprintf(stderr, "[agent-qt] FAIL: 云端拒绝 → %s/%s：%s\n",
-                qPrintable(ecode.isEmpty() ? QStringLiteral("-") : ecode),
-                qPrintable(pay.value(QStringLiteral("code")).toString()),
-                qPrintable(pay.value(QStringLiteral("message")).toString()));
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 云端拒绝 → %1/%2：%3")
+            .arg(ecode.isEmpty() ? QStringLiteral("-") : ecode,
+                 pay.value(QStringLiteral("code")).toString(),
+                 pay.value(QStringLiteral("message")).toString());
         return;
     }
 
@@ -5979,13 +6008,13 @@ void captureAndSend(const QString &outDir)
 
     QScreen *screen = QGuiApplication::primaryScreen();
     if (!screen) {
-        fprintf(stderr, "[agent-qt] FAIL: 找不到主屏\n");
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 找不到主屏");
         return;
     }
 
     const QPixmap pm = screen->grabWindow(0);
     if (pm.isNull()) {
-        fprintf(stderr, "[agent-qt] FAIL: grabWindow 返回空图\n");
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: grabWindow 返回空图");
         return;
     }
 
@@ -5994,7 +6023,7 @@ void captureAndSend(const QString &outDir)
         QBuffer buffer(&jpeg);
         buffer.open(QIODevice::WriteOnly);
         if (!pm.save(&buffer, "JPEG", 60)) {
-            fprintf(stderr, "[agent-qt] FAIL: JPEG 编码失败\n");
+            qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: JPEG 编码失败");
             return;
         }
     }
@@ -6005,7 +6034,7 @@ void captureAndSend(const QString &outDir)
         if (pm.save(path, "JPEG", 60))
             qInfo("[agent-qt] 本地存图 %s", qPrintable(path));
         else
-            fprintf(stderr, "[agent-qt] FAIL: 本地存图失败 → %s\n", qPrintable(path));
+            qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 本地存图失败 → %1").arg(path);
     }
 
     // 走到这里一定是 online（离线分支已在函数开头提前返回）。
@@ -6227,7 +6256,7 @@ int main(int argc, char *argv[])
         isl->setIdleEnabled(envOr("STE_QT_ISLAND_IDLE", QStringLiteral("1")) != QStringLiteral("0"));
         isl->ensureIdle();
     } else {
-        fprintf(stderr, "[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口\n");
+        qWarning().noquote() << QStringLiteral("[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口");
     }
 
     // ── 通知体系接线（2026-10-09 · DeepSeek Harness）─────────────────────
@@ -6290,11 +6319,11 @@ int main(int argc, char *argv[])
             g_lastOfflineToastMs = nowOffline;
             islandShow(QStringLiteral("连接中断"), QStringLiteral("正在自动重连…"), QStringLiteral("triangle-alert"), 3000);
         }
-        fprintf(stderr, "[agent-qt] FAIL: 云端断开（%lld 帧已发）\n", g_frameBytes);
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 云端断开（%1 帧已发）").arg(g_frameBytes);
         if (!g_registered) {   // 连上了却从没拿到 registered 就被断开 = 握手/令牌没过
-            fprintf(stderr, "[agent-qt]   └ 本轮 register 未通过云端校验 —— 先查令牌（STE_QT_WS_TOKEN）与云端 CLOUD_WS_TOKEN 是否一致，再看云端 events.log\n");
+            qWarning().noquote() << QStringLiteral("[agent-qt]   └ 本轮 register 未通过云端校验 —— 先查令牌（STE_QT_WS_TOKEN）与云端 CLOUD_WS_TOKEN 是否一致，再看云端 events.log");
         } else {
-            fprintf(stderr, "[agent-qt]   └ 网络/服务侧断开，正在退避重连\n");
+            qWarning().noquote() << QStringLiteral("[agent-qt]   └ 网络/服务侧断开，正在退避重连");
         }
         scheduleReconnect();
     });
@@ -6302,8 +6331,7 @@ int main(int argc, char *argv[])
     QObject::connect(g_ws, &QWebSocket::errorOccurred, &app,
                      [](QAbstractSocket::SocketError) {
                          // disconnected 里统一退避重连，这里只报真实原因
-                         fprintf(stderr, "[agent-qt] FAIL: 连接出错 —— %s\n",
-                                 qPrintable(g_ws->errorString()));
+                         qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 连接出错 —— %1").arg(g_ws->errorString());
                      });
 
     QObject::connect(g_ws, &QWebSocket::textMessageReceived, &app, [](const QString &msg) {

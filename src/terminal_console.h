@@ -79,7 +79,9 @@ private:
     TerminalConsole &operator=(const TerminalConsole &) = delete;
 
     void sendFrame(const char *type, const QJsonObject &payload);
-    void refreshCwd();                       // 命令跑完问一次当前目录，更新提示符
+    // 2026-10-13 重写：原 refreshCwd 起子进程问 `cd`，但每条命令是全新 shell，
+    // 问回来的永远是旧目录 → 提示符恒不更新。改为词法解析 cd（见 .cpp 尾部注释）。
+    void applyCwdChange();                   // 命令跑通且含 cd 时，把 m_cwd 换到解析出的目标
     void runLine(const QString &line);
     void stopCmdTimers();
 
@@ -88,6 +90,8 @@ private:
     QString m_sid;
     QString m_shell = QStringLiteral("cmd");
     QString m_cwd = QStringLiteral("C:\\");
+    QString m_lastLine;                      // 上一条命令原文（cd 词法解析用）
+    bool m_lastLineHadCd = false;            // 上一条命令里带 cd → 跑通后 applyCwdChange
     bool m_active = false;                   // 会话开着
     bool m_busy = false;                     // 有命令在跑
     QProcess *m_proc = nullptr;
