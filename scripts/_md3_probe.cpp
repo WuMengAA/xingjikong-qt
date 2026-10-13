@@ -152,6 +152,9 @@ int main(int argc, char *argv[])
     QCommandLineOption pageOpt(QStringList() << "page", "switch bottomNav page index", "page");
     QCommandLineOption dlgOpt(QStringList() << "dialog", "open confirm dialog before grab");
     QCommandLineOption snackOpt(QStringList() << "snack", "show snackbar before grab");
+    QCommandLineOption screenOpt(QStringList() << "screen", "LayoutLab screen index", "screen");
+    QCommandLineOption wOpt(QStringLiteral("width"), "window width", "width");
+    QCommandLineOption hOpt(QStringLiteral("height"), "window height", "height");
     parser.addOption(darkOpt);
     parser.addOption(outOpt);
     parser.addOption(qmlOpt);
@@ -159,6 +162,9 @@ int main(int argc, char *argv[])
     parser.addOption(pageOpt);
     parser.addOption(dlgOpt);
     parser.addOption(snackOpt);
+    parser.addOption(screenOpt);
+    parser.addOption(wOpt);
+    parser.addOption(hOpt);
     parser.process(app);
     const bool dark = parser.isSet(darkOpt);
     const QString out = parser.isSet(outOpt) ? parser.value(outOpt)
@@ -195,6 +201,8 @@ int main(int argc, char *argv[])
 
     // 老签名兼容（MaterialLab 的 dark / captureOffset）
     ro->setProperty("dark", dark);
+    if (parser.isSet(screenOpt))
+        ro->setProperty("screen", parser.value(screenOpt).toInt());
     if (parser.isSet(offOpt))
         ro->setProperty("captureOffset", parser.value(offOpt).toInt());
 
@@ -211,7 +219,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    w->resize(390, 844);
+    w->resize(parser.isSet(wOpt) ? parser.value(wOpt).toInt() : 390,
+              parser.isSet(hOpt) ? parser.value(hOpt).toInt() : 844);
     w->show();
 
     // stub 数据信号：页面在 Component.onCompleted 里连了 recordingsChanged/eventsChanged

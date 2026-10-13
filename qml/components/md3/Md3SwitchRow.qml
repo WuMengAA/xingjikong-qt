@@ -13,11 +13,13 @@ Item {
     implicitWidth: 320
     implicitHeight: supporting === "" ? 56 : 72
 
+    // 单行：标签垂直居中；两行：标签居上（y:12）、说明在下（y:38）。
+    // ⚠️ 曾经把标签写 anchors.verticalCenter + 说明 anchors.top —— 两行态直接重叠。
     Text {
         anchors.left: parent.left
         anchors.right: switchBox.left
         anchors.rightMargin: 16
-        anchors.verticalCenter: parent.verticalCenter
+        y: root.supporting === "" ? (parent.height - implicitHeight) / 2 : 12
         text: root.text
         font.pixelSize: md3.bodyL
         color: md3.cOnSurface
@@ -27,8 +29,7 @@ Item {
         anchors.left: parent.left
         anchors.right: switchBox.left
         anchors.rightMargin: 16
-        anchors.top: parent.top
-        anchors.topMargin: 34
+        y: 38
         visible: root.supporting !== ""
         text: root.supporting
         font.pixelSize: md3.bodyS
