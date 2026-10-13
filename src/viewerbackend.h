@@ -54,6 +54,21 @@ inline QString humanBytes(qint64 n)
         return QString::number((double)n / 1024.0, 'f', 1) + QStringLiteral(" KB");
     return QString::number((double)n / 1024.0 / 1024.0, 'f', 1) + QStringLiteral(" MB");
 }
+/**
+ * 把时长上限说成人话：≥1 分钟按分钟、不足 1 分钟按秒（压测上限只有几秒，别显示"0 分钟"）。
+ * 2026-10-13 架构拆分：从 viewerbackend.cpp 的 static 提升为 inline（语音/广播域新 TU 也要用）。
+ */
+inline QString fmtLimit(int ms)
+{
+    if (ms >= 60000) return QStringLiteral("%1 分钟").arg(ms / 60000);
+    return QStringLiteral("%1 秒").arg(qMax(1, ms / 1000));
+}
+/** 读时长上限环境变量（毫秒）：只在 0 < v ≤ 1 小时时才认，写错按默认走（不因此开不起来）。 */
+inline int envMaxMs(const char *key, int fallback)
+{
+    const qint64 v = qEnvironmentVariableIntValue(key);
+    return (v > 0 && v <= 3600 * 1000) ? static_cast<int>(v) : fallback;
+}
 
 class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向声明，避免引入 mmsystem）
 class AudioPlayback; // B6：管理端播放（学生回传的 audio/pcm 帧）
