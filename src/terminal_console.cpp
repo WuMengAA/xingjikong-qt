@@ -60,7 +60,10 @@ bool TerminalConsole::open(const TermReq &req, QString *err)
 {
     if (m_active) {
         if (err) *err = QStringLiteral("已有终端会话开着（sid=%1），同一台机器同时只放一个").arg(m_sid);
-        qWarning("[term] 拒绝开新会话：%s", qPrintable(err ? *err : QString()));
+        // ⚠️ 2026-10-13：原来 qPrintable(err ? *err : QString()) —— 临时 QString 在本条
+        //    语句结束即销毁，qPrintable 取到的指针悬空（Windows 上日志可能异步转发，
+        //    就有概率踩到）。改流式写法，参数是值、不经临时对象的裸指针。
+        qWarning().noquote() << "[term] 拒绝开新会话：" << (err ? *err : QStringLiteral("已有会话"));
         return false;
     }
     if (req.sid.isEmpty()) {

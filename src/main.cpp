@@ -571,7 +571,10 @@ void sendHeartbeat()
     // 协议级 Ping 帧：对抗隧道/防火墙对空闲长连接的 idle timeout。
     // 应用层 heartbeat 是"业务消息"，隧道可能不把它当活跃证据；Ping 是纯协议
     // 帧，任何 WS 实现都处理，必然产生双向网络活动，连接不会被中间设备判闲。
-    try { g_ws->ping(); } catch (...) { /* ping 失败由 disconnected 兜底重连 */ }
+    // ⚠️ 2026-10-13：QWebSocket::ping() 返回 **void**、也不抛异常（Qt 用信号报错）——
+    //    原来的 try/catch 是空壳、纯误导（它让人以为"捕获了异常"）。直接调用即可；
+    //    写失败 / 连接断由 disconnected / errorOccurred 兜底重连。
+    g_ws->ping();
 
     QJsonObject p;
     p.insert(QStringLiteral("seq"), ++g_heartbeatSeq);
@@ -659,7 +662,10 @@ static void markTerminalDone(const QString &id)
     }
     QFile f(terminalDonePath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qInfo("[agent-qt] ⚠ 破坏性指令记录写不进（%s）—— 重复下发只能靠云端侧兜", qPrintable(f.errorString()));
+        // 2026-10-13：级别从 qInfo 升到 qWarning —— 这条写不进 = 重启后 shutdown/reboot
+        // 记录全丢 = 重复下发无限重启的根因，不能让它在监控里当普通信息溜过去。
+        qWarning("[agent-qt] ⚠ 破坏性指令记录写不进（%s）—— 重启后可能重复执行",
+                 qPrintable(f.errorString()));
         return;
     }
     QJsonArray arr;
@@ -5585,7 +5591,10 @@ void handleControlText(const QString &text)
     if (raw.isEmpty()) return;
 
     if (!raw.startsWith('{')) {
-        qInfo("[agent-qt] 收到云端文本（非 JSON）：%s", qPrintable(text.left(200)));
+        // ⚠️ 2026-10-13：升级为 qWarning —— 非 JSON 文本多半是协议不匹配（云端一律发 v1
+        //    JSON 信封，不存在"已知的纯文本消息"），属于"程序/版本出问题了"，不该当普通
+        //    信息在日志里溜过去。
+        qWarning("[agent-qt] 收到云端文本（非 JSON，疑似协议不匹配）：%s", qPrintable(text.left(200)));
         return;
     }
     const QJsonDocument doc = QJsonDocument::fromJson(raw);
@@ -6275,11 +6284,20 @@ int main(int argc, char *argv[])
         (qEnvironmentVariableIntValue("STE_QT_STORE_FRAMES") == 1) ? g_shotDir : QString();
     if (!storeFrames.isEmpty())
         qInfo("[agent-qt] 注意：STE_QT_STORE_FRAMES=1，每帧都会落盘到 %s", qPrintable(storeFrames));
-    QTimer timer;
-    QObject::connect(&timer, &QTimer::timeout, &app, [storeFrames] {
-        captureAndSend(storeFrames);
-    });
-    timer.start(kFrameIntervalMs);
+    // ⚠️ 2026-10-13：原来无条件 start —— 而 captureAndSend 第一件事就是判
+    //    STE_ENABLE_WS_FRAME_PUSH，默认关 ⇒ 每 2 秒空转一次事件循环、什么都不做，
+    //    且那份判定落在每一次 tick 里。改为**启动时判定一次**：只有逃生口打开才建 timer。
+    QTimer *frameTimer = nullptr;   // 供下面"立即触发首帧"用；关停时为 null
+    if (qgetenv("STE_ENABLE_WS_FRAME_PUSH") == "1") {
+        frameTimer = new QTimer(&app);
+        QObject::connect(frameTimer, &QTimer::timeout, &app, [storeFrames] {
+            captureAndSend(storeFrames);
+        });
+        frameTimer->start(kFrameIntervalMs);
+        qInfo("[agent-qt] WS 单帧轮询推送已启用（STE_ENABLE_WS_FRAME_PUSH=1）");
+    } else {
+        qInfo("[agent-qt] WS 单帧轮询推送已停用（要启用请设 STE_ENABLE_WS_FRAME_PUSH=1）");
+    }
 
     // 心跳定时器：独立于抓屏。抓屏失败/按需拉流不推帧时，云端仍要靠它判在线。
     // 间隔先取环境变量，等云端 registered 下发 heartbeatMs 后再改（协议 v1：参数由云端定，两端不各猜）。
@@ -6298,7 +6316,7 @@ int main(int argc, char *argv[])
           g_heartbeatMs, g_timeoutMs);
 
     connectNow();
-    QMetaObject::invokeMethod(&timer, "timeout", Qt::QueuedConnection);
+    if (frameTimer) QMetaObject::invokeMethod(frameTimer, "timeout", Qt::QueuedConnection);
 
     // ── 强制升级的回滚看门狗（2026-10-06）────────────────────────────────
     // 还有一次升级没被"确认成功"摆在台面上（pending 标记还在）→ 起个定时器：

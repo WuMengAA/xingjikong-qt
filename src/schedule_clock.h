@@ -47,6 +47,7 @@ private:
 
     QString m_profilePath;
     QTimer m_timer;
+    QDate m_builtFor;                // 课表按天重建的"已建日期"（原为函数级 static：多实例会互相干扰、也没法测）
     QList<TodayLesson> m_today;      // 今天的课程（按开始时间排）
     int m_lastEmitSlot = -1;         // 上一次触发的节次
     QString m_currentPeriod;         // 当前正在上的课名

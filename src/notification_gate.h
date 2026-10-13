@@ -36,7 +36,9 @@ public:
 
     // 考试激活期间：一切种类 → 拒绝；否则放行。
     // main.cpp 在每个通知/采集动作前调用，拒绝时静默返回（不弹、不记 error）。
-    bool allow(Kind k) const { return !m_examActive; }
+    // ⚠️ 参数 k 目前**有意**未参与判定（所有 Kind 平等）；预留将来按 Kind 精细放行
+    //    （例如"考试中仍允许紧急确认"）。Q_UNUSED 表明这是有意，不是漏写。
+    bool allow(Kind k) const { Q_UNUSED(k); return !m_examActive; }
 
     // 由上层在考试状态切换点调用（exam_mode 开始/结束）。
     void setExamActive(bool on);

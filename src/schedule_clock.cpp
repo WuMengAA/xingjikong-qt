@@ -105,15 +105,14 @@ void ScheduleClock::tick()
     const QTime curTime = now.time();
 
     // 每日重建课表（跨天自动刷新）
-    static QDate s_builtFor;
-    if (s_builtFor != today) {
+    if (m_builtFor != today) {
         ProfileRepository repo;
         Profile profile = repo.load(m_profilePath);
         // 周次：以 9/1 为第 1 周的简化算法（与 ScheduleModel::weekFromDate 一致）
         QDate start(today.year(), 9, 1);
         int currentWeek = (start.daysTo(today) >= 0) ? (start.daysTo(today) / 7) + 1 : 1;
         m_today = buildTodayLessons(profile, today, currentWeek);
-        s_builtFor = today;
+        m_builtFor = today;
         qInfo().noquote() << "[schedule-clock] 今日课程 " << m_today.size() << " 节"
                           << (m_today.isEmpty() ? QStringLiteral("（档案无课表或非上课日）") : QString());
         m_currentPeriod.clear();

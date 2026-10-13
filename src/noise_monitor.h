@@ -19,6 +19,7 @@
 
 #include <QObject>
 #include <QTimer>
+#include <QThreadPool>
 #include <QString>
 
 class NoiseMonitor : public QObject {
@@ -56,6 +57,10 @@ private:
     bool m_running = false;
     int m_sampleRate = 16000;
     QTimer m_timer;
+    // ⚠️ 2026-10-13：专用单线程池 —— 原来用 QThreadPool::globalInstance()，会和摄像头抓拍/
+    //    录制等抢全局池（池满时噪音采样被静默挤掉）。噪音采集是"短窗口阻塞等录满"，
+    //    独占一个后台线程最省事，也不连累别的任务。
+    QThreadPool m_pool;
     double m_lastDb = 0.0;
     bool m_lastActive = false;
     bool m_captureOk = false;   // 最近一次采集成功？

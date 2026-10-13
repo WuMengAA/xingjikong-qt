@@ -21,6 +21,7 @@
 
 #include <cstdlib>
 #include <ctime>
+#include <QRandomGenerator>   // state 随机串（密码学安全，替掉 std::rand）
 
 namespace {
 
@@ -30,20 +31,22 @@ constexpr const char *kDeviceClientId = "xjk_device_public";
 /** 回拨路径。站点按 RFC 8252 只认 127.0.0.1 回拨，路径后缀任意，这里与管理端保持一致。 */
 constexpr const char *kRedirectPath = "/oauth-callback";
 
-/** 随机串（state 用）：state 能被猜就等于别人能伪造回拨把 code 骗走。 */
+/** 随机串（state 用）：state 能被猜就等于别人能伪造回拨把 code 骗走。
+ *
+ * ⚠️ 2026-10-13：原来用 std::rand()（非密码学安全，且 srand 种子含秒级 time），
+ *    猜中 state 就等于能伪造 OAuth 回拨把授权码骗走。改走 QRandomGenerator::system()
+ *    （Windows 上走 BCryptGenRandom，密码学安全）。同款 bug 在管理端 oauthlogin.cpp
+ *    也有一份，见被控端代码质量报告 A7。
+ */
 QString randomHex(int bytes)
 {
-    static bool seeded = false;
-    if (!seeded) {
-        std::srand(static_cast<unsigned>(std::time(nullptr) ^ (quintptr)(void *)&randomHex));
-        seeded = true;
-    }
     QString out;
     out.reserve(bytes * 2);
+    const char digits[] = "0123456789abcdef";
     for (int i = 0; i < bytes; ++i) {
-        const char digits[] = "0123456789abcdef";
-        out += digits[std::rand() % 16];
-        out += digits[std::rand() % 16];
+        const quint32 v = QRandomGenerator::system()->generate();
+        out += digits[v & 0xF];
+        out += digits[(v >> 4) & 0xF];
     }
     return out;
 }

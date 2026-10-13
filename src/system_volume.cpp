@@ -28,8 +28,12 @@
 bool setSystemMasterVolume(int v, QString *errOut)
 {
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    const bool needUninit = SUCCEEDED(hr);
-    // RPC_E_CHANGED_MODE 表示本线程已经以别的模式初始化过 COM —— 不算错误，继续用
+    // ⚠️ 2026-10-13：只有 S_OK 才表示"本次首次初始化"，才配 CoUninitialize。
+    //    SUCCEEDED(S_FALSE) 为真，但 S_FALSE = 本线程**已初始化过**（Qt 平台插件常先
+    //    初始化过 STA）—— 此时再 CoUninitialize 会多减一次引用计数，可能把别的 COM
+    //    使用者拖崩。RPC_E_CHANGED_MODE = 已初始化但套间模型不同：不算错、可继续用，
+    //    但同样不能 uninit（下面把它归一成 S_OK 只是为让流程继续）。
+    const bool needUninit = (hr == S_OK);
     if (hr == RPC_E_CHANGED_MODE) hr = S_OK;
     if (FAILED(hr)) {
         if (errOut) *errOut = QStringLiteral("COM 初始化失败（0x%1）").arg((quint32)hr, 8, 16, QLatin1Char('0'));

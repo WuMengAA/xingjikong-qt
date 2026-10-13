@@ -103,6 +103,7 @@ private:
 
 NoiseMonitor::NoiseMonitor(QObject* parent) : QObject(parent)
 {
+    m_pool.setMaxThreadCount(1);   // 采集串行，独占一个后台线程（不抢全局池）
     connect(&m_timer, &QTimer::timeout, this, &NoiseMonitor::sample);
 }
 
@@ -138,7 +139,7 @@ void NoiseMonitor::sample()
     if (!m_running || m_busy) return;   // 上一轮还没回来就跳过（防设备慢时堆任务）
     m_busy = true;
     ++m_seq;
-    QThreadPool::globalInstance()->start(new Task(this, m_sampleRate, m_seq));
+    m_pool.start(new Task(this, m_sampleRate, m_seq));
 }
 
 void NoiseMonitor::onCaptured(double rms, int seq)

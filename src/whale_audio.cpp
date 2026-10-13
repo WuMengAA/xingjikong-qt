@@ -44,13 +44,17 @@ QString WhaleAudio::qrcPath(Sound s) const
 QString WhaleAudio::extractToTemp(const QString &qrcPathStr) const
 {
     // PlaySoundW 不认 qrc 路径。从 QResource 读字节、写到固定临时文件。
-    // 文件名固定 = whale_<basename>.wav，每次覆盖，不累积。
+    // 文件名固定 = stelarith_whale_v<版本>_<basename>.wav，每次覆盖，不累积。
+    // ⚠️ 2026-10-13：文件名带上**应用版本** —— 原来只按 basename 命名且"存在就复用"，
+    //    升级后 qrc 里的 wav 变了、临时文件却是旧的 ⇒ 音效永远播旧版。带版本号后，
+    //    新版本第一次播就是新文件（依赖调用方设了 applicationVersion，即 kAppVersion）。
     const QFileInfo fi(qrcPathStr);
     const QString baseName = fi.fileName();
     const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     if (tempDir.isEmpty()) return {};
     QDir().mkpath(tempDir);
-    const QString outPath = tempDir + QStringLiteral("/stelarith_whale_") + baseName;
+    const QString outPath = tempDir + QStringLiteral("/stelarith_whale_v")
+                            + QCoreApplication::applicationVersion() + QLatin1Char('_') + baseName;
 
     QFile out(outPath);
     if (out.exists() && out.size() > 0) {

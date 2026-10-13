@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QDebug>
 #include <windows.h>
+#include <tlhelp32.h>   // CreateToolhelp32Snapshot（进程枚举，替代 fork tasklist.exe）
 
 // Windows 原生：把窗口置顶（WS_EX_TOPMOST）+ 抢占 Alt+Tab 等（WS_EX_TOOLWINDOW 隐藏任务栏图标）。
 // 不拦截 Ctrl+Alt+Del（Windows 安全键，无法完全拦截 —— 文档 3.7 诚实边界）。
@@ -280,31 +281,26 @@ void ExamMode::killBlacklisted()
 {
     if (!m_enforcing || m_blacklist.isEmpty()) return;
 
-    // tasklist 快照（/NH 去掉表头，/FO CSV 便于解析）。
-    // 每次子进程调用约几十 ms，2 秒一次可接受；不比"轮询 1 秒一次"重。
-    QProcess p;
-    p.start(QStringLiteral("tasklist"), { QStringLiteral("/FO"), QStringLiteral("CSV"),
-                                           QStringLiteral("/NH") });
-    if (!p.waitForFinished(1500)) return;
-    const QByteArray out = p.readAllStandardOutput();
-    // CSV 每行：`"Image Name","PID","Session Name","Session#","Mem Usage"` —— 取第 1、2 列。
-    const QList<QByteArray> lines = out.split('\n');
+    // 进程列表走**内核快照**（CreateToolhelp32Snapshot），不再 fork tasklist.exe。
+    // 2026-10-13 改：原来每 2 秒 fork 一次 tasklist、每杀一个进程 fork 一次 taskkill ——
+    //   60 台机器同时跑 = 每 2 秒 60 次子进程（教室机本来就弱），且 waitForFinished 会
+    //   阻塞主线程最多 1 秒。整条链路换成零 fork。
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
     struct Proc { QString name; qint64 pid = 0; };
     QList<Proc> procs;
-    for (const QByteArray &raw : lines) {
-        QByteArray line = raw.trimmed();
-        if (line.isEmpty() || !line.startsWith('"')) continue;
-        const QList<QByteArray> cols = line.split(',');
-        if (cols.size() < 2) continue;
-        // ⚠️ 归一化必须**双侧一致**：tasklist 给 "Foo.exe"，黑名单里写 "foo"，
-        //    两边都过 normalizeProcName() 才能对上。旧版只剥了配置那一侧，
-        //    于是黑名单/保护名单**一条都匹配不上**（2026-10-09 事故的直接导火索）。
-        const QString name = normalizeProcName(QString::fromUtf8(cols[0]).remove('"'));
-        const QString pidStr = QString::fromUtf8(cols[1]).remove('"').trimmed();
-        bool ok = false;
-        const qint64 pid = pidStr.toLongLong(&ok);
-        if (ok) procs.append({ name, pid });
+    PROCESSENTRY32W pe = {};
+    pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            // ⚠️ 归一化必须**双侧一致**：快照给 "Foo.exe"，黑名单里写 "foo"，
+            //    两边都过 normalizeProcName() 才能对上。旧版只剥了配置那一侧，
+            //    于是黑名单/保护名单**一条都匹配不上**（2026-10-09 事故的直接导火索）。
+            procs.append({ normalizeProcName(QString::fromWCharArray(pe.szExeFile)),
+                           static_cast<qint64>(pe.th32ProcessID) });
+        } while (Process32NextW(snap, &pe));
     }
+    CloseHandle(snap);
 
     auto isBlacklisted = [this](const QString &normName) {
         return m_blacklist.contains(normName);
@@ -318,9 +314,11 @@ void ExamMode::killBlacklisted()
 
         // ── 到这一步还要过三重内核闸门才敢动手 ──
         //    即使老师手滑在黑名单里填了 svchost.exe，也会被这里拦下来。
-        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pr.pid);
+        //    一次 OpenProcess 同时要 QUERY（查闸门）+ TERMINATE（杀），省一次打开。
+        HANDLE h = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                               FALSE, static_cast<DWORD>(pr.pid));
         if (!h) {
-            // 打不开句柄：权限更高或是系统进程 —— 一律放过（不是"反抗"，是保护）
+            // 打不开句柄：权限更高或是受保护/系统进程 —— 一律放过（保护优先）
             ++guarded;
             continue;
         }
@@ -331,21 +329,26 @@ void ExamMode::killBlacklisted()
             g_ntQueryProc(h, kProcInfoSession, &sessionId, sizeof(sessionId), &dummy);
         }
         const bool untouchable = processIsUntouchable(h, sessionId);
-        CloseHandle(h);
         if (untouchable) {
+            CloseHandle(h);
             ++guarded;
             qInfo("[exam] 已保护 %s (PID %lld)：内核标记为 critical/受保护或服务会话，跳过",
                   qPrintable(pr.name), pr.pid);
             continue;
         }
 
-        QProcess k;
-        k.start(QStringLiteral("taskkill"), { QStringLiteral("/PID"),
-                                              QString::number(pr.pid),
-                                              QStringLiteral("/F") });
-        k.waitForFinished(1000);
-        ++killed;
-        qInfo("[exam] 黑名单拦截：终止 %s (PID %lld)", qPrintable(pr.name), pr.pid);
+        // 零 fork 终止（原为 fork taskkill.exe）。
+        const BOOL ok = TerminateProcess(h, 1);
+        const DWORD lastErr = ok ? 0 : GetLastError();
+        CloseHandle(h);
+        if (ok) {
+            ++killed;
+            qInfo("[exam] 黑名单拦截：终止 %s (PID %lld)", qPrintable(pr.name), pr.pid);
+        } else {
+            ++guarded;
+            qInfo("[exam] 终止失败 %s (PID %lld) 错误码 %lu（按保护处理，不重试）",
+                  qPrintable(pr.name), pr.pid, lastErr);
+        }
     }
     if (killed > 0) qInfo("[exam] 本轮终止 %d 个黑名单进程", killed);
     if (guarded > 0) qInfo("[exam] 本轮 %d 个命中黑名单的进程被安全阀拦下（未杀）", guarded);
