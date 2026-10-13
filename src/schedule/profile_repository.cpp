@@ -5,6 +5,8 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QCoreApplication>
+#include <QTime>       // 2026-10-13：makeSample 里构造时间点
+#include <QUuid>       // 2026-10-13：makeSample 里生成对象 id
 
 ProfileRepository::ProfileRepository()
 {
@@ -122,4 +124,51 @@ bool ProfileRepository::mergeClassPlan(Profile& profile, const QJsonObject& clas
     }
 
     return true;
+}
+
+// 2026-10-13 审计 2.2：从 main.cpp 搬来的示例档案构造（3 节时间点 + 3 科目 + 2 套课表群）。
+// main() 不再需要知道 Profile 内部结构，改示例只动这里。
+Profile ProfileRepository::makeSample()
+{
+    Profile p;
+    p.name = QStringLiteral("示例档案");
+    p.id = QUuid::createUuid().toString();
+    auto mkSlot = [](const QString& n, int h1, int m1, int h2, int m2) {
+        TimeSlot ts; ts.id = QUuid::createUuid().toString(); ts.name = n;
+        ts.startTime = QTime(h1, m1); ts.endTime = QTime(h2, m2);
+        ts.timeType = 0; ts.isActive = true; return ts;
+    };
+    TimeSlot ts1 = mkSlot(QStringLiteral("第一节"), 8,0, 8,45);
+    TimeSlot ts2 = mkSlot(QStringLiteral("第二节"), 8,55, 9,40);
+    TimeSlot ts3 = mkSlot(QStringLiteral("第三节"), 10,10, 10,55);
+    p.timeSlots.insert(ts1.id, ts1);
+    p.timeSlots.insert(ts2.id, ts2);
+    p.timeSlots.insert(ts3.id, ts3);
+    auto mkSub = [](const QString& n) { Subject s; s.id = QUuid::createUuid().toString();
+        s.name = n; s.simplifiedName = n.left(1); return s; };
+    Subject s1 = mkSub(QStringLiteral("语文"));
+    Subject s2 = mkSub(QStringLiteral("数学"));
+    Subject s3 = mkSub(QStringLiteral("英语"));
+    p.subjects.insert(s1.id, s1);
+    p.subjects.insert(s2.id, s2);
+    p.subjects.insert(s3.id, s3);
+    auto mkPlan = [&](const QString& name, int wd, const QList<QString>& subs) {
+        ClassPlan cp; cp.id = QUuid::createUuid().toString(); cp.name = name;
+        cp.weekDay = wd; cp.weekCountDiv = 1; cp.weekCountDivTotal = 1; cp.isActive = true;
+        int i = 0;
+        for (const QString& sid : subs) {
+            cp.lessons.append(Lesson{sid, wd, i++, 1, 1, true});
+        }
+        return cp;
+    };
+    ClassPlan c1 = mkPlan(QStringLiteral("周一"), 1, {s1.id, s2.id, s3.id});
+    ClassPlan c2 = mkPlan(QStringLiteral("周二"), 2, {s2.id, s3.id, s1.id});
+    p.classPlans.insert(c1.id, c1);
+    p.classPlans.insert(c2.id, c2);
+    ClassPlanGroup grp;
+    grp.id = QUuid::createUuid().toString();
+    grp.name = QStringLiteral("默认课表"); grp.isActive = true;
+    grp.classPlanIds = {c1.id, c2.id};
+    p.classPlanGroups.insert(grp.id, grp);
+    return p;
 }

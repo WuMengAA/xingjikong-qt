@@ -446,48 +446,10 @@ int main(int argc, char *argv[])
     if (schedProfile.classPlans.isEmpty()) {
         logf("[viewer] 课表档案为空，生成示例档案（%s）",
              qPrintable(schedRepo.defaultProfilePath()));
-        // 构造一份最小示例（3 节时间点 + 3 科目 + 2 套课表群）
-        schedProfile = Profile();
-        schedProfile.name = QStringLiteral("示例档案");
-        schedProfile.id = QUuid::createUuid().toString();
-        auto mkSlot = [](const QString& n, int h1, int m1, int h2, int m2) {
-            TimeSlot ts; ts.id = QUuid::createUuid().toString(); ts.name = n;
-            ts.startTime = QTime(h1, m1); ts.endTime = QTime(h2, m2);
-            ts.timeType = 0; ts.isActive = true; return ts;
-        };
-        TimeSlot ts1 = mkSlot(QStringLiteral("第一节"), 8,0, 8,45);
-        TimeSlot ts2 = mkSlot(QStringLiteral("第二节"), 8,55, 9,40);
-        TimeSlot ts3 = mkSlot(QStringLiteral("第三节"), 10,10, 10,55);
-        schedProfile.timeSlots.insert(ts1.id, ts1);
-        schedProfile.timeSlots.insert(ts2.id, ts2);
-        schedProfile.timeSlots.insert(ts3.id, ts3);
-        auto mkSub = [](const QString& n) { Subject s; s.id = QUuid::createUuid().toString();
-            s.name = n; s.simplifiedName = n.left(1); return s; };
-        Subject s1 = mkSub(QStringLiteral("语文"));
-        Subject s2 = mkSub(QStringLiteral("数学"));
-        Subject s3 = mkSub(QStringLiteral("英语"));
-        schedProfile.subjects.insert(s1.id, s1);
-        schedProfile.subjects.insert(s2.id, s2);
-        schedProfile.subjects.insert(s3.id, s3);
-        auto mkPlan = [&](const QString& name, int wd, const QList<QString>& subs) {
-            ClassPlan cp; cp.id = QUuid::createUuid().toString(); cp.name = name;
-            cp.weekDay = wd; cp.weekCountDiv = 1; cp.weekCountDivTotal = 1; cp.isActive = true;
-            int i = 0;
-            for (const QString& sid : subs) {
-                cp.lessons.append(Lesson{sid, wd, i++, 1, 1, true});
-            }
-            return cp;
-        };
-        ClassPlan c1 = mkPlan(QStringLiteral("周一"), 1, {s1.id, s2.id, s3.id});
-        ClassPlan c2 = mkPlan(QStringLiteral("周二"), 2, {s2.id, s3.id, s1.id});
-        schedProfile.classPlans.insert(c1.id, c1);
-        schedProfile.classPlans.insert(c2.id, c2);
-        ClassPlanGroup grp;
-        grp.id = QUuid::createUuid().toString();
-        grp.name = QStringLiteral("默认课表"); grp.isActive = true;
-        grp.classPlanIds = {c1.id, c2.id};
-        schedProfile.classPlanGroups.insert(grp.id, grp);
-        schedProfile.selectedClassPlanGroupId = grp.id;
+        // 2026-10-13 审计 2.2：示例构造搬进 ProfileRepository::makeSample()——
+        // 原 40 行 mkSlot/mkSub/mkPlan 直接住在 main() 里（与 Profile 强耦合，
+        // 改示例要重编整个入口）。这里只留一行调用。
+        schedProfile = ProfileRepository::makeSample();
     }
 
     ScheduleModel schedModel(schedProfile);
