@@ -827,9 +827,12 @@ void IslandOverlay::dismiss()
     m_fadeAnim->setEndValue(0.0);
     m_fadeAnim->stop();
     m_fadeAnim->setDirection(QAbstractAnimation::Forward);
-    connect(m_fadeAnim, &QPropertyAnimation::finished, this, [this]() {
-        hide();
-    }, Qt::UniqueConnection);
+    // ⚠️ 2026-10-13 修：这里曾残留一条 `connect(..., [this]{ hide(); }, Qt::UniqueConnection)` ——
+    //    正是本文件 132-137 行注释里记的那个坑（lambda 连接永不解绑、Qt::UniqueConnection 对
+    //    lambda 无效）。当年的修复改成了"成员槽 + m_closing 状态位"，但**漏删了 dismiss() 这一处**：
+    //    于是每次 dismiss() 都多挂一条 finished→hide()，非空闲路径下"第一条提示之后每条只闪 220ms"。
+    //    收敛回设计意图：置 m_closing，由 onFadeFinished()（139 行那条只连一次的成员槽）统一收窗。
+    m_closing = true;                 // 这次是淡出：finished 到了才 hide
     m_fadeAnim->start();
     if (m_bridge) m_bridge->sync();
 }

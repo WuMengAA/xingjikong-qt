@@ -40,6 +40,7 @@
 #include <QBuffer>
 #include <QSet>
 #include <cstdlib>   // rand()：重连退避抖动（2026-10-08）
+#include <QRandomGenerator>   // 退避抖动改走 CSPRNG（rand() 未播种 ⇒ 全机同一序列，2026-10-13）
 #include <QStandardPaths>
 #include <QElapsedTimer>
 #include <QUrl>
@@ -47,6 +48,7 @@
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
 #include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
 #include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
+#include "proc_guard.h"        // 2026-10-13：进程终止安全闸门（与 exam_mode 共用同一道门）
 #include "audio_player.h"      // 2026-10-07：语音对讲播放（waveOut）
 #include "broadcast_view.h"    // 2026-10-07：屏幕广播全屏显示
 #include "ldc_streamer.h"      // 2026-10-09：WebRTC 去 WebEngine 底层（libdatachannel 推流）
@@ -227,7 +229,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.27";
+constexpr const char *kAppVersion = "0.6.28";
 
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
@@ -464,7 +466,11 @@ void scheduleReconnect()
     // 把云端瞬间打死 → 又一起断，恶性循环。加 ±20% 抖动，让重连时刻分散开。
     // 首连（从未注册成功过）用快速重试，断网恢复更快。
     const int base = g_everRegistered ? qMin(g_backoffMs, kMaxBackoffMs) : kFirstBackoffMs;
-    const double r = (double)rand() / (double)RAND_MAX;        // [0,1)
+    // ⚠️ 2026-10-13：原来用 rand()，而**全仓没有任何 srand()**（MSVC 下等价 srand(1)）⇒
+    //    每台教室机拿到**完全相同的随机序列**，断线后算出同一个 jitter、同一毫秒一起重连，
+    //    正是上面这段注释要避免的"一起重连把云端瞬间打死 → 又一起断"的雪崩 —— 抖动白加了。
+    //    改走 QRandomGenerator::system()（Windows 上 BCryptGenRandom）。
+    const double r = QRandomGenerator::system()->generateDouble();   // [0,1)
     const int jitter = int(base * (0.8 + 0.4 * r));            // [0.8,1.2) × base
     QTimer::singleShot(jitter, connectNow);
     qInfo("[agent-qt] %d ms 后重试（退避上限 %d ms，含 ±20%% 抖动%s）",
@@ -3994,6 +4000,19 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.error = QStringLiteral("拒绝结束 %1（pid %2）：命中硬禁止名单「%3」").arg(exe).arg(pid).arg(prot);
             return out;
         }
+        // ⚠️ 2026-10-13：名字名单之外**再过一次内核闸门**。
+        //    名单不可能穷举 —— MemCompression / Registry / Secure System / LogonUI / 任意未列名的
+        //    session-0 服务宿主都不在 kProtectedSystem 里，而名单曾是这条指令**唯一**的保护。
+        //    这与 2026-10-09 学校机房"反复重启"事故（名单漏项 → TerminateProcess 掉 critical 进程
+        //    → CRITICAL_PROCESS_DIED 0xEF）是同一类机理，只是换到了 process_stop 这条路径上；
+        //    本端以 Highest 权限运行，杀掉 MemCompression 就是同一个 0xEF。
+        //    闸门与 exam_mode 共用 proc_guard（问内核，不猜名字；查不到一律当受保护）。
+        const QString blocked = terminateBlockedReason((DWORD)pid, prot);
+        if (!blocked.isEmpty()) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("拒绝结束 %1（pid %2）：%3").arg(exe).arg(pid).arg(blocked);
+            return out;
+        }
         HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
         if (!h) {
             out.result = QStringLiteral("failed");
@@ -5976,6 +5995,10 @@ int main(int argc, char *argv[])
     // IslandOverlay::historyPath() 里那种"返回空→手拼兜底 xingjikong/"的怪癖就是它造成的。
     // 与管理端 main.cpp 同款三行（见管理端为什么这么写的注释）。QLockFile 路径也受益。
     QCoreApplication::setApplicationName(QStringLiteral("Stelarith Agent"));
+    // ⚠️ 2026-10-13 修：此前**全仓从未调用 setApplicationVersion()** ⇒ applicationVersion()
+    //    恒为空串，whale_audio.cpp 里"临时文件名带版本"那条修复（stelarith_whale_v<ver>_*.wav）
+    //    实际拼出来是 `_v_`，跨版本不变，升级后仍复用旧音效 —— 那条修复等于没生效。这里补上。
+    QCoreApplication::setApplicationVersion(QString::fromLatin1(kAppVersion));
     QCoreApplication::setOrganizationName(QStringLiteral("Stelarith"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("stelarith.local"));
 

@@ -1,5 +1,6 @@
 // 考试模式实现（见 exam_mode.h 头注释）。
 #include "exam_mode.h"
+#include "proc_guard.h"   // 内核闸门（与 main.cpp 的 process_stop 共用，2026-10-13 抽出）
 
 #include <QWidget>
 #include <QLabel>
@@ -43,65 +44,10 @@ constexpr int kTickerMs = 1000;
 //
 //   ⚠️ 铁律：**打不开句柄 / 查询失败，一律按"受保护"处理**（宁可不杀，不可杀错）。
 //      这类保守处理是这个功能的全部价值所在。
-#ifndef PROCESS_QUERY_LIMITED_INFORMATION
-#define PROCESS_QUERY_LIMITED_INFORMATION 0x1000
-#endif
-
-constexpr DWORD kProcInfoBreakOnTermination = 29;   // ProcessBreakOnTermination
-constexpr DWORD kProcInfoProtection         = 61;   // ProcessProtectionInformation
-constexpr DWORD kProcInfoSession            = 25;   // ProcessSessionInformation
-
-typedef LONG (NTAPI *PfnNtQueryInformationProcess)(HANDLE, DWORD, PVOID, ULONG, PULONG);
-
-struct StePsProtection {
-    UCHAR level;    // Type|Signer<<3 —— 非 0 即受保护
-    UCHAR type;
-    UCHAR signer;
-};
-
-HMODULE g_ntdll = nullptr;
-PfnNtQueryInformationProcess g_ntQueryProc = nullptr;
-
-void ensureNtdll()
-{
-    if (g_ntQueryProc) return;
-    if (!g_ntdll) g_ntdll = GetModuleHandleW(L"ntdll.dll");
-    if (g_ntdll) {
-        g_ntQueryProc = reinterpret_cast<PfnNtQueryInformationProcess>(
-            GetProcAddress(g_ntdll, "NtQueryInformationProcess"));
-    }
-}
-
-/**
- * 这个进程能不能杀？返回 **true = 绝不能杀**（保守：任何一次查询失败都返回 true）。
- */
-bool processIsUntouchable(HANDLE handle, DWORD sessionId)
-{
-    ensureNtdll();
-    if (!g_ntQueryProc) return true;   // 拿不到内核查询入口 ⇒ 一律不杀
-
-    ULONG retLen = 0;
-    NTSTATUS st = 0;
-
-    // ① critical 进程：内核标记为"被终止就蓝屏"
-    BOOLEAN breakOnTerm = FALSE;
-    st = g_ntQueryProc(handle, kProcInfoBreakOnTermination,
-                       &breakOnTerm, sizeof(breakOnTerm), &retLen);
-    if (st < 0 || retLen < sizeof(BOOLEAN)) return true;   // 查不到 ⇒ 当保护
-    if (breakOnTerm) return true;
-
-    // ② 受保护进程（PPL：杀软 / 系统组件常见）
-    StePsProtection prot = { 0, 0, 0 };
-    st = g_ntQueryProc(handle, kProcInfoProtection, &prot, sizeof(prot), &retLen);
-    if (st < 0) return true;
-    if (retLen >= 1 && prot.level != 0) return true;
-
-    // ③ Session 0 = 服务会话。服务不在用户的考试桌面上，杀它没有任何监考收益，
-    //    风险却是整机崩掉 —— 一律放过。
-    if (sessionId == 0) return true;
-
-    return false;
-}
+// ── 进程安全性判定（上面 28-45 行那段说明仍然有效）已抽到公共件 `proc_guard.{h,cpp}`：
+//    exam_mode 与 main.cpp 的 process_stop 现在共用**同一道**内核闸门 —— 后者的保护此前只有
+//    一份纯进程名名单（缺口见 proc_guard.h 头注释），抽出来才能堵住那条路径。
+//    本文件的调用点在下方 killBlacklisted()。
 
 /** tasklist 的 "Foo.exe" 与配置里的 "foo" 要能对上：双侧都剥 .exe 再比。 */
 QString normalizeProcName(const QString &raw)
@@ -136,13 +82,10 @@ bool ExamMode::start(int minutes, const QStringList &blacklist)
     // 黑名单为空 ⇒ **一个进程都不杀**。这时考试模式仍然生效（全屏拦截 + 倒计时），
     // 只是不执行终止；原因必须如实回报，不能报"started 一切正常"。
     // （黑名单制下这条是"没配就别动手"的自然结果，不再是白名单时代那种拼运气的安全兜底）
-    m_enforcing = !blacklist.isEmpty();
-    m_reason.clear();
-    if (!m_enforcing) {
-        m_reason = QStringLiteral("黑名单为空：只做全屏拦截与倒计时，不终止任何进程");
-        qInfo("[exam] 考试模式已启动但未启用进程终止（黑名单为空）—— 只做全屏拦截");
-    }
-
+    // ⚠️ 2026-10-13 修：m_enforcing 原来按**原始列表**是否为空来定，且位置在归一化**之前**。
+    //    下发 ["", "  "] 时：m_enforcing=true，而归一化后 m_blacklist 为空 ⇒ killBlacklisted()
+    //    进门就 return（零终止），但 start() 的返回值与回执都报"已启用进程终止 / 无错误" ——
+    //    把"没做"报成了"做了"（正是本项目明确禁止的）。改为按**过滤后**的列表判定。
     m_blacklist.clear();
     for (const QString &raw : blacklist) {
         const QString n = normalizeProcName(raw);
@@ -152,6 +95,16 @@ bool ExamMode::start(int minutes, const QStringList &blacklist)
     m_blacklist.removeAll(QStringLiteral("stelarith-agent-qt"));
     m_blacklist.removeAll(QStringLiteral("taskkill"));
     m_blacklist.removeAll(QStringLiteral("tasklist"));
+
+    m_enforcing = !m_blacklist.isEmpty();
+    m_reason.clear();
+    if (!m_enforcing) {
+        m_reason = blacklist.isEmpty()
+            ? QStringLiteral("黑名单为空：只做全屏拦截与倒计时，不终止任何进程")
+            : QStringLiteral("黑名单里没有有效进程名（下发 %1 项全被过滤）：只做全屏拦截与倒计时")
+                  .arg(blacklist.size());
+        qInfo("[exam] 考试模式已启动但未启用进程终止（%s）—— 只做全屏拦截", qPrintable(m_reason));
+    }
     m_durationSec = minutes > 0 ? minutes * 60 : 0; // 0 = 不自动结束（管理员手动结束）
     createWindow(minutes);
     m_active = true;
@@ -322,12 +275,7 @@ void ExamMode::killBlacklisted()
             ++guarded;
             continue;
         }
-        DWORD sessionId = 0xFFFFFFFF;
-        ensureNtdll();
-        if (g_ntQueryProc) {
-            ULONG dummy = 0;
-            g_ntQueryProc(h, kProcInfoSession, &sessionId, sizeof(sessionId), &dummy);
-        }
+        const DWORD sessionId = queryProcessSessionId(h);
         const bool untouchable = processIsUntouchable(h, sessionId);
         if (untouchable) {
             CloseHandle(h);

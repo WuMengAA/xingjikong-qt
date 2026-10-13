@@ -67,7 +67,11 @@ bool SingleInstanceGuard::acquire(const wchar_t *mutexName, const wchar_t *lockF
     // 用途：跑着正式版的同时起一个离屏实例做自检（QML 是运行时从 build 目录加载的，
     // 只有开着一个实例才验不了新版），或者多开做界面比对。
     // 默认不设 ⇒ 行为与以前逐字一致（生产照旧单实例）。**别在教室机上设这个。**
-    if (qEnvironmentVariableIsSet("STE_ALLOW_MULTI")) {
+    // ⚠️ 2026-10-13 修：原来只判"**设没设**"环境变量。装机脚本或环境里一旦残留
+    //    STE_ALLOW_MULTI=0（"关掉"的直觉写法），守卫会被**整个跳过** → 双开抢云端连接、
+    //    互覆日志，而操作者以为已经关掉了多开。改为按值判定（空 = 未设，0 = 明确关闭）。
+    const QString multi = qEnvironmentVariable("STE_ALLOW_MULTI");
+    if (!multi.isEmpty() && multi != QLatin1String("0")) {
     // ⚠️ stderr 出口统一转本机编码：源码字面量是 UTF-8，而命令行/记事本按 GBK 解 ⇒ 中文全是乱码。
     //    与 [viewer] 那套日志同一个规矩（见 main.cpp 的 installMessageHandler / writeLogBytes）。
         fprintf(stderr, "%s\n", QStringLiteral("[stelarith] STE_ALLOW_MULTI 已设 → 跳过单实例守卫（仅调试）")
