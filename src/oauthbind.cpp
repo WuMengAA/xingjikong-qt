@@ -11,8 +11,10 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QNetworkAccessManager>
+#include <QNetworkProxy>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSslSocket>     // 绑定前的 TLS/网络自检（2026-10-13）
 #include <QSysInfo>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -105,6 +107,17 @@ void OAuthBind::begin(const QString &siteBase)
 
     qInfo().noquote() << QStringLiteral("[oauthbind] 站点=%1 客户端=%2（公开客户端，不带密钥）")
                          .arg(m_siteUrl, m_clientId);
+
+    // ⚠️ 2026-10-13：绑定前先自报**网络/TLS 能力**。
+    //    教室里这类失败最常见的三种是「TLS 后端不可用」「系统代理拦掉」「DNS 不通」，
+    //    而 QNetworkAccessManager 三者都只表现成一个 HTTP 0（状态码缺席），
+    //    现场与远端都判不出是哪一种 —— 这行日志一次把三样都摊开。
+    qInfo().noquote() << QStringLiteral("[oauthbind] 自检：TLS 可用=%1 运行时=%2 后端=%3 应用代理类型=%4")
+                             .arg(QSslSocket::supportsSsl() ? QStringLiteral("是") : QStringLiteral("否"),
+                                  QSslSocket::sslLibraryVersionString().isEmpty()
+                                      ? QStringLiteral("(未加载)") : QSslSocket::sslLibraryVersionString(),
+                                  QSslSocket::availableBackends().join(QLatin1Char(',')),
+                                  QString::number(static_cast<int>(QNetworkProxy::applicationProxy().type())));
 
     if (!m_siteUrl.startsWith(QStringLiteral("http"), Qt::CaseInsensitive)) {
         const QString why = QStringLiteral("站点地址不是 http/https 开头（当前：%1）").arg(m_siteUrl);
@@ -254,15 +267,32 @@ void OAuthBind::onTokenFinished()
     QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
     if (!reply) return;
 
+    // ⚠️ 2026-10-13：`HttpStatusCodeAttribute` 在**传输层失败**时是**无效 QVariant**，
+    //    `toInt()` 得到的就是 0 —— 于是提示写成「站点返回 HTTP 0」，而真实原因
+    //    （DNS 解析不了 / 连接被拒 / TLS 握手失败 / 被代理或安全软件拦掉）只在
+    //    `error()` / `errorString()` 里，被旧代码整段丢掉，现场无从下手。
+    //    现场反馈「远端提示：换网站登录态失败站点返回 http 0」走的正是这条路径。
+    const QNetworkReply::NetworkError netErr = reply->error();
+    const QString netErrStr = reply->errorString();
     m_tokenStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     m_tokenDone = QString::fromUtf8(reply->readAll());
     reply->deleteLater();
 
     if (m_tokenStatus != 200) {
-        qWarning().noquote() << QStringLiteral("[oauthbind] 换站点令牌失败（HTTP %1）：%2")
-                                 .arg(m_tokenStatus).arg(m_tokenDone.left(512));
+        // status==0 ⇒ 一个字节的 HTTP 响应都没收到；否则是站点确实回了非 200。
+        const bool noResponse = (m_tokenStatus == 0);
+        qWarning().noquote()
+            << QStringLiteral("[oauthbind] 换站点令牌失败（HTTP %1，networkError=%2：%3）站点=%4 响应=%5")
+                   .arg(m_tokenStatus)
+                   .arg(static_cast<int>(netErr))
+                   .arg(netErrStr, m_siteUrl, m_tokenDone.left(512));
         release();
-        emit failed(QStringLiteral("换网站登录态失败（站点返回 HTTP %1）").arg(m_tokenStatus));
+        emit failed(noResponse
+                        ? QStringLiteral("连不上站点 %1（网络层就没通：%2）。"
+                                         "请先在这台机器上打开 %1 —— 打不开就是 DNS / 代理 / 防火墙的问题，"
+                                         "能打开再把这条报给管理员。")
+                              .arg(m_siteUrl, netErrStr)
+                        : QStringLiteral("换网站登录态失败（站点返回 HTTP %1）").arg(m_tokenStatus));
         return;
     }
 
@@ -302,21 +332,32 @@ void OAuthBind::onBindFinished()
     QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
     if (!reply) return;
 
+    // 同 onTokenFinished：HTTP 0 ＝ 没拿到响应，真因只在 error()/errorString() 里（2026-10-13）。
+    const QNetworkReply::NetworkError netErr = reply->error();
+    const QString netErrStr = reply->errorString();
     m_bindStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     m_bindDone = QString::fromUtf8(reply->readAll());
     reply->deleteLater();
 
     if (m_bindStatus != 200) {
-        qWarning().noquote() << QStringLiteral("[oauthbind] 申请设备票失败（HTTP %1）：%2")
-                                 .arg(m_bindStatus).arg(m_bindDone.left(512));
+        const bool noResponse = (m_bindStatus == 0);
+        qWarning().noquote()
+            << QStringLiteral("[oauthbind] 申请设备票失败（HTTP %1，networkError=%2：%3）站点=%4 响应=%5")
+                   .arg(m_bindStatus)
+                   .arg(static_cast<int>(netErr))
+                   .arg(netErrStr, m_siteUrl, m_bindDone.left(512));
         release();
         // 站点在 401/503 时给的是人话（"登录会话无效或已过期" / "云端票据密钥未配置"），
         // 别用 HTTP 码糊过去——运维看不懂 503 到底要改什么。
         const QJsonObject obj = QJsonDocument::fromJson(m_bindDone.toUtf8()).object();
         const QString why = obj.value(QStringLiteral("error")).toString();
-        emit failed(why.isEmpty()
-                    ? QStringLiteral("申请设备接入票失败（站点返回 HTTP %1）").arg(m_bindStatus)
-                    : why);
+        if (noResponse) {
+            emit failed(QStringLiteral("连不上站点 %1（网络层就没通：%2）").arg(m_siteUrl, netErrStr));
+        } else {
+            emit failed(why.isEmpty()
+                        ? QStringLiteral("申请设备接入票失败（站点返回 HTTP %1）").arg(m_bindStatus)
+                        : why);
+        }
         return;
     }
 
