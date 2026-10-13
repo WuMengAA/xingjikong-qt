@@ -739,13 +739,11 @@ private:
      */
     void deliverOffer(const QString &sdp);
     /**
-     * 没人看的时候把离屏收流页（Chromium 渲染进程，实测 ~137MB）回收掉。
-     *
-     * 和被控端的 releaseRtcView() 是对称的一套：那边回收采集页，这边回收收流页。
-     * 两边都不回收的话，几十台机器常年挂着的 WebEngine 就是纯粹的固定开销 ——
-     * 老师只看其中一两台，剩下的 137MB × N 全在空转。
+     * 2026-10-13 审计 2.10 改名：WebEngine 已移除，此函数不再回收任何 Chromium 页，
+     * 只把 RTC 状态清回 idle（保留调用路径安全收尾）。原名 releaseRtcView() 是
+     * WebEngine 时代残留，空壳名字会误导后来人以为还在做资源清理。
      */
-    void releaseRtcView();
+    void resetRtcState();
     void scheduleRtcViewReap();
     void cancelRtcViewReap();
     void stopRtcTimers();        // 抽帧/诊断节拍停表（收流页回收时必须一起停）

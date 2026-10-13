@@ -1331,7 +1331,7 @@ void ViewerBackend::deliverOffer(const QString &)
  * 2026-10-10：WebEngine 已移除，ldc 收流无 Chromium 页可回收。保留签名，
  * 内部只清状态（供依旧调用它的旧路径安全收尾）。
  */
-void ViewerBackend::releaseRtcView()
+void ViewerBackend::resetRtcState()
 {
     setRtcState(QStringLiteral("idle"));
 }
@@ -1352,7 +1352,7 @@ void ViewerBackend::scheduleRtcViewReap()
         m_rtcReap = new QTimer(this);
         m_rtcReap->setSingleShot(true);
         m_rtcReap->setInterval(5000);
-        QObject::connect(m_rtcReap, &QTimer::timeout, this, [this]() { releaseRtcView(); });
+        QObject::connect(m_rtcReap, &QTimer::timeout, this, [this]() { resetRtcState(); });
     }
     m_rtcReap->stop();
     if (!m_offlineSince) return;          // 还在线上，没什么可收的
@@ -1361,7 +1361,7 @@ void ViewerBackend::scheduleRtcViewReap()
     const qint64 limit = envIdle.isEmpty() ? 20000 : QString::fromLocal8Bit(envIdle).toLongLong();
     const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_offlineSince;
     if (limit <= 0) return;
-    if (elapsed >= limit) { releaseRtcView(); return; }   // 早就算超了，立刻收
+    if (elapsed >= limit) { resetRtcState(); return; }   // 早就算超了，立刻收
     m_rtcReap->setInterval((int)(limit - elapsed));
     m_rtcReap->start();
 }
