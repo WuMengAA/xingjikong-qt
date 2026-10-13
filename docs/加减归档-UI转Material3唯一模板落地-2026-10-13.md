@@ -97,3 +97,40 @@
 5. **viewer ota.json 仍未发 0.6.31**：viewer OTA 通道吃 zip（updater.cpp 解压+robocopy），与用户「出 zip 没有任何意义」口径冲突，**待用户裁定**（走 NSIS 全量则 OTA 通道要改，或桌面端只发全量链接）。
 6. **管理端 offscreen 冒烟未跑**（QML 界面程序，无 backend 起不来）；本次以 stub backend 探针覆盖手机端页面渲染。
 7. agent 0.6.31 未发布 ota.json（出包后 publish，见当轮收尾）。
+
+---
+
+# 附批（2026-10-14 00:3x）：布局模板演示 LayoutLab 五屏
+
+用户点单「接下来看布局——不同界面的模板和简易演示 demo」。交付 `qml/LayoutLab.qml` + `qml/layout/` 五屏：
+
+| 模板 | 尺寸 | 内容 | 对应需求 |
+|---|---|---|---|
+| DesktopConsole | 1280×800 | 桌面集控台：导航轨（pill 激活）+ 顶栏（作用域切换器/搜索/账户）+ 统计四卡 + 设备网格（画面占位/状态点/名称/ping/关机） | 桌面端迁移底稿 |
+| OobeConfig | 560×640 | 配置教室：**只露一个接入码输入**（URL/令牌收「高级」折叠）+ 状态行 + 保存并连接 | 需求 #2 界面预演 |
+| ExamMode | 1280×800 | 考试模式全屏：标题+倒计时大数字 + 统计 + 座位网格（求助红框高亮）+ 退出需监考密码 | #88 延伸 |
+| LocalSettings | 560×680 | 本机设置：五个本地开关（语音/摄像头/广播/通知/监控角标）+ 「云端可否强制打开」策略待定声明 | 需求 #3 界面预演 |
+| NotifyFull | 960×600 | 通知/广播全屏：severity 着色 + 左色条 + 来源 chip + 倒计时进度条 + 单按钮 | 需求 #4 之前的全屏态 |
+
+## 附批修改/新增
+
+- **新增**：`qml/LayoutLab.qml`（演示宿主：左轨切五屏）、`qml/layout/*.qml` 五屏、`scripts/_md3_probe.cpp` 加 `--screen/--width/--height`
+- **修复**：`Md3SwitchRow.qml` 两行态（带 supporting）标签与说明文字重叠——标签 `y:12`、说明 `y:38`（agent 端同步修 `a1d5070`）
+- **提交**：viewer `b4774f9`、agent `a1d5070`
+
+## 附批踩坑（均已写进代码注释）
+
+1. **宿主晚赋值替换 md3 实例 = 渲染事故**：Loader 链路下探针/宿主在 `setSource` 之后才注入 Md3 实例，屏幕创建期 `md3={}`（空）⇒ Behavior 动画时长 `md3.durShort` 变 NaN **永久卡死**（开关轨道填充色停默认白）、空实例子树把宿主内容盖住。**修法**：各屏内部自建 `Md3 { dark: root.dark }`，宿主只传 `dark` 布尔（与手机端 mobile/ 页面同一模式——它们本来就自建所以没炸）。
+2. **GridView 委托直接拿 Md3Card 当委托 ⇒ 内容不渲染**（Row/Repeater 里的 Md3Card 没事）。改 plain Item 自绘卡片。
+3. **Row 在 Column 里 implicitHeight 实测算成 0** ⇒ 子项全不画（信息行整行消失）。信息行显式 `height: 48`。
+4. `-h` 撞 Qt 内置 help 选项 ⇒ 探针窗口尺寸用长选项 `--width/--height`。
+
+## 附批验证
+
+qmllint 零错；`python scripts/_md3_probe.py` **14/14 OK**；五屏 + 深浅变体逐张目检符合 MD3（色阶/字阶/圆角/状态层/severity 着色）。截图：`D:/Stelarith/_probe/shots/layout-*.png`。
+
+## 附批未验证
+
+- 五屏是**布局骨架 + 假数据**，未接真实 backend（DesktopConsole 的设备网格、ExamMode 的座位名单都是静态假数据）
+- 真机手感未测；桌面端 Main.qml 仍未逐页迁移（本批只是底稿）
+- OOBE 的真实链路（接入码→云端兑换 url+token）未实现，本批只做界面
