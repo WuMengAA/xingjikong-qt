@@ -33,7 +33,14 @@ export function loadRepairs() {
     if (!existsSync(REPAIRS_FILE)) return;
     const arr = JSON.parse(readFileSync(REPAIRS_FILE, 'utf8'));
     if (!Array.isArray(arr)) return;
-    for (const t of arr) if (t && t.id) repairs.set(String(t.id), t);
+    for (const t of arr) if (t && t.id) {
+      repairs.set(String(t.id), t);
+      // ⚠️ 2026-10-13 修：原来只把票灌回 Map、**从不回填 seq**。seq 是进程内变量，
+      //    重启后从 0 开始 ⇒ 当天第一张新票又叫 tick-YYYYMMDD-001，与已存在的 id 相撞，
+      //    repairs.set() 直接**覆盖旧票**（数据丢失且无任何报错）。这里把已有票号的最大值续上。
+      const m = /-(\d+)$/.exec(String(t.id));
+      if (m) seq = Math.max(seq, Number(m[1]));
+    }
   } catch (e) {
     // 落盘损坏不致命：内存表照常跑，下次写入覆盖（审计留一行）
     console.error('[repairs] 加载 repairs.json 失败（继续以空表运行）：', e.message);

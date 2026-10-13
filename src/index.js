@@ -11,7 +11,7 @@
 
 import http from 'node:http';
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync, mkdirSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';   // resolve：录制根目录支持 CLOUD_RECORDINGS_DIR 覆盖
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
@@ -442,16 +442,25 @@ const server = http.createServer((req, res) => {
     return send(200, { ok: true, classes: listClasses() });
   }
   if (req.method === 'POST' && u.pathname === '/api/device/bind-class') {
-    // 管理端把某设备绑到某班（或改绑）。body: { uid, classCode, className? }
-    let body = {};
-    try { body = JSON.parse(String(data)); } catch { /* 空 body 或非法 JSON → 走 query */ }
-    const uid = String(body.uid ?? u.searchParams.get('uid') ?? '').trim();
-    const classCode = String(body.classCode ?? u.searchParams.get('classCode') ?? '').trim();
-    const className = String(body.className ?? u.searchParams.get('className') ?? '').trim();
-    if (!uid) return send(400, { ok: false, error: '缺 uid' });
-    if (!isClassCodeValid(classCode)) return send(400, { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' });
-    const r = bindDeviceToClass(classCode, uid, className);
-    return send(r.ok ? 200 : 400, { ok: r.ok, ...r });
+    // 管理端把某设备绑到某班（或改绑）。body: { uid, classCode, className? }，也兼容 query。
+    // ⚠️ 2026-10-13 修：原来这行写 `JSON.parse(String(data))`，而**该作用域里根本没有 data**
+    //    （全文件另一个 data 在 WS 作用域），`String(data)` 抛 ReferenceError 被右侧空 catch
+    //    吞掉 ⇒ body 恒为 {}，**JSON body 从来没被读过**，按注释用 body 调用的客户端只会拿到
+    //    「缺 uid」而且悄无声息（正是本文件反复强调禁止的 fail-silent）。改为真正读 body。
+    let raw = '';
+    req.on('data', (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch { /* 非法 JSON → 走 query */ }
+      const uid = String(body.uid ?? u.searchParams.get('uid') ?? '').trim();
+      const classCode = String(body.classCode ?? u.searchParams.get('classCode') ?? '').trim();
+      const className = String(body.className ?? u.searchParams.get('className') ?? '').trim();
+      if (!uid) return send(400, { ok: false, error: '缺 uid' });
+      if (!isClassCodeValid(classCode)) return send(400, { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' });
+      const r = bindDeviceToClass(classCode, uid, className);
+      return send(r.ok ? 200 : 400, { ok: r.ok, ...r });
+    });
+    return;
   }
 
   // ── 班级监控（设计文档 3.6 第一版，2026-10-07）──
@@ -639,8 +648,11 @@ const server = http.createServer((req, res) => {
       ok: true,
       host: env.CLOUD_WS_HOST || '0.0.0.0',
       port: env.CLOUD_WS_PORT || '8788',
-      wsToken: env.CLOUD_WS_TOKEN || '',
-      viewerToken: env.CLOUD_VIEWER_TOKEN || '',
+      // ⚠️ 2026-10-13 修：原来明文回吐**设备令牌**。任何持管理端令牌/票据的人都能据此拿到
+      //    设备令牌，而设备令牌可以直接调 /api/recordings/upload，或以任意 uid 走静态令牌分支
+      //    注册伪设备 —— 等于把"看的人"提权成"被控端身份"。这里只回尾 4 位供比对。
+      wsToken: env.CLOUD_WS_TOKEN ? '****' + String(env.CLOUD_WS_TOKEN).slice(-4) : '',
+      viewerToken: env.CLOUD_VIEWER_TOKEN ? '****' + String(env.CLOUD_VIEWER_TOKEN).slice(-4) : '',
       wsTokenIsDefault: (env.CLOUD_WS_TOKEN || 'dev-cloud-token') === 'dev-cloud-token',
     });
   }
@@ -842,8 +854,12 @@ const server = http.createServer((req, res) => {
   }
 });
 
-const wss = new WebSocketServer({ noServer: true });        // 被控端接入
-const viewerWss = new WebSocketServer({ noServer: true });  // 管理端（看的人）
+// ⚠️ maxPayload：ws 默认上限是 100MiB，而帧解析发生在**鉴权之前**（viewer 的 authed 判断、
+//    agent 的 register 校验都在 message 回调里更靠后）。不设上限 ⇒ 任何未鉴权连接发一条
+//    100MB 文本就能让这条"全班共用入口"做一次 toString + JSON.parse（瞬时数百 MB），
+//    开几条连接即可打爆云端。这里按两端各自的正常帧量级收紧（2026-10-13）。
+const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });        // 被控端接入（最大是 JPEG 帧）
+const viewerWss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });  // 管理端（看的人）
 
 server.on('upgrade', (req, socket, head) => {
   const u = new URL(req.url, 'http://127.0.0.1');
