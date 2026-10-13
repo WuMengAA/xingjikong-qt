@@ -29,7 +29,12 @@ import { OTA_MANIFEST_FILE } from './config.js';
  *    读同目录的 ota-<channel>.json（灰度清单）。灰度清单缺失即回落 null（设备当"无更新"），
  *    不会去读 stable 清单 —— 灰度必须是显式发布的，避免把 stable 误当成灰度推下去。 */
 function loadManifest(channel) {
-  const file = (channel && channel !== 'stable') ? `ota-${channel}.json` : OTA_MANIFEST_FILE;
+  // ⚠️ 2026-10-13 三端审计修复：channel 来自 URL query 与设备 register 载荷，此前**直接拼进文件名**
+  //    ⇒ 传 `channel=../secret` 就能读任意 *.json（路径穿越；虽限 .json，仍足以泄露配置）。
+  //    在**唯一真源**处白名单收口（所有调用点自动受益）：不合规一律回落 stable 清单。
+  const ch = String(channel || '').trim();
+  const isGray = ch !== 'stable' && /^[a-z0-9_-]{1,16}$/.test(ch);
+  const file = isGray ? `ota-${ch}.json` : OTA_MANIFEST_FILE;
   try {
     const raw = readFileSync(file, 'utf8');
     const obj = JSON.parse(raw);

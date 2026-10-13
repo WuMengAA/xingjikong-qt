@@ -106,6 +106,18 @@ import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from '
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
 import { latestFor, cmpVersion } from './ota.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
+import { timingSafeEqual } from 'node:crypto';
+
+/** 常量时间比较（防时序侧信道）。
+ *  ⚠️ 2026-10-13 三端审计修复：静态令牌（VIEWER/DEV）此前一律用 `===` —— V8 的字符串比较
+ *  在首个不同字节处提前返回 ⇒ 攻击者可按响应耗时逐字节推断令牌（burst 爆破的经典前置）。
+ *  票据那条路早就是 timingSafeEqual，这里把静态令牌这条也收口到同一实现。 */
+function safeEqual(a, b) {
+  const A = Buffer.from(String(a ?? ''), 'utf8');
+  const B = Buffer.from(String(b ?? ''), 'utf8');
+  if (A.length !== B.length) return false;
+  try { return timingSafeEqual(A, B); } catch { return false; }
+}
 
 /** 发一条协议消息（自动按对端版本选格式），失败不静默。 */
 function snd(ws, type, payload, id = '') {
@@ -226,7 +238,7 @@ const server = http.createServer((req, res) => {
   if (u.pathname.startsWith('/recordings/')) {
     const rauth = req.headers.authorization || '';
     const rtoken = rauth.toLowerCase().startsWith('bearer ') ? rauth.slice(7).trim() : '';
-    const rStatic = !!rtoken && rtoken === VIEWER_TOKEN;
+    const rStatic = !!rtoken && safeEqual(rtoken, VIEWER_TOKEN);
     const rTicket = !!rtoken && !rStatic ? verifyViewerTicket(rtoken).ok : false;
     if (!rtoken || (!rStatic && !rTicket)) {
       pushEvent('warn', '录制回放下载被拒（未授权）', { path: u.pathname });
@@ -243,7 +255,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, {
       'content-type': 'video/mp4',
       'content-length': st.size,
-      'cache-control': 'public, max-age=31536000',
+      'cache-control': 'private, max-age=3600',
       'content-disposition': `inline; filename="${fname}"`,
     });
     return createReadStream(file).pipe(res);
@@ -325,7 +337,7 @@ const server = http.createServer((req, res) => {
     const auth = req.headers.authorization || '';
     const tok = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
     if (!tok) return send(200, { ok: true, signedIn: false });
-    if (tok === VIEWER_TOKEN) {
+    if (safeEqual(tok, VIEWER_TOKEN)) {
       return send(200, { ok: true, signedIn: true, mode: 'token', user: '', exp: 0 });
     }
     const v = verifyViewerTicket(tok);
@@ -358,7 +370,7 @@ const server = http.createServer((req, res) => {
      *   ① 手敲的长期令牌 CLOUD_VIEWER_TOKEN —— 老机器/离线机房照旧，不能因为加了账号就断人路；
      *   ② 网站账号签出来的管理台票据 —— 有 uid，被抄走也能在事件流水里看到是谁的。
      * 顺序上是"先比静态令牌，再试票据"：静态令牌长得不像票，验它不会有任何副作用。 */
-    const isStatic = !!token && token === VIEWER_TOKEN;
+    const isStatic = !!token && safeEqual(token, VIEWER_TOKEN);
     const isTicket = !!token && !isStatic ? verifyViewerTicket(token).ok : false;
     if (!token || (!isStatic && !isTicket)) {
       pushEvent('warn', 'HTTP 管理面鉴权失败，已拒绝', { path: u.pathname });
@@ -426,7 +438,7 @@ const server = http.createServer((req, res) => {
   if (isViewerApi) {
     const vauth = req.headers.authorization || '';
     const vtoken = vauth.toLowerCase().startsWith('bearer ') ? vauth.slice(7).trim() : '';
-    if (vtoken !== VIEWER_TOKEN) {
+    if (!safeEqual(vtoken, VIEWER_TOKEN)) {
       return send(401, { ok: false, ecode: 'AU1001', code: 'TOKEN_INVALID', error: '未授权：需要管理端令牌' });
     }
   }
@@ -474,6 +486,10 @@ const server = http.createServer((req, res) => {
   const RECORDINGS_ROOT = process.env.CLOUD_RECORDINGS_DIR
       ? resolve(process.env.CLOUD_RECORDINGS_DIR)
       : join(__dirname, '..', 'recordings');
+  // ⚠️ 2026-10-13 三端审计修复：上传此前只有**下限**（<1KB 拒绝）、**没有上限** ——
+  //    持设备令牌者可发无限大 body，chunks 全攒在内存里 ⇒ 直接把云端 OOM 掉。
+  //    默认 300MB（与 OTA 护栏同量级），可用 env 覆盖。
+  const MAX_RECORDING_BYTES = Number(process.env.CLOUD_MAX_RECORDING_BYTES) || 300 * 1024 * 1024;
   const isRecordingUpload = u.pathname === '/api/recordings/upload';
   if (isRecordingUpload) {
     // 设备令牌验证（与 WS register 同一套：agent ticket 或静态 DEV_TOKEN）
@@ -489,14 +505,29 @@ const server = http.createServer((req, res) => {
         ticketUid = at.uid || '';
       }
     }
-    const okTok = token && (token === DEV_TOKEN || !!ticketUid);
+    const okTok = token && (safeEqual(token, DEV_TOKEN) || !!ticketUid);
     if (!okTok || !uid) {
       return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '上传录制需设备令牌' });
     }
     // 接收原始字节（mp4）→ 存 recordings/<uid>/<时间戳>.mp4
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
+    let recvBytes = 0;
+    let overflowed = false;
+    req.on('data', (c) => {
+      if (overflowed) return;
+      recvBytes += c.length;
+      if (recvBytes > MAX_RECORDING_BYTES) {
+        overflowed = true;
+        pushEvent('warn', '录制上传超过上限，已中止', { uid, limit: MAX_RECORDING_BYTES, got: recvBytes });
+        res.writeHead(413, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: `录制超过上限（${MAX_RECORDING_BYTES} 字节）` }));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => {
+      if (overflowed) return;
       try {
         const body = Buffer.concat(chunks);
         if (body.length < 1024) {
@@ -885,7 +916,7 @@ server.on('upgrade', (req, socket, head) => {
 function authorizeViewer(msg) {
   const token = typeof msg.token === 'string' ? msg.token.trim() : '';
   if (token) {
-    if (token === VIEWER_TOKEN) return { ok: true, mode: 'token', uid: null };
+    if (safeEqual(token, VIEWER_TOKEN)) return { ok: true, mode: 'token', uid: null };
     return { ok: false, reason: '管理端令牌不对' };
   }
   const ticket = typeof msg.ticket === 'string' ? msg.ticket.trim() : '';
@@ -1146,7 +1177,7 @@ wss.on('connection', (ws) => {
       }
       // 不是设备票：退回旧的静态令牌校验（保留原路，不破已有部署）
       if (!authedBy) {
-        if (token !== DEV_TOKEN) {
+        if (!safeEqual(token, DEV_TOKEN)) {
           finish();
           pushEvent('error', '设备令牌校验失败，连接已拒绝', { uid: String(ruid ?? '') });
           sndErr(ws, 'BAD_TOKEN', token ? '票据与静态令牌均校验失败' : '未提供令牌或设备票');
