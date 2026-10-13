@@ -155,9 +155,14 @@ target_link_libraries(stelarith-agent-qt PRIVATE winmm)
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Qml Qt6::Quick Qt6::QuickWidgets)
 # ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
 #    STE_USE_LDC_RTC=1 默认走 ldc，=0 回退 WebEngine）────────────────────
-# 库：_probe/ldc_libs（重建产物，命名 datachannel.lib/juice.lib）+ PG17 OpenSSL
+# 库：_probe/ldc_libs（重建产物，命名 datachannel.lib/juice.lib）+ OpenSSL
 # 头：_probe/libdatachannel-master/include（rtc/rtc.hpp）
+# 2026-10-13 审计 #26：OpenSSL 路径可覆盖（STE_OPENSSL_ROOT；默认 PG17 兼容现有机器）
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
+  set(STE_OPENSSL_ROOT "$ENV{STE_OPENSSL_ROOT}" CACHE PATH "OpenSSL lib 目录（含 libssl.lib/libcrypto.lib）")
+  if(NOT STE_OPENSSL_ROOT)
+    set(STE_OPENSSL_ROOT "C:/Program Files/PostgreSQL/17/lib" CACHE PATH "" FORCE)
+  endif()
   target_include_directories(stelarith-agent-qt PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
   target_link_libraries(stelarith-agent-qt PRIVATE
@@ -165,8 +170,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/srtp2.lib"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/juice.lib"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/usrsctp.lib"
-    "C:/Program Files/PostgreSQL/17/lib/libssl.lib"
-    "C:/Program Files/PostgreSQL/17/lib/libcrypto.lib"
+    "${STE_OPENSSL_ROOT}/libssl.lib"
+    "${STE_OPENSSL_ROOT}/libcrypto.lib"
     ws2_32 bcrypt crypt32 userenv secur32)
   target_compile_definitions(stelarith-agent-qt PRIVATE RTC_STATIC)
   message(STATUS "[agent] libdatachannel 已链入（RTC_STATIC）")
