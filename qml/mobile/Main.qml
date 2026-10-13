@@ -1,19 +1,21 @@
-// 星集控 · 手机端主界面入口（2026-10-11 · 独立 QML 方案落地）
+// 星集控 · 手机端主界面入口（2026-10-13 · MD3 唯一模板迁移批）
 //
 // 文档《手机端：独立 QML 还是响应式》落地：UI 层 mobile/ 独立，
 // C++ 层（viewerbackend）100% 共享；原子组件 components/ 共享。
 // 结构：qml/mobile/{Main, OverviewPage, DeviceListPage, MonitorPage,
-//                SettingsPage, DeviceDetailDrawer, BottomNav}.qml
+//                SettingsPage, DeviceDetailDrawer}.qml + components/md3/ 组件库
 //
 // main.cpp：Android 加载 qrc:/mobile/Main.qml（桌面仍 qml/Stelarith/Main.qml）。
+//
+// 2026-10-13：UI 转 Material 3（用户批准 MaterialLab 为唯一模板）。
+// 令牌单一真源 = ../components/Md3.qml；组件 = ../components/md3/。
+// 原 BottomNav.qml 已删除（由 Md3NavBar 取代）。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../components"
-import "."
-// #5：FilePushDialog.qml 在 qml/ 根目录（桌面 Main.qml 同目录），手机端要拿它
-// 必须相对导入上一级 —— 手机端此前没有这个 import，所以整个文件传输功能够不着。
-import ".."
+import "../components"      // Md3.qml 令牌单一真源
+import "../components/md3"  // MD3 组件库
+import ".."          // #5：FilePushDialog.qml 在 qml/ 根目录，手机端要拿它必须相对导入上一级
 
 ApplicationWindow {
     id: root
@@ -21,12 +23,11 @@ ApplicationWindow {
     height: Math.min(930, Math.max(640, Screen.height))
     visible: true
     title: "星集控 · 手机端"
-    color: root.th.win
-    // ⚠️ Fluent 风格下 ApplicationWindow 背景色由系统控制，这里显式铺一层
-    background: Rectangle { color: root.th.win }
+    color: md3Theme.cSurface
 
-    Theme { id: theme; dark: root.darkMode }
-    readonly property var th: theme
+    Md3 { id: md3Theme; dark: root.darkMode }
+    // 迁移桥：保留 th 旧签名
+    readonly property var th: md3Theme
     // E4 同步：darkMode 由 backend.themeMode 派生（0 浅色 / 1 深色 / 2 跟随系统取 backend.systemDark）。
     readonly property bool darkMode: (backend.themeMode === 1) ? true
                                       : (backend.themeMode === 2 ? backend.systemDark : false)
@@ -40,39 +41,36 @@ ApplicationWindow {
     property var recSummary: []   // [{uid, count, last}]
     property var recentEvents: [] // [{id, time, level, msg, uid}]
 
-    // ── 顶部条 ──
+    // ── 顶部条（MD3 top app bar：64 高、surface 底、titleL 标题）──
     Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 52
-        color: root.th.panel
-        border.color: root.th.stroke
-        border.width: 1
+        height: 64
+        color: md3Theme.cSurface
 
         Text {
             anchors.left: parent.left
-            anchors.leftMargin: 18
+            anchors.leftMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             text: "星集控"
-            color: root.th.fg
-            font.pixelSize: 17
-            font.weight: Font.Medium
+            font.pixelSize: md3Theme.titleL
+            color: md3Theme.cOnSurface
         }
         Row {
             anchors.right: parent.right
-            anchors.rightMargin: 18
+            anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
             Rectangle {
-                width: 6; height: 6; radius: 3
+                width: 8; height: 8; radius: 4
                 anchors.verticalCenter: parent.verticalCenter
-                color: backend.connected ? root.th.ok : root.th.err
+                color: backend.connected ? md3Theme.cOk : md3Theme.cError
             }
             Text {
                 text: backend.loggedIn ? (backend.connected ? "已连接" : "重连中…") : "未登录"
-                color: root.th.fg3
-                font.pixelSize: 11
+                color: md3Theme.cOnSurfaceVar
+                font.pixelSize: md3Theme.labelM
             }
         }
     }
@@ -81,129 +79,99 @@ ApplicationWindow {
     StackLayout {
         id: pages
         anchors.top: parent.top
-        anchors.topMargin: 52
+        anchors.topMargin: 64
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: bottomNav.top
         currentIndex: bottomNav.currentIndex
 
         // 页 0：概览
-        OverviewPage { th: root.th }
+        OverviewPage { md3: md3Theme }
 
         // 页 1：设备列表（点击 → 抽屉；关机 → 确认弹窗）
         DeviceListPage {
-            th: root.th
+            md3: md3Theme
             onOpenDetail: function (dev) { deviceDrawer.dev = dev; deviceDrawer.open() }
-            onShutdownRequested: function (uid) { root.confirmTarget = uid; root.confirmAction = "shutdown"; confirmDialog.open() }
+            onShutdownRequested: function (uid) { root.confirmTarget = uid; root.confirmAction = "shutdown"; confirmDialog.opened = true }
         }
 
         // 页 2：监控（WebRTC 实时画面，自持接线）
-        MonitorPage { th: root.th }
+        MonitorPage { md3: md3Theme }
 
         // 页 3：我的（账户/身份/外观/告警/录制/版本）
         SettingsPage {
-            th: root.th
+            md3: md3Theme
             recSummary: root.recSummary
             recentEvents: root.recentEvents
             recBusy: root.recBusy
         }
     }
 
-    // ── 底部导航（TabBar 扁平）──
-    BottomNav {
+    // ── 底部导航（MD3：80 高 + pill 指示器）──
+    Md3NavBar {
         id: bottomNav
-        th: root.th
+        objectName: "bottomNav"
+        md3: md3Theme
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
+        items: [
+            { icon: "📊", label: "概览" },
+            { icon: "💻", label: "设备" },
+            { icon: "📹", label: "监控" },
+            { icon: "⚙️", label: "我的" }
+        ]
     }
 
     // ── 设备详情抽屉（底部）──
     DeviceDetailDrawer {
         id: deviceDrawer
-        th: root.th
-        onShutdownRequested: function (uid) { root.confirmTarget = uid; root.confirmAction = "shutdown"; confirmDialog.open() }
+        md3: md3Theme
+        onShutdownRequested: function (uid) { root.confirmTarget = uid; root.confirmAction = "shutdown"; confirmDialog.opened = true }
         onToast: function (msg) { root.toast(msg) }
-        // #5：点「传文件」→ 先把目标设备设进 backend（FilePushDialog 推给 currentUid），
-        // 再开弹窗。currentUid 是 Q_PROPERTY(READ/WRITE)，QML 可直接赋值。
+        // #5：点「传文件」→ 先把目标设备设进 backend，再开弹窗。
         onFilePushRequested: function (uid) { backend.currentUid = uid; fileDlg.open() }
     }
 
     // ── 文件传输弹窗（#5：手机端补上这条入口）──
-    // 原宽 560 在 390 宽的手机上会溢出，按屏宽收一下。
     FilePushDialog {
         id: fileDlg
-        theme: root.th
+        theme: md3Theme
         width: Math.min(560, root.width * 0.94)
     }
 
-    // ── 关机/锁屏确认弹窗 ──
-    Dialog {
+    // ── 关机/锁屏确认弹窗（MD3 对话框：scrim + 28 圆角）──
+    Md3Dialog {
         id: confirmDialog
-        anchors.centerIn: parent
-        modal: true
+        objectName: "confirmDialog"
+        md3: md3Theme
         title: "确认操作"
-        standardButtons: Dialog.NoButton
-        contentItem: Column {
-            spacing: 12
-            Text {
-                text: "对 " + root.confirmTarget + " 执行「" + (root.confirmAction === "shutdown" ? "关机" : "锁屏") + "」？"
-                color: root.th.fg; font.pixelSize: 14; wrapMode: Text.Wrap; width: 240
+        text: "对 " + root.confirmTarget + " 执行「" + (root.confirmAction === "shutdown" ? "关机" : "锁屏") + "」？"
+        actions: [
+            { text: "取消", role: "cancel" },
+            { text: "确认", role: "danger" }
+        ]
+        onActionClicked: function (i, role) {
+            if (role === "danger") {
+                backend.currentUid = root.confirmTarget
+                backend.sendAction(root.confirmAction, {})
+                root.toast("已下发「" + root.confirmAction + "」→ " + root.confirmTarget)
             }
-            Row {
-                spacing: 10
-                Rectangle {
-                    width: 110; height: 34; radius: 17; color: root.th.hover
-                    border.color: root.th.stroke; border.width: 1
-                    Text { anchors.centerIn: parent; text: "取消"; color: root.th.fg3; font.pixelSize: 12 }
-                    MouseArea { anchors.fill: parent; onClicked: confirmDialog.close() }
-                }
-                Rectangle {
-                    width: 110; height: 34; radius: 17; color: root.th.err
-                    Text { anchors.centerIn: parent; text: "确认"; color: "#fff"; font.pixelSize: 12 }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            backend.currentUid = root.confirmTarget
-                            backend.sendAction(root.confirmAction, {})
-                            root.toast("已下发「" + root.confirmAction + "」→ " + root.confirmTarget)
-                            confirmDialog.close()
-                        }
-                    }
-                }
-            }
+            confirmDialog.opened = false
         }
     }
 
-    // ── 轻提示 toast ──
-    function toast(s) {
-        tipText.text = s
-        tipTimer.restart()
-    }
-    Rectangle {
-        id: tipBox
+    // ── 轻提示（MD3 Snackbar）──
+    Md3Snackbar {
+        id: snack
+        objectName: "snack"
+        md3: md3Theme
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: bottomNav.top
         anchors.bottomMargin: 12
-        width: tipText.implicitWidth + 24
-        height: 30
-        radius: 15
-        color: root.th.inv
-        visible: tipText.text !== ""
         z: 10
-        Text {
-            id: tipText
-            anchors.centerIn: parent
-            color: root.th.win
-            font.pixelSize: 12
-            text: ""
-        }
     }
-    Timer {
-        id: tipTimer
-        interval: 2000
-        onTriggered: tipText.text = ""
-    }
+    function toast(s) { snack.show(s) }
 
     // ── 设备表刷新（30s 自动）──
     Timer {

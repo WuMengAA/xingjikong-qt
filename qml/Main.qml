@@ -67,11 +67,12 @@ ApplicationWindow {
     readonly property bool darkMode: (backend.themeMode === 1) ? true
                                       : (backend.themeMode === 2 ? backend.systemDark : false)
 
-    // 主题 Token 单一真源：qml/components/Theme.qml（深 / 浅两套由 dark 切换）。
-    // 2026-10-09 把原来内联的 darkTh / lightTh 两个 JS 对象抽到 Theme 组件，
-    // 行为与旧版逐字一致，token 改一处即全局生效。
-    readonly property var darkTh:  Theme { dark: true }
-    readonly property var lightTh: Theme { dark: false }
+    // 主题 Token 单一真源：qml/components/Md3.qml（2026-10-13 UI 转 Material 3，
+    // 用户批准 MaterialLab 为全项目唯一模板）。深 / 浅两套由 dark 切换。
+    // Md3 提供 legacy 别名（win/panel/fg/acc/rCtrl…）⇒ 本文件 3802 行零改动换肤；
+    // 组件逐个迁 md3/ 后别名块删除。原 Theme.qml 全端迁移完成后退役。
+    readonly property var darkTh:  Md3 { dark: true }
+    readonly property var lightTh: Md3 { dark: false }
 
     readonly property var th: darkMode ? darkTh : lightTh
 

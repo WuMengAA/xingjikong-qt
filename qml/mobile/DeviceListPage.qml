@@ -1,11 +1,12 @@
-// 星集控 · 手机端设备列表页（2026-10-11 · 独立 QML 方案）
-// 页 1：ListView，行高 68（触摸友好 ≥64）。行点击 → openDetail 信号（Main 开抽屉）；
-// 行内 ping 快捷 + 关机（shutdownRequested 信号 → Main 开确认弹窗）。
+// 星集控 · 手机端设备列表页（2026-10-13 · MD3 迁移批）
+// 页 1：ListView，行高 76（触摸友好 ≥64）。行点击 → openDetail 信号（Main 开抽屉）；
+// 行内 ping / 关机快捷（shutdownRequested 信号 → Main 开确认弹窗）。
+// MD3：filled 卡片行（containerHigh / 圆角 12）+ 状态点 + text 按钮（primary / error）。
 import QtQuick
 
 Item {
     id: page
-    property var th: ({})
+    property var md3: ({})
     signal openDetail(var dev)
     signal shutdownRequested(string uid)
 
@@ -14,17 +15,16 @@ Item {
         anchors.fill: parent
         clip: true
         model: backend.devices
+        spacing: 8
         delegate: Item {
             width: list.width
-            height: 68
+            height: 76
             Rectangle {
                 anchors.fill: parent
                 anchors.leftMargin: 14
                 anchors.rightMargin: 14
-                radius: page.th.rCard
-                color: page.th.panel
-                border.color: page.th.stroke
-                border.width: 1
+                radius: page.md3.rM
+                color: page.md3.cContHigh
                 Row {
                     anchors.left: parent.left
                     anchors.right: parent.right
@@ -33,42 +33,45 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
                     Rectangle {
-                        width: 8; height: 8; radius: 4
+                        width: 10; height: 10; radius: 5
                         anchors.verticalCenter: parent.verticalCenter
-                        color: (modelData.online !== false) ? page.th.ok : page.th.err
+                        color: (modelData.online !== false) ? page.md3.cOk : page.md3.cError
                     }
                     Column {
-                        width: parent.width - 150
+                        width: parent.width - 170
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 3
                         Text {
                             text: (modelData.name && modelData.name !== "") ? modelData.name : modelData.uid
-                            color: page.th.fg; font.pixelSize: 14; elide: Text.ElideRight; width: parent.width
+                            color: page.md3.cOnSurface
+                            font.pixelSize: page.md3.bodyL
+                            elide: Text.ElideRight
+                            width: parent.width
                         }
                         Text {
                             text: (modelData.version ? "v" + modelData.version : "") + " · " + modelData.uid
-                            color: page.th.fg3; font.pixelSize: 11; elide: Text.ElideRight; width: parent.width
+                            color: page.md3.cOnSurfaceVar
+                            font.pixelSize: page.md3.bodyS
+                            elide: Text.ElideRight
+                            width: parent.width
                         }
                     }
-                    // 轻指令：ping / 关机（行内小按钮）
+                    // 轻指令：ping / 关机（MD3 text 按钮：labelL + primary/error）
                     Row {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: 6
+                        spacing: 4
                         Rectangle {
-                            width: 40; height: 26; radius: 13
-                            color: page.th.hover; border.color: page.th.stroke; border.width: 1
-                            Text { anchors.centerIn: parent; text: "ping"; color: page.th.acc; font.pixelSize: 11 }
-                            MouseArea { anchors.fill: parent; onClicked: backend.sendAction("ping", {}) }
+                            width: 52; height: 36; radius: 18
+                            color: pingMa.pressed ? page.md3.cContHighest : (pingMa.containsMouse ? page.md3.cContHighest : "transparent")
+                            Text { anchors.centerIn: parent; text: "ping"; color: page.md3.cPrimary; font.pixelSize: page.md3.labelL; font.weight: Font.Medium }
+                            MouseArea { id: pingMa; anchors.fill: parent; hoverEnabled: true; onClicked: backend.sendAction("ping", {}) }
                         }
                         Rectangle {
-                            width: 40; height: 26; radius: 13
-                            color: page.th.err
-                            Text { anchors.centerIn: parent; text: "关机"; color: "#fff"; font.pixelSize: 11 }
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: page.shutdownRequested(modelData.uid)
-                            }
+                            width: 52; height: 36; radius: 18
+                            color: sdMa.pressed ? page.md3.cErrorCont : (sdMa.containsMouse ? page.md3.cErrorCont : "transparent")
+                            Text { anchors.centerIn: parent; text: "关机"; color: page.md3.cError; font.pixelSize: page.md3.labelL; font.weight: Font.Medium }
+                            MouseArea { id: sdMa; anchors.fill: parent; hoverEnabled: true; onClicked: page.shutdownRequested(modelData.uid) }
                         }
                     }
                     // 整行点击 → 设备详情抽屉
