@@ -19,7 +19,9 @@ endif()
 #   必须随包走，否则装到干净机器上"岛白屏"（本机有 Qt 环境所以看不出来）。
 # 注：WebEngine 的按需加载不需要额外组件 —— 不加 WebEngineQuick（它在动态构建下会死锁，见
 #     src/main.cpp 的 ensureWebEngine 注释），只要不在 main 里提前 new QWebEngineView 即可。
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg Qml Quick QuickWidgets)
+# 2026-10-13 审计 #25：与 viewer-qt 对齐 Qt ≥ 6.12（项目两端共用一个 Qt 6.12 安装，
+# 声明一致避免"配置阶段两端行为不同"——此前 viewer 声明 6.5、control 无版本声明）。
+find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg Qml Quick QuickWidgets)
 
 # ── 版本资源 + 应用图标（2026-10-07 补）────────────────────────────────────
 # 补之前 exe 是「无版本资源的裸 PE」：任务管理器细节页空白、右键属性没有描述、
