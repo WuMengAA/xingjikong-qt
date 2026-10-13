@@ -94,7 +94,18 @@ Source: "build\iconengines\*"; DestDir: "{app}\iconengines"; Flags: ignoreversio
 Source: "build\generic\*"; DestDir: "{app}\generic"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\networkinformation\*"; DestDir: "{app}\networkinformation"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "build\tls\*"; DestDir: "{app}\tls"; Flags: ignoreversion recursesubdirs createallsubdirs
+; ── TLS 后端插件（2026-10-13 生产事故修复：**必须三个齐全**）──────────────────
+; ⚠️ 根因：windeployqt 只认 certonly + schannel（它认为 Windows 原生 schannel 够用），
+;    **不拷 openssl 后端**。实测（学生机 DESKTOP-I15OM55 的 agent-qt.log）那台机器上
+;    schannel 后端加载失败 ⇒ Qt 的 availableBackends() 只剩 "cert-only" ⇒ TLS 全不可用：
+;      · wss://control.245959623.xyz/ws/agent 连不上（表现为"被控端连不上地址"）
+;      · https://www.245959623.xyz/oauth/token 请求全 "HTTP 0"（TLS initialization failed）
+;    openssl 后端是第二条路径（配上面点名的 libssl-3-x64 / libcrypto-3-x64）。
+;    这里**逐个点名**而非通配：缺任何一个 → ISCC 当场报错，不许再静默少拷。
+;    （build-agent-installer.sh 的 0b 段已会自动补入缺失的后端。）
+Source: "build\tls\qcertonlybackend.dll"; DestDir: "{app}\tls"; Flags: ignoreversion
+Source: "build\tls\qschannelbackend.dll"; DestDir: "{app}\tls"; Flags: ignoreversion
+Source: "build\tls\qopensslbackend.dll"; DestDir: "{app}\tls"; Flags: ignoreversion
 Source: "build\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\translations\*"; DestDir: "{app}\translations"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "build\position\*"; DestDir: "{app}\position"; Flags: ignoreversion recursesubdirs createallsubdirs

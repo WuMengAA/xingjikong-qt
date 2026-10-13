@@ -69,6 +69,7 @@
 #include <QStorageInfo>   // 2026-10-06 强制自动升级：装之前先看磁盘剩多少
 #include <QStringList>
 #include <QStandardPaths>
+#include <QSslSocket>   // 2026-10-13：启动时 TLS 后端自检（TLS 挂掉时故障完全静默）
 #include <QSet>
 #include <QProcess>
 #include <QThread>      // QThread::msleep（camera_record 确认"真的在录"时等两秒）
@@ -229,7 +230,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.28";
+constexpr const char *kAppVersion = "0.6.29";
 
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
@@ -3914,24 +3915,67 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.error = QStringLiteral("参数缺失：需要 target（进程名或可执行路径）");
             return out;
         }
-        const QString allow = qEnvironmentVariable("STELARITH_AGENT_LAUNCH_ALLOWLIST").toLower();
+        // ⚠️ 2026-10-13 三端审计修复：原来白名单用 `target.toLower().contains(item)` ——
+        //    **子串**匹配。于是 `incoming\chrome-setup.exe`（file_push 能把它落到收件目录，
+        //    见 g_recvDir）里"含有 chrome"就被放行 ⇒ 配合 file_push = 免确认的任意代码执行。
+        //    改成**两道闸**（缺一不可）：
+        //      ① 名字必须**基名精确**命中（剥路径 + 去 .exe 后缀后全等）；
+        //      ② 带路径的 target 必须落在**可信安装目录**内 —— 防"把恶意二进制直接改名成
+        //         chrome.exe 再放进收件目录"绕过 ①（file_push 不禁止叫 chrome.exe）。
+        auto normExeName = [](const QString &s) {
+            QString n = QFileInfo(s.trimmed()).fileName().toLower();
+            if (n.endsWith(QLatin1String(".exe"))) n.chop(4);
+            return n;
+        };
+        const QString tName = normExeName(target);
+
+        // ① 名字闸：内置名单（去 .exe 后缀，与归一化对齐）+ 管理员配的放行名单
         bool allowed = false;
+        const QString allow = qEnvironmentVariable("STELARITH_AGENT_LAUNCH_ALLOWLIST").toLower();
         const QStringList items = allow.split(QLatin1Char(','), Qt::SkipEmptyParts);
         for (const QString &item : items)
-            if (!item.trimmed().isEmpty() && target.toLower().contains(item.trimmed())) { allowed = true; break; }
+            if (!item.trimmed().isEmpty() && normExeName(item) == tName) { allowed = true; break; }
         static const char *const kBuiltinSafe[] = {
-            "classisland", "xingjikong", "explorer.exe", "msedge", "chrome", "firefox",
-            "wechat", "wps", "word", "excel", "powerpnt", "notepad", "cmd.exe", nullptr
+            "classisland", "xingjikong", "explorer", "msedge", "chrome", "firefox",
+            "wechat", "wps", "word", "excel", "powerpnt", "notepad", "cmd", nullptr
         };
-        const QString tl = target.toLower();
         if (!allowed)
             for (const char *const *p = kBuiltinSafe; *p; ++p)
-                if (tl.contains(QLatin1String(*p))) { allowed = true; break; }
+                if (tName == QLatin1String(*p)) { allowed = true; break; }
         if (!allowed) {
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("launch_app: 「%1」不在内置安全名单（classisland/xingjikong/浏览器/Office/记事本…），"
                                        "被拒绝。可配置 STELARITH_AGENT_LAUNCH_ALLOWLIST 放行。").arg(target);
             return out;
+        }
+
+        // ② 目录闸：带路径的 target 必须落在可信安装目录（否则"改名成合法名"就能绕过 ①）。
+        //    裸名字（如 "notepad"）不含分隔符 → 交给 ShellExecuteW 走 App Paths/PATH 系统级解析，安全。
+        if (target.contains(QLatin1Char('\\')) || target.contains(QLatin1Char('/'))) {
+            const QString abs = QDir::toNativeSeparators(QFileInfo(target).absoluteFilePath()).toLower();
+            QStringList roots;
+            const auto addRoot = [&roots](const QString &p) {
+                if (!p.trimmed().isEmpty())
+                    roots << (QDir::toNativeSeparators(QDir::cleanPath(p)).toLower() + QLatin1Char('\\'));
+            };
+            addRoot(qEnvironmentVariable("ProgramFiles"));
+            addRoot(qEnvironmentVariable("ProgramFiles(x86)"));
+            addRoot(qEnvironmentVariable("ProgramW6432"));
+            addRoot(qEnvironmentVariable("SystemRoot"));                        // 含 System32 / SysWOW64
+            addRoot(qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/Programs"));  // 用户级安装
+            // 逃生口：非标准安装位置（如 D:\Programs）由管理员显式追加目录白名单
+            for (const QString &extra : qEnvironmentVariable("STELARITH_AGENT_LAUNCH_DIRS")
+                                            .split(QLatin1Char(';'), Qt::SkipEmptyParts))
+                addRoot(extra);
+            bool inTrusted = false;
+            for (const QString &root : roots) if (abs.startsWith(root)) { inTrusted = true; break; }
+            if (!inTrusted) {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("launch_app: 「%1」不在可信安装目录（Program Files / Windows / 用户程序目录），"
+                                           "已拒绝。非标准安装位置可配置 STELARITH_AGENT_LAUNCH_DIRS 追加。").arg(target);
+                qWarning("[agent-qt] launch_app 拒绝：%s 不在可信目录（防改名绕过）", qPrintable(target));
+                return out;
+            }
         }
         const HINSTANCE r = ShellExecuteW(nullptr, L"open", reinterpret_cast<LPCWSTR>(target.utf16()),
                                           nullptr, nullptr, SW_SHOWNORMAL);
@@ -5829,9 +5873,16 @@ void handleControlText(const QString &text)
             return;
         }
         if (action == QStringLiteral("terminal_input")) {
-            TerminalConsole::inst().input(params.value(QStringLiteral("sid")).toString(),
-                                          params.value(QStringLiteral("keys")).toString());
-            sendActionReceipt(id, action, QStringLiteral("done"));
+            const QString tsid = params.value(QStringLiteral("sid")).toString();
+            const bool tAccepted = TerminalConsole::inst().input(
+                tsid, params.value(QStringLiteral("keys")).toString());
+            // 2026-10-13 审计修复：会话不存在/已关闭、或上条命令还在跑时 input() 是**没接受**的，
+            // 以前无条件回 done ⇒ 管理端以为输入成功，其实一个字符都没进 shell。
+            if (tAccepted)
+                sendActionReceipt(id, action, QStringLiteral("done"));
+            else
+                sendActionReceipt(id, action, QStringLiteral("failed"),
+                                  QStringLiteral("终端输入未被接受：会话不存在/已关闭，或上一条命令还在跑（sid=%1）").arg(tsid));
             return;
         }
         if (action == QStringLiteral("terminal_close")) {
@@ -6337,6 +6388,29 @@ int main(int argc, char *argv[])
     g_hbTimer->start(g_heartbeatMs);
     qInfo("[agent-qt] 心跳间隔 %d ms（等云端 registered 下发 heartbeatMs 后以其为准；本机当前按 %d ms 无心跳即判离线）",
           g_heartbeatMs, g_timeoutMs);
+
+    // ── TLS 后端自检（2026-10-13 生产事故修复）──────────────────────────────
+    // 事故：学生机 DESKTOP-I15OM55 上 Qt 的 availableBackends() 只剩 "cert-only"
+    //   ⇒ TLS 完全不可用 ⇒ ① wss:// 连不上（表现为"被控端连不上地址"：日志里
+    //   `连接 wss://…` 之后**永远没有** `已连上云端`）② 所有 HTTPS 请求报 "HTTP 0"。
+    //   这类故障以前**完全静默** —— 只有一个"连不上"的表象，直到翻出 agent-qt.log
+    //   里 oauthbind 那行自检才定位。故启动时大声报一次。
+    // Qt 的 TLS 后端是**插件**（安装目录 tls\），windeployqt 默认只部署
+    // certonly + schannel、**不拷 openssl 后端**；任一后端加载失败即退化成 cert-only。
+    {
+        const QStringList be = QSslSocket::availableBackends();
+        if (!QSslSocket::supportsSsl()) {
+            qWarning("[agent-qt] ⛔ TLS 不可用！可用后端=[%s]。后果：连不上云端 wss、"
+                     "所有 HTTPS 请求报 HTTP 0。请检查安装目录 tls\\ 下三个后端是否齐全"
+                     "（qcertonlybackend / qschannelbackend / qopensslbackend），"
+                     "以及 libssl-3-x64.dll / libcrypto-3-x64.dll 是否存在。",
+                     qPrintable(be.join(QLatin1Char(','))));
+        } else {
+            qInfo("[agent-qt] TLS 就绪：后端=[%s] 运行时=%s",
+                  qPrintable(be.join(QLatin1Char(','))),
+                  qPrintable(QSslSocket::sslLibraryVersionString()));
+        }
+    }
 
     connectNow();
     if (frameTimer) QMetaObject::invokeMethod(frameTimer, "timeout", Qt::QueuedConnection);

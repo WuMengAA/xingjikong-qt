@@ -51,7 +51,10 @@ public:
     void setSocket(QWebSocket *ws);
 
     bool open(const TermReq &req, QString *err = nullptr);
-    void input(const QString &sid, const QString &keys);
+    /// 投递一次输入。返回 false = **未被接受**（会话不存在/已关闭，或上一条命令还在跑），
+    /// 调用方据此如实回 failed —— 别无条件回 done（2026-10-13 审计：那会让管理端
+    /// 以为"输入成功了"，其实一个字符都没进 shell）。
+    bool input(const QString &sid, const QString &keys);
     void resize(const QString &sid, int cols, int rows);   // REPL 模式仅记日志（无 PTY 可调尺寸）
     void close(const QString &sid, const QString &reason);
 

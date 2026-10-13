@@ -96,9 +96,9 @@ bool TerminalConsole::open(const TermReq &req, QString *err)
 }
 
 // ── 收一行输入 ─────────────────────────────────────────────────────────────
-void TerminalConsole::input(const QString &sid, const QString &keys)
+bool TerminalConsole::input(const QString &sid, const QString &keys)
 {
-    if (!m_active || sid != m_sid) return;
+    if (!m_active || sid != m_sid) return false;
     m_idleTimer.start(m_idleMs);
 
     if (m_busy) {
@@ -107,7 +107,7 @@ void TerminalConsole::input(const QString &sid, const QString &keys)
         QJsonObject p; p.insert(QStringLiteral("sid"), sid);
         p.insert(QStringLiteral("data"), QStringLiteral("\r\n[上一条命令还在跑，等它结束]\r\n"));
         sendFrame("terminal_data", p);
-        return;
+        return false;
     }
 
     // 先回显（含提示符），再执行 —— 与管理端"输入即可见"的习惯一致
@@ -117,6 +117,7 @@ void TerminalConsole::input(const QString &sid, const QString &keys)
     sendFrame("terminal_data", p);
 
     runLine(line);
+    return true;
 }
 
 void TerminalConsole::resize(const QString &sid, int cols, int rows)

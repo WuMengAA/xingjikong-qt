@@ -36,6 +36,31 @@ if [ ! -f "$ISCC_EXE" ]; then
     exit 3
 fi
 
+# ---- 0b) TLS 后端体检（2026-10-13 生产事故修复）--------------------------------
+# 事故：学生机 DESKTOP-I15OM55 上 Qt 的 availableBackends() 只剩 "cert-only"
+#   ⇒ TLS 完全不可用 ⇒ ① wss:// 连不上（表现为"被控端连不上地址"）
+#                    ② HTTPS 请求全 "HTTP 0"（TLS initialization failed）。
+# 根因：windeployqt 只部署它认为够用的 certonly + schannel，**不拷 openssl 后端**
+#   （实测 `windeployqt --list relative` 只列这 2 个）；而 schannel 在部分机器
+#   （杀软拦截 / 系统策略 / LTSC 精简）上会加载失败 ⇒ 退化成只剩 cert-only。
+# 处置：出包前强制三个后端齐全。openssl 是第二条路径（配 build/ 里已有的
+#   libssl-3-x64.dll / libcrypto-3-x64.dll，installer.iss 已点名）。
+#   补不齐就 FATAL —— 宁可不出包，也不出"装上去连不上云端"的半残包。
+QT_TLS_DIR="D:/QTqwq/6.12.0/msvc2022_64/plugins/tls"
+mkdir -p build/tls
+for b in qcertonlybackend.dll qschannelbackend.dll qopensslbackend.dll; do
+    if [ ! -f "build/tls/$b" ]; then
+        if [ -f "$QT_TLS_DIR/$b" ]; then
+            cp -f "$QT_TLS_DIR/$b" build/tls/ && echo "[tls] 补入 $b（windeployqt 漏拷）"
+        else
+            echo "[FATAL] TLS 后端缺失且无法补齐：build/tls/$b"
+            echo "        Qt 源目录也没有：$QT_TLS_DIR/$b —— 检查 Qt 安装是否完整"
+            exit 3
+        fi
+    fi
+done
+echo "[tls] 后端齐全：$(ls build/tls/*.dll | xargs -n1 basename | tr '\n' ' ')"
+
 # ---- 1) version from build/version.nsh (唯一真源＝CMakeLists AGENT_VERSION) ----
 if [ ! -f build/version.nsh ]; then
     echo "[FATAL] build/version.nsh missing - run cmake first to generate it"
