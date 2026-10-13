@@ -857,9 +857,13 @@ void IslandOverlay::setInteractive(bool on)
     //    所以 QML 侧也按 interactive 决定 MouseArea 的 enabled（见 IslandRoot.qml
     //    的 gesture.enabled）—— 两边都要关，只关一边仍会"吃掉"点击。
     if (m_quick) {
+        // ⚠️ 2026-10-13：删掉原来的 m_quick->setEnabled(on || !m_idle)。
+        //    setEnabled(false) 会让 QQuickWidget 走"禁用态"渲染（可能变灰）并停掉部分
+        //    窗口内部更新；它和 WA_TransparentForMouseEvents 是**两套独立机制**，
+        //    同时用交互语义混乱，且 on||!m_idle 在"不可交互但非空闲"时判 true 含义不明。
+        //    真正管穿透的是下面这条属性；精确的"哪些区域可点"由 QML 侧 MouseArea.enabled
+        //    决定（见 IslandRoot.qml 的 gesture.enabled，上面注释也讲了）。只留一条。
         m_quick->setAttribute(Qt::WA_TransparentForMouseEvents, !on);
-        // QQuickWidget 自己要的鼠标策略：穿透态连 hover 都不该收
-        m_quick->setEnabled(on || !m_idle);
     }
     if (on) setCursor(Qt::PointingHandCursor);
     else    unsetCursor();
