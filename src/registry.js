@@ -28,6 +28,32 @@ const devices = new Map();
  */
 const knownDevices = new Map();
 
+/* 上限护栏（2026-10-13）：uid 由设备自报，而设备令牌是全班/全校共用的 ⇒ 不设上限时
+ * 可被无限灌 uid 把这张表撑爆内存（一条 register 加一条，永不释放）。
+ * 照 results 表的先例：超限淘汰最久未见的（重连会重新注册，丢的只是展示元数据）。 */
+const KNOWN_KEEP = Number(process.env.CLOUD_KNOWN_KEEP || 20000);
+function pruneKnown() {
+  if (knownDevices.size <= KNOWN_KEEP) return;
+  // ⚠️ 不能只删"插入序最前"的：Map 对已有 key 再 set **不改插入位置**，重连不刷新顺序，
+  //    于是插入序 ≠ 活跃序，按插入序淘汰会误删天天在线的设备。必须显式按 lastSeen 排。
+  //    一次多淘汰 10% 留余量，免得每来一台新设备就全表扫一遍。
+  const overflow = knownDevices.size - KNOWN_KEEP;
+  const drop = Math.max(overflow, Math.ceil(KNOWN_KEEP * 0.1));
+  const byOldest = [...knownDevices.entries()]
+    .sort((a, b) => (a[1].lastSeen || 0) - (b[1].lastSeen || 0));
+  let n = 0;
+  for (const [k] of byOldest) {
+    if (n >= drop) break;
+    // 🔴 在线设备一律不淘汰：knownDevices.lastSeen **只在连接时写**（心跳只更新 devices 表），
+    //    于是连续在线十天的机器 lastSeen 反而是全表最旧 —— 不跳过就会把天天在用的设备删掉，
+    //    还会让 offlineDevices(= knownDevices.size - online) 变成负数。
+    if (devices.has(k)) continue;
+    knownDevices.delete(k);
+    n++;
+  }
+  pushEvent('warn', '已知设备表超上限，淘汰最久未见记录', { keep: KNOWN_KEEP, dropped: n });
+}
+
 /**
  * 分班制：classCode -> { code, name, devices:[uid] }。
  * 设备上线 / 绑定 / 解绑时维护；列表接口与「按班定向下发」都读它。
@@ -169,7 +195,13 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     try { old.ws.close(4001, 'superseded'); } catch { /* 已断就算了，别静默吞掉别的 */ }
   }
   const now = Date.now();
+  const isNewUid = !knownDevices.has(uid);   // 只有新 uid 才需要过上限检查（重连不必）
   const known = knownDevices.get(uid) || {};
+  // 上限护栏：新设备才查（超限先淘汰最久未见的，避免被灌爆内存）。
+  // 🔴 必须在 knownDevices.set(uid) **之前**：放在 set 之后有可能把刚写进去的这条
+  //    自己淘汰掉（同毫秒批量注册时排序不稳），下面 `knownDevices.get(uid).name` 当场就崩
+  //    —— 2026-10-13 验证脚本实测撞到过。
+  if (isNewUid) pruneKnown();
   // 已知设备表：离线也留着，online 由 devices.has 派生；name/classCode 落这里，重连沿用。
   const resolvedClass = meta?.classCode ?? known.classCode ?? null;
   knownDevices.set(uid, {
@@ -179,6 +211,7 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     version: version || known.version || 'unknown',
     lastSeen: now,
   });
+  // 上限护栏：新设备才查（超限先淘汰最久未见的，避免被灌爆内存）
   // 注册带班级码 → 同步进班级索引（保证「按班下发」能找到这台）。
   if (resolvedClass) addToClassIndex(uid, resolvedClass, meta?.className ?? '');
   devices.set(uid, {
@@ -191,8 +224,8 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     bytesIn: 0,
     heartbeatsIn: 0,
     lastError: null,
-    name: knownDevices.get(uid).name,
-    classCode: knownDevices.get(uid).classCode,
+    name: knownDevices.get(uid)?.name ?? null,
+    classCode: knownDevices.get(uid)?.classCode ?? null,
     recentFrame: old?.recentFrame ?? null,
     // 能力清单（2026-10-06 契合度）：被控端 register 带上来，云端**原样转给管端**，
     // 管端据此把不支持的按钮置灰，别让人点下去才吃一句"未知指令"。
@@ -555,6 +588,23 @@ export function autoSubscribeViewers(uid) {
   return n;
 }
 
+/* 背压护栏（2026-10-13）：管理端消费不过来时（TCP 发送缓冲里堆着还没发出去的字节），
+ * 继续塞只会把帧全积在**云端**内存里 —— 一条慢连接就能把整个云端吃爆。
+ * 帧是**实时**画面/流式输出：丢掉新的、保住连接，比"攒到 OOM 再崩"强得多。
+ * 这是"尽力而为"的既定语义（不是丢包 bug），所以只按 10s 节流报一次。 */
+const RELAY_BUFFER_MAX = Number(process.env.CLOUD_RELAY_BUFFER_MAX || 8 * 1024 * 1024);
+let relayBpWarnAt = 0;
+function relayBlocked(ws) {
+  if (ws.bufferedAmount <= RELAY_BUFFER_MAX) return false;
+  const now = Date.now();
+  if (now - relayBpWarnAt > 10000) {
+    relayBpWarnAt = now;
+    pushEvent('warn', '管理端消费不过来，暂停推流（背压）',
+      { buffered: ws.bufferedAmount, limit: RELAY_BUFFER_MAX });
+  }
+  return true;
+}
+
 /**
  * 把一帧推给所有订阅了该 uid 的 viewer。推不出去就报出来，绝不假装推成功。
  * v1 对端收**二进制帧**（带 seq/ts/mime，省掉 base64 的 33% 开销），旧对端仍收 JSON base64。
@@ -565,6 +615,7 @@ export function broadcastFrame(uid, buf, frameSeq = 0) {
   for (const [ws, v] of viewers) {
     if (!v.subs.has(String(uid))) continue;
     if (ws.readyState !== 1) { viewers.delete(ws); continue; }
+    if (relayBlocked(ws)) continue;
     try {
       if (ws.__v1 === true) ws.send(makeFrame(uid, frameSeq, 'image/jpeg', buf));
       else ws.send(JSON.stringify({
@@ -595,6 +646,7 @@ export function relayToSubscribers(uid, type, payload) {
   for (const [ws, v] of viewers) {
     if (!v.subs.has(String(uid))) continue;
     if (ws.readyState !== 1) { viewers.delete(ws); continue; }
+    if (relayBlocked(ws)) continue;
     try { sendTo(ws, type, payload); hits++; }
     catch { viewers.delete(ws); }
   }

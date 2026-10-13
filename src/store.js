@@ -163,9 +163,14 @@ export function paramsOf(id) {
 export function receiptsByNotice(noticeId) {
   if (!db || noticeId == null) return [];
   try {
+    // ⚠️ 2026-10-13：原来只用 `%"notice_id":N%` —— 那是**前缀子串**匹配，
+    //    notice_id=1 会把 12 / 123 / 1234 的记录全捞进来（对账结果张冠李戴）。
+    //    改成带"值为结尾"的分隔符：JSON 里该值后面只可能是 `,`（还有别的字段）
+    //    或 `}`（它正好是最后一个字段）。两种都列上，既不误配也不漏配。
+    const n = Number(noticeId);
     const rows = db.prepare(
-      "SELECT uid, state, result FROM instructions WHERE params LIKE ? AND action = 'notify' ORDER BY id DESC",
-    ).all(`%\"notice_id\":${Number(noticeId)}%`);
+      "SELECT uid, state, result FROM instructions WHERE (params LIKE ? OR params LIKE ?) AND action = 'notify' ORDER BY id DESC",
+    ).all(`%"notice_id":${n},%`, `%"notice_id":${n}}%`);
     // 同 uid 多条 → 保留最新（id 最大）一条
     const seen = new Map();
     for (const r of rows) {
