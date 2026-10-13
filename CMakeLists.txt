@@ -152,6 +152,8 @@ qt_add_executable(viewer-qt
   src/viewerbackend_file.cpp
   # 2026-10-13 架构拆分：语音对讲 + 屏幕广播子域独立编译单元
   src/viewerbackend_voice.cpp
+  # 2026-10-13 架构拆分：RTC 收流方法域独立编译单元
+  src/viewerbackend_rtc.cpp
   ${STE_SINGLEINSTANCE_SRC}
   src/oauthlogin.cpp
   src/oauthlogin.h
