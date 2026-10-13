@@ -8,6 +8,7 @@
 
 #include <QByteArray>
 #include <QDesktopServices>
+#include <QRandomGenerator>   // state 随机串（CSPRNG，替掉 std::rand，2026-10-13）
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -46,22 +47,23 @@ constexpr int kCloseAfterSuccessMs = 1200;
  */
 constexpr int kLoginTimeoutMs = 3 * 60 * 1000;
 
-/** 随机串（state 用）。state 必须不可猜，否则别人能伪造回拨把 code 骗走。 */
+/** 随机串（state 用）。state 必须不可猜，否则别人能伪造回拨把 code 骗走。
+ *
+ * ⚠️ 2026-10-13 修（原来用 std::rand()，两个问题叠在一起）：
+ *   ① rand() 是线性同余式，**非密码学安全**；种子只有"秒级时钟 ^ 一个进程内函数地址"，
+ *      知道大概启动时间就能枚举出整串 state；
+ *   ② 种子在进程生命周期内**只种一次**（seeded 只被置真一次）⇒ 登录失败重试时
+ *      randomHex() 产出**完全相同的字节序列**——"换一次 state"其实没换。
+ *   改走 QRandomGenerator::system()（Windows 上走 BCryptGenRandom，CSPRNG）。
+ *   被控端 oauthbind.cpp 的同款问题已在同一轮修掉（那是代码质量报告 A7）。
+ */
 QString randomHex(int bytes)
 {
-    static bool seeded = false;
-    if (!seeded) {
-        // 时钟 + 函数地址：同一毫秒连开两次也不会撞上同一串 state
-        std::srand(static_cast<unsigned>(std::time(nullptr) ^ (quintptr)(void *)&randomHex));
-        seeded = true;
-    }
     QString out;
     out.reserve(bytes * 2);
-    for (int i = 0; i < bytes; ++i) {
-        const char digits[] = "0123456789abcdef";
-        out += digits[std::rand() % 16];
-        out += digits[std::rand() % 16];
-    }
+    const char digits[] = "0123456789abcdef";
+    for (int i = 0; i < bytes * 2; ++i)
+        out += digits[QRandomGenerator::system()->bounded(16)];
     return out;
 }
 
@@ -252,7 +254,16 @@ void OAuthLogin::onNewConnection()
         }
         m_sock = s;
         QObject::connect(s, &QTcpSocket::readyRead, this, &OAuthLogin::onReadyRead);
-        QObject::connect(s, &QTcpSocket::disconnected, s, &QTcpSocket::deleteLater);
+        // ⚠️ 2026-10-13 修：断连时除了回收对象，**还必须清 m_sock 槽位**。
+        //    浏览器会先开一条 preconnect/探测连接再立刻关掉（或在授权页刷新导致连接被重置）；
+        //    这种"没发完整请求就断"的连接会让 m_sock 指向一个已被 deleteLater 回收的对象 ——
+        //     ① 紧随其后的**真正回拨**会命中上面那句 `if (m_sock)` 被回 404（用户看到 404 页面，
+        //        而管理端一直干等到 3 分钟超时）；
+        //     ② m_sock 变成悬垂指针，析构路径（disconnectFromHost）解引用即崩。
+        QObject::connect(s, &QTcpSocket::disconnected, this, [this, s] {
+            if (m_sock == s) m_sock = nullptr;
+            s->deleteLater();
+        });
     }
 }
 

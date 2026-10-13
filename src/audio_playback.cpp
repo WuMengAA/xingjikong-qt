@@ -78,14 +78,30 @@ void AudioPlayback::write(const QByteArray &pcm)
     if (pcm.isEmpty()) return;
     if (!openDevice()) return;
 
-    // 缓存放成员：waveOutWrite 后缓冲必须存活到播放完成
-    m_buffer = pcm;
-    m_header.lpData = m_buffer.data();
-    m_header.dwBufferLength = DWORD(m_buffer.size());
+    // ⚠️ 2026-10-13 修：header 在 openDevice() 里已经 waveOutPrepareHeader 过。按 winmm 的契约，
+    //    header 一经 Prepare **不允许再改 lpData/dwBufferLength**，且它指向的内存必须活到 Unprepare。
+    //    原来这里 `m_buffer = pcm` 会让 QByteArray detach 到新堆块、丢掉原 640B 块：
+    //      ① 上一帧可能仍在播（waveOutReset **不保证**驱动已归还缓冲）⇒ 潜在 use-after-free；
+    //      ② waveOutWrite 拿到的是**没 Prepare 过**的指针 ⇒ 返回 WAVERR_/INVALPARAM，
+    //         而这行原来**完全不检查返回值** —— 学生回传的语音静默不出声，日志一个字都没有。
+    //    现在：尺寸不变就**往同一块缓冲 memcpy**；尺寸真的变了才 Unprepare→改→重 Prepare。
+    if (m_buffer.size() != pcm.size()) {
+        waveOutUnprepareHeader(m_waveOut, &m_header, sizeof(m_header));
+        m_buffer.resize(pcm.size());
+        m_header.lpData = m_buffer.data();
+        m_header.dwBufferLength = DWORD(m_buffer.size());
+        if (waveOutPrepareHeader(m_waveOut, &m_header, sizeof(m_header)) != MMSYSERR_NOERROR) {
+            qWarning("[audio] waveOutPrepareHeader 失败（帧长变化后重新准备）");
+            return;
+        }
+    } else {
+        std::memcpy(m_buffer.data(), pcm.constData(), size_t(pcm.size()));
+    }
     // ⚠️ 上一帧若还在播（waveOut 慢于音频节奏），先 Reset 掉再写新的 —— 语音实时性优先，
     //    不攒缓冲（攒了就是越听越延迟）。与被控端 AudioPlayer 同一裁决。
     waveOutReset(m_waveOut);
-    waveOutWrite(m_waveOut, &m_header, sizeof(m_header));
+    if (waveOutWrite(m_waveOut, &m_header, sizeof(m_header)) != MMSYSERR_NOERROR)
+        qWarning("[audio] waveOutWrite 失败（缓冲未 Prepare / 设备已关？）");
 }
 
 void AudioPlayback::stop()

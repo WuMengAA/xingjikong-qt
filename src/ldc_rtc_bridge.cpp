@@ -33,8 +33,14 @@ void ldcInitRtc(ViewerBackend *backend)
         }, Qt::UniqueConnection);
     QObject::connect(&r, &LdcReceiver::failed, backend,
         [backend](const QString &reason) {
+            // ⚠️ 2026-10-13 修：原来这里是连调两次 setLdcRtcState —— 第一句是**死代码**。
+            //    setRtcState 只在值变化时发信号，中间态 "failed" 立刻被 "failed: <原因>" 顶掉，
+            //    于是 rtcState 这个公开读数**永远不会等于 "failed"**（任何按 `rtcState === "failed"`
+            //    写的降级/提示分支恒不成立，qml/Main.qml 现在判的是 "waiting"/"track" 才没暴露），
+            //    而且每次失败都会多一次 rtcStateChanged 抖动。
+            //    语义态固定为 "failed"；原因只走日志（本端没有独立的 reason 通道）。
             backend->setLdcRtcState(QStringLiteral("failed"));
-            backend->setLdcRtcState(QStringLiteral("failed:" ) + reason);
+            logf("[viewer] RTC 失败：%s", reason.toUtf8().constData());
         }, Qt::UniqueConnection);
     // 帧就绪：走既有帧显示通道（QML 画面区）
     QObject::connect(&r, &LdcReceiver::frameReady, backend,

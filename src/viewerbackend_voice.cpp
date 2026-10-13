@@ -133,9 +133,17 @@ bool ViewerBackend::startSpeakingCapture()
     if (m_speaking) return true;
     if (!m_audioCapture) m_audioCapture = new AudioCapture(this);
     // 采集回调：每 20ms 一帧 PCM → 发云端（二进制帧，云端按 audio 会话转发）
+    // ⚠️ 2026-10-13 修：**必须跨线程投递**。这个 onFrame 是在 winmm/AAudio 的**音频驱动线程**里
+    //    被调用的（见 audio_capture.cpp 的 waveInProc 回调 / audio_capture_android.cpp 的 AAudio 回调，
+    //    后者注释自己都写了"跑在音频线程"），而 m_ws（QWebSocket）属**主线程** —— Qt 要求 QObject
+    //    及其子类只能在所属线程使用，每 20ms 跨线程直调 sendBinaryMessage()/state() 是数据竞争 + UB：
+    //    轻则内部发送缓冲与状态机被并发破坏、帧错乱，重则断言或访问冲突崩溃。
+    //    改成投递回主线程再发（帧只有 640B，队列开销可忽略）。
     m_audioCapture->onFrame = [this](const QByteArray &pcm) {
-        if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState) return;
-        m_ws->sendBinaryMessage(pcm); // 原始 PCM 帧（云端 parseFrame 兼容，mime 由会话推断）
+        QMetaObject::invokeMethod(this, [this, pcm] {
+            if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState) return;
+            m_ws->sendBinaryMessage(pcm); // 原始 PCM 帧（云端 parseFrame 兼容，mime 由会话推断）
+        }, Qt::QueuedConnection);
     };
     // 采集中途出错也要把状态收干净：只把 m_speaking 置 false 而不发 audio.stop，
     // 云端那边还挂着"老师在讲话"，学生端会一直提示。（2026-10-07 补）
