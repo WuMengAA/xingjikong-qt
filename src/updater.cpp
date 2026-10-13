@@ -224,8 +224,15 @@ void Updater::installUpdate()
                  .arg(m_size).arg(kMaxOtaBytes));
         return;
     }
-    QString why;
-    if (!installDirWritable(&why)) { fail(why); return; }
+    // 包类型路由（2026-10-14 exe 直更）：url 以 .exe 结尾 ⇒ 安装器通道（/S 静默安装），
+    // 否则走 zip 通道（解压 + robocopy）。扩展名来自云端清单，两种都认、都不默认猜。
+    const QString base0 = QFileInfo(QUrl(m_url).path()).fileName();
+    m_isExe = base0.endsWith(QLatin1String(".exe"), Qt::CaseInsensitive);
+    // exe 通道靠安装器自带提权，不预检程序目录可写（zip 通道的 robocopy 才需要）。
+    if (!m_isExe) {
+        QString why;
+        if (!installDirWritable(&why)) { fail(why); return; }
+    }
 
     m_dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
             + QStringLiteral("/xingjikong-update");
@@ -234,7 +241,7 @@ void Updater::installUpdate()
         return;
     }
     QString base = QFileInfo(QUrl(m_url).path()).fileName();
-    if (base.isEmpty() || !base.endsWith(QLatin1String(".zip"), Qt::CaseInsensitive))
+    if (base.isEmpty() || (!m_isExe && !base.endsWith(QLatin1String(".zip"), Qt::CaseInsensitive)))
         base = QStringLiteral("stelarith-viewer-update.zip");
     m_zipPath = m_dir + QLatin1Char('/') + base;
     QFile::remove(m_zipPath);
@@ -324,7 +331,21 @@ void Updater::onDownloadFinished()
         QFile::remove(m_zipPath);
         return;
     }
-    logf("[update] sha256 校验通过（%s），开始解压", m_sha.toUtf8().constData());
+    logf("[update] sha256 校验通过（%s）%s", m_sha.toUtf8().constData(),
+         m_isExe ? "，exe 安装器通道" : "，开始解压");
+
+    // ── exe 直更通道（2026-10-14）：不解压，写「等旧进程退 → 安装器 /S → 拉起新版本」脚本 ──
+    if (m_isExe) {
+        setState(QStringLiteral("launching"), QStringLiteral("正在启动安装程序…"));
+        QString why;
+        if (!launchExeInstaller(&why)) {
+            fail(QStringLiteral("写更新脚本失败：%1").arg(why));
+            return;
+        }
+        logf("[update] 安装器脚本已启动，本进程即将退出");
+        QTimer::singleShot(500, qApp, [] { QCoreApplication::quit(); });
+        return;
+    }
 
     setState(QStringLiteral("extracting"), QStringLiteral("正在解压新版本…"));
     const QString staging = m_dir + QStringLiteral("/staging");
@@ -484,6 +505,70 @@ bool Updater::launchReplacer(const QString &staging, QString *why)
                                                  { QStringLiteral("/c"), QDir::toNativeSeparators(cmdPath) });
     if (!started) {
         *why = QStringLiteral("替换脚本启动失败（cmd.exe 没能拉起 %1）").arg(QDir::toNativeSeparators(cmdPath));
+        return false;
+    }
+    return true;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// exe 直更（2026-10-14）：安装器通道
+//
+// 与 zip 通道的分工：zip 通道自己解压 + robocopy（不需要提权，但程序目录必须可写）；
+// 本通道把活全交给 NSIS 安装器（/S 静默），安装器自带提权与「停旧进程 → 覆盖 → 收尾」。
+// 脚本只做三件事：等旧进程退干净 → 跑安装器 → 把新版本拉起来。
+// ⚠️ 不删 staging / 不 robocopy：安装器是唯一写程序目录的人，避免两路互相覆盖。
+bool Updater::launchExeInstaller(QString *why)
+{
+    const QString appDir  = QCoreApplication::applicationDirPath();
+    const QString exeName = QFileInfo(QCoreApplication::applicationFilePath()).fileName();
+    const QString cmdPath = m_dir + QStringLiteral("/apply-update.cmd");
+
+    // 同 launchReplacer：toLocal8Bit() 落盘（中文机 = GBK），UTF-8 会让中文路径乱码。
+    QString s;
+    s += QStringLiteral("@echo off\r\n");
+    s += QStringLiteral("rem 星集控管理端自更新（exe 直更 · 静默安装器；自动生成，下次启动清理）\r\n");
+    s += QStringLiteral("setlocal enabledelayedexpansion\r\n");
+    s += QStringLiteral("set \"PKG=%1\"\r\n").arg(QDir::toNativeSeparators(m_zipPath));
+    s += QStringLiteral("set \"DST=%1\"\r\n").arg(QDir::toNativeSeparators(appDir));
+    s += QStringLiteral("rem 1) 等旧进程退出（exe 与同目录 Qt DLL 在运行时是被锁的；最多 90 秒）\r\n");
+    s += QStringLiteral("set /a N=0\r\n");
+    s += QStringLiteral(":wait\r\n");
+    s += QStringLiteral("tasklist /FI \"IMAGENAME eq %1\" 2>nul | find /I \"%1\" >nul\r\n").arg(exeName);
+    s += QStringLiteral("if not errorlevel 1 (\r\n");
+    s += QStringLiteral("  set /a N+=1\r\n");
+    s += QStringLiteral("  if !N! geq 90 goto giveup\r\n");
+    s += QStringLiteral("  ping -n 2 127.0.0.1 >nul\r\n");
+    s += QStringLiteral("  goto wait\r\n");
+    s += QStringLiteral(")\r\n");
+    s += QStringLiteral("rem 2) 静默安装。安装器自行停残留进程、覆盖文件、写卸载信息（UAC 会弹一次）\r\n");
+    s += QStringLiteral("\"%PKG%\" /S\r\n");
+    s += QStringLiteral("rem 3) 拉起新版本。装在原地才起得来；用户换过安装位就只留快捷方式，不强启\r\n");
+    s += QStringLiteral("if exist \"%DST%\\%1\" start \"\" \"%DST%\\%1\"\r\n").arg(exeName);
+    s += QStringLiteral("del \"%PKG%\" >nul 2>nul\r\n");
+    s += QStringLiteral("goto done\r\n");
+    s += QStringLiteral(":giveup\r\n");
+    s += QStringLiteral("rem 旧进程 90 秒没退：不动任何文件，如实留个脚印\r\n");
+    s += QStringLiteral("echo [%DATE% %TIME%] 等待旧进程退出超时，本次更新未执行 > \"%DST%\\update-failed.txt\"\r\n");
+    s += QStringLiteral(":done\r\n");
+    s += QStringLiteral("endlocal\r\n");
+
+    QFile f(cmdPath);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        *why = QStringLiteral("建不了 %1：%2").arg(QDir::toNativeSeparators(cmdPath), f.errorString());
+        return false;
+    }
+    const QByteArray bytes = s.toLocal8Bit();
+    const qint64 wrote = f.write(bytes);
+    f.close();
+    if (wrote != bytes.size()) {
+        *why = QStringLiteral("更新脚本没写全（%1/%2 字节）").arg(wrote).arg(bytes.size());
+        return false;
+    }
+
+    const bool started = QProcess::startDetached(QStringLiteral("cmd.exe"),
+                                                 { QStringLiteral("/c"), QDir::toNativeSeparators(cmdPath) });
+    if (!started) {
+        *why = QStringLiteral("更新脚本启动失败（cmd.exe 没能拉起 %1）").arg(QDir::toNativeSeparators(cmdPath));
         return false;
     }
     return true;

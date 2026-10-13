@@ -14,6 +14,12 @@
 //    进程内 robocopy 一定失败。所以流程是：解压到暂存 → 写一个 .cmd → detached 启动它 →
 //    自己退出；.cmd 等进程消失后覆盖、再拉起新版本。
 //
+// 2b. **exe 直更（2026-10-14）**：云端清单的 url 以 .exe 结尾时走安装器通道——
+//     下载 → sha256 校验 → 写 apply-update.cmd（等旧进程退 → `<安装器> /S` 静默安装 →
+//     拉起新版本）→ 退出。zip 通道（2）保留兼容。两条通道都由包扩展名路由。
+//     exe 通道**不做** installDirWritable 预检：安装器自身要管理员权（UAC），
+//     程序目录不可写不该挡死更新（zip 通道才需要目录可写）。
+//
 // 3. **sha256 是硬门槛**。没有校验的"更新"等于任意代码执行（和被控端 self_update 同一口径）。
 //    URL 只认 http(s)，sha256 必须是 64 位小写十六进制，体积有上限 —— 缺一不升。
 //
@@ -92,6 +98,8 @@ private:
     /** 用系统 tar.exe（Win10 1803+ 自带 bsdtar）解压 zip；失败回落 PowerShell。 */
     bool extractZip(const QString &zip, const QString &dest, QString *why);
     bool launchReplacer(const QString &staging, QString *why);
+    /** exe 直更：写 apply-update.cmd（等旧进程退 → 安装器 /S → 拉起新版本）。 */
+    bool launchExeInstaller(QString *why);
     /** 安装目录可写吗 —— 不可写就早点说，别下完 130MB 才发现。 */
     bool installDirWritable(QString *why) const;
     /** wss://host/ws/viewer → https://host（只换协议、砍掉 /ws/… 之后的部分）。 */
@@ -118,7 +126,8 @@ private:
     int     m_percent = 0;
     bool    m_mandatory = false;
 
-    QString m_zipPath;             // 下载落盘的 zip
+    QString m_zipPath;             // 下载落盘的包（zip 或 exe 安装器）
+    bool    m_isExe = false;       // 本次更新包是 exe 安装器（走 launchExeInstaller）
     QString m_dir;                 // 更新工作目录（缓存区）
 };
 

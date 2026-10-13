@@ -1,14 +1,14 @@
-// 统一的单行输入框（2026-10-07 抽出）
+// 统一的单行输入框（2026-10-14 · MD3 唯一模板迁移批）
 //
 // 为什么要有这一个文件：界面上的输入框以前每个调用点都只写 `color: th.fg`，
 // **没有一个设 background**。于是输入框沿用 Qt 自带的系统调色板 —— 在 Windows 上
 // 那是白底，而 th.fg 在暗色外观下是 #FAFAFA（近白）。白底白字 ⇒ 打进去的字一个都
-// 看不见，用户看到的就是"这框没法输入内容"。亮色外观下反过来：深字配深底，一样看不见。
+// 看不见（#94 事故同根）。
 //
-// 控件级的样子不该在每个调用点各写一遍（写一遍漏一遍，漏的那遍就是 bug），
-// 统一在这里给：底色透明（面板本身就是底，再叠一层灰就是"两层灰叠一起"）、
-// 描边、占位色、聚焦时描边加深。
-
+// 2026-10-14：内部规格升到 Material Design 3（outlined 变体）：
+//   透明底 + 1px outline 描边、聚焦升 2px primary、圆角 rXS(4)、
+//   字 bodyM(14)/cOnSurface、占位 bodyM/cOnSurfaceVar。
+// **调用方 API 一字未改**（th / placeholderText / 所有 TextField 原生属性）。
 import QtQuick
 import QtQuick.Controls
 
@@ -16,27 +16,27 @@ TextField {
     id: fld
 
     // 主题对象（Main.qml 的 root.th / CommandPalette 的 pal.theme）。
-    // 不传也能用：退回一组暗色安全值，不至于变成"没颜色"。
+    // 不传也能用：退回一组 MD3 浅色安全值，不至于变成"没颜色"。
     property var th: null
 
-    readonly property color colFg:    th ? (th.fg     || "#FAFAFA") : "#FAFAFA"
-    readonly property color colPh:    th ? (th.ph     || "#6E6E6E") : "#6E6E6E"
-    readonly property color colLine:  th ? (th.stroke || "#333333") : "#333333"
-    readonly property color colLine2: th ? (th.fg3    || "#8A8A8A") : "#8A8A8A"
-    readonly property real  rad:      th ? (th.rCtrl  || 8)         : 8
+    readonly property color colFg:    th ? (th.fg     || "#1C1B1F") : "#1C1B1F"
+    readonly property color colPh:    th ? (th.ph     || "#49454F") : "#49454F"
+    readonly property color colLine:  th ? (th.stroke2 || "#79747E") : "#79747E"
+    readonly property color colLine2: th ? (th.acc    || "#6750A4") : "#6750A4"
+    readonly property real  rad:      th ? (th.rXS !== undefined ? th.rXS : 4) : 4
 
     color: colFg
-    font.pixelSize: 13
-    leftPadding: 10
-    rightPadding: 8
+    font.pixelSize: th && th.bodyM !== undefined ? th.bodyM : 14
+    leftPadding: 12
+    rightPadding: 10
     verticalAlignment: Text.AlignVCenter
     selectByMouse: true
     placeholderTextColor: colPh
 
     background: Rectangle {
         radius: fld.rad
-        color: "transparent"
+        color: "transparent"     // 面板本身就是底（两层灰叠一起更糊）
         border.color: fld.activeFocus ? fld.colLine2 : fld.colLine
-        border.width: 1
+        border.width: fld.activeFocus ? 2 : 1   // MD3：聚焦描边升 2dp
     }
 }
