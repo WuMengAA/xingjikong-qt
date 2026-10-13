@@ -353,6 +353,10 @@ void OAuthLogin::onReadyRead()
 
     QNetworkRequest req(tokenUrl);
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+    // ⚠️ 2026-10-13 三端审计修复：此前没设传输超时 —— 站点挂住（半开连接 / 中间设备黑洞）时
+    //    QNetworkReply 永不 finished ⇒ onTokenFinished 不触发 ⇒ m_busy 不复位 ⇒ 登录按钮
+    //    **永久变灰**，只能重启软件。15s 后强制失败，让用户能重试。
+    req.setTransferTimeout(15000);
     QNetworkReply *reply = m_nam->post(req, body);
     QObject::connect(reply, &QNetworkReply::finished, this, &OAuthLogin::onTokenFinished);
 }
