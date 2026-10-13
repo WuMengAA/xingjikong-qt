@@ -182,6 +182,10 @@ QString jsonStringLiteral(const QString &s)
 ViewerBackend::ViewerBackend(QObject *parent)
     : QObject(parent)
 {
+    // 2026-10-13 审计 2.9：HTTP 客户端统一在构造创建——原来 6 处 `if (!m_nam) m_nam =
+    // new ...` 散落在各接口里（checkQmlPatch/fetchRecordings/requestClasses/requestStorage/
+    // fetchEvents/ensureCloudTicket），每处都要判空。构造创建后这些检查全删。
+    m_nam = new QNetworkAccessManager(this);
     // 身份与提醒开关先落下来（QSettings），后面所有门控判断都基于它。
     loadPrefs();
     // 主题三档（E4，2026-10-11）：0 浅色 / 1 深色 / 2 跟随系统。默认浅色，读自 QSettings。
@@ -947,7 +951,7 @@ void ViewerBackend::onSessionTicketFinished()
 }
 void ViewerBackend::ensureCloudTicket(bool interactive)
 {
-    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    // 2026-10-13 审计 2.9：m_nam 已在构造函数创建，这里直接用
     if (m_sessionReply) return;   // 换票请求在飞，别叠一个
     refreshAccountText();
     if (!m_cloudTicket.isEmpty() && ticketUsable()) {
@@ -2750,7 +2754,7 @@ QString ViewerBackend::defaultCloudUrl()
 // 手机端告警页数据源（桌面 NotifyDialog 已有本地通知，不需要它；仅手机端拉）。
 void ViewerBackend::fetchEvents()
 {
-    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    // 2026-10-13 审计 2.9：m_nam 已在构造函数创建，这里直接用
     QString httpUrl = m_url;
     httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
            .replace(QLatin1String("ws://"), QLatin1String("http://"));
@@ -2841,7 +2845,7 @@ void ViewerBackend::requestDiagFeedback()
 void ViewerBackend::checkQmlPatch()
 {
 #if defined(Q_OS_ANDROID)
-    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    // 2026-10-13 审计 2.9：m_nam 已在构造函数创建，这里直接用
     QString httpUrl = m_url;
     httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
            .replace(QLatin1String("ws://"), QLatin1String("http://"));
@@ -2982,7 +2986,7 @@ void ViewerBackend::stopAllLive(const QString &why)
 }
 void ViewerBackend::fetchRecordings()
 {
-    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    // 2026-10-13 审计 2.9：m_nam 已在构造函数创建，这里直接用
     // 云端地址：m_url 是 ws://host:port/ws/viewer，派生 http://host:port/api/recordings
     QString httpUrl = m_url;
     httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
@@ -3014,7 +3018,7 @@ void ViewerBackend::fetchRecordings()
 // 拉全部班级（含每台在线数）。云端算好结论推下来，界面只消费。
 void ViewerBackend::requestClasses()
 {
-    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    // 2026-10-13 审计 2.9：m_nam 已在构造函数创建，这里直接用
     QString httpUrl = m_url;
     httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
            .replace(QLatin1String("ws://"), QLatin1String("http://"));
@@ -3061,7 +3065,7 @@ void ViewerBackend::requestClasses()
 
 void ViewerBackend::requestStorage()
 {
-    if (!m_nam) m_nam = new QNetworkAccessManager(this);
+    // 2026-10-13 审计 2.9：m_nam 已在构造函数创建，这里直接用
     QString httpUrl = m_url;
     httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
            .replace(QLatin1String("ws://"), QLatin1String("http://"));
