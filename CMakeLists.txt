@@ -148,6 +148,8 @@ qt_add_executable(viewer-qt
   src/main.cpp
   src/viewerbackend.cpp
   src/viewerbackend.h
+  # 2026-10-13 架构拆分（审计 2.1）：文件推送状态机独立编译单元，给 viewerbackend.cpp 减负
+  src/viewerbackend_file.cpp
   ${STE_SINGLEINSTANCE_SRC}
   src/oauthlogin.cpp
   src/oauthlogin.h

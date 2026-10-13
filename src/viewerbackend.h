@@ -35,6 +35,26 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 #include <QVariantList>
 #include <QVariantMap>
 
+// ── 文件推送共享符号（2026-10-13 架构拆分）──
+// viewerbackend.cpp / viewerbackend_file.cpp 两个翻译单元共享：常量用 constexpr
+// （内联无 ODR 问题），humanBytes 用 inline。别改成非 inline 的非 constexpr 版本
+// ——那会在两个 .cpp 里产生重复符号。
+/**
+ * 文件分片大小（为什么 64KB）：被控端 file_chunk 的 data 是 base64，大文件整发＝一条
+ * 几 MB 的 JSON；一片一回报，卡在第几片能直接看出来。见 viewerbackend.cpp 顶部注释。
+ */
+constexpr qint64 kFileChunkBytes = 64 * 1024;
+/** 等多久算"教室机没应答"（毫秒）。一片一回报，超时判对面掉线并删半截文件。 */
+constexpr int kPushAckTimeoutMs = 15000;
+/** 体积的人话写法（1024 进制，只到 MB）。进度条旁边那行要给人看。 */
+inline QString humanBytes(qint64 n)
+{
+    if (n < 1024) return QString::number(n) + QStringLiteral(" B");
+    if (n < 1024 * 1024)
+        return QString::number((double)n / 1024.0, 'f', 1) + QStringLiteral(" KB");
+    return QString::number((double)n / 1024.0 / 1024.0, 'f', 1) + QStringLiteral(" MB");
+}
+
 class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向声明，避免引入 mmsystem）
 class AudioPlayback; // B6：管理端播放（学生回传的 audio/pcm 帧）
 class LdcReceiver;  // 2026-10-09：WebRTC 收流（libdatachannel 替换 QWebEngine 离屏）
