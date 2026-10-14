@@ -1,4 +1,4 @@
-; 星集控管理端 · NSIS 安装器（首次安装 / 二次升级 / 保留配置）
+﻿; 星集控管理端 · NSIS 安装器（首次安装 / 二次升级 / 保留配置）
 ; 版本号来自 build/version.nsh（与 MSI、应用内同源，由 scripts/gen-wxs-viewer.mjs 生成）。
 ; 用法（在 viewer-qt/ 目录下）：makensis scripts/make-installer.nsi
 ;   产出 dist/stelarith-viewer-setup-<版本>.exe，默认安装到 **$PROGRAMFILES64\StelarithViewer（纯 ASCII）**
