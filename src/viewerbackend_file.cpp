@@ -104,6 +104,13 @@ void ViewerBackend::pushFile(const QString &urlText)
     p.insert(QStringLiteral("name"), m_fileName);
     p.insert(QStringLiteral("total_bytes"), (double)m_fileTotal);
     sendAction(QStringLiteral("file_push"), p);
+    // 2026-10-14 修（审计 P1）：原来发出 file_push 后**不启动看门狗**。
+    // m_pushWatchdog 只在「收到回执之后」才 start（viewerbackend.cpp:201），
+    // 于是「教室机离线 / agent 崩了 / 云端把这条 file_push 丢了」时第一条回执永远
+    // 不来 → 看门狗从未启动 → m_fileState 永远停在 "pushing"，界面上没有任何超时
+    // 提示，用户只能盯着转圈猜是不是卡死了。
+    // 分片那一段本来就靠 :201 那条续命，缺口恰好只有第一条 —— 这里补上就闭环了。
+    if (m_pushWatchdog) m_pushWatchdog->start(kPushAckTimeoutMs);
 }
 void ViewerBackend::sendNextChunk()
 {

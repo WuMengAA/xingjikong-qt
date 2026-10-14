@@ -64,8 +64,17 @@ void LdcReceiver::createPc(const QByteArray &payload)
                 m_connected.store(conn);
                 emit stateChanged(conn);
             }
-            if (st == rtc::PeerConnection::State::Failed)
+            if (st == rtc::PeerConnection::State::Failed) {
                 emit failed(QStringLiteral("PeerConnection Failed"));
+                // 2026-10-14 修（审计 P1）：Failed 之后不拆掉这台 PC，RTC 就再也没救。
+                // 原来 stop() 全库零调用点 → 这台 PC 一辈子不复用。于是后续每台设备的
+                // offer 都落进 onSignal 的「已有 PC → 重协商」分支（onSignal:23），
+                // 往一台**已死**的 PC 上 setRemoteDescription：answer 永远不生成，
+                // RTC 整个进程死在这儿，只能一直吃 JPEG 兜底，而且日志上看不出来为什么。
+                // 延时到事件循环再拆 —— 不能在这台 PC 自己的回调栈里 close 它自己
+                //（和上面 offer 建 PC 用 singleShot(0) 是同一个约束，见本文件 :38 的注释）。
+                QTimer::singleShot(0, this, [this]() { stop(); });
+            }
         });
 
         // 收流：track 的每个 message 是 RTP 包（RtpHeader + JPEG 载荷），剥头解 JPEG。

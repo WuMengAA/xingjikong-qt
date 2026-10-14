@@ -15,7 +15,9 @@
 
 #include <QObject>
 #include <QByteArray>
+#include <QMutex>
 #include <functional>
+#include <atomic>
 
 // 2026-10-11：手机 App 并入管理端（Android target）→ 音频采集是 winmm 专属。
 // Android 无 waveIn，用空实现 stub（startCapture 返回 false），保持接口不破。
@@ -51,7 +53,15 @@ public:
     void handleBuffer();
 
 private:
-    bool m_active = false;
+    // 2026-10-14 修（审计 P0）：原是非原子 bool。handleBuffer() 跑在 winmm 音频驱动线程
+    //（见 viewerbackend_voice.cpp:136 的注释），stopCapture() 跑主线程，
+    // 两边同时读写同一个 bool 就是数据竞争。改原子后 active() 这类锁外读取才安全。
+    std::atomic<bool> m_active{false};
+    // 保护 m_waveIn / m_header / m_buffer 的完整生命周期（重新入队 ↔ 停止回收）。
+    // ⚠️ 锁内**不许**调 onFrame/onError：onError 那条链会经 stopSpeaking 回来调
+    // stopCapture() 抢这把**非递归**锁 → 自死锁。回调一律出锁之后再调。
+    // Android 版不用它也没关系，留着给 audio_capture_android.cpp 同样的场景复用。
+    QMutex m_mu;
     QString m_lastError;
 #ifndef Q_OS_ANDROID
     HWAVEIN m_waveIn = nullptr;

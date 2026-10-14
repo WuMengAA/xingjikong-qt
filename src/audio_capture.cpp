@@ -46,9 +46,14 @@ AudioCapture::~AudioCapture()
 
 bool AudioCapture::startCapture()
 {
-    if (m_active) return true;
+    // 只在锁内读一下就立刻放锁：下面马上要调 g_activeCapture->stopCapture()，
+    // 那是**另一个对象**的锁，但本对象的 m_active 判据必须先拿锁读完再放行。
+    {
+        QMutexLocker lock(&m_mu);
+        if (m_active) return true;
+    }
     if (g_activeCapture && g_activeCapture != this) {
-        // 别的实例在采：先停它（管理端单麦语义）
+        // 别的实例在采：先停它（管理端单麦语义）。锁外调 —— 抢的是那个实例的锁。
         g_activeCapture->stopCapture();
     }
 
@@ -108,7 +113,12 @@ bool AudioCapture::startCapture()
         return false;
     }
 
-    m_active = true;
+    // 收尾也在锁内：handleBuffer() 判的是「m_active && m_waveIn」，
+    // 这两个必须成对可见，否则回调会卡在 m_active 已置位、缓冲却还没排好的窗口里。
+    {
+        QMutexLocker lock(&m_mu);
+        m_active = true;
+    }
     g_activeCapture = this;
     qInfo("[audio] 🎤 麦克风已开（16kHz 单声道 16bit，20ms/帧）");
     return true;
@@ -116,25 +126,63 @@ bool AudioCapture::startCapture()
 
 void AudioCapture::stopCapture()
 {
-    if (!m_active && !m_waveIn) return;
-    m_active = false;
-    if (g_activeCapture == this) g_activeCapture = nullptr;
-    if (m_waveIn) {
-        waveInStop(m_waveIn);
-        if (m_header.lpData) waveInUnprepareHeader(m_waveIn, &m_header, sizeof(m_header));
-        waveInClose(m_waveIn);
-        m_waveIn = nullptr;
+    {
+        QMutexLocker lock(&m_mu);
+        if (!m_active && !m_waveIn) return;
+        m_active = false;
+        if (g_activeCapture == this) g_activeCapture = nullptr;
+        if (m_waveIn) {
+            // 2026-10-14 修（审计 P0）：原顺序是 Stop → Unprepare → Close，
+            // 而且这三个调用的返回值全部丢弃。两处问题：
+            //  ① 缺 waveInReset —— 驱动线程可能还握着已入队的缓冲，直接 Close 之后
+            //     handleBuffer() 会往一个**已关的句柄**上 waveInAddBuffer。
+            //  ② 不查返回值 —— 反复开关麦时句柄/缓冲会悄悄泄漏，日志上一个字都没有，
+            //     用户只觉得"麦怎么没声了"，真正原因根本查不出来。
+            waveInStop(m_waveIn);
+            if (const MMRESULT r = waveInReset(m_waveIn); r != MMSYSERR_NOERROR)
+                qWarning("[audio] waveInReset 失败：%s（继续回收）",
+                         waveErrText(r).toUtf8().constData());
+            if (m_header.lpData) {
+                if (const MMRESULT r = waveInUnprepareHeader(m_waveIn, &m_header, sizeof(m_header));
+                    r != MMSYSERR_NOERROR)
+                    qWarning("[audio] waveInUnprepareHeader 失败：%s",
+                             waveErrText(r).toUtf8().constData());
+            }
+            if (const MMRESULT r = waveInClose(m_waveIn); r != MMSYSERR_NOERROR)
+                qWarning("[audio] waveInClose 失败：%s", waveErrText(r).toUtf8().constData());
+            m_waveIn = nullptr;
+        }
+        m_header = {};
+        m_buffer.clear();
     }
-    m_header = {};
-    m_buffer.clear();
     qInfo("[audio] 🎤 麦克风已关（静音）");
 }
 
 void AudioCapture::handleBuffer()
 {
-    if (!m_active || !m_waveIn) return;
-    // 这一帧采满了：先吐出去，再重新入队继续采（避免停止采集时丢数据）。
-    if (onFrame) onFrame(m_buffer);
-    // 重新入队（单缓冲 20ms 足够，延迟小）
-    waveInAddBuffer(m_waveIn, &m_header, sizeof(m_header));
+    // 本函数跑在 winmm 音频驱动线程（见 viewerbackend_voice.cpp:136 的注释）。
+    // 两件事必须先在锁内做完，否则和主线程的 stopCapture() 并发就是 UB：
+    //  ① 原来 onFrame(m_buffer) 直接把 m_buffer 的引用递出去，而 stopCapture() 的
+    //     m_buffer.clear() 可能同一刻在跑 —— 边读边清。先锁内拷出来，锁外再吐。
+    //  ② 原来完全不查 waveInAddBuffer 的返回值：句柄已被 stop 关掉时它照样返回失败，
+    //     代码却当成功 —— 这就是"麦克风拔了也不报错、界面一声不吭"的源头。
+    QByteArray frame;
+    QString failMsg;
+    {
+        QMutexLocker lock(&m_mu);
+        if (!m_active || !m_waveIn) return;   // stop 已回收 → 别往已关句柄上入队
+        frame = m_buffer;                     // 锁内拷贝，锁外吐帧
+        const MMRESULT r = waveInAddBuffer(m_waveIn, &m_header, sizeof(m_header));
+        // WAVERR_STILLPLAYING 不算错：单缓冲设计只在 WIM_DATA 后入队，不会真撞上；
+        // 真返回了也只是说上一帧还在放，不该因此中断采集。
+        if (r != MMSYSERR_NOERROR && r != WAVERR_STILLPLAYING)
+            failMsg = QStringLiteral("采集中断：%1（可能麦克风被拔了）").arg(waveErrText(r));
+    }
+    // 出锁之后再调回调：onError 那条链会经 stopSpeaking 回来调 stopCapture，
+    // 抢的是这把**非递归**锁 —— 在锁内调就是自死锁。
+    if (!failMsg.isEmpty()) {
+        if (onError) onError(failMsg);
+        return;
+    }
+    if (onFrame) onFrame(frame);
 }

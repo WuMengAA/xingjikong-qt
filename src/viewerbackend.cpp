@@ -391,7 +391,16 @@ QString ViewerBackend::accountName() const { return m_accountUser; }
 QString ViewerBackend::role() const { return m_role; }
 bool ViewerBackend::mayDo(const QString &perm) const
 {
-    if (m_role != QStringLiteral("admin")) return adminOnlyActions().contains(perm);
+    // 2026-10-14 修（审计 P0）：这里原来漏了一个 `!`，把权限门控整个判反。
+    // 教师身份下 adminOnlyActions() 里那批危险动作（lock/reboot/shutdown/远控/
+    // terminal_open/定时关机/launch_app/broadcast）一律返回 true = **放行**，
+    // 反而是表外的普通动作被拦。
+    // 文档契约在 viewerbackend.h:357-358 写得很明确：「没在这张表里的一律算
+    // 『所有人都能做』」—— 也就是 !contains。grep 全库 3 个调用点
+    //（Main.qml:3048 permOk / 3160 broadcastAll / 3412 命令面板）传的全都是动作名，
+    // 没有一个传 "admin" 这类权限键，所以补 `!` 就同时改对了全部调用方。
+    // 一直没暴露是因为默认身份是 admin（admin 分支恒 true），教师那路从来没被验证过。
+    if (m_role != QStringLiteral("admin")) return !adminOnlyActions().contains(perm);
     return true;
 }
 bool ViewerBackend::setRole(const QString &role)
