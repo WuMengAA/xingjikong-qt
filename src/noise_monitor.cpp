@@ -50,8 +50,22 @@ double captureRms(int sampleRate)
         waveInClose(h);
         return -1.0;
     }
-    waveInAddBuffer(h, &hdr, sizeof(hdr));
-    waveInStart(h);
+    // 2026-10-14 修（审计）：原来这两个返回值不查，失败会一路滑到下面的 600ms
+    // 死等 —— 最终同样 return -1.0（结果正确），但白等最多 600ms，期间线程池
+    // 线程被占着。这里快速失败，回滚顺序与末尾的释放顺序相反。
+    // 注意**故意不打日志**：本函数每 2s 被 Task::run 周期性调用，设备被语音对讲
+    // 独占时失败是常态；onCaptured() 已有「从能采到变成采不到才报一次」的去抖，
+    // 在这里打 qWarning 会绕过那层去抖、每 2s 刷一条。
+    if (waveInAddBuffer(h, &hdr, sizeof(hdr)) != MMSYSERR_NOERROR) {
+        waveInUnprepareHeader(h, &hdr, sizeof(hdr));
+        waveInClose(h);
+        return -1.0;
+    }
+    if (waveInStart(h) != MMSYSERR_NOERROR) {
+        waveInUnprepareHeader(h, &hdr, sizeof(hdr));
+        waveInClose(h);
+        return -1.0;
+    }
 
     // 等录满（最多 ~600ms 兜底，防设备不吐数据时死等）
     QElapsedTimer t;
