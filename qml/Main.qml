@@ -426,14 +426,16 @@ ApplicationWindow {
                         spacing: 8
                         Repeater {
                             // 2026-10-11：手机管理端隐藏「屏幕广播」（老师桌面推流，桌面专属）
+                            // 2026-10-14：按钮文案「刷新多班墙」→「多班墙」（行为本就是把墙弹窗打开，
+                            // 叫"刷新"名不副实；多设备入口留在概览，单设备操作列表不再放它）
                             model: root.isPhone
                                    ? [ { l: "锁屏", a: "lock" }, { l: "发通知", a: "notify" },
                                        { l: "广播", a: "broadcast" }, { l: "语音对讲", a: "voice" },
-                                       { l: "刷新多班墙", a: "multiband" } ]
+                                       { l: "多班墙", a: "multiband" } ]
                                    : [ { l: "锁屏", a: "lock" }, { l: "发通知", a: "notify" },
                                        { l: "广播", a: "broadcast" }, { l: "语音对讲", a: "voice" },
                                        { l: "屏幕广播", a: "screen" }, { l: "考试模式", a: "exam" },
-                                       { l: "刷新多班墙", a: "multiband" } ]
+                                       { l: "多班墙", a: "multiband" } ]
                             delegate: Rectangle {
                                 width: 76; height: 30; radius: th.rCtrl
                                 color: qhMa.containsMouse ? th.hover2 : th.panel
@@ -714,7 +716,7 @@ ApplicationWindow {
                                         }
                                         Text {
                                             width: parent.width - 76
-                                            text: modelData.uid + " · " + modelData.action
+                                            text: modelData.uid + " · " + root.actionLabel(modelData.action)
                                                   + (modelData.ok ? ""
                                                         : (modelData.err ? "（" + modelData.err + "）" : ""))
                                             color: modelData.ok ? th.op : th.fg3
@@ -1503,7 +1505,8 @@ ApplicationWindow {
                                     backend.sendAction("process_list")
                                 } },
                                 { l: "监控",   f: function () { openOnly("camera") } },
-                                { l: "多班墙", f: function () { openOnly("multiband") } },
+                                // 2026-10-14 修（UI 反馈 #4）：多班墙是多设备视图，不该出现在
+                                // 单设备「看看」操作列表里 —— 概览页顶部已有「多班墙」入口（quickAction）。
                                 { l: "音量",   f: function () { volumeDlg.open() } },
                                 { l: "文件",   f: function () { openOnly("file") } }
                             ]
@@ -2968,6 +2971,34 @@ ApplicationWindow {
             { name: "跟随系统外观",     keys: ["auto", "xitong", "xt"], tip: "跟着系统配色走", run: function () { backend.themeMode = 2 } },
             { name: "打开官网下载页",   keys: ["download", "xiazai", "xz"], tip: "打开 www.245959623.xyz/download", run: function () { backend.openExternal("https://www.245959623.xyz/download") } }
         ]
+    }
+
+    // ── 操作日志的 action → 中文（2026-10-14 加 · UI 反馈 #5）──
+    // 右侧「最近回执」流水原来直接显示被控端回执里的英文 action 名
+    // （如 remote_control_start），老师看不懂。只做 QML 侧映射，不动 C++ 数据结构；
+    // 覆盖常见动作，未覆盖的回落原文（宁可露英文也不硬编错）。
+    function actionLabel(a) {
+        const m = {
+            "lock": "锁屏", "shutdown": "关机", "reboot": "重启",
+            "screenshot": "截图", "notify": "通知",
+            "set_volume": "设置音量", "volume": "音量",
+            "remote_control_start": "远程控制", "remote_control_stop": "停止远程控制",
+            "process_list": "软件列表", "list_shortcut_candidates": "软件列表",
+            "launch_app": "打开软件", "open_app": "打开软件",
+            "camera_list": "摄像头列表", "camera_bind": "绑定摄像头",
+            "camera_test": "摄像头测试", "camera_snapshot": "摄像头快照",
+            "camera_record_start": "开始录像", "camera_record_stop": "停止录像",
+            "camera_stream_start": "摄像头推流", "camera_stream_stop": "停止推流",
+            "broadcast": "屏幕广播", "screen": "屏幕广播",
+            "voice": "语音对讲", "exam_mode": "考试模式", "exam": "考试模式",
+            "multiband": "多班墙", "file_push": "推送文件",
+            "terminal_open": "远程终端", "terminal_input": "终端输入",
+            "schedule_shutdown": "定时关机", "schedule_reboot": "定时重启",
+            "noise_monitor_start": "噪音监测开", "noise_monitor_stop": "噪音监测关",
+            "study_mode_start": "自习模式开", "study_mode_stop": "自习模式关",
+            "self_update": "自动更新", "ping": "心跳"
+        }
+        return m[a] !== undefined ? m[a] : a
     }
 
 
