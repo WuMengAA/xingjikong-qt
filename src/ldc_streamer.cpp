@@ -180,6 +180,12 @@ void LdcStreamer::stop()
     stopCamera();            // 先杀 ffmpeg 采集进程（否则推流停了它还占着摄像头）
     m_connected = false;
     if (m_pc) {
+        // 2026-10-14 修（审计 P2）：m_pc 的访问原来不统一 —— start() / renegotiate()
+        // 都在 m_mu 里读，唯独 stop() 裸着。今天全在主线程所以没有真实竞争，
+        // 但「同一成员有的访问点持锁、有的不持」正是本次审计里 addRemoteCandidate
+        // 裸抛那类问题的同款土壤：哪天有人在子线程里碰 m_pc，这一处就是漏点。
+        // 一致性优先，补齐。
+        QMutexLocker lock(&m_mu);
         auto *pc = static_cast<rtc::PeerConnection *>(m_pc.get());
         // 只 close：libdatachannel 内部线程还持有引用，close() 后 shared_ptr
         // 引用计数自然归零才安全析构（PC 由 m_pc 持有，重置即释放所有权）。

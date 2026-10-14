@@ -71,6 +71,7 @@
 #include <QStringList>
 #include <QStandardPaths>
 #include <QSslSocket>   // 2026-10-13：启动时 TLS 后端自检（TLS 挂掉时故障完全静默）
+#include <QSslError>    // 2026-10-14：sslErrors 回调里要具体错误原因
 #include <QSet>
 #include <QProcess>
 #include <QThread>      // QThread::msleep（camera_record 确认"真的在录"时等两秒）
@@ -215,6 +216,11 @@ constexpr int kFrameIntervalMs = 2000;   // 2 秒一帧，与 D2 保持一致
 // 采集页回收延迟：rtc-stop 后留这么久，没人重新点开就真删（见 scheduleRtcViewReap）
 constexpr int kRtcReapDelayMs = 5000;
 constexpr int kHeartbeatIntervalMs = 10000; // 心跳缺省值（云端 registered 里给了就以云端为准）
+// 2026-10-14 修（审计 P2）：云端下发的心跳间隔以前只要 >0 就无条件采纳，
+// 异常值（笔误写成 3600000 = 1 小时之类）会让心跳变得极稀 → 云端 30s 判离线 →
+// 重连 → 又收到同一份配置 → 循环「连上又断」。现在钳制在这个区间内。
+constexpr int kHeartbeatMinMs = 1000;    // 下界：再密就白耗流量
+constexpr int kHeartbeatMaxMs = 60000;   // 上界：再稀就会被云端当离线
 constexpr int kMaxBackoffMs = 8000;      // 退避上限（2026-10-08：从 15s 降到 8s，断网恢复更快）
 constexpr int kFirstBackoffMs = 500;     // 首连/未注册时的快速重试间隔（2026-10-08）
 constexpr int kProtocolVersion = 1;      // 协议 v1（《星集控-协议规范v1-2026-10-03.md》）
@@ -5713,8 +5719,14 @@ void handleControlText(const QString &text)
         g_islandOfflineShown = false;       // 2026-10-08：真的又连上了，断线提示的闸门放开（下一次断线再弹一条）
         const int hb = pay.value(QStringLiteral("heartbeatMs")).toInt(0);
         const int to = pay.value(QStringLiteral("timeoutMs")).toInt(0);
-        if (hb > 0 && hb != g_heartbeatMs) {
-            g_heartbeatMs = hb;
+        // 2026-10-14 修（审计 P2）：原来只要 hb > 0 就无条件采纳，异常值直接生效。
+        // g_timeoutMs 只用于日志说明、不参与本端任何判定，所以不加约束。
+        const int hbClamped = qBound(kHeartbeatMinMs, hb, kHeartbeatMaxMs);
+        if (hb > 0 && hbClamped != g_heartbeatMs) {
+            if (hbClamped != hb)
+                qWarning("[agent-qt] 云端下发心跳 %d ms 超出合理范围 [%d, %d]，按 %d ms 执行",
+                         hb, kHeartbeatMinMs, kHeartbeatMaxMs, hbClamped);
+            g_heartbeatMs = hbClamped;
             if (g_hbTimer) g_hbTimer->setInterval(g_heartbeatMs);
         }
         if (to > 0) g_timeoutMs = to;
@@ -6344,6 +6356,19 @@ int main(int argc, char *argv[])
                          // disconnected 里统一退避重连，这里只报真实原因
                          qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 连接出错 —— %1").arg(g_ws->errorString());
                      });
+
+    // 2026-10-14 加（审计 P2）：sslErrors 以前根本没接。Qt 默认 VerifyPeer + 未连接
+    // 此信号 = fail-closed，坏证书**本来就不会被放行**（这点一直是安全的）；但
+    // sslErrors 之后只走 errorOccurred 报一句笼统的 "SSL handshake failed"，日志
+    // 分不清是证书过期、host mismatch 还是自签 —— 教室排查 TLS 问题时很痛。
+    // 这里接上**只打日志、绝不调 ignoreSslErrors**，fail-closed 语义不变，只是把原因打细。
+    QObject::connect(g_ws, &QWebSocket::sslErrors, &app, [](const QList<QSslError> &errs) {
+        // Qt 6 已移除 QSslSocket::SslErrorString / QSslError::sslError()，
+        // errorString() 本身就是人类可读的具体原因，够用。
+        for (const QSslError &e : errs)
+            qWarning().noquote() << QStringLiteral("[agent-qt] TLS 校验失败（已中止，不会放行）：%1")
+                .arg(e.errorString());
+    });
 
     QObject::connect(g_ws, &QWebSocket::textMessageReceived, &app, [](const QString &msg) {
         handleControlText(msg);
