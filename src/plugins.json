@@ -1,0 +1,22 @@
+[
+  {
+    "id": "echo",
+    "name": "Echo 示例插件",
+    "version": "1.0.0",
+    "author": "Stelarith",
+    "description": "演示进程外插件：实现 echo 指令并在灵动岛弹提示。对应被控端内置示例 plugins/samples/echo。",
+    "minAgentVersion": "0.6.31",
+    "permissions": ["island"],
+    "downloadUrl": ""
+  },
+  {
+    "id": "voicehub-broadcast",
+    "name": "VoiceHub 广播（第三方能力）",
+    "version": "0.1.0",
+    "author": "社区",
+    "description": "启用后获得「老师广播音频 / 点歌器 / 歌词」等满配能力（P0 反思要点名的能力外迁到第三方能力窗口）。被控端已对 broadcast/点歌/歌词 等指令返回「需要安装插件」的友好提示——装好本插件即可在插件市场一键启用。规划中，待上传下载包。",
+    "minAgentVersion": "0.6.31",
+    "permissions": ["island", "notify"],
+    "downloadUrl": ""
+  }
+]

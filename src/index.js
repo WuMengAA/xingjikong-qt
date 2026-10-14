@@ -287,6 +287,27 @@ const server = http.createServer((req, res) => {
     return createReadStream(file).pipe(res);
   }
 
+  // ── 公开只读：插件商店清单（P2 · 2026-10-14）─────────────────────────────
+  // 被控端「插件市场」窗口来取，渲染可安装的第三方能力（id/名称/版本/作者/说明/下载包）。
+  // 公开、不带鉴权——清单本身不含任何令牌；具体插件包下载由各自的 downloadUrl 决定（可走 CDN）。
+  if (req.method === 'GET' && u.pathname === '/api/plugins') {
+    const pluginsFile = join(__dirname, 'plugins.json');
+    let list = [];
+    if (existsSync(pluginsFile)) {
+      try { list = JSON.parse(readFileSync(pluginsFile, 'utf8')); }
+      catch (e) { list = []; }
+    }
+    const body = JSON.stringify({ apiVersion: API_VERSION, plugins: list });
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': Buffer.byteLength(body),
+      'x-api-version': API_VERSION,
+      'cache-control': 'public, max-age=30',
+    });
+    res.end(body);
+    return;
+  }
+
   // ── 公开只读：发布版本信息（2026-10-06 加）──────────────────────────────
   // 给**官网下载中心**用：站点服务端来取，渲染"当前版本 / 下载地址 / sha256"。
   // 为什么单独开一个**不带鉴权**的端点：官网是公网站点，不该持有管理端令牌；
@@ -294,6 +315,19 @@ const server = http.createServer((req, res) => {
   // 大小、sha256、说明），**不含任何令牌**，暴露了也没有额外风险。
   // 与 ota.json 同源 → 发版时只改一处，官网自动跟着变，不需要两处各写一套。
   if (req.method === 'GET' && u.pathname === '/api/public/ota') {
+    // ⚠️ 2026-10-14 测试通道抓到的缺口：本端点此前走通用 send()，**不带 cache-control**
+    //    ⇒ 公网 CDN/代理按启发式缓存，发布新版本后官网下载中心可能几分钟不刷新。
+    //    版本信息是公开只读内容：private + 60s —— 允许浏览器短暂缓存，不让共享缓存长期囤。
+    const sendOta = (obj) => {
+      const body = JSON.stringify({ apiVersion: API_VERSION, ...obj });
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+        'x-api-version': API_VERSION,
+        'cache-control': 'private, max-age=60',
+      });
+      res.end(body);
+    };
     const product = (u.searchParams.get('product') || 'agent').trim();
     // current（可选）= 客户端自报的当前版本。带上它，服务端直接算出 hasUpdate ——
     // 版本比较**只有这一份实现**（见 ota.js 的 cmpVersion 注释：两端各写一遍 C++ 比较
@@ -305,9 +339,9 @@ const server = http.createServer((req, res) => {
     const ota = latestFor(product, channel);
     // 没发布过就如实回 published:false —— 官网据此显示"暂未发布"，不假装有内容。
     if (!ota || !ota.version) {
-      return send(200, { ok: true, product, published: false, latest: null, hasUpdate: false });
+      return sendOta({ ok: true, product, published: false, latest: null, hasUpdate: false });
     }
-    return send(200, {
+    return sendOta({
       ok: true,
       product,
       published: true,
