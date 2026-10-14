@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <QElapsedTimer>
+#include <QDebug>
 
 // ── winmm waveIn 采集 16kHz/单声道/16bit PCM ──────────────────────────
 // 定时 pump 拉取数据（waveInAddBuffer + waveInGetNumDevs 头部检查）。
@@ -42,9 +43,37 @@ bool Microphone::openDevice()
     std::memset(&m_header, 0, sizeof(m_header));
     m_header.lpData = m_buffer.data();
     m_header.dwBufferLength = m_buffer.size();
-    waveInPrepareHeader(m_waveIn, &m_header, sizeof(m_header));
-    waveInAddBuffer(m_waveIn, &m_header, sizeof(m_header));
-    waveInStart(m_waveIn);
+
+    // 2026-10-14 修（审计 P1）：下面三个调用的返回值原来**全都不查**、无条件 return true。
+    // 若 waveInStart 失败：m_waveIn 非空 → start() 返回 true → m_running=true，
+    // 但采集根本没起来，pump() 每 20ms 空转一次却永远收不到一个字节
+    // → 语音通话「静默无声」，而日志上一片正常，老师听到的死寂查不出任何线索。
+    // 对比 noise_monitor.cpp：它同样漏查这两个返回值，但有 600ms 死等 +
+    // 「样本数<=0 就返回 -1.0」兜底，所以不会静默失败；这里没有兜底，只能把检查补上。
+    // 失败一律先回滚已开的资源再返回 false（回滚顺序与 closeDevice 相反）。
+    const MMRESULT prep = waveInPrepareHeader(m_waveIn, &m_header, sizeof(m_header));
+    if (prep != MMSYSERR_NOERROR) {
+        qWarning("[mic] waveInPrepareHeader 失败（错误码 %u），放弃采集", unsigned(prep));
+        waveInClose(m_waveIn);
+        m_waveIn = nullptr;
+        return false;
+    }
+    const MMRESULT add = waveInAddBuffer(m_waveIn, &m_header, sizeof(m_header));
+    if (add != MMSYSERR_NOERROR) {
+        qWarning("[mic] waveInAddBuffer 失败（错误码 %u），放弃采集", unsigned(add));
+        waveInUnprepareHeader(m_waveIn, &m_header, sizeof(m_header));
+        waveInClose(m_waveIn);
+        m_waveIn = nullptr;
+        return false;
+    }
+    const MMRESULT st = waveInStart(m_waveIn);
+    if (st != MMSYSERR_NOERROR) {
+        qWarning("[mic] waveInStart 失败（错误码 %u）——采集未启动，放弃", unsigned(st));
+        waveInUnprepareHeader(m_waveIn, &m_header, sizeof(m_header));
+        waveInClose(m_waveIn);
+        m_waveIn = nullptr;
+        return false;
+    }
     return true;
 }
 

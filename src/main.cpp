@@ -5828,8 +5828,15 @@ void handleControlText(const QString &text)
                                    .value(QStringLiteral("duplex")).toBool(false);
         if (duplex && !g_microphone.running()) {
             // 会话内采集：硬上限 120s 自动停（防挂起窃听，安全边界见语音通话设计 §3）
-            g_microphone.start(120000);
-            qInfo("[agent-qt] 🔊 语音通话开始（duplex，学生 mic 已开启，回传老师）");
+            // 2026-10-14 修（审计 P1）：返回值原来直接丢弃 —— mic 开不起来（无设备 /
+            // 被语音对讲独占 / 驱动报错）时照样打「mic 已开启」，于是老师那头听到的是
+            // 死寂，而我们这边日志写的是成功，两头都对不上。现在如实分岔。
+            if (g_microphone.start(120000)) {
+                qInfo("[agent-qt] 🔊 语音通话开始（duplex，学生 mic 已开启，回传老师）");
+            } else {
+                qWarning("[agent-qt] ⚠️ 语音通话是 duplex 但本机 mic 没开起来"
+                         "（无麦克风 / 被语音对讲独占 / 设备报错），学生这端是哑的");
+            }
         }
         qInfo("[agent-qt] 🔊 老师开始讲话（语音对讲）");
         return;
