@@ -50,7 +50,19 @@ void LdcStreamer::onSignal(const QString &type, const QByteArray &payload)
             emit failed(QStringLiteral("setRemoteDescription(answer): %1").arg(QString::fromLocal8Bit(e.what())));
         }
     } else if (type == QLatin1String("candidate")) {
-        pc->addRemoteCandidate(rtc::Candidate(payload.constData()));
+        // 2026-10-14 修（审计 P0）：这里原来是**整个文件唯一没有 try-catch 的** libdatachannel
+        // 调用点。`rtc::Candidate` 构造要解析 SDP candidate 串、addRemoteCandidate 也会校验，
+        // 格式不对就抛 std::runtime_error —— 而这条调用链是
+        //   textMessageReceived → handleControlText → onSignal → 这里
+        // 一路裸抛到 Qt 事件循环 = **未捕获异常 → 进程直接终止**。
+        // 也就是说：云端只要转发一条畸形 rtc-ice，就能把这台教室机崩掉（远程可触发的 DoS）。
+        // 同文件另外 8 处 libdatachannel 调用（setRemoteDescription / setLocalDescription×2 /
+        // close / isOpen×2 / send×2）全都包着 try-catch，唯独这处漏了。
+        try {
+            pc->addRemoteCandidate(rtc::Candidate(payload.constData()));
+        } catch (const std::exception &e) {
+            emit failed(QStringLiteral("addRemoteCandidate: %1").arg(QString::fromLocal8Bit(e.what())));
+        }
     }
 }
 

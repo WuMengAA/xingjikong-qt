@@ -3708,11 +3708,15 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
 
     if (action == QStringLiteral("lock")) {
         // user32 真实导出名就是 LockWorkStation（无 Native 后缀，那个名字不存在）
-        if (LockWorkStation())
+        if (LockWorkStation()) {
             out.result = QStringLiteral("done");
-        else
-            out.result = QStringLiteral("failed"),
+        } else {
+            // 2026-10-14 修（审计）：这里原来用**逗号运算符**当语句分隔符
+            //（`out.result = ..., out.error = ...`）—— 靠 QString::operator= 返回引用才凑合成立。
+            // 它看起来就像漏了个分号，下一个改这段的人很容易「顺手」补成分号再引入真 bug。
+            out.result = QStringLiteral("failed");
             out.error = QStringLiteral("LockWorkStation 返回 FALSE，错误码 %1").arg((int)GetLastError());
+        }
         return out;
     }
 
