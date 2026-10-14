@@ -1,4 +1,4 @@
-﻿; 星集控管理端 · NSIS 安装器（首次安装 / 二次升级 / 保留配置）
+; 星集控管理端 · NSIS 安装器（首次安装 / 二次升级 / 保留配置）
 ; 版本号来自 build/version.nsh（与 MSI、应用内同源，由 scripts/gen-wxs-viewer.mjs 生成）。
 ; 用法（在 viewer-qt/ 目录下）：makensis scripts/make-installer.nsi
 ;   产出 dist/stelarith-viewer-setup-<版本>.exe，默认安装到 **$PROGRAMFILES64\StelarithViewer（纯 ASCII）**
@@ -145,6 +145,15 @@ Section "Main" SEC_MAIN
   restore_env:
     CopyFiles "$PLUGINSDIR\viewer.env.bak" "$INSTDIR\viewer.env"
   no_restore:
+
+  ; ── 装完启动新版本（2026-10-14 加）────────────────────────────────────
+  ; 为什么：exe 直更通道（updater.cpp launchExeInstaller）不再写 apply-update.cmd
+  ; 批处理（那段 tasklist / "%PKG%" /S 模板被火绒启发式误报 Backdoor/Agent.oi，
+  ; 见 updater.cpp 注释），改为只拉起安装器 /S 后本进程退出；
+  ; 「停旧进程 → 覆盖 → 装完拉起」全部由这里完成。不加这句，OTA 升级后
+  ; 管理端不会自己起来（老行为依赖 cmd 里的 start 命令）。
+  ; 升级段 82 行已 Stop-Process 停掉旧实例，此处 Exec 装完即拉起，无锁冲突。
+  Exec '"$INSTDIR\viewer-qt.exe"'
 
   ; ── 迁移收尾：删掉旧的「中文」安装目录（仅迁移时执行）──
   ;    旧目录里的程序已被覆盖到新目录，这里只清残留；老师配置已在上面抢出来。
