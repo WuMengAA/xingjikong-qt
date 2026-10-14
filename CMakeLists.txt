@@ -306,6 +306,24 @@ else()
   message(WARNING "[viewer] _probe/ldc_libs/datachannel.lib 缺失——ldc_receiver 编译会失败，请先重建 libdatachannel")
 endif()
 
+# ── OpenSSL 运行时 DLL 拷进 build/（2026-10-14 补，对齐被控端）────────────
+# 为什么必须有：libdatachannel 的 DTLS 让 exe **静态导入** libssl-3-x64.dll /
+# libcrypto-3-x64.dll，windeployqt 不认识这两个（非 Qt 件）不会部署；
+# 而 build-qt-viewer.bat 每次干净重建（rd /s /q build）会把它们冲掉 ——
+# 0.6.33 出包现场实证：makensis 报 "File ..\build\libssl-3-x64.dll -> no files found"。
+# 历史上（0.6.25~0.6.32）靠手工拷进 build/，干净构建一次就缺一次。
+# DLL 与 .lib 同源：PG17 布局下 lib/ 的同级 bin/ 目录；STE_OPENSSL_ROOT 可覆盖。
+if(NOT STE_IS_ANDROID AND STE_OPENSSL_ROOT)
+  set(STE_OPENSSL_BIN "${STE_OPENSSL_ROOT}/../bin")
+  foreach(_ossl libssl-3-x64.dll libcrypto-3-x64.dll)
+    add_custom_command(TARGET viewer-qt POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+              "${STE_OPENSSL_BIN}/${_ossl}" "$<TARGET_FILE_DIR:viewer-qt>/${_ossl}"
+      COMMENT "[viewer] 拷贝 ${_ossl} → 构建输出目录（libdatachannel DTLS 运行时）"
+      VERBATIM)
+  endforeach()
+endif()
+
 # ── Qt 运行时部署（用 Qt 官方部署工具 windeployqt）──
 # 【为什么必须有】2026-10-04 踩的"真机级"坑：Qt6Widgets.dll 没跟着 exe 走（链接上了、
 # 但 DLL 复制规则没覆盖 Widgets 模块）—— 后果是 exe 一启动就退出，**而且一条日志都不写**：
