@@ -43,9 +43,12 @@
 #include <cstdlib>   // rand()：重连退避抖动（2026-10-08）
 #include <QRandomGenerator>   // 退避抖动改走 CSPRNG（rand() 未播种 ⇒ 全机同一序列，2026-10-13）
 #include <QStandardPaths>
+#include <QSettings>        // P0-1（2026-10-14）：本地功能开关持久化（QCoreApplication 名/组织已在 main 设置）
 #include <QElapsedTimer>
 #include <QUrl>
 #include <QWebSocket>
+#include <QTextEdit>    // P3：长期记录对话框（QTextEdit 不在 QWidgets 总含头里）
+#include <QCheckBox>    // P3：播放时段配置对话框
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
 #include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
 #include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
@@ -64,6 +67,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QTextStream>   // P3：长期记录对话框文本汇总
 #include <QHash>
 #include <QVector>
 #include <QFileInfo>
@@ -99,6 +103,9 @@
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include "plugin/pluginhost.h"   // P2：插件宿主（进程外插件 ABI）
+#include <QMessageBox>         // P2：插件市场对话框
+#include <QListWidget>         // P2：插件市场列表
 #include <QUrlQuery>
 #include <QMouseEvent>   // 2026-10-05：紧急通知点击关闭
 #include <QPaintEvent>   // 2026-10-05：全屏通知背景色（setStyleSheet 对顶层 QWidget 无效）
@@ -237,7 +244,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.31";
+constexpr const char *kAppVersion = "0.6.32";
 
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
@@ -317,6 +324,8 @@ QString g_recvDir;                 // file_push 落盘目录
 QProcess *g_recProc = nullptr;     // camera_record 正在录制的 ffmpeg 进程（stop 时 terminate）
 QString g_recOutPath;              // 正在录制的输出 mp4 路径
 QProcess *g_playProc = nullptr;    // media_session 正在播放的 ffplay 进程
+static QTimer *g_mediaTick = nullptr;   // P3：媒体在播时推进岛底「已播时长」的 1s 计时器
+static QTimer *g_mediaAutoStop = nullptr;  // P3：超播放时段窗口自动截断（单一定时器，避免旧计时器误停新会话）
 bool g_remoteControl = false;      // remote_control_start/stop 的真实会话状态
 int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
 int g_frameDiffMs = -1;            // 上一帧耗时（毫秒），动态帧率控制器用它判断画面是否稳定
@@ -373,6 +382,31 @@ enum class TrayState { Connected, Disconnected, Unconfigured };
 bool g_configured = true;            // URL+TOKEN 是否齐全（loadEnvFile 后判定）
 bool g_unconfigured = false;         // 已进入"未配置"态（不连接/不重试）
 bool g_unconfiguredNotified = false; // 未配置气泡只弹一次
+
+// ── P0-1（2026-10-14）：本地功能开关 ───────────────────────────────────────
+// 把被控端已存在的各项能力（通知/语音播报/噪音监测/灵动岛常驻/浅色主题）做成可勾选的开关，
+// 落 QSettings（组织 Stelarith / 应用 Stelarith Agent，注册表 HKCU）。默认全开，
+// 各子系统的入口点（speakText / notifyFromParams / noise_monitor_start / 灵动岛初始化）统一读这里。
+// 这样"设置项"才真的"调用设置项"，而不是只摆几个开机自启开关（用户 2026-10-14 反思）。
+namespace AgentSettings {
+    static bool noiseEnabled()  { return QSettings().value(QStringLiteral("feature/noiseEnabled"), true).toBool(); }
+    static void setNoiseEnabled(bool v) { QSettings().setValue(QStringLiteral("feature/noiseEnabled"), v); }
+    static bool voiceEnabled()  { return QSettings().value(QStringLiteral("feature/voiceEnabled"), true).toBool(); }
+    static void setVoiceEnabled(bool v) { QSettings().setValue(QStringLiteral("feature/voiceEnabled"), v); }
+    static bool notifyEnabled() { return QSettings().value(QStringLiteral("feature/notifyEnabled"), true).toBool(); }
+    static void setNotifyEnabled(bool v) { QSettings().setValue(QStringLiteral("feature/notifyEnabled"), v); }
+    static bool islandIdle()    { return QSettings().value(QStringLiteral("ui/islandIdle"), true).toBool(); }
+    static void setIslandIdle(bool v) { QSettings().setValue(QStringLiteral("ui/islandIdle"), v); }
+    static bool lightMode()     { return QSettings().value(QStringLiteral("ui/lightMode"), false).toBool(); }
+    static void setLightMode(bool v) { QSettings().setValue(QStringLiteral("ui/lightMode"), v); }
+
+    // ── P3 播放时段管理：允许的播放时段窗口（本地时 "HH:MM-HH:MM"）──
+    // 默认关闭 = 随时可播（不限制）；开启后只有落在窗口内才允许 media_session_start。
+    static bool playScheduleEnabled() { return QSettings().value(QStringLiteral("play/scheduleEnabled"), false).toBool(); }
+    static void setPlayScheduleEnabled(bool v) { QSettings().setValue(QStringLiteral("play/scheduleEnabled"), v); }
+    static QStringList playWindows() { return QSettings().value(QStringLiteral("play/windows"), QStringList()).toStringList(); }
+    static void setPlayWindows(const QStringList &v) { QSettings().setValue(QStringLiteral("play/windows"), v); }
+}
 bool g_reconnectNow = false;         // 保存新配置后：断线回调里立刻重连（别等退避）
 bool g_configDialogOpen = false;     // 配置窗防重入（首运行自动弹 + 手动点可能撞车）
 
@@ -1720,6 +1754,27 @@ void applyUpdateInfo(const QJsonObject &pay)
                   qPrintable(g_latestVer), kAppVersion,
                   canUpgrade ? "" : "（⚠ 清单缺 url/sha256，先别升，让管理员补 ota.json）");
         }
+        // P0-3（2026-10-14）：托盘气泡容易错过 ⇒ 同时经灵动岛主动推送（带 changelog + 操作按钮）。
+        // 非强制更新不打扰太久：20s 后自动收起；点了「立即更新」复用既有 self_update 链路。
+        if (g_tray && IslandOverlay::instance()) {
+            const QString desc = g_updateNotes.isEmpty()
+                ? QStringLiteral("当前 v%1，点「立即更新」即可静默升级。")
+                      .arg(QString::fromLatin1(kAppVersion))
+                : g_updateNotes;
+            QStringList acts{ QStringLiteral("立即更新"), QStringLiteral("稍后") };
+            IslandOverlay::instance()->showWithActions(
+                QStringLiteral("发现新版本 v%1").arg(g_latestVer), desc,
+                QStringLiteral("download"), IslandOverlay::Form::Centered, acts,
+                [](const QString &a) {
+                    if (a == QStringLiteral("立即更新")) {
+                        QJsonObject p;
+                        p.insert(QStringLiteral("url"), g_updateUrl);
+                        p.insert(QStringLiteral("sha256"), g_updateSha);
+                        p.insert(QStringLiteral("version"), g_latestVer);
+                        startSelfUpdate(QStringLiteral("island"), p);   // 与管理端同一条 self_update 链路
+                    }
+                }, 20000, false);
+        }
         if (g_actUpdate) {
             g_actUpdate->setVisible(true);
             g_actUpdate->setText(g_updateMandatory
@@ -2224,6 +2279,39 @@ void openInfoDialog()
         form->addRow(QStringLiteral("桌面快捷"), chkLnk);
     }
 
+    // ── P0-1（2026-10-14）：功能开关 —— 把已存在的能力做成可勾选、落 QSettings ──
+    // 之前「设置与信息」只有开机自启/桌面快捷两项，用户反映"设置太简单、不调用设置项"。
+    // 这里把通知/语音播报/噪音监测/灵动岛常驻/浅色主题都暴露出来，勾选即生效（部分实时作用于灵动岛）。
+    {
+        auto *grpLbl = new QLabel(QStringLiteral("功能开关"));
+        grpLbl->setStyleSheet(QStringLiteral("font-weight:bold;margin-top:8px;"));
+        form->addRow(grpLbl, new QWidget());   // 分组标题占一行
+
+        auto mkToggle = [&](const QString &label, bool on, const std::function<void(bool)> &apply) {
+            auto *cb = new QCheckBox(label);
+            cb->setChecked(on);
+            QObject::connect(cb, &QCheckBox::toggled, &dlg, [apply](bool v) { apply(v); });
+            form->addRow(cb);
+            return cb;
+        };
+        mkToggle(QStringLiteral("通知与弹窗"), AgentSettings::notifyEnabled(),
+                 [](bool v) { AgentSettings::setNotifyEnabled(v); });
+        mkToggle(QStringLiteral("语音播报（通知朗读）"), AgentSettings::voiceEnabled(),
+                 [](bool v) { AgentSettings::setVoiceEnabled(v); });
+        mkToggle(QStringLiteral("噪音监测"), AgentSettings::noiseEnabled(),
+                 [](bool v) { AgentSettings::setNoiseEnabled(v); });
+        mkToggle(QStringLiteral("灵动岛空闲常驻"), AgentSettings::islandIdle(),
+                 [](bool v) {
+                     AgentSettings::setIslandIdle(v);
+                     if (IslandOverlay::instance()) IslandOverlay::instance()->setIdleEnabled(v);
+                 });
+        mkToggle(QStringLiteral("浅色主题"), AgentSettings::lightMode(),
+                 [](bool v) {
+                     AgentSettings::setLightMode(v);
+                     if (IslandOverlay::instance()) IslandOverlay::instance()->setLightMode(v);
+                 });
+    }
+
     auto *btnRow = new QHBoxLayout();
     root->addLayout(btnRow);
 
@@ -2290,6 +2378,439 @@ void openInfoDialog()
 
     dlg.exec();
     infoOpen = false;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P0-2（2026-10-14）：配置自检 —— env 自动判断 + 一键修复
+ * 四项检查：配置完整 / 云端已连接 / 已注册 / 班级已绑。失败项给「一键修复」按钮
+ * （去配置 / 绑班 → 打开配置向导；未连 / 未注册 → 立即重连），不弹多层窗。
+ * 首运行（未配置）由 main 自动调一次；托盘菜单「配置自检…」也走它。
+ * ══════════════════════════════════════════════════════════════════════════ */
+void openConfigDialog();   // 前向声明：本函数在下方定义，runSelfCheck 的「一键修复」会调它
+void openPluginStore();     // 前向声明：P2 插件市场对话框
+void openNoiseLogDialog();  // 前向声明：P3 噪音长期记录查看
+void openStudyLogDialog();  // 前向声明：P3 自习模式长期记录查看
+void openPlayScheduleDialog(); // 前向声明：P3 播放时段配置
+
+// P3 前置声明：下方对话框 / lambda 在定义前用到这些静态辅助函数（定义在 executeAction 之前）
+static QString dataRoot();
+static void appendJsonl(const QString &subdir, const QJsonObject &o);
+static void logNoiseSample(double db, bool active, int seq, bool study, bool ok);
+static qint64 logStudyStart(double th, int need, int recSec);
+static void logStudyStop(qint64 startTs, int alertCount);
+static bool isPlayAllowedNow();
+static qint64 remainingMsInWindow();
+static void stopMediaSession();
+static PluginHost *g_pluginHost = nullptr;   // P2：插件宿主（进程外插件 ABI）；定义在 openPluginStore 之前以便对话框使用
+void runSelfCheck()
+{
+    static bool selfCheckOpen = false;     // 防重入
+    if (selfCheckOpen) return;
+    selfCheckOpen = true;
+
+    QDialog dlg;
+    dlg.setWindowTitle(QStringLiteral("星集控 · 配置自检"));
+    dlg.setMinimumWidth(520);
+
+    auto *root = new QVBoxLayout(&dlg);
+    auto *intro = new QLabel(QStringLiteral(
+        "自动检查本机接入状态。红色项表示需要处理后才能被管理端正常管控。"));
+    intro->setWordWrap(true);
+    root->addWidget(intro);
+
+    auto *list = new QVBoxLayout();
+    root->addLayout(list);
+
+    // 四项检查（同步读当前状态，便宜；重连态以 QWebSocket 实时状态为准）
+    struct Check { QString name; bool ok; QString fix; };
+    QVector<Check> checks;
+    checks.append({ QStringLiteral("配置完整（云端地址 + 设备令牌）"),
+                    g_configured, QStringLiteral("去配置 / 绑定") });
+    const bool connected = g_ws && g_ws->state() == QAbstractSocket::ConnectedState;
+    checks.append({ QStringLiteral("已连接云端"), connected, QStringLiteral("重试连接") });
+    checks.append({ QStringLiteral("已注册（云端已确认）"), g_registered, QStringLiteral("重试连接") });
+    checks.append({ QStringLiteral("班级已绑定（管理端按班可见）"),
+                    !g_classCode.isEmpty(), QStringLiteral("绑定班级") });
+
+    QVector<QPushButton *> fixBtns;
+    for (const Check &c : checks) {
+        auto *row = new QHBoxLayout();
+        auto *mark = new QLabel(c.ok ? QStringLiteral("✅") : QStringLiteral("❌"));
+        mark->setStyleSheet(c.ok ? QStringLiteral("color:#1a7f37;") : QStringLiteral("color:#c0392b;"));
+        auto *name = new QLabel(c.name);
+        row->addWidget(mark);
+        row->addWidget(name, 1);
+        if (!c.ok) {
+            auto *fix = new QPushButton(c.fix);
+            fixBtns.append(fix);
+            row->addWidget(fix);
+        }
+        list->addLayout(row);
+    }
+
+    auto *btnRow = new QHBoxLayout();
+    root->addLayout(btnRow);
+    auto *recheck = new QPushButton(QStringLiteral("重新检测"));
+    auto *close = new QPushButton(QStringLiteral("关闭"));
+    btnRow->addWidget(recheck);
+    btnRow->addStretch();
+    btnRow->addWidget(close);
+
+    // 一键修复：配置缺 / 班级缺 → 打开配置向导（OAuth 零手填即接入）；否则立即重连。
+    auto doFix = [&]() {
+        if (!g_configured || g_classCode.isEmpty()) {
+            openConfigDialog();
+        } else {
+            g_backoffMs = 1000;
+            if (g_ws && g_ws->state() != QAbstractSocket::UnconnectedState) {
+                g_reconnectNow = true; g_ws->close();
+            } else {
+                updateTray(TrayState::Disconnected, QStringLiteral("正在重连…"));
+                connectNow();
+            }
+        }
+        dlg.accept();
+    };
+    for (QPushButton *b : fixBtns)
+        QObject::connect(b, &QPushButton::clicked, &dlg, doFix);
+    // 重新检测：先放开门禁再重开本窗（嵌套模态对话框，安全）
+    QObject::connect(recheck, &QPushButton::clicked, &dlg, [&] {
+        selfCheckOpen = false;
+        dlg.accept();
+        runSelfCheck();
+    });
+    QObject::connect(close, &QPushButton::clicked, &dlg, &QDialog::reject);
+
+    dlg.exec();
+    selfCheckOpen = false;
+}
+
+// ── P2：插件市场（第三方能力窗口）────────────────────────────────────────────
+// 你 P0 反思里点名的「第三方能力窗口」：浏览云端插件商店、安装/启用/停用/卸载，
+// 并内置「安装本地示例」演示闭环。安装 = 下载 zip → 解压到 plugins/<id>/ → 启用启动。
+void openPluginStore()
+{
+    if (!g_pluginHost) { QMessageBox::information(nullptr, QStringLiteral("插件市场"),
+                                                  QStringLiteral("插件宿主未启动")); return; }
+    QDialog dlg;
+    dlg.setWindowTitle(QStringLiteral("插件市场 · 第三方能力"));
+    dlg.resize(680, 480);
+    auto *list = new QListWidget(&dlg);
+    auto *detail = new QLabel(&dlg);
+    detail->setWordWrap(true); detail->setMinimumHeight(70); detail->setText(QStringLiteral("选择左侧插件查看说明"));
+    auto *btnRefresh  = new QPushButton(QStringLiteral("刷新"), &dlg);
+    auto *btnInstall  = new QPushButton(QStringLiteral("安装/启用选中"), &dlg);
+    auto *btnDisable  = new QPushButton(QStringLiteral("停用选中"), &dlg);
+    auto *btnUninstall= new QPushButton(QStringLiteral("卸载选中"), &dlg);
+    auto *btnSample   = new QPushButton(QStringLiteral("安装本地示例(echo)"), &dlg);
+    auto *btnClose    = new QPushButton(QStringLiteral("关闭"), &dlg);
+
+    auto *nam = new QNetworkAccessManager(&dlg);
+    QString registryUrl = qEnvironmentVariable("STE_PLUGIN_REGISTRY");
+    if (registryUrl.isEmpty()) registryUrl = QStringLiteral("https://control.245959623.xyz/api/plugins");
+
+    QHash<QString, QJsonObject> g_storeEntries;   // id -> 云端条目
+    QHash<QString, bool> g_installed;
+
+    auto render = [&]() {
+        list->clear();
+        const QJsonArray local = g_pluginHost->snapshot();
+        QHash<QString, QJsonObject> localById;
+        for (const QJsonValue &v : local) {
+            QJsonObject o = v.toObject();
+            localById.insert(o.value(QStringLiteral("id")).toString(), o);
+        }
+        QStringList ids;
+        for (auto it = g_storeEntries.begin(); it != g_storeEntries.end(); ++it) ids << it.key();
+        for (const QString &id : localById.keys()) if (!ids.contains(id)) ids << id;
+        for (const QString &id : ids) {
+            QJsonObject cloud = g_storeEntries.value(id);
+            QJsonObject loc = localById.value(id);
+            const bool inst = localById.contains(id);
+            const bool en = loc.value(QStringLiteral("enabled")).toBool();
+            const bool run = loc.value(QStringLiteral("running")).toBool();
+            const QString name = cloud.value(QStringLiteral("name")).toString(loc.value(QStringLiteral("name")).toString(id));
+            const QString ver = cloud.value(QStringLiteral("version")).toString(loc.value(QStringLiteral("version")).toString());
+            const QString author = cloud.value(QStringLiteral("author")).toString();
+            const QString status = inst ? (en ? (run ? QStringLiteral("● 运行中") : QStringLiteral("○ 已装未运行")) : QStringLiteral("× 已禁用")) : QStringLiteral("— 未安装");
+            auto *item = new QListWidgetItem(
+                QStringLiteral("[%1] %2 v%3 · %4 · %5").arg(id, name, ver, author, status));
+            item->setData(Qt::UserRole, id);
+            list->addItem(item);
+        }
+    };
+
+    auto selectedId = [&]() -> QString {
+        QListWidgetItem *it = list->currentItem();
+        return it ? it->data(Qt::UserRole).toString() : QString();
+    };
+
+    auto fetchCloud = [&]() {
+        QNetworkRequest req((QUrl(registryUrl)));
+        QNetworkReply *rep = nam->get(req);
+        QObject::connect(rep, &QNetworkReply::finished, &dlg, [rep, &g_storeEntries, &render]() {
+            const QByteArray data = rep->readAll();
+            rep->deleteLater();
+            if (rep->error() != QNetworkReply::NoError) { render(); return; }   // 离线也能看本地已装
+            const QJsonArray arr = QJsonDocument::fromJson(data).array();
+            for (const QJsonValue &v : arr) {
+                QJsonObject o = v.toObject();
+                g_storeEntries.insert(o.value(QStringLiteral("id")).toString(), o);
+            }
+            render();
+        });
+    };
+
+    QObject::connect(btnRefresh, &QPushButton::clicked, &dlg, [&]() { fetchCloud(); render(); });
+    QObject::connect(btnInstall, &QPushButton::clicked, &dlg, [&]() {
+        const QString id = selectedId(); if (id.isEmpty()) return;
+        if (!g_installed.value(id)) {
+            const QString url = g_storeEntries.value(id).value(QStringLiteral("downloadUrl")).toString();
+            if (url.isEmpty()) { QMessageBox::warning(&dlg, QStringLiteral("插件市场"),
+                QStringLiteral("该插件暂无可下载包（需先在商店后台上传）")); return; }
+            QNetworkRequest req((QUrl(url)));
+            QNetworkReply *rep = nam->get(req);
+            QObject::connect(rep, &QNetworkReply::finished, &dlg, [rep, id, &dlg]() {
+                const QByteArray data = rep->readAll();
+                rep->deleteLater();
+                if (rep->error() != QNetworkReply::NoError) { QMessageBox::warning(&dlg, QStringLiteral("插件市场"), QStringLiteral("下载失败")); return; }
+                const QString tmp = QDir::tempPath() + QStringLiteral("/stelarith-plugin-%1.zip").arg(id);
+                { QFile f(tmp); if (f.open(QIODevice::WriteOnly)) { f.write(data); f.close(); } }
+                const QString dir = g_pluginHost->pluginDir() + QLatin1Char('/') + id;
+                QDir().mkpath(dir);
+                QProcess::execute(QStringLiteral("powershell"),
+                    QStringList() << QStringLiteral("-Command")
+                                  << QStringLiteral("Expand-Archive -Force '%1' '%2'").arg(tmp, dir));
+                g_pluginHost->installAndLaunch(id);
+                QMessageBox::information(&dlg, QStringLiteral("插件市场"), QStringLiteral("已安装并启动：%1").arg(id));
+            });
+        } else {
+            g_pluginHost->enable(id, true);
+        }
+        render();
+    });
+    QObject::connect(btnDisable, &QPushButton::clicked, &dlg, [&]() {
+        const QString id = selectedId(); if (id.isEmpty()) return;
+        g_pluginHost->enable(id, false); render();
+    });
+    QObject::connect(btnUninstall, &QPushButton::clicked, &dlg, [&]() {
+        const QString id = selectedId(); if (id.isEmpty()) return;
+        if (QMessageBox::question(&dlg, QStringLiteral("插件市场"), QStringLiteral("确认卸载 %1？").arg(id)) == QMessageBox::Yes) {
+            g_pluginHost->uninstall(id); render();
+        }
+    });
+    QObject::connect(btnSample, &QPushButton::clicked, &dlg, [&]() {
+        const QString src = QCoreApplication::applicationDirPath() + QStringLiteral("/plugins/samples/echo");
+        const QString dst = g_pluginHost->pluginDir() + QStringLiteral("/echo");
+        if (!QFile::exists(src)) { QMessageBox::warning(&dlg, QStringLiteral("插件市场"), QStringLiteral("未找到内置示例（plugins/samples/echo）")); return; }
+        QDir().mkpath(dst);
+        for (const QString &f : QStringList() << QStringLiteral("manifest.json") << QStringLiteral("echo.py"))
+            QFile::copy(src + QLatin1Char('/') + f, dst + QLatin1Char('/') + f);
+        g_pluginHost->installAndLaunch(QStringLiteral("echo"));
+        QMessageBox::information(&dlg, QStringLiteral("插件市场"),
+            QStringLiteral("已安装示例插件 echo（需本机 python 且 pip install websocket-client）"));
+        render();
+    });
+    QObject::connect(btnClose, &QPushButton::clicked, &dlg, &QDialog::accept);
+    QObject::connect(list, &QListWidget::currentItemChanged, [&](QListWidgetItem *cur, QListWidgetItem *) {
+        Q_UNUSED(cur);
+        const QString id = selectedId();
+        if (id.isEmpty()) { detail->setText(QStringLiteral("选择左侧插件查看说明")); return; }
+        QJsonObject e = g_storeEntries.value(id);
+        detail->setText(QStringLiteral("<b>%1</b> v%2<br>作者：%3<br>%4")
+            .arg(e.value(QStringLiteral("name")).toString(id), e.value(QStringLiteral("version")).toString(),
+                 e.value(QStringLiteral("author")).toString(), e.value(QStringLiteral("description")).toString()));
+    });
+
+    auto *top = new QHBoxLayout(); top->addWidget(list, 1);
+    auto *right = new QVBoxLayout(); right->addWidget(detail);
+    auto *row = new QHBoxLayout();
+    row->addWidget(btnRefresh); row->addWidget(btnInstall); row->addWidget(btnDisable);
+    row->addWidget(btnUninstall); row->addWidget(btnSample); row->addWidget(btnClose);
+    right->addLayout(row);
+    top->addLayout(right, 1);
+    auto *mainL = new QVBoxLayout(&dlg); mainL->addLayout(top, 1);
+    dlg.setLayout(mainL);
+
+    render();
+    fetchCloud();
+    dlg.exec();
+}
+
+// ── P3 长期记录 / 配置对话框 ───────────────────────────────────
+// 读 subdir 下全部 YYYY-MM-DD.jsonl，逐行解析成数组（跨日汇总用）。
+static QJsonArray readJsonlDir(const QString &subdir)
+{
+    QJsonArray arr;
+    const QString dir = dataRoot() + QLatin1Char('/') + subdir;
+    QDir d(dir);
+    if (!d.exists()) return arr;
+    for (const QFileInfo &fi : d.entryInfoList(QStringList() << QStringLiteral("*.jsonl"), QDir::Files, QDir::Name)) {
+        QFile f(fi.absoluteFilePath());
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+        while (!f.atEnd()) {
+            const QByteArray line = f.readLine().trimmed();
+            if (line.isEmpty()) continue;
+            const QJsonObject o = QJsonDocument::fromJson(line).object();
+            if (!o.isEmpty()) arr.append(o);
+        }
+    }
+    return arr;
+}
+
+static void openFolder(const QString &subdir)
+{
+    const QString dir = dataRoot() + QLatin1Char('/') + subdir;
+    QDir().mkpath(dir);
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+}
+
+void openNoiseLogDialog()
+{
+    QDialog dlg;
+    dlg.setWindowTitle(QStringLiteral("噪音记录"));
+    dlg.resize(520, 420);
+    auto *lay = new QVBoxLayout(&dlg);
+    auto *te = new QTextEdit(&dlg);
+    te->setReadOnly(true);
+    lay->addWidget(te);
+
+    const QJsonArray all = readJsonlDir(QStringLiteral("noise_log"));
+    if (all.isEmpty()) {
+        te->setPlainText(QStringLiteral("还没有噪音记录。\n开启「噪音监测」或「自习模式」后，每次采样都会记到这里。"));
+    } else {
+        QMap<QString, QVector<double>> byDay;
+        for (const QJsonValue &v : all) {
+            const QJsonObject o = v.toObject();
+            const qint64 ts = o.value(QStringLiteral("ts")).toVariant().toLongLong();
+            const QString day = QDateTime::fromSecsSinceEpoch(ts).toString(QStringLiteral("yyyy-MM-dd"));
+            byDay[day].append(o.value(QStringLiteral("db")).toDouble());
+        }
+        QString out; QTextStream ts(&out);
+        ts << QStringLiteral("共 %1 天、%2 条采样\n\n").arg(byDay.size()).arg(all.size());
+        for (auto it = byDay.begin(); it != byDay.end(); ++it) {
+            const QVector<double> &v = it.value();
+            double sum = 0, mn = 1e9, mx = -1e9;
+            for (double d : v) { sum += d; if (d < mn) mn = d; if (d > mx) mx = d; }
+            ts << QStringLiteral("%1：采样 %2 次，均值 %3 dB，区间 [%4, %5] dB\n")
+                  .arg(it.key()).arg(v.size())
+                  .arg(QString::number(sum / v.size(), 'f', 1))
+                  .arg(QString::number(mn, 'f', 1)).arg(QString::number(mx, 'f', 1));
+        }
+        te->setPlainText(out);
+    }
+
+    auto *row = new QHBoxLayout();
+    auto *btnOpen = new QPushButton(QStringLiteral("打开记录文件夹"), &dlg);
+    auto *btnClose = new QPushButton(QStringLiteral("关闭"), &dlg);
+    row->addWidget(btnOpen); row->addStretch(1); row->addWidget(btnClose);
+    lay->addLayout(row);
+    QObject::connect(btnOpen, &QPushButton::clicked, &dlg, [] { openFolder(QStringLiteral("noise_log")); });
+    QObject::connect(btnClose, &QPushButton::clicked, &dlg, &QDialog::accept);
+    dlg.exec();
+}
+
+void openStudyLogDialog()
+{
+    QDialog dlg;
+    dlg.setWindowTitle(QStringLiteral("自习记录"));
+    dlg.resize(520, 420);
+    auto *lay = new QVBoxLayout(&dlg);
+    auto *te = new QTextEdit(&dlg);
+    te->setReadOnly(true);
+    lay->addWidget(te);
+
+    const QJsonArray all = readJsonlDir(QStringLiteral("study_log"));
+    if (all.isEmpty()) {
+        te->setPlainText(QStringLiteral("还没有自习记录。\n开启「自习模式」后，每次会话（开始/结束/时长/异常次数）都会记到这里。"));
+    } else {
+        QVector<QJsonObject> sessions;
+        QMap<qint64, QJsonObject> pending;
+        for (const QJsonValue &v : all) {
+            QJsonObject o = v.toObject();
+            const QString ev = o.value(QStringLiteral("event")).toString();
+            if (ev == QStringLiteral("start")) {
+                pending.insert(o.value(QStringLiteral("ts")).toVariant().toLongLong(), o);
+            } else if (ev == QStringLiteral("stop")) {
+                const qint64 st = o.value(QStringLiteral("startTs")).toVariant().toLongLong();
+                QJsonObject s = pending.take(st);
+                s.insert(QStringLiteral("endTs"), o.value(QStringLiteral("ts")));
+                s.insert(QStringLiteral("durationSec"), o.value(QStringLiteral("durationSec")));
+                s.insert(QStringLiteral("alertCount"), o.value(QStringLiteral("alertCount")));
+                sessions.append(s);
+            }
+        }
+        QString out; QTextStream ts(&out);
+        ts << QStringLiteral("共 %1 次自习会话\n\n").arg(sessions.size());
+        for (const QJsonObject &s : sessions) {
+            const qint64 st = s.value(QStringLiteral("ts")).toVariant().toLongLong();
+            const int dur = s.value(QStringLiteral("durationSec")).toInt();
+            const int al = s.value(QStringLiteral("alertCount")).toInt();
+            ts << QStringLiteral("%1：时长 %2 分 %3 秒，异常录制 %4 次（阈值 %5 dB）\n")
+                  .arg(QDateTime::fromSecsSinceEpoch(st).toString(QStringLiteral("yyyy-MM-dd HH:mm")))
+                  .arg(dur / 60).arg(dur % 60).arg(al)
+                  .arg(QString::number(s.value(QStringLiteral("thresholdDb")).toDouble(), 'f', 0));
+        }
+        te->setPlainText(out);
+    }
+
+    auto *row = new QHBoxLayout();
+    auto *btnOpen = new QPushButton(QStringLiteral("打开记录文件夹"), &dlg);
+    auto *btnClose = new QPushButton(QStringLiteral("关闭"), &dlg);
+    row->addWidget(btnOpen); row->addStretch(1); row->addWidget(btnClose);
+    lay->addLayout(row);
+    QObject::connect(btnOpen, &QPushButton::clicked, &dlg, [] { openFolder(QStringLiteral("study_log")); });
+    QObject::connect(btnClose, &QPushButton::clicked, &dlg, &QDialog::accept);
+    dlg.exec();
+}
+
+void openPlayScheduleDialog()
+{
+    QDialog dlg;
+    dlg.setWindowTitle(QStringLiteral("播放时段"));
+    dlg.setMinimumWidth(460);
+    auto *lay = new QVBoxLayout(&dlg);
+
+    auto *en = new QCheckBox(QStringLiteral("启用播放时段限制（只在这些时段内允许广播/播放）"));
+    en->setChecked(AgentSettings::playScheduleEnabled());
+    lay->addWidget(en);
+
+    lay->addWidget(new QLabel(QStringLiteral("允许的时段（每行一个，格式 HH:MM-HH:MM；可跨午夜如 22:00-07:00）：")));
+    auto *ed = new QTextEdit(&dlg);
+    ed->setPlainText(AgentSettings::playWindows().join(QStringLiteral("\n")));
+    ed->setMaximumHeight(120);
+    lay->addWidget(ed);
+
+    auto *state = new QLabel();
+    {
+        QString cur = (IslandOverlay::instance() && IslandOverlay::instance()->mediaOn())
+            ? QStringLiteral("正在播放：%1").arg(IslandOverlay::instance()->mediaTitle()) : QStringLiteral("当前无媒体在播");
+        state->setText(QStringLiteral("当前状态：%1 · 时段内允许播放：%2")
+                       .arg(cur).arg(isPlayAllowedNow() ? QStringLiteral("是") : QStringLiteral("否")));
+    }
+    lay->addWidget(state);
+
+    auto *row = new QHBoxLayout();
+    auto *btnSave = new QPushButton(QStringLiteral("保存"), &dlg);
+    auto *btnCancel = new QPushButton(QStringLiteral("取消"), &dlg);
+    auto *btnOpen = new QPushButton(QStringLiteral("打开数据目录"), &dlg);
+    row->addWidget(btnSave); row->addWidget(btnCancel); row->addStretch(1); row->addWidget(btnOpen);
+    lay->addLayout(row);
+
+    QObject::connect(btnCancel, &QPushButton::clicked, &dlg, &QDialog::reject);
+    QObject::connect(btnOpen, &QPushButton::clicked, &dlg, [] { openFolder(QStringLiteral("")); });
+    QObject::connect(btnSave, &QPushButton::clicked, &dlg, [&] {
+        AgentSettings::setPlayScheduleEnabled(en->isChecked());
+        QStringList list;
+        for (const QString &line : ed->toPlainText().split(QStringLiteral("\n"), Qt::SkipEmptyParts)) {
+            const QString s = line.trimmed();
+            if (!s.isEmpty()) list.append(s);
+        }
+        AgentSettings::setPlayWindows(list);
+        qInfo("[play] 🎵 播放时段已保存：enabled=%d, windows=%d", en->isChecked(), list.size());
+        dlg.accept();
+    });
+    dlg.exec();
 }
 
 void openConfigDialog()
@@ -2686,6 +3207,8 @@ static bool g_ttsFinishedWired = false;
 
 static void speakText(const QString &text)
 {
+    // P0-1（2026-10-14）：本地「语音播报」开关关了就不朗读——通知/循环提醒照常显示，只是不念。
+    if (!AgentSettings::voiceEnabled()) return;
     const QString say = text.trimmed();
     if (say.isEmpty()) return;
 
@@ -2737,14 +3260,13 @@ static void speakText(const QString &text)
 // ── 灵动岛统一入口（2026-10-07 · #98）──────────────────────────────────
 // 用户 2026-10-07 定下："被控端一切通知都经过灵动岛显示，弹窗则居中，全屏则放大全屏，
 // 要有过渡。"
-// 以前被控端的"轻量提示"有三种写法（托盘气泡 / NotifyWindow 的 island 形态 / 直接弹窗），
-// 各弹各的、位置互相打架，教室大屏上还会叠成一摞。现在统一走 IslandOverlay：
+// 被控端所有"轻量提示"统一走 IslandOverlay（灵动岛）：
 //   · 顶部居中胶囊、Collapsed(56)↔Expanded(168) 弹性缓动、出现/消失都带动画；
 //   · 默认鼠标穿透（WA_TransparentForMouseEvents）—— 不挡后面的课件/白板；
-//   · 需要"用户点一下"的（如收到文件想看清楚）才 setInteractive(true) 临时收走点击。
-// 需要真·弹窗的（要确认 / 要输入文本）仍然走 NotifyWindow，不硬塞进灵动岛。
+//   · 需要"用户点一下"的（如收到文件想看清楚 / 通知确认）走 showWithActions + setInteractive(true)。
 // form（#98）：Capsule=顶部胶囊（默认）；Centered=屏幕正中卡片；Fullscreen=铺满整屏。
 // 调用方按"这条内容要不要停下来看清"来选，别什么都往全屏上堆。
+// 注：2026-10-14 P1 起 NotifyWindow 已删除，灵动岛是被控端唯一展示入口。
 static void islandShow(const QString &title, const QString &desc = QString(),
                        const QString &icon = QString(), int ms = 5000, bool interactive = false,
                        const QString &openPath = QString(),
@@ -2770,273 +3292,6 @@ static void trayNotify(const QString &title, const QString &body,
     g_tray->showMessage(title, body.isEmpty() ? title : body, icon, ms);
 }
 
-// 大屏通知窗口：无边框 + 置顶 + Tool（不进任务栏）。
-// 三种形态（用户 2026-10-04 拍板）：
-//   · popup     —— 居中弹窗（圆角卡片）；同时经托盘 showMessage 进 Windows 通知中心留存
-//   · island    —— 顶部灵动岛（细长圆角胶囊，顶部居中，自动收起）
-//   · fullscreen—— 全屏遮罩（大字居中，紧急通知）
-// 单例：同一时间只显示一个（新通知顶掉旧的），防止堆叠霸屏。
-class NotifyWindow : public QWidget
-{
-public:
-    enum Kind { Popup, Island, Fullscreen };
-
-    // severity：remind(绿) / inform(黄) / urgent(红)；仅对 fullscreen 生效（其它形态背景本就是深色半透明）。
-    // emergency：紧急通知 —— 不自动关闭、强制置顶（WindowStaysOnTopAlways），点击任意处手动关闭。
-    // needConfirm：普通通知也要确认（2026-10-07 · 通知确认 + 快捷回复）；
-    //             显示「确认」按钮 + 快捷回复按钮行，点击后回调 onConfirm(reply)。
-    //             reply 为 "确认" 或用户点的快捷话术（如"收到"）。
-    static void showNotice(Kind kind, const QString &title, const QString &content, int seconds, bool tts,
-                           const QString &severity = QString(), bool emergency = false,
-                           bool needConfirm = false, const QStringList &replies = {},
-                           std::function<void(const QString &reply)> onConfirm = nullptr)
-    {
-        // 单例：先关掉旧的（同一时间只一个通知窗口）
-        if (g_notify) {
-            // 新通知顶掉旧的：旧的**淡出**再走（直接 hide() 会硬切，教室大屏上很扎眼）
-            g_notify->fadeOutClose();
-            g_notify->deleteLater();
-        }
-        g_notify = new NotifyWindow(kind, title, content, seconds, tts, severity, emergency,
-                                    needConfirm, replies, onConfirm);
-        g_notify->showWindow();
-    }
-
-private:
-    explicit NotifyWindow(Kind kind, const QString &title, const QString &content, int seconds, bool tts,
-                          const QString &severity, bool emergency,
-                          bool needConfirm = false, const QStringList &replies = {},
-                          std::function<void(const QString &reply)> onConfirm = nullptr)
-        : m_kind(kind), m_title(title), m_content(content), m_seconds(seconds), m_tts(tts),
-          m_severity(severity), m_emergency(emergency), m_needConfirm(needConfirm),
-          m_replies(replies), m_onConfirm(onConfirm)
-    {
-        // 所有通知统一置顶（Qt6 只有 WindowStaysOnTopHint 一种置顶标志，没有 Always 变体）。
-        // 紧急通知的差异化靠"不自动关闭 + 点击才关"表达，不靠更强的置顶强度。
-        // ⚠️ WindowDoesNotAcceptFocus（2026-10-09 加）：从窗口标志这一层就拒绝拿焦点，
-        //    光靠"不调 activateWindow()"不够 —— 置顶窗口在某些情况下仍会被系统聚焦。
-        //    Qt::Tool = 不进任务栏；StaysOnTop = 压在最上层。三者合起来才是"只展示不打扰"。
-        setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool
-                       | Qt::WindowDoesNotAcceptFocus);
-        setAttribute(Qt::WA_DeleteOnClose);
-        if (kind == Fullscreen) {
-            // 全屏遮罩：palette 画纯色背景（WA_TranslucentBackground + paintEvent 在 Qt 6 不稳定）
-            QColor c;
-            if (severity == QLatin1String("urgent"))      c = QColor(180, 20, 20);
-            else if (severity == QLatin1String("inform")) c = QColor(200, 140, 10);
-            else if (severity == QLatin1String("remind")) c = QColor(20, 140, 60);
-            else                                            c = QColor(0, 0, 0);
-            setAutoFillBackground(true);
-            QPalette pal = palette();
-            pal.setColor(QPalette::Window, c);
-            setPalette(pal);
-        } else {
-            // 灵动岛/弹窗：圆角+透明背景
-            setAttribute(Qt::WA_TranslucentBackground);
-        }
-
-        // 长度限制：标题/正文各限长，超长截断加省略号——防止长广播把固定高度的窗撑爆
-        // （2026-10-04 用户要求"长度限制"；显示与 TTS 都读同一份截断文本，口径一致）
-        static const int kTitleCap = 24;
-        static const int kContentCap = 64;
-        const QString t = (m_title.length() > kTitleCap)
-                              ? m_title.left(kTitleCap) + QStringLiteral("…")
-                              : m_title;
-        QString c = m_content.trimmed();
-        if (c.length() > kContentCap)
-            c = c.left(kContentCap) + QStringLiteral("…");
-        m_combined = c.isEmpty() ? t : t + QStringLiteral("：") + c;
-
-        auto *lay = new QVBoxLayout(this);
-        lay->setContentsMargins(24, 16, 24, 16);
-        m_label = new QLabel(m_combined, this);
-        m_label->setAlignment(Qt::AlignCenter);
-        m_label->setWordWrap(false);
-        // 字号随长度自适应（短则大，长则缩）—— 复刻旧插件 BuildSingleLineFontSize 思路
-        m_label->setStyleSheet(QStringLiteral(
-            "font-weight:700; color:#ffffff; background:transparent;"
-            "font-size:%1px;").arg(fontSizeFor(m_combined.length())));
-        lay->addWidget(m_label);
-
-        // 紧急通知：底部"确认"按钮（2026-10-05：需求文档要求确认按钮）
-        // 确认 + 快捷回复（2026-10-07）：needConfirm 时显示「确认」按钮；
-        // 有 replies 时再加一排快捷回复话术按钮。点击 → onConfirm(reply) → 关闭。
-        // 紧急通知（emergency）也走这里（此前只有确认按钮，现在同样带回调上报）。
-        if (m_emergency || m_needConfirm) {
-            lay->addSpacing(16);
-            auto *btnLay = new QHBoxLayout();
-            btnLay->addStretch();
-            auto mkBtn = [this, lay](const QString &text, const QString &reply) {
-                auto *b = new QPushButton(text, this);
-                b->setMinimumSize(140, 48);
-                b->setStyleSheet(QStringLiteral(
-                    "QPushButton { font-size:18px; font-weight:700; color:#ffffff;"
-                    " background:rgba(255,255,255,80); border:2px solid rgba(255,255,255,180);"
-                    " border-radius:24px; padding:0 32px;}"
-                    "QPushButton:hover { background:rgba(255,255,255,140);}"
-                    "QPushButton:pressed { background:rgba(255,255,255,180);}"));
-                QObject::connect(b, &QPushButton::clicked, this, [this, reply]() {
-                    if (m_onConfirm) m_onConfirm(reply);
-                    close();
-                });
-                return b;
-            };
-            btnLay->addWidget(mkBtn(QStringLiteral("\u2713 \u786e\u8ba4"), QStringLiteral("\u786e\u8ba4")));
-            // 快捷回复：一排预设话术（如"收到"/"好的"/"稍后处理"）
-            for (const QString &r : m_replies) {
-                if (r.trimmed().isEmpty()) continue;
-                btnLay->addWidget(mkBtn(r, r));
-            }
-            btnLay->addStretch();
-            lay->addLayout(btnLay);
-        }
-
-        // 淡入（用户 2026-10-07："要有过渡"）。
-        // 以前这里是"直接显示"——教室大屏上通知是"啪"地砸出来，紧接着一颗弹窗又"啪"地消失，
-        // 讲台上的学生注意力全被这个硬切带走。QPropertyAnimation 在 QtCore 里（不用加依赖），
-        // 220ms 跟手、不拖沓。
-        auto *eff = new QGraphicsOpacityEffect(this);
-        setGraphicsEffect(eff);
-        auto *fin = new QPropertyAnimation(eff, "opacity", this);
-        fin->setDuration(220);
-        fin->setStartValue(0.0);
-        fin->setEndValue(1.0);
-        fin->start();
-    }
-
-    /** 带淡出的关窗（用户要求"要有过渡"）：动画放完再真关，避免"啪一下不见"。 */
-    void fadeOutClose()
-    {
-        if (!isVisible()) { close(); return; }
-        QGraphicsOpacityEffect *eff = qobject_cast<QGraphicsOpacityEffect *>(graphicsEffect());
-        if (!eff) { close(); return; }
-        auto *fout = new QPropertyAnimation(eff, "opacity", this);
-        fout->setDuration(220);
-        fout->setStartValue(1.0);
-        fout->setEndValue(0.0);
-        // 动画对象随窗一起析构；真关窗在 finished 里做（此时窗口还在，视觉连续）
-        QObject::connect(fout, &QPropertyAnimation::finished, this, [this]() { close(); });
-        fout->start();
-    }
-
-    ~NotifyWindow() { if (g_notify == this) g_notify = nullptr; }
-
-    void showWindow()
-    {
-        QScreen *screen = QGuiApplication::primaryScreen();
-        if (!screen) { close(); return; }
-        const QRect geo = screen->geometry();
-
-        if (m_kind == Fullscreen) {
-            setGeometry(geo);
-            // 全屏遮罩 + 居中大字。严重度配色（2026-10-05 补）：
-            //   remind  绿 —— 提醒；inform  琥珀 —— 通知；urgent 红 —— 紧急；
-            //   未知/缺省回黑底（安全默认，避免把任意串直接插进 QSS）。
-            // 全屏背景由构造函数 palette 处理
-            setStyleSheet(QStringLiteral("border:none;"));
-        } else if (m_kind == Island) {
-            // 灵动岛：顶部居中细长胶囊（≈ 高度 64px、宽度随内容 60% 屏宽）
-            const int w = qMin(geo.width() * 6 / 10, 720);
-            const int h = 64;
-            setGeometry(geo.x() + (geo.width() - w) / 2, geo.y() + 24, w, h);
-            setStyleSheet(QStringLiteral(
-                "background:rgba(20,20,20,215); border-radius:%1px; border:none;").arg(h / 2));
-            m_label->setStyleSheet(m_label->styleSheet() + QStringLiteral(" font-size:22px;"));
-        } else {
-            // popup 居中弹窗：圆角卡片，宽 40% 屏、高 140
-            const int w = qMin(geo.width() * 2 / 5, 520);
-            const int h = 140;
-            setGeometry(geo.x() + (geo.width() - w) / 2, geo.y() + (geo.height() - h) / 2, w, h);
-            setStyleSheet(QStringLiteral(
-                "background:rgba(30,30,30,215); border-radius:16px; border:1px solid #666;"));
-        }
-
-        // ⚠️ 这里**绝不能 activateWindow()**（2026-10-09 修：老师反馈"每次弹通知桌面跳一下"）。
-        //    activateWindow() 会把**键盘焦点**从老师/学生正在用的程序上抢走 —— 讲课时弹一条
-        //    通知，正在打的字就断了、输入法上下文也跳掉，教室里看着就是"桌面抖一下"。
-        //    通知是**展示性**的：WindowStaysOnTopHint 已经保证它压在最上层看得见，
-        //    raise() 再保证 Z 序在顶 —— 焦点必须留在用户当前正在操作的窗口上。
-        //    ⚠️ WindowDoesNotAcceptFocus 只挡键盘焦点，**不挡鼠标点击**：
-        //       紧急通知"点一下才关"（mousePressEvent）照常工作，所以可以放心加。
-        show();
-        raise();
-
-        // TTS 朗读（调用方要求时）：读截断后的完整内容（标题：正文），与显示一致
-        if (m_tts) speakText(m_combined);
-
-        // 到点自动收起；0/缺省 → 自适应（短 5s、长内容按字数抬高，复刻旧插件公式）
-        const int durMs = m_seconds > 0
-                              ? qMin(m_seconds, 3600) * 1000
-                              : qMax(5000.0, 2500.0 + m_combined.length() * 120.0);
-        if (m_emergency) return;   // 紧急通知不自动消失，点击才关（见 mousePressEvent）
-        QTimer::singleShot(durMs, this, &NotifyWindow::fadeOutClose);
-    }
-
-    // fullscreen 遮罩底色：按严重度映射（仅这三档白名单 + 黑底回落）。
-    // 用 rgba(0,0,0,200) 风格保持与旧版一致的半透明密度，只换色相。
-    static QString fullscreenBackground(const QString &severity)
-    {
-        if (severity == QLatin1String("urgent")) return QStringLiteral("rgba(180,20,20,210)");
-        if (severity == QLatin1String("inform")) return QStringLiteral("rgba(200,140,10,205)");
-        if (severity == QLatin1String("remind")) return QStringLiteral("rgba(20,140,60,205)");
-        return QStringLiteral("rgba(0,0,0,200)");   // 缺省/未知 → 黑底（与旧版一致）
-    }
-
-    static int fontSizeFor(int len)
-    {
-        // 短 → 特大（48px）；长 → 逐步缩小，最低 18px
-        if (len <= 8) return 48;
-        if (len <= 16) return 36;
-        if (len <= 32) return 28;
-        if (len <= 64) return 22;
-        return 18;
-    }
-
-    Kind m_kind;
-    QString m_title;
-    QString m_content;
-    QString m_combined;
-    int m_seconds;
-    bool m_tts;
-    QString m_severity;   // remind / inform / urgent（仅 fullscreen 生效）
-    bool m_emergency;     // 紧急：不自动关 + 强制置顶 + 点击关闭
-    // 确认 + 快捷回复（2026-10-07）
-    bool m_needConfirm = false;
-    QStringList m_replies;                        // 快捷回复话术（可空）
-    std::function<void(const QString &reply)> m_onConfirm;
-    QLabel *m_label = nullptr;
-    static NotifyWindow *g_notify;
-
-protected:
-
-    // paintEvent: stylesheet background is ineffective on top-level QWidget (Qt 6)
-    void paintEvent(QPaintEvent *) override
-    {
-        if (m_kind == Fullscreen) { QWidget::paintEvent(nullptr); return; }
-        QPainter p(this);
-        if (m_kind == Island) {
-            QPainterPath path;
-            path.addRoundedRect(rect().toRectF(), 32, 32);
-            p.fillPath(path, QColor(20, 20, 20, 215));
-        } else {
-            QPainterPath path;
-            path.addRoundedRect(rect().toRectF(), 16, 16);
-            p.fillPath(path, QColor(30, 30, 30, 215));
-            p.setPen(QColor(0x66, 0x66, 0x66));
-            p.drawRoundedRect(rect().adjusted(1, 1, -1, -1).toRectF(), 16, 16);
-        }
-    }
-
-    // 紧急通知：必须人工确认 —— 点击任意处手动关闭（不自动消失）。
-    void mousePressEvent(QMouseEvent *ev) override
-    {
-        // 紧急通知点哪都能关，但同样走淡出（用户 2026-10-07："要有过渡"）
-        if (m_emergency) { ev->accept(); fadeOutClose(); return; }
-        QWidget::mousePressEvent(ev);
-    }
-};
-
-NotifyWindow *NotifyWindow::g_notify = nullptr;
 
 // 前向声明（2026-10-07）：notify 确认/快捷回复回调要在定义前用（二次回执）
 static void sendActionReceipt(const QString &id, const QString &action, const QString &result,
@@ -3059,6 +3314,8 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
         : kind == QLatin1String("loop") ? NotificationGate::LoopRemind
         : NotificationGate::Island);
     if (gated) return QStringLiteral("exam-active-gated");
+    // P0-1（2026-10-14）：本地「通知与弹窗」开关关了就整体静默（考试门控优先，已在上方处理）。
+    if (!AgentSettings::notifyEnabled()) return QStringLiteral("notify-disabled-by-local-setting");
     const int seconds = params.value(QStringLiteral("seconds")).toInt(0);
     // flags.speech → TTS 朗读（缺省不读，避免每教室都响）
     const QJsonObject flags = params.value(QStringLiteral("flags")).toObject();
@@ -3086,10 +3343,13 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
                     QStringLiteral("\u7a0d\u540e\u5904\u7406") };
     }
 
-    NotifyWindow::Kind k = NotifyWindow::Popup;
-    if (kind == QStringLiteral("island")) k = NotifyWindow::Island;
-    else if (kind == QStringLiteral("fullscreen")) k = NotifyWindow::Fullscreen;
-    else k = NotifyWindow::Popup;   // popup 及未知值一律居中弹窗（安全默认）
+    // 形态分流（P1 · 2026-10-14）：kind 直接映射灵动岛形态，**不再经 NotifyWindow**
+    // （岛已覆盖全屏/居中/胶囊/确认/紧急，是被控端唯一展示入口）。
+    //   popup / 未知 → Centered（屏幕正中卡片，安全默认）
+    //   fullscreen → Fullscreen（铺满整屏） ｜ island → Capsule（顶部胶囊）
+    IslandOverlay::Form f = IslandOverlay::Form::Centered;
+    if (kind == QLatin1String("island"))          f = IslandOverlay::Form::Capsule;
+    else if (kind == QLatin1String("fullscreen")) f = IslandOverlay::Form::Fullscreen;
 
     // ── 弹幕（2026-10-09 接线 · §1.2/§6.1）：kind=danmaku → 字幕式横向滚动 ──
     if (kind == QLatin1String("danmaku")) {
@@ -3164,8 +3424,8 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
     //   popup      → 灵动岛 Centered（屏幕正中卡片）
     //   fullscreen → 灵动岛 Fullscreen（铺满整屏，带放大过渡）
     //   island     → 灵动岛 Capsule（顶部胶囊）
-    // ⚠️ 需要交互的（要确认 / 有快捷回复 / 紧急"点一下才关"）**仍走 NotifyWindow**：
-    //    灵动岛现在没有按钮，硬塞过去等于把"确认"这个能力悄悄砍掉 —— 那是功能倒退。
+    // ⚠️ 需要交互的（要确认 / 有快捷回复 / 紧急"点一下才关"）走灵动岛的 showWithActions：
+    //    岛本体自带按钮行（2026-10-09 起「确认」已并入岛），不再依赖 NotifyWindow。
     // ── 时长：>0 用给定秒数；0/缺省 → 按字数自适应（约 5 秒起）────────────────────
     // ⚠️ 2026-10-09 修 bug：原来直接把 seconds*1000 传给灵动岛，而灵动岛按
     //    "durationMs>0 才自动收"判定 ⇒ seconds=0 时永远不消失、一直置顶。
@@ -3175,11 +3435,8 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
         ? qMin(seconds, 3600) * 1000
         : int(qMax(5000.0, 2500.0 + (title + QStringLiteral("：") + content).length() * 120.0));
 
-    // ── 形态分流：**一律经灵动岛**（2026-10-09 起「确认」也并入岛本体，不再走 NotifyWindow）──
+    // ── 形态分流：**一律经灵动岛**（P1 · 2026-10-14 后 NotifyWindow 已删除，岛为唯一入口）──
     //   popup → Centered（正中卡片）｜island → Capsule（顶部胶囊）｜fullscreen → Fullscreen
-    IslandOverlay::Form f = IslandOverlay::Form::Capsule;
-    if (k == NotifyWindow::Fullscreen)     f = IslandOverlay::Form::Fullscreen;
-    else if (k == NotifyWindow::Popup)     f = IslandOverlay::Form::Centered;
 
     // ⚠️ 2026-10-09 修 bug「全屏通知没有颜色」：配色档必须**无条件先设**。
     //    原来只在"确认/紧急"那条 else 分支里调 setSeverity ⇒ **纯展示的全屏通知**
@@ -3203,7 +3460,7 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
                                                    f, acts, onConfirm, 0, true);
     }
 
-    // TTS（调用方要求时）：读「标题：正文」，与旧 NotifyWindow 的行为保持一致
+    // TTS（调用方要求时）：读「标题：正文」，与岛渲染口径一致
     if (tts)
         speakText(content.trimmed().isEmpty() ? title
                                               : (title + QStringLiteral("：") + content));
@@ -3611,12 +3868,14 @@ static int     g_studyStreakNeed = 3;      // 连续超阈拍数
 static int     g_studyRecordSec = 30;      // 触发后录多久（秒）
 static int     g_studyStreak = 0;          // 当前连续超阈计数
 static int     g_studyAlertCount = 0;      // 本次自习累计触发次数
+static qint64   g_studyStartTs = 0;         // P3：本次自习开始时间（长期记录算时长用）
 static QTimer *g_studyRecTimer = nullptr;  // 自动录制到点停
 
 static void sendNoiseSample(const QJsonObject &p)
 {
     if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
     g_ws->sendTextMessage(makeEnvelope(QStringLiteral("noise_sample"), p));
+    if (g_pluginHost) g_pluginHost->forwardEvent(QStringLiteral("noise_sample"), p);   // P2：转发给订阅插件
 }
 static void sendNoiseAlert(const QJsonObject &p)
 {
@@ -3642,6 +3901,7 @@ static void ensureNoise()
         p.insert(QStringLiteral("captureOk"), g_noise ? g_noise->captureAvailable() : false);
         if (g_studyOn) p.insert(QStringLiteral("thresholdDb"), g_studyThreshDb);
         sendNoiseSample(p);                 // 实时回传管理端（订阅中继）
+        logNoiseSample(db, active, seq, g_studyOn, g_noise ? g_noise->captureAvailable() : false);  // P3：长期记录
         if (g_studyOn) studyOnSample(db);   // 自习模式：超阈判定
     });
     QObject::connect(g_noise, &NoiseMonitor::failed, g_ws, [](const QString &reason) {
@@ -3708,9 +3968,154 @@ static void studyTriggerRecord()
     g_studyRecTimer->start(g_studyRecordSec * 1000 + 3000);   // 留 3s 余量（ffmpeg 自身 -t 也在计时）
 }
 
+// ── P3 功能补齐：噪音/自习长期记录 + 播放时段管理 的本地落盘与查询 ──────
+// 落盘目录统一在 AppDataLocation/Stelarith 下（与现存 island_history 同族，独立子目录）。
+static QString dataRoot()
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                        + QStringLiteral("/Stelarith");
+    QDir().mkpath(dir);
+    return dir;
+}
+
+// 追加一行 JSON（Compact + 换行）到 subdir/YYYY-MM-DD.jsonl。
+static void appendJsonl(const QString &subdir, const QJsonObject &o)
+{
+    const QString dir = dataRoot() + QLatin1Char('/') + subdir;
+    QDir().mkpath(dir);
+    const QString file = dir + QLatin1Char('/') + QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")) + QStringLiteral(".jsonl");
+    QFile f(file);
+    if (f.open(QIODevice::Append | QIODevice::Text)) {
+        f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
+        f.write("\n");
+    }
+}
+
+// 噪音采样落盘（采不到不记，避免污染趋势）。
+static void logNoiseSample(double db, bool active, int seq, bool study, bool ok)
+{
+    if (!ok) return;
+    QJsonObject o;
+    o.insert(QStringLiteral("ts"), QDateTime::currentSecsSinceEpoch());
+    o.insert(QStringLiteral("db"), db);
+    o.insert(QStringLiteral("active"), active);
+    o.insert(QStringLiteral("seq"), seq);
+    o.insert(QStringLiteral("study"), study);
+    appendJsonl(QStringLiteral("noise_log"), o);
+}
+
+// 自习会话：开始/结束各记一行（带 startTs 便于算时长）。返回 startTs。
+static qint64 logStudyStart(double th, int need, int recSec)
+{
+    const qint64 ts = QDateTime::currentSecsSinceEpoch();
+    QJsonObject o;
+    o.insert(QStringLiteral("event"), QStringLiteral("start"));
+    o.insert(QStringLiteral("ts"), ts);
+    o.insert(QStringLiteral("thresholdDb"), th);
+    o.insert(QStringLiteral("streakNeed"), need);
+    o.insert(QStringLiteral("recordSec"), recSec);
+    appendJsonl(QStringLiteral("study_log"), o);
+    return ts;
+}
+static void logStudyStop(qint64 startTs, int alertCount)
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("event"), QStringLiteral("stop"));
+    o.insert(QStringLiteral("ts"), QDateTime::currentSecsSinceEpoch());
+    o.insert(QStringLiteral("startTs"), startTs);
+    o.insert(QStringLiteral("durationSec"),
+             startTs > 0 ? (QDateTime::currentSecsSinceEpoch() - startTs) : 0);
+    o.insert(QStringLiteral("alertCount"), alertCount);
+    appendJsonl(QStringLiteral("study_log"), o);
+}
+
+// ── P3 播放时段管理：时段判断 ───────────────────────────────────
+// 没开时段限制 → 随时可播；开了但窗口为空 → 也放开；否则落在任一窗口内才放行。
+static bool isPlayAllowedNow()
+{
+    if (!AgentSettings::playScheduleEnabled()) return true;
+    const QStringList wins = AgentSettings::playWindows();
+    if (wins.isEmpty()) return true;
+    const QTime now = QTime::currentTime();
+    for (const QString &w : wins) {
+        const QStringList p = w.split(QStringLiteral("-"));
+        if (p.size() != 2) continue;
+        const QTime a = QTime::fromString(p.at(0).trimmed(), QStringLiteral("HH:mm"));
+        const QTime b = QTime::fromString(p.at(1).trimmed(), QStringLiteral("HH:mm"));
+        if (!a.isValid() || !b.isValid()) continue;
+        if (a <= b) { if (now >= a && now <= b) return true; }
+        else        { if (now >= a || now <= b) return true; }   // 跨午夜窗口
+    }
+    return false;
+}
+// 当前窗口距结束的剩余毫秒（无限制/无窗口返回 -1）。供「最大最小适配」：超长播放自动截断。
+static qint64 remainingMsInWindow()
+{
+    if (!AgentSettings::playScheduleEnabled()) return -1;
+    const QStringList wins = AgentSettings::playWindows();
+    if (wins.isEmpty()) return -1;
+    const QTime now = QTime::currentTime();
+    qint64 best = -1;
+    for (const QString &w : wins) {
+        const QStringList p = w.split(QStringLiteral("-"));
+        if (p.size() != 2) continue;
+        const QTime a = QTime::fromString(p.at(0).trimmed(), QStringLiteral("HH:mm"));
+        const QTime b = QTime::fromString(p.at(1).trimmed(), QStringLiteral("HH:mm"));
+        if (!a.isValid() || !b.isValid()) continue;
+        qint64 rem = -1;
+        if (a <= b) { if (now >= a && now <= b) rem = QDateTime::currentDateTime().secsTo(QDateTime(QDate::currentDate(), b)) * 1000; }
+        else        { if (now >= a) rem = QDateTime::currentDateTime().secsTo(QDateTime(QDate::currentDate(), b)) * 1000;
+                      else if (now <= b) rem = QDateTime::currentDateTime().secsTo(QDateTime(QDate::currentDate().addDays(1), b)) * 1000; }
+        if (rem >= 0 && (best < 0 || rem < best)) best = rem;
+    }
+    return best;
+}
+
+// 停掉媒体会话：终止 ffplay + 清空岛底「正在播放」+ 停计时器。media_session_stop 与
+// 自动截断计时器共用，避免两份停止逻辑。
+static void stopMediaSession()
+{
+    if (g_mediaTick) { g_mediaTick->stop(); }
+    if (g_mediaAutoStop) { g_mediaAutoStop->stop(); }
+    if (g_playProc && g_playProc->state() != QProcess::NotRunning) {
+        g_playProc->terminate();
+        if (!procWaitFinished(*g_playProc, 3000)) g_playProc->kill();
+    }
+    delete g_playProc; g_playProc = nullptr;
+    if (IslandOverlay::instance()) IslandOverlay::instance()->clearMediaSession();
+}
+
 ExecOut executeAction(const QString &action, const QJsonObject &params)
 {
     ExecOut out;
+
+    // ── P2 插件前置路由：插件 register 的 action 优先走插件宿主（本地 WS 同步调用）──
+    if (g_pluginHost) {
+        PluginResult pr;
+        if (g_pluginHost->dispatch(action, params, pr)) {
+            out.result = pr.result;
+            out.error = pr.error;
+            out.data = pr.data;
+            return out;
+        }
+    }
+
+    // ── P3 第三方能力友好提示 ─────────────────────────────────────
+    // 插件前置路由没接住的能力名（如广播/点歌/歌词），说明对应第三方插件未安装。
+    // 给管理端一条明确的"去哪装"提示，而不是默默 failed（把"能力外迁"落到实处）。
+    static const QStringList kThirdPartyCaps = {
+        QStringLiteral("voicehub_broadcast"), QStringLiteral("song_request"),
+        QStringLiteral("lyrics"), QStringLiteral("broadcast_audio")
+    };
+    if (kThirdPartyCaps.contains(action)) {
+        islandShow(QStringLiteral("需要安装插件"),
+                    QStringLiteral("「广播 / 点歌 / 歌词」等能力由第三方插件 VoiceHub 广播提供。\n请到托盘菜单「插件市场…」安装该能力后重试。"),
+                    QStringLiteral("puzzle"), 9000, false, QString(),
+                    IslandOverlay::Form::Centered, false);
+        out.result = QStringLiteral("needs-plugin");
+        out.error = QStringLiteral("未安装 VoiceHub 广播插件（请到插件市场安装）");
+        return out;
+    }
 
     if (action == QStringLiteral("lock")) {
         // user32 真实导出名就是 LockWorkStation（无 Native 后缀，那个名字不存在）
@@ -4743,6 +5148,13 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.error = QStringLiteral("media_session_start: 找不到 ffplay（可设 STE_QT_FFPLAY）");
             return out;
         }
+        // P3 播放时段管理（"最大最小适配播放时段"）：开了时段限制且当前不在窗口内 → 拦。
+        if (AgentSettings::playScheduleEnabled() && !isPlayAllowedNow()) {
+            out.result = QStringLiteral("blocked");
+            out.error = QStringLiteral("media_session_start: 当前不在允许的播放时段内");
+            out.data.insert(QStringLiteral("allowed"), false);
+            return out;
+        }
         QString target = params.value(QStringLiteral("path")).toString().trimmed();
         if (target.isEmpty()) {
             QDir d(g_mediaDir);
@@ -4779,6 +5191,36 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("path"), QDir::toNativeSeparators(target));
         out.data.insert(QStringLiteral("pid"), (int)g_playProc->processId());
+        // P3 播放时段管理：岛底「正在播放」（标题/总时长/下一首/封面）+ 1s 计时器推进已播。
+        const QString mTitle = params.value(QStringLiteral("title")).toString();
+        const qint64 mTotal = (qint64)params.value(QStringLiteral("totalMs")).toDouble(0);
+        const QString mNext  = params.value(QStringLiteral("nextTitle")).toString();
+        const QString mCover = params.value(QStringLiteral("nextCover")).toString();
+        if (IslandOverlay::instance())
+            IslandOverlay::instance()->setMediaSession(
+                mTitle.isEmpty() ? QFileInfo(target).fileName() : mTitle, mTotal, mNext, mCover);
+        if (!g_mediaTick) {
+            g_mediaTick = new QTimer();
+            g_mediaTick->setInterval(1000);
+            QObject::connect(g_mediaTick, &QTimer::timeout, [] {
+                if (IslandOverlay::instance()) IslandOverlay::instance()->advanceMediaElapsed(1000);
+            });
+        }
+        g_mediaTick->start();
+        // 最大最小适配：给定总时长超过本窗口剩余 → 到点自动截断（不让播放溢出时段）。
+        if (g_mediaAutoStop) g_mediaAutoStop->stop();
+        if (mTotal > 0) {
+            const qint64 rem = remainingMsInWindow();
+            const qint64 stopMs = (rem > 0 ? qMin(mTotal, rem) : mTotal);
+            if (stopMs > 0) {
+                if (!g_mediaAutoStop) {
+                    g_mediaAutoStop = new QTimer();
+                    QObject::connect(g_mediaAutoStop, &QTimer::timeout, [] { stopMediaSession(); });
+                }
+                g_mediaAutoStop->setSingleShot(true);
+                g_mediaAutoStop->start((int)qMin(stopMs, (qint64)0x7FFFFFFF));
+            }
+        }
         return out;
     }
 
@@ -4793,11 +5235,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         // 老师点了停止却看到"没在播放"，等于把"已经停了"说成了"做失败"。
         const int pid = (int)g_playProc->processId();
         const bool wasRunning = (g_playProc->state() != QProcess::NotRunning);
-        if (wasRunning) {
-            g_playProc->terminate();
-            if (!procWaitFinished(*g_playProc, 3000)) g_playProc->kill();
-        }
-        delete g_playProc; g_playProc = nullptr;
+        stopMediaSession();   // P3：统一停止（终止 ffplay + 清岛底 + 停计时器），与自动截断共用
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("stopped"), true);
         out.data.insert(QStringLiteral("pid"), pid);
@@ -4805,6 +5243,30 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         if (!wasRunning)
             out.data.insert(QStringLiteral("note"),
                             QStringLiteral("播放器此前已自行退出（播完或无输出设备），不是我们停的"));
+        return out;
+    }
+
+    // ── P3 播放时段管理：配置允许的播放时段窗口 ──
+    if (action == QStringLiteral("play_schedule_set")) {
+        AgentSettings::setPlayScheduleEnabled(params.value(QStringLiteral("enabled")).toBool(false));
+        const QJsonArray wins = params.value(QStringLiteral("windows")).toArray();
+        QStringList list;
+        for (const QJsonValue &v : wins) {
+            const QString s = v.toString().trimmed();
+            if (!s.isEmpty()) list.append(s);
+        }
+        AgentSettings::setPlayWindows(list);
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("enabled"), AgentSettings::playScheduleEnabled());
+        out.data.insert(QStringLiteral("windows"), QJsonArray::fromStringList(AgentSettings::playWindows()));
+        qInfo("[play] 🎵 播放时段配置：enabled=%d, windows=%d", AgentSettings::playScheduleEnabled(), list.size());
+        return out;
+    }
+    if (action == QStringLiteral("play_schedule_get")) {
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("enabled"), AgentSettings::playScheduleEnabled());
+        out.data.insert(QStringLiteral("windows"), QJsonArray::fromStringList(AgentSettings::playWindows()));
+        out.data.insert(QStringLiteral("allowedNow"), isPlayAllowedNow());
         return out;
     }
 
@@ -4858,6 +5320,12 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     // {db, active, seq} 经 type:"noise_sample" 实时回传（订阅该设备的管理端）。
     // 短窗口采集：每拍"开→录 150ms→关"，不驻留录音、不受语音对讲长期占用。
     if (action == QStringLiteral("noise_monitor_start")) {
+        // P0-1（2026-10-14）：本地「噪音监测」开关关了，远端指令也跳过（不占麦、不回传）。
+        if (!AgentSettings::noiseEnabled()) {
+            out.result = QStringLiteral("skipped");
+            out.data.insert(QStringLiteral("reason"), QStringLiteral("本地已关闭噪音监测"));
+            return out;
+        }
         ensureNoise();
         const int iv = qBound(500, params.value(QStringLiteral("intervalMs")).toInt(2000), 60000);
         if (g_noise->running()) {
@@ -4894,6 +5362,12 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     // 与 noise_monitor_start 的分工：那个是"只测不录"的底层开关；这个是上层**模式**——
     // 除周期回传 dB 外，还带"连续超阈 → 自动录一段 → 上传云端 → 上报 noise_alert"的闭环。
     if (action == QStringLiteral("study_mode_start")) {
+        // P0-1（2026-10-14）：自习模式底层也走噪音采集，本地关了就不开。
+        if (!AgentSettings::noiseEnabled()) {
+            out.result = QStringLiteral("skipped");
+            out.data.insert(QStringLiteral("reason"), QStringLiteral("本地已关闭噪音监测"));
+            return out;
+        }
         const double th = params.value(QStringLiteral("thresholdDb")).toDouble(-45.0);
         const int need = qBound(1, params.value(QStringLiteral("streakNeed")).toInt(3), 60);
         const int recSec = qBound(5, params.value(QStringLiteral("recordSec")).toInt(30), 300);
@@ -4905,6 +5379,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         g_studyRecordSec = recSec;
         g_studyStreak = 0;
         g_studyAlertCount = 0;
+        g_studyStartTs = logStudyStart(th, need, recSec);   // P3：长期记录（会话开始）
         if (!g_noise->running()) g_noise->start(16000, iv);
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("study"), true);
@@ -4921,6 +5396,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         g_studyStreak = 0;
         if (g_studyRecTimer) g_studyRecTimer->stop();
         if (g_noise && g_noise->running()) g_noise->stop();
+        logStudyStop(g_studyStartTs, g_studyAlertCount);   // P3：长期记录（会话结束 + 时长 + 触发数）
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("study"), false);
         out.data.insert(QStringLiteral("alertCount"), g_studyAlertCount);
@@ -6225,6 +6701,19 @@ int main(int argc, char *argv[])
         // 设置与信息（2026-10-06）：一眼看清 版本 / uid / 云端地址 / 连接状态 / 能不能升级
         auto *actInfo = menu->addAction(QStringLiteral("设置与信息…"));
         QObject::connect(actInfo, &QAction::triggered, &app, [] { openInfoDialog(); });
+        // 配置自检（P0-2 · 2026-10-14）：env 自动判断 + 一键修复
+        auto *actSelf = menu->addAction(QStringLiteral("配置自检…"));
+        QObject::connect(actSelf, &QAction::triggered, &app, [] { runSelfCheck(); });
+        // 插件市场（P2 · 2026-10-14）：浏览/安装/启停第三方能力（你 P0 反思里的「第三方能力窗口」）
+        auto *actPlugin = menu->addAction(QStringLiteral("插件市场…"));
+        QObject::connect(actPlugin, &QAction::triggered, &app, [] { openPluginStore(); });
+        // P3：三张长期记录 / 配置入口
+        auto *actNoise = menu->addAction(QStringLiteral("噪音记录…"));
+        QObject::connect(actNoise, &QAction::triggered, &app, [] { openNoiseLogDialog(); });
+        auto *actStudy = menu->addAction(QStringLiteral("自习记录…"));
+        QObject::connect(actStudy, &QAction::triggered, &app, [] { openStudyLogDialog(); });
+        auto *actPlay  = menu->addAction(QStringLiteral("播放时段…"));
+        QObject::connect(actPlay, &QAction::triggered, &app, [] { openPlayScheduleDialog(); });
         // 今日课表（2026-10-06）：教室大屏显示全天课程，双击全屏；读 ClassIsland 档案
         auto *actSched = menu->addAction(QStringLiteral("今日课表…"));
         QObject::connect(actSched, &QAction::triggered, &app, [] {
@@ -6276,14 +6765,21 @@ int main(int argc, char *argv[])
         // 放在托盘块里：有托盘 = 有桌面会话，Session0 那种无界面环境不摆窗口。
         // 想要回"用完即隐"的老样子，设 STE_QT_ISLAND_IDLE=0。
         IslandOverlay *isl = IslandOverlay::instance();
-        isl->setIdleEnabled(envOr("STE_QT_ISLAND_IDLE", QStringLiteral("1")) != QStringLiteral("0"));
+        // P0-1（2026-10-14）：空闲半胶囊默认开；环境变量 STE_QT_ISLAND_IDLE=0 可硬关，否则读本地设置。
+        {
+            const QString envIdle = qEnvironmentVariable("STE_QT_ISLAND_IDLE");
+            const bool idle = envIdle.isEmpty() ? AgentSettings::islandIdle()
+                                                : (envIdle != QStringLiteral("0"));
+            isl->setIdleEnabled(idle);
+        }
+        isl->setLightMode(AgentSettings::lightMode());   // 浅色主题开关（P0-1）
         isl->ensureIdle();
     } else {
         qWarning().noquote() << QStringLiteral("[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口");
     }
 
     // ── 通知体系接线（2026-10-09 · DeepSeek Harness）─────────────────────
-    // 循环提醒：展示由 notifyFromParams 的 loop 分支直接走 NotifyWindow（含确认按钮，
+    // 循环提醒：展示由 notifyFromParams 的 loop 分支走灵动岛（含确认按钮，
     // 点确认 → loopConfirm 回调 → g_loopReminder.confirm 终止）。这里只收终止日志。
     QObject::connect(&g_loopReminder, &LoopReminder::expired, &app,
         [](const QString &id, const QString &reason) {
@@ -6506,16 +7002,19 @@ int main(int argc, char *argv[])
         auto *clock = new ScheduleClock(profilePath, &app);
         QObject::connect(clock, &ScheduleClock::periodStarted, &app,
             [](const QString& name, const QTime& at) {
-                NotifyWindow::showNotice(NotifyWindow::Popup, QStringLiteral("上课啦"),
-                           QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm")),
-                           6, true, QStringLiteral("remind"));
+                const QString txt = QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm"));
+                // P1 · 2026-10-14：统一走灵动岛（原 NotifyWindow 已删），本地铃记 fromAdmin=false
+                islandShow(QStringLiteral("上课啦"), txt, QStringLiteral("bell"),
+                           6000, false, QString(), IslandOverlay::Form::Centered, false);
+                speakText(QStringLiteral("上课啦") + QStringLiteral("：") + txt);
                 qInfo().noquote() << "[agent-qt] 上课提醒已弹: " << name;
             });
         QObject::connect(clock, &ScheduleClock::periodEnded, &app,
             [](const QString& name, const QTime& at) {
-                NotifyWindow::showNotice(NotifyWindow::Popup, QStringLiteral("下课啦"),
-                           QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm")),
-                           6, true, QStringLiteral("remind"));
+                const QString txt = QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm"));
+                islandShow(QStringLiteral("下课啦"), txt, QStringLiteral("bell"),
+                           6000, false, QString(), IslandOverlay::Form::Centered, false);
+                speakText(QStringLiteral("下课啦") + QStringLiteral("：") + txt);
                 qInfo().noquote() << "[agent-qt] 下课提醒已弹: " << name;
             });
         clock->start();
@@ -6529,7 +7028,41 @@ int main(int argc, char *argv[])
     // 老师点「以后再说」即可跳过；关掉后未配置态的托盘告警照旧保留。
     if (g_unconfigured && g_tray) {
         qInfo().noquote() << QStringLiteral("[agent-qt] 检测到未配置，稍后自动打开配置向导（可点「以后再说」跳过）");
-        QTimer::singleShot(700, &app, [] { openConfigDialog(); });
+        QTimer::singleShot(700, &app, [] { runSelfCheck(); });   // P0-2：首运行先自检（含一键修复入口）
+    }
+
+    // ── P2：插件宿主启动（进程外插件 ABI）──
+    // 本地 WS 仅绑 127.0.0.1:26789；agent 暴露的能力经 PluginAgentApi 注入，
+    // 插件无法直接调内部符号，只能走 islandShow / notify / settings / 事件订阅。
+    g_pluginHost = new PluginHost(qApp);
+    g_pluginHost->setAgentVersion(kAppVersion);
+    PluginAgentApi api;
+    api.islandShow = [](const QString &title, const QString &desc, const QString &icon,
+                        int form, bool fromAdmin, int durationMs) {
+        islandShow(title, desc, icon, durationMs, false, QString(),
+                   (IslandOverlay::Form)form, fromAdmin);
+    };
+    api.notify = [](const QJsonObject &params) { notifyFromParams(params); };
+    api.settingsGet = [](const QString &key) -> QJsonValue {
+        if (key == QStringLiteral("noiseEnabled"))   return AgentSettings::noiseEnabled();
+        if (key == QStringLiteral("voiceEnabled"))   return AgentSettings::voiceEnabled();
+        if (key == QStringLiteral("notifyEnabled"))  return AgentSettings::notifyEnabled();
+        if (key == QStringLiteral("islandIdle"))     return AgentSettings::islandIdle();
+        if (key == QStringLiteral("lightMode"))      return AgentSettings::lightMode();
+        return QJsonValue();
+    };
+    api.settingsSet = [](const QString &key, const QJsonValue &v) {
+        const bool on = v.toBool();
+        if (key == QStringLiteral("noiseEnabled"))       AgentSettings::setNoiseEnabled(on);
+        else if (key == QStringLiteral("voiceEnabled"))  AgentSettings::setVoiceEnabled(on);
+        else if (key == QStringLiteral("notifyEnabled")) AgentSettings::setNotifyEnabled(on);
+        else if (key == QStringLiteral("islandIdle"))    AgentSettings::setIslandIdle(on);
+        else if (key == QStringLiteral("lightMode"))     AgentSettings::setLightMode(on);
+    };
+    api.subscribeEvents = [](const QString &, const QStringList &) { /* 订阅登记在宿主侧，事件经 forwardEvent 推送 */ };
+    g_pluginHost->setAgentApi(api);
+    if (g_pluginHost->start()) {
+        g_pluginHost->loadEnabled();   // 启动 QSettings 中已启用的插件
     }
 
     const int rc = app.exec();

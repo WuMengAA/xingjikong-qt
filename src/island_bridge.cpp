@@ -205,6 +205,14 @@ QVariantList IslandBridge::spectrumBands() const
 }
 bool IslandBridge::spectrumActive() const { return m_host ? m_host->m_spectrumOn : false; }
 
+// ── P3 播放时段管理：岛底「正在播放」状态（2026-10-14）──
+bool    IslandBridge::mediaActive() const    { return m_host ? m_host->m_mediaOn : false; }
+QString IslandBridge::mediaTitle() const     { return m_host ? m_host->m_mediaTitle : QString(); }
+qint64  IslandBridge::mediaElapsedMs() const { return m_host ? m_host->m_mediaElapsedMs : 0; }
+qint64  IslandBridge::mediaTotalMs() const   { return m_host ? m_host->m_mediaTotalMs : 0; }
+QString IslandBridge::mediaNextTitle() const { return m_host ? m_host->m_mediaNextTitle : QString(); }
+QString IslandBridge::mediaNextCover() const { return m_host ? m_host->m_mediaNextCover : QString(); }
+
 void IslandBridge::syncSpectrum()
 {
     // 只发频谱那一路：高频（每帧一次），不能拖累全量 changed（见头文件里的说明）

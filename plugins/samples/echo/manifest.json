@@ -1,0 +1,12 @@
+{
+  "id": "echo",
+  "name": "Echo 示例插件",
+  "version": "1.0.0",
+  "author": "Stelarith",
+  "description": "演示进程外插件：实现 echo 指令，并在收到时经灵动岛弹出提示（需 island 权限）。",
+  "minAgentVersion": "0.6.31",
+  "permissions": ["island"],
+  "runtime": "python",
+  "entry": "echo.py",
+  "actions": ["echo"]
+}

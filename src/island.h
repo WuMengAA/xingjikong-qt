@@ -12,8 +12,9 @@
 //     调用方 setInteractive(true) 关闭穿透
 //   · 自动收起：时长到后淡出；紧急/交互模式不自动关
 //
-// 与 NotifyWindow 的关系：NotifyWindow 保留（全屏遮罩/居中弹窗/紧急确认仍在它那里），
-// 灵动岛接管 **island 形态** 与各类瞬态提示（语音/广播/考试倒计时等）——见 island.cpp。
+// 与被删 NotifyWindow 的关系（2026-10-14 P1）：NotifyWindow 已删除，灵动岛是被控端
+// **唯一展示入口**——全屏遮罩/居中弹窗/顶部胶囊/确认/紧急全部由岛覆盖（见 island.cpp）。
+// 历史注释里"与旧 NotifyWindow 同思路/同白名单"指的就是这次被吸收的那套窗口做法。
 //
 // ── 2026-10-11 · 绘制层改 QML（用户裁决）──────────────────────────────
 // 用户要求"被控端 QWidget 改 QML"。本次只把**绘制**搬走，**逻辑一行不动**：
@@ -139,6 +140,19 @@ public:
     void setSpectrumActive(bool on);
     bool spectrumActive() const { return m_spectrumOn; }
 
+    // ── P3 播放时段管理：岛底「正在播放」状态 ──────────────────────
+    // media_session_start 成功 → setMediaSession（标题/总时长/下一首/封面）；
+    // media_session_stop / 自动截断 → clearMediaSession。桥读这些成员给 QML 画底栏。
+    // 时长(ms)走 qint64（QML 侧用 real 承接，同 fileTransfer 口径）。
+    void setMediaSession(const QString &title, qint64 totalMs,
+                         const QString &nextTitle, const QString &nextCover);
+    void clearMediaSession();
+    // 计时器推进已播毫秒（ffplay 无进度回调，用墙上钟估）；mediaOn 时同步给 QML。
+    void advanceMediaElapsed(int ms);
+    bool mediaOn() const { return m_mediaOn; }
+    // 当前曲目名（岛底栏「正在播放」+ 播放时段对话框现状展示用；缺省为文件名）。
+    QString mediaTitle() const { return m_mediaTitle; }
+
 signals:
     void expandedChanged(bool expanded);
 
@@ -231,6 +245,14 @@ private:
     bool m_spectrumOn = false;        // 对讲中（展开态显示频谱区）
     QVector<float> m_spectrumBands;   // 16 个 0..1 能量（IslandBridge 读它给 QML）
     qint64 m_spectrumLastMs = 0;      // 最近一次有数据的时刻（静音 800ms 归零，与旧件同口径）
+
+    // ── P3 播放时段管理：岛底「正在播放」状态 ──
+    bool   m_mediaOn = false;         // 当前有媒体在播（岛底栏显隐）
+    QString m_mediaTitle;             // 当前曲目名（缺省用文件名）
+    qint64  m_mediaElapsedMs = 0;     // 已播毫秒（由计时器推进；ffplay 无回调，用墙上钟估）
+    qint64  m_mediaTotalMs = 0;       // 总时长（管理端下发；<=0 未知）
+    QString m_mediaNextTitle;         // 下一首名（"下一首封面小演示"）
+    QString m_mediaNextCover;         // 下一首封面路径/URL（空=不显示）
 
     QTimer *m_autoClose = nullptr;
     QTimer *m_dismissGuard = nullptr;   // dismiss 淡出的兜底：动画没走完也强制 hide

@@ -88,6 +88,16 @@ Item {
     readonly property bool _spectrumActive: bridgeRef ? bridgeRef.spectrumActive : false
     readonly property var  _spectrumBands:  (bridgeRef && bridgeRef.spectrumBands) ? bridgeRef.spectrumBands : []
 
+    // ── P3 播放时段管理：岛底「正在播放」（桥 media* 属性，跟 changed() 走）──
+    // ⚠️ 同样点访问绑定（不是 bridge["x"]），靠 changed() 一把全 NOTIFY 重读。
+    // ⚠️ qint64 用 real 承接（同 fileTransferBytes 口径，Qt 6.12 严格化）。
+    readonly property bool   _mediaActive:    bridgeRef ? bridgeRef.mediaActive    : false
+    readonly property string _mediaTitle:     bridgeRef ? bridgeRef.mediaTitle     : ""
+    readonly property real   _mediaElapsedMs: bridgeRef ? bridgeRef.mediaElapsedMs : 0
+    readonly property real   _mediaTotalMs:   bridgeRef ? bridgeRef.mediaTotalMs   : 0
+    readonly property string _mediaNextTitle: bridgeRef ? bridgeRef.mediaNextTitle : ""
+    readonly property string _mediaNextCover: bridgeRef ? bridgeRef.mediaNextCover : ""
+
     // ── 尺寸（显式，不靠隐式推导）───────────────────────────
     readonly property int padH: 14
     // 展开态"标题 + 描述"占的头部高度（自适应字号后标题可达 64px，2 行 128px）。
@@ -116,6 +126,10 @@ Item {
     readonly property int ftH: (root._expanded && root._ftActive) ? 46 : 0
     // §6.3 语音频谱区占的额外高度（展开态 + 对讲中才给；= 34 高 + 12 上边距）
     readonly property int specH: (root._expanded && root._spectrumActive) ? 46 : 0
+    // P3 播放时段管理：岛底「正在播放」栏占的额外高度（展开态 + 媒体在播才给；
+    // = 行高 34 + 上边距 12，与 specH 同口径 —— 2026-10-14 修：原值 40 少算 6px，
+    // 内容比预算高，叠历史面板时底部会被压 6px）
+    readonly property int mediaH: (root._expanded && root._mediaActive) ? 46 : 0
     readonly property int collapsedH: root.th.shapeCollapsed
 
     // 有动作按钮时：胶囊也走"加高"逻辑（Centered/Fullscreen 本来就高）
@@ -154,7 +168,24 @@ Item {
         if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB"
         return (n / 1024 / 1024 / 1024).toFixed(2) + " GB"
     }
-    readonly property int exTitlePx: root.fitTitlePx((bridgeRef ? bridgeRef.title : ""))
+    // P3：毫秒 → "mm:ss"（播放底栏时长）
+    function fmtMediaTime(ms) {
+        var s = Math.max(0, Math.floor(ms / 1000))
+        var m = Math.floor(s / 60)
+        var r = s % 60
+        return (m < 10 ? "0" : "") + m + ":" + (r < 10 ? "0" : "") + r
+    }
+    // ⚠️ 2026-10-14 修 Binding loop：exTitlePx 原来是**绑定** root.fitTitlePx(bridgeRef.title)，
+    //   而 fitTitlePx 内部既**读** tm.width（TextMetrics）又**写** tm.font.pixelSize/tm.text
+    //   —— tm.width 随写入变化 ⇒ 触发 exTitlePx 重算 ⇒ 又写 tm ⇒ QML 依赖图成环
+    //   （冒烟日志实测：`Binding loop detected for property "exTitlePx"`，标题字号可能停更）。
+    //   修法：exTitlePx 退为**命令式**属性（无绑定表达式⇒不进依赖图），由 _title/_expanded
+    //   变化时显式重算；fitTitlePx 对 tm 的写就再也流不回属性系统。
+    property int exTitlePx: root.th ? root.th.fsTitleXxl : 64
+    function refreshTitlePx() { root.exTitlePx = root.fitTitlePx(root._title) }
+    on_TitleChanged:   root.refreshTitlePx()
+    on_ExpandedChanged: root.refreshTitlePx()
+    Component.onCompleted: root.refreshTitlePx()   // 创建时桥可能已带 title，兜底算一次
 
     // 2026-10-13 用户「界面太小了放大到 640x320」：展开态 400×自适应 → **640**（宽）× 高度下限 **320**。
     // ⚠️ 宽度是主导：宿主 QQuickWidget 走 SizeRootObjectToView，view 按 root implicit 走
@@ -164,7 +195,7 @@ Item {
                                : (root._expanded ? 640 : 320)
     implicitHeight: root._idle ? root.th.shapeIdle
                                : (root._expanded
-                                  ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.specH + root.actH + root.padH)
+                                  ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.specH + root.mediaH + root.actH + root.padH)
                                   : (root._showActionsNow
                                      ? Math.max(root.collapsedH + root.actH + 10, 90)
                                      : root.collapsedH))
@@ -520,6 +551,107 @@ Item {
                     }
                 }
             }
+
+            // ── P3 播放时段管理：岛底「正在播放」栏（展开态 + 媒体在播）──
+            // ⚠️ 2026-10-14 修布局 bug：本栏原在**根级**（expandedCol 的兄弟），却锚
+            //    expandedCol 内 specRow.bottom —— 跨父级锚被 QML 静默丢弃，整栏落到
+            //    y=0（岛顶）。探针 _island_qml_probe --media 全子树几何转储实测：
+            //    同父级 left/right 锚正常（w=236），唯 top 锚失效（y=0）。
+            //    修法＝移进 expandedCol 做 specRow 的**同父级兄弟**，与 stList/ftRow/
+            //    specRow 同一锚定范式（root 级的行只锚 parent 或用预算公式，见
+            //    actionRow / historyPanel，都是刻意避开跨父级锚的）。
+            Item {
+                id: mediaRow
+                visible: root._expanded && root._mediaActive
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: specRow.bottom
+                anchors.topMargin: visible ? 12 : 0
+                height: visible ? 34 : 0
+
+                // ▶ 是符号字形，教室机字体不全会 tofu（specRow 注释里有同样教训）
+                //    ⇒ 用矢量 play 图标，不依赖任何字体覆盖。
+                SvgIcon {
+                    id: mediaPlayIcon
+                    name: "play"
+                    tint: root.th.fg
+                    px: 12
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Text {
+                    id: mediaTitleTxt
+                    anchors.left: mediaPlayIcon.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root._mediaTitle || "正在播放"
+                    color: root.th.fg
+                    font.pixelSize: 12
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                    // 有下一首：右栏占 40%；无下一首：给右侧时长让位
+                    // （implicitWidth 实测 ~65px + 图标/间隙；原写法直接 parent.width
+                    //   会让长标题跑到时长文字下面）
+                    width: root._mediaNextTitle
+                        ? parent.width * 0.6
+                        : Math.max(40, parent.width - mediaTimeTxt.implicitWidth - 30)
+                }
+
+                Text {
+                    id: mediaTimeTxt
+                    visible: root._mediaNextTitle === ""
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.fmtMediaTime(root._mediaElapsedMs) + (root._mediaTotalMs > 0
+                           ? " / " + root.fmtMediaTime(root._mediaTotalMs) : "")
+                    color: root.th.sub
+                    font.pixelSize: 11
+                }
+
+                // 下一首 + 封面小演示（图1 痛点点名项）
+                // ⚠️ 2026-10-14 修：原写法 Row 不定宽 + 子 Text width 绑 Row.width
+                //    ⇒ 互相依赖，整组塌成 0x0（探针实测 QQuickRow w=0 h=0，
+                //   "下一首：稻香"完全不显示）。改绝对锚：文本左起、右界停在封面
+                //    左缘；封面右锚定，两边无相互依赖。
+                Item {
+                    id: mediaNext
+                    visible: root._mediaNextTitle !== ""
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width * 0.4
+                    height: parent.height
+
+                    Text {
+                        id: mediaNextTxt
+                        anchors.left: parent.left
+                        anchors.right: mediaNextCover.left
+                        anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "下一首：" + root._mediaNextTitle
+                        color: root.th.sub
+                        font.pixelSize: 10
+                        elide: Text.ElideRight
+                    }
+
+                    Rectangle {
+                        id: mediaNextCover
+                        visible: root._mediaNextCover !== ""
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 28; height: 28; radius: 4
+                        color: root.th.light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.12)
+                        clip: true
+                        Image {
+                            anchors.fill: parent
+                            fillMode: Image.PreserveAspectCrop
+                            source: (root._mediaNextCover.indexOf("://") >= 0)
+                                    ? root._mediaNextCover
+                                    : (root._mediaNextCover ? "file:///" + root._mediaNextCover : "")
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -584,8 +716,11 @@ Item {
         anchors.top: parent.top
         // 2026-10-12 修「历史显示不全」：原写法 headH + 36，但 implicitHeight 预算里
         // 顶部只算了 padH ⇒ 那 36 属于"预算外占位"，把历史面板整体往下顶、越顶越矮。
-        // 现在与预算同一套公式：从内容区（标题+描述+状态列表+进度条）之下开始。
-        anchors.topMargin: root.padH + root.headH + root.listH + root.ftH
+        // 2026-10-14 补 specH + mediaH：频谱/岛底播放栏开启时历史面板也要让位，
+        // 否则与「正在播放」栏重叠（implicitHeight 预算公式里本来就有这两项，
+        // 这里不同步就会"预算长了、面板没动"）。
+        // 现在与预算同一套公式：从内容区（标题+描述+状态列表+进度条+频谱+播放栏）之下开始。
+        anchors.topMargin: root.padH + root.headH + root.listH + root.ftH + root.specH + root.mediaH
         anchors.bottom: parent.bottom
         anchors.bottomMargin: root.padH
         z: 40

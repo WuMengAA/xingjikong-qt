@@ -30,6 +30,7 @@
 #include <QTextStream>
 #include <QTimer>
 #include <cmath>   // §6.3 频谱探针：std::sin
+#include <functional>  // P3 布局诊断：全子树几何转储
 
 // 从岛的子控件里找 QQuickWidget（island.h 没有公开 getter，这里按类型找）
 static QQuickWidget *findQuick(QWidget *w)
@@ -69,7 +70,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    bool idle = false, expand = false, actions = false, light = false, spectrum = false;
+    bool idle = false, expand = false, actions = false, light = false, spectrum = false, media = false;
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
@@ -78,6 +79,7 @@ int main(int argc, char *argv[])
         if (a == QLatin1String("--actions"))   actions = true;
         if (a == QLatin1String("--light"))     light = true;
         if (a == QLatin1String("--spectrum"))  spectrum = true;   // §6.3 频谱态（2026-10-13）
+        if (a == QLatin1String("--media"))     media = true;      // P3 岛底「正在播放」（2026-10-14）
         if (a == QLatin1String("--out") && i + 1 < argc)
             outPath = QString::fromLocal8Bit(argv[++i]);
     }
@@ -128,6 +130,18 @@ int main(int argc, char *argv[])
         QObject::connect(tick, &QTimer::timeout, isl, [isl, pcm]() { isl->feedSpectrum(*pcm); });
         tick->start();
         isl->feedSpectrum(*pcm);
+    } else if (media) {
+        // P3 播放时段管理（2026-10-14）：岛底「正在播放」栏——曲名 + 已播/总时长 + 下一首。
+        // 与 media_session_start 成功分支同一条路：setMediaSession 后 setExpanded，
+        // advanceMediaElapsed 补一个非零已播（ffplay 无回调，生产里由 1s 计时器推进）。
+        isl->showIsland(QStringLiteral("老师正在讲话"),
+                        QStringLiteral("请保持安静，认真听讲"),
+                        QStringLiteral("bell"), 0);
+        isl->setExpanded(true);
+        isl->setMediaSession(QStringLiteral("晴天 - 周杰伦"), 269000,
+                             QStringLiteral("稻香"),
+                             QStringLiteral("D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-control-qt/resources/icons/music.svg"));
+        isl->advanceMediaElapsed(83000);   // 01:23 / 04:29
     } else {
         isl->showIsland(QStringLiteral("老师正在讲话"),
                         QStringLiteral("请保持安静，认真听讲，有问题举手"),
@@ -205,6 +219,27 @@ int main(int argc, char *argv[])
             out << "  root._actions.count = " << ac.toList().size() << "\n";
             QVariant sb = ri->property("_spectrumBands");
             out << "  root._spectrumBands.count = " << sb.toList().size() << "\n";
+        }
+
+        // ── P3 布局诊断（2026-10-14）：全子树几何转储 ──────────────────
+        // mediaRow 锚 specRow.bottom 但两者不同父级（root vs expandedCol），
+        // 截图里媒体栏跑到了顶部。这里把整棵 Item 树的 x/y/w/h 打出来定位真因。
+        if (QQuickItem *ri = q->rootObject()) {
+            out << "=== tree ===\n";
+            std::function<void(QQuickItem *, int)> walk = [&](QQuickItem *it, int depth) {
+                QVariant t = it->property("text");
+                const QString ts = t.isValid() ? t.toString().left(14) : QString();
+                out << QStringLiteral("  %1%2 y=%3 h=%4 w=%5 vis=%6%7\n")
+                       .arg(QString(depth * 2, QLatin1Char(' ')))
+                       .arg(QLatin1String(it->metaObject()->className()))
+                       .arg(it->y()).arg(it->height()).arg(it->width())
+                       .arg(it->isVisible() ? 1 : 0)
+                       .arg(ts.isEmpty() ? QString() : QStringLiteral(" text=\"") + ts + QStringLiteral("\""));
+                for (QObject *c : it->children())
+                    if (auto *ci = qobject_cast<QQuickItem *>(c)) walk(ci, depth + 1);
+            };
+            walk(ri, 0);
+            out << "=== end tree ===\n";
         }
 
         // ⚠️ 关键：QML 内容必须用 grabFramebuffer()，普通 grab() 拿到空白。

@@ -87,6 +87,17 @@ class IslandBridge : public QObject
     Q_PROPERTY(QVariantList spectrumBands  READ spectrumBands  NOTIFY spectrumChanged)
     Q_PROPERTY(bool         spectrumActive READ spectrumActive NOTIFY spectrumChanged)
 
+    // ── P3 播放时段管理：岛底「正在播放」状态（2026-10-14）────────────
+    // 展开/收起态底栏显示：当前曲目 + 已播/总时长 + 下一首封面小演示。
+    // 更新频率低（~1Hz 计时器推进 elapsed），跟全量 changed() 走即可，不必单独信号。
+    // ⚠️ qint64 走 C++ 属性、QML 用 real 承接（同 fileTransferBytes 口径，Qt 6.12 严格）。
+    Q_PROPERTY(bool    mediaActive    READ mediaActive    NOTIFY changed)
+    Q_PROPERTY(QString mediaTitle     READ mediaTitle     NOTIFY changed)
+    Q_PROPERTY(qint64  mediaElapsedMs READ mediaElapsedMs NOTIFY changed)
+    Q_PROPERTY(qint64  mediaTotalMs   READ mediaTotalMs   NOTIFY changed)
+    Q_PROPERTY(QString mediaNextTitle READ mediaNextTitle NOTIFY changed)
+    Q_PROPERTY(QString mediaNextCover READ mediaNextCover NOTIFY changed)
+
 public:
     explicit IslandBridge(IslandOverlay *host, QObject *parent = nullptr);
 
@@ -123,6 +134,14 @@ public:
     // §6.3 语音频谱
     QVariantList spectrumBands() const;
     bool spectrumActive() const;
+
+    // P3 播放时段管理：岛底「正在播放」状态
+    bool    mediaActive() const;
+    QString mediaTitle() const;
+    qint64  mediaElapsedMs() const;
+    qint64  mediaTotalMs() const;
+    QString mediaNextTitle() const;
+    QString mediaNextCover() const;
     // 频谱状态变了就调这个：**只发频谱那一路**（高频，别用全量 sync()）。
     void syncSpectrum();
     // QML → C++：点历史项，恢复该通知到展开态

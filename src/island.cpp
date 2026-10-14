@@ -638,6 +638,41 @@ void IslandOverlay::setSpectrumActive(bool on)
     update();
 }
 
+// ── P3 播放时段管理：岛底「正在播放」状态（2026-10-14）──────────────
+// media_session_start 成功 → 由 main.cpp 调用；elapsed 用墙上钟估算（ffplay 无进度回调）。
+void IslandOverlay::setMediaSession(const QString &title, qint64 totalMs,
+                                     const QString &nextTitle, const QString &nextCover)
+{
+    m_mediaOn = true;
+    m_mediaTitle = title;
+    m_mediaTotalMs = totalMs;
+    m_mediaNextTitle = nextTitle;
+    m_mediaNextCover = nextCover;
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
+void IslandOverlay::clearMediaSession()
+{
+    if (!m_mediaOn && m_mediaTitle.isEmpty()) return;
+    m_mediaOn = false;
+    m_mediaTitle.clear();
+    m_mediaElapsedMs = 0;
+    m_mediaTotalMs = 0;
+    m_mediaNextTitle.clear();
+    m_mediaNextCover.clear();
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
+void IslandOverlay::advanceMediaElapsed(int ms)
+{
+    if (!m_mediaOn) return;
+    m_mediaElapsedMs += ms;
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
 // 仅全屏形态的配色档（与旧 NotifyWindow 同白名单 + 黑底回落）
 void IslandOverlay::setSeverity(const QString &severity)
 {
