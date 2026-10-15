@@ -1,8 +1,8 @@
 // 小鲸鱼音效播放器（2026-10-11）
 //
 // dsh-whale-widget 的音效素材已 cp 到 resources/whale/ 并转 wav：
-//   Ya1.wav / Ya2.wav  = 按压 / 松开（小黄鸭）
-//   D1.wav / D2.wav     = 按压 / 松开（音效1）
+//   ya1.wav / ya2.wav  = 按压 / 松开（小黄鸭）
+//   d1.wav / d2.wav    = 按压 / 松开（音效1）
 //   minecraft-exp-orb.wav = 任务结束音（Minecraft 经验球）
 //   task-end-a.wav        = 任务结束音（预设 A）
 //
@@ -27,10 +27,10 @@ class WhaleAudio : public QObject
     Q_OBJECT
 public:
     enum class Sound {
-        PressYa,     // Ya1.wav 按压音（小黄鸭）
-        ReleaseYa,   // Ya2.wav 松开音（小黄鸭）
-        PressD,      // D1.wav  按压音（音效1）
-        ReleaseD,    // D2.wav  松开音（音效1）
+        PressYa,     // ya1.wav 按压音（小黄鸭）
+        ReleaseYa,   // ya2.wav 松开音（小黄鸭）
+        PressD,      // d1.wav  按压音（音效1）
+        ReleaseD,    // d2.wav  松开音（音效1）
         TaskEndA,    // minecraft-exp-orb.wav
         TaskEndB,    // task-end-a.wav
         Notify       // minecraft-exp-orb.wav（通知上岛提示音，与 TaskEndA 同文件但语义不同）

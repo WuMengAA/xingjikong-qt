@@ -29,6 +29,7 @@
 #include "island_bridge.h"
 #include "svgiconprovider.h"
 #include "whale_audio.h"
+#include "danmaku.h"             // 2026-10-15 组件5：祝福弹幕全屏浮层
 
 #include <QApplication>
 #include <QDebug>
@@ -270,6 +271,17 @@ QRect IslandOverlay::geometryForContent(int shapeHeight) const
     if (!screen) return QRect(0, 0, 200, shapeHeight);
     const QRect sg = screen->geometry();
 
+    // 2026-10-15 组件1（点歌互动）：媒体呈现时按 QML 预算宽度走 ——
+    // 收起 320 / 展开 640（与 IslandRoot.implicitWidth 逐字一致）。
+    // 内容定宽对短曲名只给 ~200：互动区 + 弹幕输入行在 200 宽下放不下
+    // （探针实测 danmakuRow 被推到 320 高度线外，根本看不见），
+    // 且 fitTitlePx 的宽度预算也按 640/320 算，窄岛下大标题会被挤成 3 行 192px。
+    // ⚠️ 只对媒体呈现生效：通知类仍走内容定宽，不动既有 100+ 调用方的观感。
+    if (m_mediaPresenting) {
+        const int mw = m_expanded ? 640 : 320;
+        return QRect(sg.x() + (sg.width() - mw) / 2, sg.y() + 24, mw, shapeHeight);
+    }
+
     // 内容决定宽度（标题/描述最长行）
     const int maxW = qMin(sg.width() * 6 / 10, 640);
     QFontMetrics fm(font());
@@ -436,7 +448,11 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
 {
     // ── 历史归档：上一条有内容的通知在被顶掉时进历史 ──
     // 判据：m_contentActive && m_title 非空（活动中的真通知被顶掉）
-    if (m_contentActive && !m_title.isEmpty() && !m_ftActive)
+    // 2026-10-15 组件1：再加 !m_mediaPresenting —— 上一条是"正在播放"时不归档
+    // （媒体不是通知；且 setMediaSession 里置位在 showIsland **之后**，本行读到的
+    //  永远是"上一条内容"的状态：歌2顶歌1→true 不归档；媒体顶通知→false 通知照常归档；
+    //  通知顶媒体→true 媒体不归档）。
+    if (m_contentActive && !m_title.isEmpty() && !m_ftActive && !m_mediaPresenting)
         archiveToHistory();
 
     m_title = title;
@@ -640,6 +656,12 @@ void IslandOverlay::setSpectrumActive(bool on)
 
 // ── P3 播放时段管理：岛底「正在播放」状态（2026-10-14）──────────────
 // media_session_start 成功 → 由 main.cpp 调用；elapsed 用墙上钟估算（ffplay 无进度回调）。
+//
+// 2026-10-15 组件1（点歌互动）：播放呈现上岛 —— 媒体以**收起态胶囊**上屏
+// （不开独立窗、时长 0 不自动收、交互态可点开互动）。置位顺序是核心：
+//   setInteractive/showIsland 先走（归档守卫读到的还是"上一条内容"的旧标志），
+//   m_mediaPresenting 最后置位 ⇒ 歌2顶歌1不归档、通知顶媒体不归档媒体、
+//   媒体顶通知则通知正常进历史。
 void IslandOverlay::setMediaSession(const QString &title, qint64 totalMs,
                                      const QString &nextTitle, const QString &nextCover)
 {
@@ -648,6 +670,18 @@ void IslandOverlay::setMediaSession(const QString &title, qint64 totalMs,
     m_mediaTotalMs = totalMs;
     m_mediaNextTitle = nextTitle;
     m_mediaNextCover = nextCover;
+    // 图标 music.svg 在 resources/icons/ 已存在；bell/notify/alert 白名单外 ⇒ 不上岛音效。
+    setInteractive(true);
+    showIsland(title, QString(), QStringLiteral("music"), 0, Form::Capsule);
+    m_mediaPresenting = true;   // ⚠️ 必须在 showIsland 之后（见上）
+    // 组件7：广播开始 —— 2.5s 内岛显示"即将播放"，到点自动转 playing。
+    m_mediaPhase = QStringLiteral("starting");
+    armMediaPhaseTimer(2500);
+    // 宽度按媒体预算（收起 320）重算一次：上面 showIsland 算几何时本标志还没置位
+    // （归档守卫必须先读旧值），拿到的是内容定宽（短曲名 ~200，互动区放不下）。
+    // 展开态不用管 —— setExpanded 发生在本函数返回之后，那时标志已置位。
+    if (isVisible() && !m_expanded)
+        animateGeometry(geometryForForm(m_form));
     if (m_bridge) m_bridge->sync();
     update();
 }
@@ -655,12 +689,26 @@ void IslandOverlay::setMediaSession(const QString &title, qint64 totalMs,
 void IslandOverlay::clearMediaSession()
 {
     if (!m_mediaOn && m_mediaTitle.isEmpty()) return;
+    // 2026-10-15 组件1：只有"岛面当前画的就是这条媒体"时才收回岛面。
+    // 通知顶掉期间的 clearMediaSession 不碰岛 —— 那条通知有自己的生命周期
+    // （自动收/确认按钮），媒体结束不该把人家吞了。
+    const bool contentIsMedia = m_mediaPresenting && (m_title == m_mediaTitle);
     m_mediaOn = false;
     m_mediaTitle.clear();
     m_mediaElapsedMs = 0;
     m_mediaTotalMs = 0;
     m_mediaNextTitle.clear();
     m_mediaNextCover.clear();
+    m_mediaPresenting = false;
+    // 组件7：相位归零 + 停相位定时器（"播完"的 2.5s 延时也在这里被取消）。
+    m_mediaPhase.clear();
+    if (m_mediaPhaseTimer) m_mediaPhaseTimer->stop();
+    if (contentIsMedia) {
+        // "正在播放"不是通知，不进历史：先断 m_contentActive 再 dismiss，
+        // 否则 enterIdle 的归档守卫会把媒体内容写进历史。
+        m_contentActive = false;
+        dismiss();
+    }
     if (m_bridge) m_bridge->sync();
     update();
 }
@@ -669,8 +717,163 @@ void IslandOverlay::advanceMediaElapsed(int ms)
 {
     if (!m_mediaOn) return;
     m_mediaElapsedMs += ms;
+    // ── 组件7：快结束判定 ────────────────────────────────────────
+    // 相位单点判定在这里（QML 不自己算，避免两端口径漂）。阈值取
+    // max(15s, 总长 10%)：长曲按 10%（4:29 → 27s 前提示），短曲保底 15s。
+    // 只在 playing 时单向推进（ending 是终态，不因 elapsed 回退而退回去）。
+    if (m_mediaPhase == QLatin1String("playing") && m_mediaTotalMs > 0) {
+        const qint64 remain = m_mediaTotalMs - m_mediaElapsedMs;
+        if (remain <= qMax<qint64>(15000, m_mediaTotalMs / 10))
+            m_mediaPhase = QStringLiteral("ending");
+    }
     if (m_bridge) m_bridge->sync();
     update();
+}
+
+// ── 组件7 播放四态细化（2026-10-15，用户点单）────────────────────────
+// 相位定时器（单一复用）：三种需要"等一会儿再迁"的相位共用它 ——
+//   starting → playing（广播开始提示 2.5s 后进常态）
+//   blocked  → 清相位 + 收起（禁播提示 3.5s 后自动收）
+//   ended    → clearMediaSession（播完保留歌名 2.5s 后收起）
+// 到点重读 m_mediaPhase 再分派：期间若被 setMediaSession/clearMediaSession
+// 抢先改了相位（歌2顶歌1、手动停），本次回调按新相位走，不会误迁。
+void IslandOverlay::armMediaPhaseTimer(int ms)
+{
+    if (!m_mediaPhaseTimer) {
+        m_mediaPhaseTimer = new QTimer(this);
+        m_mediaPhaseTimer->setSingleShot(true);
+        QObject::connect(m_mediaPhaseTimer, &QTimer::timeout, this, [this] {
+            const QString p = m_mediaPhase;
+            if (p == QLatin1String("starting")) {
+                m_mediaPhase = QStringLiteral("playing");
+            } else if (p == QLatin1String("blocked")) {
+                m_mediaPhase.clear();
+                m_mediaPresenting = false;
+                m_contentActive = false;   // 禁播提示不是通知，不进历史
+                dismiss();
+            } else if (p == QLatin1String("ended")) {
+                clearMediaSession();       // 内部已 sync + update
+                return;
+            } else {
+                return;   // 相位已被换走（歌2顶歌1 / 手动停）⇒ 什么都不做
+            }
+            if (m_bridge) m_bridge->sync();
+            update();
+        });
+    }
+    m_mediaPhaseTimer->start(ms);
+}
+
+void IslandOverlay::mediaBlocked(const QString &reason)
+{
+    // 播放条家族的一态：与 setMediaSession 同款收起胶囊上屏，只是没有进度。
+    // 走 m_mediaPresenting（不是 m_mediaOn）—— "岛面画的是媒体家族"，但没在播。
+    // 时长参数给 0（不自动收），收回交给相位定时器（3.5s），两级收口不打架。
+    m_mediaOn = false;                    // 没在播：进度条/下一首都不显示
+    m_mediaTitle = reason.isEmpty() ? QStringLiteral("当前时段不开放播放") : reason;
+    m_mediaElapsedMs = 0;
+    m_mediaTotalMs = 0;
+    m_mediaNextTitle.clear();
+    m_mediaNextCover.clear();
+    m_mediaPhase = QStringLiteral("blocked");
+    setInteractive(false);                // 禁播没有互动可点
+    showIsland(m_mediaTitle, QString(), QStringLiteral("alert"), 0, Form::Capsule);
+    m_mediaPresenting = true;             // ⚠️ 必须在 showIsland 之后（同上）
+    if (isVisible() && !m_expanded)
+        animateGeometry(geometryForForm(m_form));
+    armMediaPhaseTimer(3500);
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
+void IslandOverlay::mediaFinished()
+{
+    // ffplay 播完自行退出（-autoexit）⇒ 原来没人管，岛会一直停在"正在播放"
+    // 直到老师手动停或时段截断。这里补上"播完"态：保留歌名 2.5s（让学生看到
+    // 结尾），之后由相位定时器走 clearMediaSession 收起。
+    if (!m_mediaOn) return;               // 已清过 / 手动停先到 ⇒ 不重复
+    m_mediaOn = false;                    // 停进度（岛不再"在播"，但仍在岛上）
+    m_mediaPhase = QStringLiteral("ended");
+    // 保持 3s（不是 2.5s）：探针在 2500ms 抓帧，2.5s 会与清理赛跑（实测 ended
+    // 截图被 clearMediaSession 抢先，岛已收起只剩收起胶囊）。3s 同时也是更舒服的
+    // "播放结束"停留时长。
+    armMediaPhaseTimer(3000);
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
+// ── 组件5 祝福弹幕（2026-10-15）────────────────────────────────
+// 接线链：QML 投稿钮 → IslandBridge::sendBlessing → 本类 → DanmakuWidget。
+// 弹幕是独立全屏浮层（设计文档 L32 裁决），岛只提供输入行；岛不画弹幕、
+// 不持有弹幕内容，DanmakuWidget 单例自己管队列/滚动/冷却。
+// 组件6 起本地入队成功后另经 CloudReporter 旁路上报云端（见 sendBlessing）。
+
+DanmakuWidget *IslandOverlay::ensureDanmaku()
+{
+    if (!m_danmaku) {
+        m_danmaku = DanmakuWidget::danmakuWidget();   // 单例懒建（替代 g_danmaku）
+        // 冷却倒计时 1Hz → 桥全量 NOTIFY → QML 倒计时（与 media elapsed 同频率先例；
+        // 只在 30s 冷却期内跑，归零自停，常态零开销）
+        connect(m_danmaku, &DanmakuWidget::blessingCooldownChanged,
+                this, [this](int) { if (m_bridge) m_bridge->sync(); });
+    }
+    return m_danmaku;
+}
+
+int IslandOverlay::sendBlessing(const QString &text)
+{
+    const int code = ensureDanmaku()->sendBlessingLocal(text);
+    // 组件6：本地入队成功（码 0）才旁路上报云端 —— 学生不可信源走
+    // 「端侧先行」：本地体验（入队滚动 + 冷却）永远是第一公民，云端是旁路。
+    // 被拦（1 敏感/2 冷却/3 无效）不上报：本地都没让它过，报上去只会浪费审核队列。
+    // 上报失败不重试不提示（ws 断线时 g_ws 发送自身会记日志）——课堂节奏优先。
+    if (code == 0) {
+        reportToCloud(QStringLiteral("blessing"),
+                      QJsonObject{ { QStringLiteral("text"), text.trimmed() } });
+    }
+    return code;
+}
+
+int IslandOverlay::blessingCooldownSec() const
+{
+    // peek 不建窗口：从没发过祝福时岛也能安全读冷却（返回 0 = 无冷却）。
+    // ⚠️ 这里刻意不用 ensureDanmaku()：const 方法不该有"为了读个数先造个窗口"
+    //    这种副作用。
+    if (DanmakuWidget *d = DanmakuWidget::danmakuWidgetPeek())
+        return d->blessingCooldownRemaining();
+    return 0;
+}
+
+// ── 组件6 云端上报旁路（2026-10-15）──────────────────────────────
+// 三处上报（blessing / feedback / song_request）都收口到 reportToCloud：
+// reporter 未注入（探针/单测）= 静默跳过；注入后由 main.cpp 的 lambda 负责
+// 真正经 g_ws 发出去（island 不认识 g_ws，也不该认识——依赖方向永远是
+// main → island，不是反过来）。
+
+void IslandOverlay::setCloudReporter(CloudReporter reporter)
+{
+    m_cloudReporter = std::move(reporter);
+}
+
+void IslandOverlay::reportToCloud(const QString &type, const QJsonObject &payload)
+{
+    if (!m_cloudReporter) return;   // 未接云端：静默跳过（本地行为不受影响）
+    m_cloudReporter(type, payload);
+}
+
+void IslandOverlay::reportFeedback(const QString &kind, int value)
+{
+    reportToCloud(QStringLiteral("feedback"),
+                  QJsonObject{ { QStringLiteral("kind"), kind },
+                               { QStringLiteral("value"), qMax(1, qMin(value, 100)) } });
+}
+
+void IslandOverlay::submitSongRequest(const QString &title, const QString &artist, const QString &source)
+{
+    reportToCloud(QStringLiteral("song_request"),
+                  QJsonObject{ { QStringLiteral("title"), title.trimmed() },
+                               { QStringLiteral("artist"), artist.trimmed() },
+                               { QStringLiteral("source"), source } });
 }
 
 // 仅全屏形态的配色档（与旧 NotifyWindow 同白名单 + 黑底回落）

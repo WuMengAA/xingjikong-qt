@@ -244,7 +244,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.33";
+constexpr const char *kAppVersion = "0.6.34";
 
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
@@ -265,7 +265,9 @@ AudioPlayer g_audioPlayer;
 bool g_audioHintShown = false;   // "老师正在讲话"提示是否已显示（每会话一次）
 int g_audioUpSeq = 0;            // 语音通话上行帧序号（2026-10-09）
 // ── 通知体系组件实例（2026-10-09 接线 · DeepSeek Harness）──
-DanmakuWidget *g_danmaku = nullptr;          // 弹幕（懒建：实际用弹幕时才建窗口）
+// 弹幕（2026-10-15 组件5）：全局指针 g_danmaku 已删，改 danmaku.h 的单例访问器
+// danmakuWidget()/danmakuWidgetPeek() —— 通知路径（下方 kind=danmaku）与学生祝福
+// 路径（IslandOverlay::sendBlessing）共享同一个弹幕层，全局指针会指岔。
 LoopReminder g_loopReminder;                 // 循环提醒（无 UI，纯逻辑）
 NotificationGate g_notifGate;                // 通知门控（考试模式禁通知）
 Microphone g_microphone;                     // 语音通话 mic 采集（会话内开关）
@@ -326,6 +328,10 @@ QString g_recOutPath;              // 正在录制的输出 mp4 路径
 QProcess *g_playProc = nullptr;    // media_session 正在播放的 ffplay 进程
 static QTimer *g_mediaTick = nullptr;   // P3：媒体在播时推进岛底「已播时长」的 1s 计时器
 static QTimer *g_mediaAutoStop = nullptr;  // P3：超播放时段窗口自动截断（单一定时器，避免旧计时器误停新会话）
+// 组件7（2026-10-15）：「正在主动停止」标志 —— stopMediaSession() 里置位，
+// 用来把"我们主动 terminate 引发的 finished"和"ffplay 自己播完的 finished"分开。
+// 少了它，老师点「停止」会被岛报成"播放结束"（见 media_session_start 里的 finished 连接）。
+static bool g_mediaStopping = false;
 bool g_remoteControl = false;      // remote_control_start/stop 的真实会话状态
 int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
 int g_frameDiffMs = -1;            // 上一帧耗时（毫秒），动态帧率控制器用它判断画面是否稳定
@@ -3353,8 +3359,8 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
 
     // ── 弹幕（2026-10-09 接线 · §1.2/§6.1）：kind=danmaku → 字幕式横向滚动 ──
     if (kind == QLatin1String("danmaku")) {
-        if (!g_danmaku) g_danmaku = new DanmakuWidget();   // 懒建：只在真用弹幕时才开窗口
-        g_danmaku->push(content.isEmpty() ? title : (title + QStringLiteral("：") + content));
+        // 2026-10-15 组件5：g_danmaku 全局指针 → 单例访问器（与学生祝福弹幕同层）
+        DanmakuWidget::danmakuWidget()->push(content.isEmpty() ? title : (title + QStringLiteral("：") + content));
         // 同样进托盘通知留存（与 popup 行为一致，别丢静默列表）
         if (g_tray) {
             g_tray->showMessage(title, content.isEmpty() ? title : content,
@@ -4075,6 +4081,7 @@ static qint64 remainingMsInWindow()
 // 自动截断计时器共用，避免两份停止逻辑。
 static void stopMediaSession()
 {
+    g_mediaStopping = true;   // 组件7：本次停止是我们发起的，finished 不当"播完"
     if (g_mediaTick) { g_mediaTick->stop(); }
     if (g_mediaAutoStop) { g_mediaAutoStop->stop(); }
     if (g_playProc && g_playProc->state() != QProcess::NotRunning) {
@@ -4082,6 +4089,7 @@ static void stopMediaSession()
         if (!procWaitFinished(*g_playProc, 3000)) g_playProc->kill();
     }
     delete g_playProc; g_playProc = nullptr;
+    g_mediaStopping = false;
     if (IslandOverlay::instance()) IslandOverlay::instance()->clearMediaSession();
 }
 
@@ -5153,6 +5161,11 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.result = QStringLiteral("blocked");
             out.error = QStringLiteral("media_session_start: 当前不在允许的播放时段内");
             out.data.insert(QStringLiteral("allowed"), false);
+            // 组件7（2026-10-15）：被时段拦住 → 学生端的岛也显示"禁播"这一态。
+            // 原来只有管理端能看到 blocked 回执，学生端一片安静：点了"点歌"没反应，
+            // 最容易被当成"机器坏了"。这里让岛把"为什么没播"讲清楚（3.5s 自动收）。
+            if (IslandOverlay::instance())
+                IslandOverlay::instance()->mediaBlocked(QStringLiteral("当前时段不开放播放"));
             return out;
         }
         QString target = params.value(QStringLiteral("path")).toString().trimmed();
@@ -5180,6 +5193,18 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         }
         g_playProc = new QProcess();
         g_playProc->setProcessChannelMode(QProcess::MergedChannels);
+        // ── 组件7（2026-10-15）：「播完」态的接线 ────────────────────
+        // ffplay 带 -autoexit，播完会**自己退出** —— 原来没人接住这个信号，
+        // 岛就一直停在"正在播放"，直到老师手动停 / 时段截断。这里接住：
+        // 非主动停止（g_mediaStopping=false）才算"播完"。
+        // ⚠️ context 传 g_playProc：进程对象被 delete 时连接自动断开，
+        //    lambda 不会在野指针上跑。
+        QObject::connect(g_playProc, &QProcess::finished, g_playProc,
+                         [](int, QProcess::ExitStatus) {
+            if (g_mediaStopping) return;              // 我们主动停的，不是播完
+            if (g_mediaTick) g_mediaTick->stop();
+            if (IslandOverlay::instance()) IslandOverlay::instance()->mediaFinished();
+        });
         g_playProc->start(fp, { QStringLiteral("-nodisp"), QStringLiteral("-autoexit"), target });
         if (!g_playProc->waitForStarted(3000)) {
             const int code = g_playProc->exitCode();
@@ -6802,6 +6827,20 @@ int main(int argc, char *argv[])
 
     g_ws = new QWebSocket();
     g_ws->setParent(&app);
+
+    // ── 组件6 云端上报旁路注入（2026-10-15）────────────────────────
+    // 灵动岛的互动上报（祝福/点赞/点歌）经这个 lambda 出海：岛不认识 g_ws，
+    // 只认 IslandOverlay::CloudReporter；依赖方向保持 main → island。
+    // payload 的 type 与云端 interact.js 的入向消息一一对应：
+    //   blessing → {text} / feedback → {kind,value} / song_request → {title,artist,source}
+    // 班级码由云端按 uid 自己查（knownDevices 表，自报值不可信），这里不带。
+    // 发送失败（ws 未连/已断）由 QWebSocket 自己记状态，这里不重试不提示——
+    // 端侧先行：本地体验（弹幕已滚/赞已点）不因云端欠收而回退。
+    IslandOverlay::instance()->setCloudReporter(
+        [](const QString &type, const QJsonObject &payload) {
+            if (!g_ws) return;
+            g_ws->sendTextMessage(makeEnvelope(type, payload));
+        });
 
     QObject::connect(g_ws, &QWebSocket::connected, &app, [] {
         qInfo("[agent-qt] 已连上云端（等待 register 回执）");

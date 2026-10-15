@@ -212,6 +212,38 @@ qint64  IslandBridge::mediaElapsedMs() const { return m_host ? m_host->m_mediaEl
 qint64  IslandBridge::mediaTotalMs() const   { return m_host ? m_host->m_mediaTotalMs : 0; }
 QString IslandBridge::mediaNextTitle() const { return m_host ? m_host->m_mediaNextTitle : QString(); }
 QString IslandBridge::mediaNextCover() const { return m_host ? m_host->m_mediaNextCover : QString(); }
+bool    IslandBridge::mediaPresenting() const { return m_host ? m_host->m_mediaPresenting : false; }
+// 组件7：播放四态相位（走公开 getter，不直读成员 —— 相位由 IslandOverlay 单点维护）
+QString IslandBridge::mediaPhase() const { return m_host ? m_host->mediaPhase() : QString(); }
+
+// ── 组件5 祝福弹幕（2026-10-15）────────────────────────────────
+int IslandBridge::blessingCooldownSec() const
+{
+    return m_host ? m_host->blessingCooldownSec() : 0;
+}
+
+int IslandBridge::sendBlessing(const QString &text)
+{
+    if (!m_host) return 3;   // 没宿主 = 内容无效（桥不该独立于岛存在，防御性返回）
+    const int code = m_host->sendBlessing(text);
+    // 结果码 + 冷却倒计时都要让 QML 立刻看到（成功 → 钮禁用+倒计时起跳；
+    // 失败 → 失败态文案），所以走全量 sync() 而不是只发冷却那一路。
+    sync();
+    return code;
+}
+
+// ── 组件6 云端上报旁路（2026-10-15）──────────────────────────────
+// 只转发到岛（岛经 CloudReporter 决定发不发）；没有 sync() —— 这两条
+// 不改变任何 QML 可见状态，为高频旁路单独 NOTIFY 纯属浪费。
+void IslandBridge::reportFeedback(const QString &kind, int value)
+{
+    if (m_host) m_host->reportFeedback(kind, value);
+}
+
+void IslandBridge::submitSongRequest(const QString &title, const QString &artist, const QString &source)
+{
+    if (m_host) m_host->submitSongRequest(title, artist, source);
+}
 
 void IslandBridge::syncSpectrum()
 {
@@ -241,14 +273,14 @@ void IslandBridge::clearHistory()
 
 void IslandBridge::whaleClicked()
 {
-    // 鲸鱼被短按 → 播按压音（Ya1.wav 小黄鸭按压）
+    // 鲸鱼被短按 → 播按压音（ya1.wav 小黄鸭按压）
     if (whaleAudioOn())
         WhaleAudio::instance()->play(WhaleAudio::Sound::PressYa, 0.9);
 }
 
 void IslandBridge::whaleLongPressed()
 {
-    // 鲸鱼被长按 → 播松开音（Ya2.wav 小黄鸭松开）
+    // 鲸鱼被长按 → 播松开音（ya2.wav 小黄鸭松开）
     if (whaleAudioOn())
         WhaleAudio::instance()->play(WhaleAudio::Sound::ReleaseYa, 1.0);
 }

@@ -33,7 +33,7 @@ find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Sv
 # 命名同为 DeepSeek Harness 同款：正式 X.Y.Z / 内测 X.Y.Z-alpha.N / 候选 X.Y.Z-rc.N
 # （阶段序 alpha < rc < 正式；号同核心递增、换核心归零、转正即剥离后缀）。
 # 成熟度标记不进版本号，归 ota.json 的 mandatory / notes 管。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
-set(AGENT_VERSION "0.6.33")
+set(AGENT_VERSION "0.6.34")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" _agent_src)
 if(_agent_src MATCHES "kAppVersion[ \t\r\n]*=[ \t\r\n]*\"([^\"]+)\"")
   set(_src_agent_version "${CMAKE_MATCH_1}")
@@ -197,7 +197,7 @@ qt_add_resources(stelarith-agent-qt "agenticons" PREFIX "/icons" BASE "${CMAKE_C
 
 # ── 2026-10-11 · 灵动岛 QML 资源 ────────────────────────────────────────
 # 鲸鱼娘素材（清单元数据 #1）：cp 自 Stelarith-viewer-qt/resources/whale/（源未动）。
-# 编进 exe（qrc 前缀 /whale）—— QML 里写 qrc:/whale/DSniang1.png。
+# 编进 exe（qrc 前缀 /whale）—— QML 里写 qrc:/whale/dsniang1.png。
 # ⚠️ 不能走磁盘：这两张是装饰图，跟着 exe 走最省心（装机不用带额外文件）。
 file(GLOB AGENT_WHALE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/whale/*")
 if(AGENT_WHALE_FILES)
@@ -211,9 +211,29 @@ endif()
 # ⚠️ 走**磁盘**而不是 qrc：改外观不用重编译（与 viewer 同一个约定，项目笔记 §3）。
 #    代价是 build/ 下必须有 qml/ 目录，且打包要带上（NSIS 那边已按目录整包带）。
 #    POST_BUILD 覆盖拷贝：源码目录改了 qml，重编译即生效；改副本可热更（重启 exe）。
+#
+# 2026-10-15（用户点单「抽共享目录」）：**灵动岛视觉层唯一真源**
+#   在根仓库 <repo-root>/Stelarith-shared-qml/island/，被控端与管理端共用同一份 .qml。
+#   这里在拷完 qml/ 之后**再拷一遍共享 island 覆盖/补齐** qml/island/ ——
+#   island.cpp 的加载路径（qml/island/IslandRoot.qml）一个字符都不用改。
+#   好处：改一次外观两端同时生效，不会再出现两份实现各自漂移（这正是抽共享的目的）。
+# ⚠️ 共享件是根仓库的东西 ⇒ **必须整体 clone 根仓库**；单独 clone 本子工程会缺件，
+#    下面显式 FATAL_ERROR 拦住，别让它变成一个运行期"鲸鱼娘/岛白屏"的哑巴故障。
+set(STE_SHARED_ISLAND_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/island")
+if(NOT EXISTS "${STE_SHARED_ISLAND_DIR}/IslandRoot.qml")
+  message(FATAL_ERROR
+    "[agent] 共享灵动岛目录缺失：${STE_SHARED_ISLAND_DIR}\n"
+    "  灵动岛 QML 真源在 Stelarith-shared-qml/island/（两端共用）。\n"
+    "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
+endif()
+
 add_custom_command(TARGET stelarith-agent-qt POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           "${CMAKE_CURRENT_SOURCE_DIR}/qml"
           "$<TARGET_FILE_DIR:stelarith-agent-qt>/qml"
-  COMMENT "[agent] 拷贝 qml/ → 构建输出目录（灵动岛视觉层）")
+  # 共享 island 覆盖：唯一真源，本地 qml/island/ 若残留也被这份盖掉。
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${STE_SHARED_ISLAND_DIR}"
+          "$<TARGET_FILE_DIR:stelarith-agent-qt>/qml/island"
+  COMMENT "[agent] 拷贝 qml/ + 共享 island/ → 构建输出目录（灵动岛视觉层）")
 

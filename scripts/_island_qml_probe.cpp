@@ -16,7 +16,28 @@
 //   --actions       带动作按钮（走 showWithActions）
 //   --light         浅色
 //   --out <路径>    截图输出（默认 D:/Stelarith/_probe/shots/island-agent.png）
+//   --spectrum      §6.3 频谱态（2026-10-13）
+//   --media         P3 岛底「正在播放」收起播放条（2026-10-14）
+//   --media --expand 组件1：展开互动区 + 弹幕输入行（2026-10-15）
+//   --search [--phase N]  组件2：点歌搜索页（隐含展开；N=0 空态/1 骨架/
+//                         2 结果[默认]/3 无结果/4 超额禁用）（2026-10-15）
+//   --submit [--sphase N] 组件3：投稿页（隐含展开；N=0 空编辑/1 有内容/
+//                         2 超限/3 提交中/4 成功/5 失败）（2026-10-15）
+//   --likefly            组件4：点赞后飘心中途态（隐含 media + expand +
+//                         likeOn=true；注入 y=-14/opacity=0.55/visible=true
+//                         供截图——600ms 动画的时序由 QML 配置静态可查，
+//                         探针只证中途视觉与归位隐藏）（2026-10-15）
+//   --click <objectName>  组件3：2500ms 时向目标 MouseArea 派发合成鼠标
+//                         press/release（绝对坐标沿父链累加计算）
+//   --warm               组件5：预热 30s 发送冷却（先走真实发送链路发一条
+//                         祝福 ⇒ 投稿钮禁用 + 计数行倒计时；配 --submit
+//                         演示冷却态，点击被禁用的投稿钮应被守卫吞掉、
+//                         岛保持展开不误收起）（2026-10-15）
+//   --draft <文字>       组件5：投稿页草稿覆写（默认 14 字演示句）；配
+//                         --click abtn_submit 演示敏感词拦截（结果码 1）
+//                         等真实拒绝路径（2026-10-15）
 #include "island.h"
+#include "danmaku.h"           // 组件5：弹幕层单例诊断（peek 不建窗口）
 
 #include <QApplication>
 #include <QDir>
@@ -28,7 +49,10 @@
 #include <QQuickItem>
 #include <QFontDatabase>
 #include <QTextStream>
+#include <QMouseEvent>
 #include <QTimer>
+#include <QJsonDocument>   // 组件6：--report 把 CloudReporter 收到的 payload 序列化留证
+#include <QJsonObject>
 #include <cmath>   // §6.3 频谱探针：std::sin
 #include <functional>  // P3 布局诊断：全子树几何转储
 
@@ -40,6 +64,244 @@ static QQuickWidget *findQuick(QWidget *w)
         if (auto *cw = qobject_cast<QWidget *>(c))
             if (auto *q = findQuick(cw)) return q;
     return nullptr;
+}
+
+// 组件6（2026-10-15）：按 objectName 在 **Item 树**（childItems）里深度优先找。
+// 为什么不用 QObject::findChild：Repeater 的 delegate 物件由 QQmlDelegateModel
+// 持有，其 QObject parent 不在 rootObject 的 QObject 链上 ⇒ findChild 找不到
+// （实测 abtn_songrow found=0 而 searchResults.count=3、objdiag 只列出 13 个
+//  顶层具名对象）。而 delegate item 的 **parentItem** 是 Repeater 的 parentItem，
+// 在 Item 树里 ⇒ 用 childItems() 递归即可命中。
+static QQuickItem *findItemByName(QQuickItem *root, const QString &name)
+{
+    if (!root) return nullptr;
+    if (root->objectName() == name) return root;
+    const QList<QQuickItem *> kids = root->childItems();
+    for (QQuickItem *c : kids)
+        if (QQuickItem *hit = findItemByName(c, name)) return hit;
+    return nullptr;
+}
+
+// 组件3（2026-10-15）：合成鼠标点击 —— 向 QQuickWidget viewport 派发
+// press/release。目标绝对坐标沿 parentItem 链累加 x/y（锚定位生效后即
+// 当前位置）；scene 与 widget 坐标 1:1（framebuffer 尺寸 = widget 尺寸，
+// 2026-10-15 实证）。目标 MouseArea 挂 objectName ⇒ findChild 直达。
+static bool clickItem(QQuickWidget *q, QQuickItem *target)
+{
+    if (!q || !target) return false;
+    QPointF base(0, 0);
+    for (const QQuickItem *p = target; p; p = p->parentItem())
+        base += QPointF(p->x(), p->y());
+    const QPoint pt(qRound(base.x() + target->width() / 2.0),
+                    qRound(base.y() + target->height() / 2.0));
+    QMouseEvent press(QEvent::MouseButtonPress, pt, target->mapToGlobal(QPointF()),
+                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, pt, target->mapToGlobal(QPointF()),
+                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    // ⚠️ 事件发给 QQuickWidget 本身（它没有 viewport() —— 那是
+    //    QAbstractScrollArea 的接口；QQuickWidget 自行把 widget 鼠标事件
+    //    转译派发到内部 QQuickWindow）。
+    qApp->sendEvent(q, &press);
+    qApp->sendEvent(q, &release);
+    return true;
+}
+
+// 组件3（2026-10-15）：捕获段（原 2500ms lambda 后半）—— dump 根对象属性 +
+// 全子树几何 + grabFramebuffer 截图。与「注入+点击」分离，以便点击后按需
+// 再等 400ms 提交 Timer 再捕获。
+static void captureAndSave(IslandOverlay *isl, QQuickWidget *q, const QString &outPath,
+                           const QString &extraLog)
+{
+    QFile logf(QStringLiteral("D:/Stelarith/_probe/shots/_probe_result.txt"));
+    logf.open(QIODevice::Append | QIODevice::Text);
+    QTextStream out(&logf);
+    out << extraLog;
+
+    out << "=== probe ===\n";
+    // ── 字体诊断 ────────────────────────────────────────────
+    // 离屏平台下中文常渲染成 tofu（方框）。要分清「代码问题」还是「环境缺字」：
+    // 这里列出 Qt 实际看得见的字族数量与前几个名字。
+    // 若数量为 0 或全是西文 ⇒ 环境问题（离屏 + 无 fontconfig/字体目录），不是本工程的锅。
+    {
+        const QStringList fams = QFontDatabase::families();
+        out << "fonts: count=" << fams.size();
+        const int show = qMin(8, fams.size());
+        for (int i = 0; i < show; ++i) out << " | " << fams.at(i);
+        out << "\n";
+        QFontDatabase fdb;
+        for (const QString &want : { QStringLiteral("Microsoft YaHei"),
+                                     QStringLiteral("SimHei"),
+                                     QStringLiteral("SimSun") }) {
+            out << "  fontcheck " << want << " => "
+                << (fdb.hasFamily(want) ? "HAVE" : "MISSING") << "\n";
+        }
+    }
+    out << "island visible=" << (isl->isVisible() ? 1 : 0)
+        << " geom=" << isl->geometry().width() << "x" << isl->geometry().height()
+        << " idle=" << (isl->isIdle() ? 1 : 0)
+        << " expanded=" << (isl->isExpanded() ? 1 : 0)
+        << " interactive=" << (isl->interactive() ? 1 : 0) << "\n";
+    out << "quickwidget=" << (q ? "found" : "NULL") << "\n";
+    if (!q) { out.flush(); return; }
+    out << "quick status=" << int(q->status())
+        << " errors=" << q->errors().size()
+        << " qgeom=" << q->geometry().width() << "x" << q->geometry().height() << "\n";
+    for (const QQmlError &e : q->errors())
+        out << "  QMLERR " << e.toString() << "\n";
+
+    if (QQuickItem *ri = q->rootObject()) {
+        out << "rootObj class=" << ri->metaObject()->className() << "\n";
+        auto dumpProp = [&](const char *n) {
+            QVariant v = ri->property(n);
+            out << "  root." << n << " = " << (v.isValid() ? v.toString() : QStringLiteral("<invalid>"))
+                << "\n";
+        };
+        dumpProp("_title");
+        dumpProp("_desc");
+        dumpProp("_icon");
+        dumpProp("_idle");
+        dumpProp("_expanded");
+        dumpProp("_light");
+        dumpProp("_interactive");
+        dumpProp("_severity");
+        dumpProp("_spectrumActive");   // §6.3：频谱态（2026-10-13）
+        dumpProp("_mediaPresenting");  // 组件1：媒体占据岛面标志（2026-10-15）
+        dumpProp("mediaIsContent");    // 组件1：presenting && 标题==媒体标题
+        dumpProp("_mediaPhase");       // 组件7：播放四态渲染相位（2026-10-15）
+        dumpProp("_mediaNoProgress");  // 组件7：播完/禁播（无进度条两态）
+        dumpProp("likeCount");         // 组件1：点赞计数（探针演示值）
+        dumpProp("searchOn");          // 组件2：搜索页打开（2026-10-15）
+        dumpProp("searchPhase");       // 组件2：五态 0/1/2/3/4
+        dumpProp("searchQuery");       // 组件2：搜索关键词
+        dumpProp("searchQuotaUsed");   // 组件2：已点歌数
+        dumpProp("searchQuotaFull");   // 组件2：配额满判据
+        dumpProp("submitOn");          // 组件3：投稿页打开（2026-10-15）
+        dumpProp("submitPhase");       // 组件3：四态 0 编辑/1 提交中/2 成功/3 失败
+        dumpProp("submitFailCode");    // 组件5：态3 失败原因码（1 敏感词/2 冷却/3 无效）
+        dumpProp("_blessingCooldownSec"); // 组件5：30s 冷却倒计时（桥驱动，1Hz）
+        dumpProp("submitText");        // 组件3：投稿文字
+        dumpProp("submitLen");         // 组件3：字数（CJK 一字一计）
+        dumpProp("submitEmpty");       // 组件3：空判据（投稿钮禁用源）
+        dumpProp("submitOver");        // 组件3：超 50 字判据（投稿钮禁用源）
+        dumpProp("submitPageOn");      // 组件3：页面总可见性
+        dumpProp("submitH");           // 组件3：页面高度预算
+        dumpProp("interactH");         // 组件3：互动区让位验证（开页应 0）
+        dumpProp("danmakuH");          // 组件3：弹幕行让位验证（开页应 0）
+        dumpProp("likeOn");            // 组件4：快速反馈一次制标志（2026-10-15）
+        dumpProp("likePop");           // 组件4：计数回弹缩放（1.0 静止/动画中）
+        dumpProp("implicitWidth");
+        dumpProp("implicitHeight");
+        dumpProp("width");
+        dumpProp("height");
+        // states / actions 是 list，toString() 给不出内容，单独数个数
+        QVariant st = ri->property("_states");
+        QVariant ac = ri->property("_actions");
+        out << "  root._states.count = " << st.toList().size() << "\n";
+        out << "  root._actions.count = " << ac.toList().size() << "\n";
+        QVariant sb = ri->property("_spectrumBands");
+        out << "  root._spectrumBands.count = " << sb.toList().size() << "\n";
+        QVariant sr = ri->property("searchResults");
+        out << "  root.searchResults.count = " << sr.toList().size() << "\n";
+        // 组件4：飘心 Item（findChild 按 objectName；动画中 y/opacity 有值）
+        if (QQuickItem *fly = ri->findChild<QQuickItem *>(QStringLiteral("likeFly"))) {
+            out << "  likeFly.visible = " << (fly->isVisible() ? 1 : 0)
+                << " y=" << fly->y() << " opacity=" << fly->opacity() << "\n";
+        } else {
+            out << "  likeFly = <not found>\n";
+        }
+        // 组件5：投稿钮禁用态（--warm 冷却中应为 0）—— 传导置灰的客观证据
+        if (QQuickItem *bs = ri->findChild<QQuickItem *>(QStringLiteral("abtn_submit"))) {
+            out << "  abtn_submit.enabled = " << (bs->property("enabled").toBool() ? 1 : 0) << "\n";
+        } else {
+            out << "  abtn_submit = <not found>\n";
+        }
+        // 组件6（2026-10-15）诊断：Repeater delegate 内的 objectName 检索。
+        // 实测 --click abtn_songrow 落空（found=0）而 searchResults.count=3 ⇒
+        // delegate 物件虽已按 model 创建，却不在 QQuickItem::findChild 的
+        // QObject 父子链上（Repeater 的 delegate 由 QQmlDelegateModel 持有）。
+        // 这里把 QObject 层「具名对象有多少 / 目标在不在」摊开，不靠猜。
+        {
+            int named = 0, hit = 0;
+            QStringList names;
+            const auto objs = ri->findChildren<QObject *>(QString());
+            for (QObject *o : objs) {
+                if (o->objectName().isEmpty()) continue;
+                named++;
+                if (names.size() < 40) names << o->objectName();
+                if (o->objectName() == QStringLiteral("abtn_songrow")) hit++;
+            }
+            out << "  -- objdiag: named=" << named
+                << " abtn_songrow_hits=" << hit << "\n";
+            out << "  -- objdiag names: " << names.join(QStringLiteral(",")) << "\n";
+        }
+        // 组件5：弹幕层单例诊断（peek 不建窗口；null = 本会话还没碰过弹幕层）。
+        // last 非空 = 真有祝福被接受入队（真发送的客观证据，与 QML 侧成功态互证）。
+        if (DanmakuWidget *dw = DanmakuWidget::danmakuWidgetPeek()) {
+            out << "  danmaku: pending=" << dw->pendingCount()
+                << " scrolling=" << (dw->isScrolling() ? 1 : 0)
+                << " cooldown=" << dw->blessingCooldownRemaining()
+                << " last=\"" << dw->lastBlessing() << "\"\n";
+        } else {
+            out << "  danmaku: <not created>\n";
+        }
+    }
+
+    // ── P3 布局诊断（2026-10-14）：全子树几何转储 ──────────────────
+    // mediaRow 锚 specRow.bottom 但两者不同父级（root vs expandedCol），
+    // 截图里媒体栏跑到了顶部。这里把整棵 Item 树的 x/y/w/h 打出来定位真因。
+    if (QQuickItem *ri = q->rootObject()) {
+        out << "=== tree ===\n";
+        std::function<void(QQuickItem *, int)> walk = [&](QQuickItem *it, int depth) {
+            QVariant t = it->property("text");
+            const QString ts = t.isValid() ? t.toString().left(14) : QString();
+            out << QStringLiteral("  %1%2 y=%3 h=%4 w=%5 vis=%6%7\n")
+                   .arg(QString(depth * 2, QLatin1Char(' ')))
+                   .arg(QLatin1String(it->metaObject()->className()))
+                   .arg(it->y()).arg(it->height()).arg(it->width())
+                   .arg(it->isVisible() ? 1 : 0)
+                   .arg(ts.isEmpty() ? QString() : QStringLiteral(" text=\"") + ts + QStringLiteral("\""));
+            for (QObject *c : it->children())
+                if (auto *ci = qobject_cast<QQuickItem *>(c)) walk(ci, depth + 1);
+        };
+        walk(ri, 0);
+        out << "=== end tree ===\n";
+    }
+
+    // ⚠️ 关键：QML 内容必须用 grabFramebuffer()，普通 grab() 拿到空白。
+    //    但若 QML 没加载（status != Ready），island.cpp 会**退回手绘** —— 手绘画在
+    //    QWidget 上，grabFramebuffer 抓不到，得改抓 widget 本身。这条分支就是用来
+    //    验证"打包漏了 qml/ 时不会白屏/崩，而是退化成老的手绘灵动岛"。
+    if (q->status() != QQuickWidget::Ready) {
+        out << "FALLBACK: QML 未加载 -> 抓 widget 手绘\n";
+        QImage wimg = isl->grab().toImage();
+        out << "widgetgrab=" << wimg.width() << "x" << wimg.height()
+            << " null=" << (wimg.isNull() ? 1 : 0) << "\n";
+        if (!wimg.isNull()) {
+            QDir().mkpath(QFileInfo(outPath).absolutePath());
+            const bool ok = wimg.save(outPath);
+            out << "saved=" << (ok ? 1 : 0) << " path=" << outPath << "\n";
+        }
+        out.flush();
+        return;
+    }
+
+    QImage img = q->grabFramebuffer();
+    out << "framebuffer=" << img.width() << "x" << img.height()
+        << " null=" << (img.isNull() ? 1 : 0) << "\n";
+    // 组件5 诊断（2026-10-15）：grab 之后再读一次冷却值。若与上面 dump 的
+    // 不同 ⇒ QML 绑定重求值挂在帧渲染上（dump 早于帧 ⇒ 读到旧值），生产
+    // 语义不受影响（文本变化自身触发重绘，自激成帧）；若仍相同 ⇒ 1Hz tick
+    // 真的没把值送到 QML，要回头查 m_cooldownTick。
+    if (QQuickItem *ri2 = q->rootObject()) {
+        QVariant v2 = ri2->property("_blessingCooldownSec");
+        out << "  root._blessingCooldownSec(post-grab) = " << v2.toString() << "\n";
+    }
+    if (!img.isNull()) {
+        QDir().mkpath(QFileInfo(outPath).absolutePath());
+        const bool ok = img.save(outPath);
+        out << "saved=" << (ok ? 1 : 0) << " path=" << outPath << "\n";
+    }
+    out.flush();
 }
 
 int main(int argc, char *argv[])
@@ -68,9 +330,34 @@ int main(int argc, char *argv[])
                                << " fam0=" << (ffams.isEmpty() ? QStringLiteral("(none)") : ffams.first())
                                << "\n";
         }
+        // 组件5 诊断（2026-10-15）：冷却广播逐条追踪文件，启动时截断
+        QFile ctr(QStringLiteral("D:/Stelarith/_probe/shots/_cooldown_trace.txt"));
+        if (ctr.open(QIODevice::WriteOnly | QIODevice::Text)) { /* 截断 */ }
+        // 组件6（2026-10-15）：云端上报追踪文件（--report 注入的 reporter 逐条落盘），启动时截断
+        QFile rtr(QStringLiteral("D:/Stelarith/_probe/shots/_report_trace.txt"));
+        if (rtr.open(QIODevice::WriteOnly | QIODevice::Text)) { /* 截断 */ }
     }
 
     bool idle = false, expand = false, actions = false, light = false, spectrum = false, media = false;
+    bool search = false;   // 组件2（2026-10-15）：点歌搜索页（隐含 media + expand）
+    int searchPhase = 2;   // 组件2：搜索页五态 0 空态/1 骨架/2 结果/3 无结果/4 超额禁用
+    // 组件3（2026-10-15）：投稿页（隐含 media + expand）
+    bool submit = false;
+    int sphase = 0;        // 投稿态 0 空编辑/1 有内容/2 超限/3 提交中/4 成功/5 失败
+    QString clickName;     // 合成点击目标 objectName（danmakuPillMa/danmakuSendMa/abtn_*）
+    // 组件5（2026-10-15）：--warm 预热 30s 冷却（投稿钮禁用+倒计时演示）；
+    // --draft <文字> 覆写投稿页草稿（敏感词/真实结果码路径演示）。
+    bool warm = false;
+    QString draftOverride;
+    // 组件4（2026-10-15）：点赞飘心中途态（隐含 media + expand + likeOn=true）
+    bool likefly = false;
+    // 组件6（2026-10-15）：注入打印式 CloudReporter —— 验证「QML 点击 → 桥 →
+    // 岛 → reporter」整条上报链真的被调到（生产里 reporter 由 main.cpp 用 g_ws
+    // 注入；探针不连 ws，用落盘替身把「调到了几次、什么 payload」留成证据）。
+    bool report = false;
+    // 组件7（2026-10-15）：播放四态 —— 直接指定相位，隐含 --media。
+    //   starting / playing / ending / ended / blocked（空 = 走 --media 默认 playing）。
+    QString mediaPhaseArg;
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
@@ -80,6 +367,23 @@ int main(int argc, char *argv[])
         if (a == QLatin1String("--light"))     light = true;
         if (a == QLatin1String("--spectrum"))  spectrum = true;   // §6.3 频谱态（2026-10-13）
         if (a == QLatin1String("--media"))     media = true;      // P3 岛底「正在播放」（2026-10-14）
+        if (a == QLatin1String("--search"))    search = true;     // 组件2：点歌搜索页（2026-10-15）
+        if (a == QLatin1String("--phase") && i + 1 < argc)
+            searchPhase = QString::fromLocal8Bit(argv[++i]).toInt();
+        if (a == QLatin1String("--submit"))    submit = true;     // 组件3：投稿页（2026-10-15）
+        if (a == QLatin1String("--sphase") && i + 1 < argc)
+            sphase = QString::fromLocal8Bit(argv[++i]).toInt();
+        if (a == QLatin1String("--click") && i + 1 < argc)
+            clickName = QString::fromLocal8Bit(argv[++i]);
+        if (a == QLatin1String("--likefly"))   likefly = true;    // 组件4：飘心中途态
+        if (a == QLatin1String("--warm"))      warm = true;       // 组件5：预热 30s 冷却
+        if (a == QLatin1String("--media-phase") && i + 1 < argc) {  // 组件7：播放四态
+            mediaPhaseArg = QString::fromLocal8Bit(argv[++i]);
+            media = true;                                          // 隐含媒体态
+        }
+        if (a == QLatin1String("--draft") && i + 1 < argc)
+            draftOverride = QString::fromLocal8Bit(argv[++i]);    // 组件5：草稿覆写
+        if (a == QLatin1String("--report"))    report = true;     // 组件6：上报链路留证
         if (a == QLatin1String("--out") && i + 1 < argc)
             outPath = QString::fromLocal8Bit(argv[++i]);
     }
@@ -130,18 +434,28 @@ int main(int argc, char *argv[])
         QObject::connect(tick, &QTimer::timeout, isl, [isl, pcm]() { isl->feedSpectrum(*pcm); });
         tick->start();
         isl->feedSpectrum(*pcm);
-    } else if (media) {
-        // P3 播放时段管理（2026-10-14）：岛底「正在播放」栏——曲名 + 已播/总时长 + 下一首。
-        // 与 media_session_start 成功分支同一条路：setMediaSession 后 setExpanded，
-        // advanceMediaElapsed 补一个非零已播（ffplay 无回调，生产里由 1s 计时器推进）。
-        isl->showIsland(QStringLiteral("老师正在讲话"),
-                        QStringLiteral("请保持安静，认真听讲"),
-                        QStringLiteral("bell"), 0);
-        isl->setExpanded(true);
+    } else if (mediaPhaseArg == QLatin1String("blocked")) {
+        // 组件7（2026-10-15）：禁播 —— 走真链路（生产里 media_session_start 被
+        // 播放时段拦住时，main.cpp 就是这么调的）。它自成一态：没有 setMediaSession。
+        isl->mediaBlocked(QStringLiteral("当前时段不开放播放"));
+        if (expand) isl->setExpanded(true);
+    } else if (media || search || submit || likefly) {
+        // 组件1（2026-10-15）：媒体播放呈现上岛 —— setMediaSession 内部以收起态
+        // 胶囊上屏（与 media_session_start 成功分支同一条路，不再需要预置一条通知）。
+        // --expand 才展开看互动区/弹幕行；advanceMediaElapsed 补非零已播
+        // （ffplay 无回调，生产里由 1s 计时器推进）。
+        // 组件2 --search：隐含展开（搜索页只在展开态可见），页面状态由下面
+        // rootObject 上 setProperty 注入（与 likeCount 同范式）。
+        // 组件3 --submit：同款隐含展开（投稿页同理只在展开态互动区在时可见）。
         isl->setMediaSession(QStringLiteral("晴天 - 周杰伦"), 269000,
                              QStringLiteral("稻香"),
                              QStringLiteral("D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-control-qt/resources/icons/music.svg"));
-        isl->advanceMediaElapsed(83000);   // 01:23 / 04:29
+        // 组件7：相位按 --media-phase 走真 C++ 链路（不用假数据）。
+        // 总长 269000（4:29）⇒ ending 阈值 = max(15s, 10%) = 26.9s，
+        // 已播 250000（剩 19s）正好落在 ending；ended 走 mediaFinished()。
+        isl->advanceMediaElapsed(mediaPhaseArg == QLatin1String("ending") ? 250000 : 83000);
+        if (mediaPhaseArg == QLatin1String("ended")) isl->mediaFinished();
+        if (expand || search || submit || likefly) isl->setExpanded(true);
     } else {
         isl->showIsland(QStringLiteral("老师正在讲话"),
                         QStringLiteral("请保持安静，认真听讲，有问题举手"),
@@ -149,128 +463,237 @@ int main(int argc, char *argv[])
         if (expand) isl->setExpanded(true);
     }
 
-    // 采样：等 QML 起来 + 几何动画走完（380ms）再抓
-    QTimer::singleShot(2500, [isl, &outPath]() {
-        QFile logf(QStringLiteral("D:/Stelarith/_probe/shots/_probe_result.txt"));
-        logf.open(QIODevice::Append | QIODevice::Text);
-        QTextStream out(&logf);
+    // 组件5：--warm 预热 30s 冷却 —— 走真实发送链路（IslandOverlay::
+    // sendBlessing → DanmakuWidget 单例），冷却计时从此刻起算。配 --submit
+    // 演示「投稿钮禁用 + 计数行倒计时」；此时点投稿钮应被 hitDisabledControl
+    // 守卫吞掉（岛保持展开，不误收起）。
+    if (warm) isl->sendBlessing(QStringLiteral("探针预热：祝大家上课开心"));
 
+    // 组件6（2026-10-15）：--report 注入落盘式 reporter。生产里这一步由 main.cpp
+    // 用 g_ws 的 lambda 完成（island 只认 CloudReporter，不认识 ws）。探针没有 ws，
+    // 用「追加 _report_trace.txt」的替身：能证明 QML 点击 → doSubmit/fireLike →
+    // 桥 Q_INVOKABLE → 岛 reportToCloud → reporter 的**整条端侧链路**接通，
+    // 缺的只剩 main.cpp 里那一段 socket 发送（那段的形状已由云端联调回归覆盖）。
+    if (report) {
+        isl->setCloudReporter([](const QString &type, const QJsonObject &payload) {
+            QFile f(QStringLiteral("D:/Stelarith/_probe/shots/_report_trace.txt"));
+            if (f.open(QIODevice::Append | QIODevice::Text))
+                QTextStream(&f) << "t=" << QDateTime::currentMSecsSinceEpoch()
+                                << " type=" << type
+                                << " payload=" << QString::fromUtf8(
+                                       QJsonDocument(payload).toJson(QJsonDocument::Compact))
+                                << "\n";
+        });
+    }
+
+    // 采样：等 QML 起来 + 几何动画走完（380ms）再抓
+    // 组件3：本段只做「注入 + 合成点击」；dump/tree/截图提为 captureAndSave
+    // （点击后可能还要等 400ms 提交 Timer 落 2/3 态 ⇒ 两段式 singleShot）。
+    QTimer::singleShot(2500, [isl, outPath, search, searchPhase, submit, sphase, clickName, warm, draftOverride, likefly, mediaPhaseArg]() {
         QQuickWidget *q = findQuick(isl);
-        out << "=== probe ===\n";
-        // ── 字体诊断 ────────────────────────────────────────────
-        // 离屏平台下中文常渲染成 tofu（方框）。要分清「代码问题」还是「环境缺字」：
-        // 这里列出 Qt 实际看得见的字族数量与前几个名字。
-        // 若数量为 0 或全是西文 ⇒ 环境问题（离屏 + 无 fontconfig/字体目录），不是本工程的锅。
-        {
-            const QStringList fams = QFontDatabase::families();
-            out << "fonts: count=" << fams.size();
-            const int show = qMin(8, fams.size());
-            for (int i = 0; i < show; ++i) out << " | " << fams.at(i);
-            out << "\n";
-            QFontDatabase fdb;
-            for (const QString &want : { QStringLiteral("Microsoft YaHei"),
-                                         QStringLiteral("SimHei"),
-                                         QStringLiteral("SimSun") }) {
-                out << "  fontcheck " << want << " => "
-                    << (fdb.hasFamily(want) ? "HAVE" : "MISSING") << "\n";
-            }
-        }
-        out << "island visible=" << (isl->isVisible() ? 1 : 0)
-            << " geom=" << isl->geometry().width() << "x" << isl->geometry().height()
-            << " idle=" << (isl->isIdle() ? 1 : 0)
-            << " expanded=" << (isl->isExpanded() ? 1 : 0)
-            << " interactive=" << (isl->interactive() ? 1 : 0) << "\n";
-        out << "quickwidget=" << (q ? "found" : "NULL") << "\n";
-        if (!q) { out.flush(); qApp->quit(); return; }
-        out << "quick status=" << int(q->status())
-            << " errors=" << q->errors().size()
-            << " qgeom=" << q->geometry().width() << "x" << q->geometry().height() << "\n";
-        for (const QQmlError &e : q->errors())
-            out << "  QMLERR " << e.toString() << "\n";
+        if (!q) { qApp->quit(); return; }
 
         // ── 直接问 QML 根对象：桥到底送进去没有 ────────────────────
         // ⚠️ 这一步是为了把"桥没数据"和"QML 没读"两类故障分开。
         //    2026-10-11 踩到过：QML errors=0、几何也对，但内容是空的，
         //    不加这段就只能靠猜。
         if (QQuickItem *ri = q->rootObject()) {
-            out << "rootObj class=" << ri->metaObject()->className() << "\n";
-            auto dumpProp = [&](const char *n) {
-                QVariant v = ri->property(n);
-                out << "  root." << n << " = " << (v.isValid() ? v.toString() : QStringLiteral("<invalid>"))
-                    << "\n";
-            };
-            dumpProp("_title");
-            dumpProp("_desc");
-            dumpProp("_icon");
-            dumpProp("_idle");
-            dumpProp("_expanded");
-            dumpProp("_light");
-            dumpProp("_interactive");
-            dumpProp("_severity");
-            dumpProp("_spectrumActive");   // §6.3：频谱态（2026-10-13）
-            dumpProp("implicitWidth");
-            dumpProp("implicitHeight");
-            dumpProp("width");
-            dumpProp("height");
-            // states / actions 是 list，toString() 给不出内容，单独数个数
-            QVariant st = ri->property("_states");
-            QVariant ac = ri->property("_actions");
-            out << "  root._states.count = " << st.toList().size() << "\n";
-            out << "  root._actions.count = " << ac.toList().size() << "\n";
-            QVariant sb = ri->property("_spectrumBands");
-            out << "  root._spectrumBands.count = " << sb.toList().size() << "\n";
-        }
-
-        // ── P3 布局诊断（2026-10-14）：全子树几何转储 ──────────────────
-        // mediaRow 锚 specRow.bottom 但两者不同父级（root vs expandedCol），
-        // 截图里媒体栏跑到了顶部。这里把整棵 Item 树的 x/y/w/h 打出来定位真因。
-        if (QQuickItem *ri = q->rootObject()) {
-            out << "=== tree ===\n";
-            std::function<void(QQuickItem *, int)> walk = [&](QQuickItem *it, int depth) {
-                QVariant t = it->property("text");
-                const QString ts = t.isValid() ? t.toString().left(14) : QString();
-                out << QStringLiteral("  %1%2 y=%3 h=%4 w=%5 vis=%6%7\n")
-                       .arg(QString(depth * 2, QLatin1Char(' ')))
-                       .arg(QLatin1String(it->metaObject()->className()))
-                       .arg(it->y()).arg(it->height()).arg(it->width())
-                       .arg(it->isVisible() ? 1 : 0)
-                       .arg(ts.isEmpty() ? QString() : QStringLiteral(" text=\"") + ts + QStringLiteral("\""));
-                for (QObject *c : it->children())
-                    if (auto *ci = qobject_cast<QQuickItem *>(c)) walk(ci, depth + 1);
-            };
-            walk(ri, 0);
-            out << "=== end tree ===\n";
-        }
-
-        // ⚠️ 关键：QML 内容必须用 grabFramebuffer()，普通 grab() 拿到空白。
-        //    但若 QML 没加载（status != Ready），island.cpp 会**退回手绘** —— 手绘画在
-        //    QWidget 上，grabFramebuffer 抓不到，得改抓 widget 本身。这条分支就是用来
-        //    验证"打包漏了 qml/ 时不会白屏/崩，而是退化成老的手绘灵动岛"。
-        if (q->status() != QQuickWidget::Ready) {
-            out << "FALLBACK: QML 未加载 -> 抓 widget 手绘\n";
-            QImage wimg = isl->grab().toImage();
-            out << "widgetgrab=" << wimg.width() << "x" << wimg.height()
-                << " null=" << (wimg.isNull() ? 1 : 0) << "\n";
-            if (!wimg.isNull()) {
-                QDir().mkpath(QFileInfo(outPath).absolutePath());
-                const bool ok = wimg.save(outPath);
-                out << "saved=" << (ok ? 1 : 0) << " path=" << outPath << "\n";
+            // 组件1 演示值：点赞计数（探针专用；生产由组件4 接桥后改绑定）
+            ri->setProperty("likeCount", 23);
+            // 组件7（2026-10-15）：播放四态渲染相位覆盖 —— C++ 已按真链路设了相位，
+            // 但 starting 会在 2.5s 后自转 playing、ended 会在 2.5s 后收起，而探针
+            // 恰在 2500ms 截图，正踩边界 ⇒ 用 demoMediaPhase 把渲染相位钉死
+            // （只影响渲染，不影响 C++ 真状态），四态截图才确定、可复现。
+            if (!mediaPhaseArg.isEmpty())
+                ri->setProperty("demoMediaPhase", mediaPhaseArg);
+            // 组件2 演示值：点歌搜索页五态（探针专用；生产由组件6 接桥后改绑定）
+            if (search) {
+                // 各态配一个可信关键词：结果态「周」（占位目录 3 首周杰伦）、
+                // 无结果态用生造词；空态留空。
+                const QString q = (searchPhase == 1 || searchPhase == 2 || searchPhase == 4)
+                                    ? QStringLiteral("周")
+                                    : (searchPhase == 3 ? QStringLiteral("不存在的歌") : QString());
+                ri->setProperty("searchQuery", q);
+                ri->setProperty("searchPhase", searchPhase);
+                if (searchPhase == 4) ri->setProperty("searchQuotaUsed", 3);   // 配额满
+                ri->setProperty("searchOn", true);
+                // 输入框文字同步（截图可信）：setProperty 不触发 onTextEdited，
+                // 不会把上面显式设的 phase 冲掉——两条注入互不干扰。
+                if (QQuickItem *in = ri->findChild<QQuickItem *>(QStringLiteral("songSearchInput")))
+                    in->setProperty("text", q);
             }
-            out.flush();
-            qApp->quit();
-            return;
+            // 组件3 演示值：投稿页（探针专用；生产由组件5/6 接桥后改绑定）
+            // ⚠️ --click 入口 pill（danmakuPillMa/danmakuSendMa）时**不**执行
+            //    本注入块的开页：danmakuRow.visible 含 !submitOn，此处把
+            //    submitOn 置 true 会把要点击的入口行藏掉（2026-10-15 实测：
+            //    pillMa vis=0、点击落空）——入口场景的开页交给点击本身触发。
+            const bool clickEntry = (clickName == QLatin1String("danmakuPillMa")
+                                     || clickName == QLatin1String("danmakuSendMa"));
+            if (submit && !clickEntry) {
+                // 六态注入口径（sphase 是**演示态编号**，与 QML submitPhase
+                // 状态机编号不同，必须映射——2026-10-15 冒烟踩过：直接透传
+                // sphase=1 把「有内容编辑态」演成了「提交中」）：
+                //   sphase 0 空编辑 ⇒ phase 0 + ""
+                //   sphase 1 有内容 ⇒ phase 0 + 14 字草稿
+                //   sphase 2 超限   ⇒ phase 0 + 51 字（超 1 字 ⇒ 红计数+禁用）
+                //   sphase 3 提交中 ⇒ phase 1 + 草稿（不启动 Timer，停在中态）
+                //   sphase 4 成功   ⇒ phase 2 + 草稿
+                //   sphase 5 失败   ⇒ phase 3 + 草稿
+                const QString draft14 = draftOverride.isEmpty()
+                    ? QStringLiteral("老师教师节快乐，同学们加油！") : draftOverride;
+                const QString draft51 = QStringLiteral("祝老师教师节快乐，身体健康，工作顺利！").repeated(3).left(51);
+                int qmlPhase = 0;
+                QString draft;
+                switch (sphase) {
+                case 1:  qmlPhase = 0; draft = draft14; break;
+                case 2:  qmlPhase = 0; draft = draft51; break;
+                case 3:  qmlPhase = 1; draft = draft14; break;
+                case 4:  qmlPhase = 2; draft = draft14; break;
+                case 5:  qmlPhase = 3; draft = draft14; break;
+                default: qmlPhase = 0; draft = QString(); break;   // 0 空编辑
+                }
+                ri->setProperty("submitOn", true);
+                ri->setProperty("submitPhase", qmlPhase);
+                // ⚠️ 设 submitText 而非 submitInput.text：QML 里
+                //    text: root.submitText 是绑定，直接 set text 会破坏绑定
+                //    （计数/禁用态不再跟 submitText 联动）。
+                if (!draft.isEmpty()) ri->setProperty("submitText", draft);
+            }
+            // 组件4 演示值：点赞飘心中途态（探针专用；生产由桥下发后改绑定）。
+            // 不驱动完整 600ms 动画时序（截图时刻不可控）——直接把飘心 Item
+            // 设到动画中途视觉（y=-14 半程 / opacity=0.55 半透明 / visible），
+            // 截图证「飘心中」长相；动画结束自动隐藏由 QML onFinished 保证，
+            // 点击轮（--click abtn_like）等 1400ms 后 dump 证 visible 归 0。
+            if (likefly) {
+                ri->setProperty("likeOn", true);
+                ri->setProperty("likeCount", 24);   // 23 演示值 + 1
+                if (QQuickItem *fly = ri->findChild<QQuickItem *>(QStringLiteral("likeFly"))) {
+                    fly->setVisible(true);
+                    fly->setProperty("y", -14);
+                    fly->setProperty("opacity", 0.55);
+                }
+            }
+            // ── 组件3：合成点击 ─────────────────────────────────────
+            // 入口 pill（danmakuPillMa/danmakuSendMa）：先喂一句草稿到弹幕
+            // 输入行，验证「开页携带文字」语义（onClicked 里携入 submitText）。
+            // 投稿页页内按钮（abtn_*，组件3）：先注入**目标所在态**——按钮只在
+            // 对应 phase 的态 Item 里可见（visible: submitPhase === N），态不对
+            // ⇒ 目标不可见 ⇒ 点击穿透到根 gestureArea 把岛点成收起态
+            // （2026-10-15 实测踩坑：prePhase 曾误用演示态编号 4/5，
+            //   而 QML submitPhase 只认 0 编辑/1 提交中/2 成功/3 失败；
+            //   2026-10-15 二踩：abtn_like[组件4] 被本块误伤——注入 submitOn=true
+            //   藏掉 interactRow ⇒ 好听钮不可见 ⇒ 点击落空点穿 gestureArea）。
+            //   abtn_submit/abtn_backEdit 在编辑态(0)；abtn_done/abtn_rewrite
+            //   在成功态(2)；abtn_retry/abtn_backFail 在失败态(3)。
+            // ⚠️ 本块**只认投稿页六钮**；其它 objectName（如组件4 的 abtn_like）
+            //    无需前置态——默认媒体展开态下互动区可见、按钮 enabled。
+            if (!clickName.isEmpty()) {
+                if (clickEntry) {
+                    if (QQuickItem *in = ri->findChild<QQuickItem *>(QStringLiteral("danmakuInput")))
+                        in->setProperty("text", QStringLiteral("老师教师节快乐，同学们加油！"));
+                } else if (clickName == QLatin1String("abtn_submit")
+                           || clickName == QLatin1String("abtn_backEdit")
+                           || clickName == QLatin1String("abtn_done")
+                           || clickName == QLatin1String("abtn_rewrite")
+                           || clickName == QLatin1String("abtn_retry")
+                           || clickName == QLatin1String("abtn_backFail")) {
+                    int qmlPhase = 0;
+                    if (clickName == QLatin1String("abtn_done") || clickName == QLatin1String("abtn_rewrite"))
+                        qmlPhase = 2;   // 成功态
+                    else if (clickName == QLatin1String("abtn_retry") || clickName == QLatin1String("abtn_backFail"))
+                        qmlPhase = 3;   // 失败态
+                    // abtn_submit / abtn_backEdit ⇒ 编辑态(0)
+                    ri->setProperty("submitOn", true);
+                    ri->setProperty("submitPhase", qmlPhase);
+                    // 组件5：--draft 覆写（敏感词等真实结果码演示走这里）
+                    const QString cdraft = draftOverride.isEmpty()
+                        ? QStringLiteral("老师教师节快乐，同学们加油！") : draftOverride;
+                    ri->setProperty("submitText", cdraft);
+                }
+            }
         }
 
-        QImage img = q->grabFramebuffer();
-        out << "framebuffer=" << img.width() << "x" << img.height()
-            << " null=" << (img.isNull() ? 1 : 0) << "\n";
-        if (!img.isNull()) {
-            QDir().mkpath(QFileInfo(outPath).absolutePath());
-            const bool ok = img.save(outPath);
-            out << "saved=" << (ok ? 1 : 0) << " path=" << outPath << "\n";
-        }
-        out.flush();
-        qApp->quit();
+        // ⚠️ 注入与点击之间必须让布局 polish 一帧（+100ms 再点）：setProperty
+        //    是同步的，但锚链重算/visible 传导要等事件循环。同步块内立即点击
+        //    拿到的是未重算坐标 ⇒ 落空，甚至被根 gestureArea（anchors.fill 全岛、
+        //    onClicked 切 expanded）吞掉把岛点成收起态（2026-10-15 实测）。
+        QTimer::singleShot(100, [isl, q, outPath, clickName]() {
+            // 组件6：先 Item 树找（覆盖 Repeater delegate），找不到再退回 QObject 树
+            //（顶层声明控件的常规路径，保持既有用例零回归）。
+            QQuickItem *target = clickName.isEmpty() ? nullptr
+                : (q->rootObject() ? findItemByName(q->rootObject(), clickName) : nullptr);
+            if (!target && !clickName.isEmpty() && q->rootObject())
+                target = q->rootObject()->findChild<QQuickItem *>(clickName);
+            const bool clicked = clickItem(q, target);
+            // 组件5 诊断（2026-10-15）：点击后接上冷却广播追踪（widget 已在
+            // 点击中创建）——b1 复现「QML 停 30 / widget 29」时定位 tick 发没发。
+            if (DanmakuWidget *dw = DanmakuWidget::danmakuWidgetPeek()) {
+                QObject::connect(dw, &DanmakuWidget::blessingCooldownChanged, [](int rem) {
+                    QFile f(QStringLiteral("D:/Stelarith/_probe/shots/_cooldown_trace.txt"));
+                    if (f.open(QIODevice::Append | QIODevice::Text))
+                        QTextStream(&f) << "t=" << QDateTime::currentMSecsSinceEpoch()
+                                        << " emit rem=" << rem << "\n";
+                });
+            }
+            QString extra = clickName.isEmpty() ? QString()
+                : QStringLiteral("click: target=") + clickName
+                  + QStringLiteral(" found=") + (target ? QStringLiteral("1") : QStringLiteral("0"))
+                  + QStringLiteral(" sent=") + (clicked ? QStringLiteral("1") : QStringLiteral("0"))
+                  + QStringLiteral("\n");
+            // ── 点击诊断（2026-10-15）：合成事件若没触发 onClicked，先验证坐标
+            //    链路——target 绝对坐标（父链累加）+ 自身可见性 + window 状态。
+            if (target) {
+                QPointF base(0, 0);
+                for (const QQuickItem *p = target; p; p = p->parentItem())
+                    base += QPointF(p->x(), p->y());
+                const QPointF c = base + QPointF(target->width() / 2.0, target->height() / 2.0);
+                extra += QStringLiteral("click diag: base=(") + QString::number(base.x())
+                       + QStringLiteral(",") + QString::number(base.y())
+                       + QStringLiteral(") size=") + QString::number(target->width())
+                       + QStringLiteral("x") + QString::number(target->height())
+                       + QStringLiteral(" center=(") + QString::number(c.x())
+                       + QStringLiteral(",") + QString::number(c.y())
+                       + QStringLiteral(") vis=") + (target->isVisible() ? QStringLiteral("1") : QStringLiteral("0"))
+                       + QStringLiteral(" win=") + (q->quickWindow() ? QStringLiteral("ok") : QStringLiteral("null"))
+                       + QStringLiteral("\n");
+                // childAt 逐层下钻：看该坐标处实际命中链（childAt 按子项顺序，
+                // 不按 z，仅作参考——但足以暴露"目标根本没排在点击路径上"）
+                {
+                    QQuickItem *cur = q->rootObject();
+                    QPointF local = c;
+                    QString path;
+                    for (int guard = 0; guard < 20 && cur; ++guard) {
+                        path += QStringLiteral(" > ") + QLatin1String(cur->metaObject()->className());
+                        QQuickItem *nx = cur->childAt(local.x(), local.y());
+                        if (!nx || nx == cur) break;
+                        local = QPointF(local.x() - nx->x(), local.y() - nx->y());
+                        cur = nx;
+                    }
+                    extra += QStringLiteral("click hitpath:") + path + QStringLiteral("\n");
+                }
+            }
+
+            // 点击「投稿/重试」会启动 400ms 提交 Timer（2500+100+400=3000ms 才落
+            // 2/3 态）⇒ 再等 1400ms 才捕获；「好听」会启动 600ms 飘心动画
+            // （2500+100+600=3200ms 才落回隐藏）⇒ 同样等 1400ms 证归位；
+            // 其余点击/静态注入立即捕获。
+            // ⚠️ 2026-10-15 组件5：abtn_submit 走真实发送 ⇒ 另起 30s 冷却 tick
+            //    （1Hz）。合成点击的 QML 回调经 QQuickWidget 异步投递，实际执行
+            //    比点击晚 ~400ms ⇒ 等 2600ms（而非 1400ms）给 tick 留出触发
+            //    窗口，避免 capture 与首个 tick 赛跑（b1 曾因此读到旧值 30）。
+            const bool waitsTimer = (clickName == QLatin1String("abtn_submit")
+                                     || clickName == QLatin1String("abtn_retry")
+                                     || clickName == QLatin1String("abtn_like"));
+            if (waitsTimer && clicked) {
+                QTimer::singleShot(2600, [isl, q, outPath, extra]() {
+                    captureAndSave(isl, q, outPath, extra);
+                    qApp->quit();
+                });
+            } else {
+                captureAndSave(isl, q, outPath, extra);
+                qApp->quit();
+            }
+        });
     });
 
     return app.exec();

@@ -13,6 +13,16 @@ shots-d5/
 *.jpg
 *.png
 
+# ── 白名单：鲸鱼娘 QML 素材（2026-10-15 补，修干净 clone 后鲸鱼娘空白）──────
+# resources/whale/*.png 不是抓屏截图，是**随 exe 走的运行期资源**：
+#   CMakeLists.txt:202 file(GLOB resources/whale/*) 整目录编进 qrc://whale，
+#   QML 侧 WhaleMascot.imagePath 写 qrc:/whale/dsniang1.png。
+# 此前被上面的 *.png 误挡 ⇒ 素材没进版本库 ⇒ 干净 clone 后编译的包鲸鱼娘空白。
+# （viewer 侧同名 dsniang1.png 早已入库，此处补齐一致性。）
+# ⚠️ ! 规则必须写在 *.png 之后（gitignore 后行覆盖前行）；父目录 resources/whale/
+#    自身未被忽略，故此白名单可生效。
+!resources/whale/*.png
+
 # 打包产物（MSI 18MB、wixpdb）
 msi/*.msi
 msi/*.wixpdb

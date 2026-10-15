@@ -30,10 +30,10 @@ WhaleAudio::WhaleAudio(QObject *parent)
 QString WhaleAudio::qrcPath(Sound s) const
 {
     switch (s) {
-    case Sound::PressYa:   return QStringLiteral(":/whale/Ya1.wav");
-    case Sound::ReleaseYa: return QStringLiteral(":/whale/Ya2.wav");
-    case Sound::PressD:    return QStringLiteral(":/whale/D1.wav");
-    case Sound::ReleaseD:  return QStringLiteral(":/whale/D2.wav");
+    case Sound::PressYa:   return QStringLiteral(":/whale/ya1.wav");
+    case Sound::ReleaseYa: return QStringLiteral(":/whale/ya2.wav");
+    case Sound::PressD:    return QStringLiteral(":/whale/d1.wav");
+    case Sound::ReleaseD:  return QStringLiteral(":/whale/d2.wav");
     case Sound::TaskEndA:  return QStringLiteral(":/whale/minecraft-exp-orb.wav");
     case Sound::TaskEndB:  return QStringLiteral(":/whale/task-end-a.wav");
     case Sound::Notify:    return QStringLiteral(":/whale/minecraft-exp-orb.wav");

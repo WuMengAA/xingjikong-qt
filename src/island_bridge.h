@@ -97,6 +97,23 @@ class IslandBridge : public QObject
     Q_PROPERTY(qint64  mediaTotalMs   READ mediaTotalMs   NOTIFY changed)
     Q_PROPERTY(QString mediaNextTitle READ mediaNextTitle NOTIFY changed)
     Q_PROPERTY(QString mediaNextCover READ mediaNextCover NOTIFY changed)
+    // 2026-10-15 组件1（点歌互动）：媒体内容正占据岛面（收起态播放条/展开态互动区）。
+    // 与 mediaActive 的分工：mediaActive=ffplay 在播（媒体行显隐，P3 语义）；
+    // mediaPresenting=岛面当前画的是媒体。通知顶掉媒体时 presenting 仍为 true
+    // （媒体还在播），QML 用 title===mediaTitle 判"岛面是媒体"。
+    Q_PROPERTY(bool mediaPresenting READ mediaPresenting NOTIFY changed)
+    // ── 组件7 播放四态（2026-10-15）──────────────────────────────
+    // ""|starting|playing|ending|ended|blocked（相位语义与判定见 island.h）。
+    // 相位由 C++ 单点判定（时长/剩余都只在 C++ 算），QML 只按串切文案/配色 ——
+    // 避免"两端各算一遍阈值"这种必然漂移。
+    Q_PROPERTY(QString mediaPhase READ mediaPhase NOTIFY changed)
+
+    // ── 组件5 祝福弹幕（2026-10-15）──────────────────────────────
+    // 岛内输入行投稿 → DanmakuWidget 全屏浮层（学生不可信源：30 字/100px/s/
+    // 敏感词过滤/30s 冷却，规则在 DanmakuWidget，云端端点留 TODO 组件6）。
+    // blessingCooldownSec：冷却剩余秒数（0=可发）。更新频率 ~1Hz 且只持续 30s，
+    // 骑全量 changed()（与 mediaElapsedMs 同口径，不单独开信号）。
+    Q_PROPERTY(int blessingCooldownSec READ blessingCooldownSec NOTIFY changed)
 
 public:
     explicit IslandBridge(IslandOverlay *host, QObject *parent = nullptr);
@@ -142,12 +159,30 @@ public:
     qint64  mediaTotalMs() const;
     QString mediaNextTitle() const;
     QString mediaNextCover() const;
+    // 2026-10-15 组件1：媒体占据岛面（见上面 Q_PROPERTY 注释）
+    bool mediaPresenting() const;
+    // 组件7：播放四态相位（见上面 Q_PROPERTY 注释）
+    QString mediaPhase() const;
     // 频谱状态变了就调这个：**只发频谱那一路**（高频，别用全量 sync()）。
     void syncSpectrum();
     // QML → C++：点历史项，恢复该通知到展开态
     Q_INVOKABLE void showHistoryItem(int index);
     // QML → C++：清空全部历史
     Q_INVOKABLE void clearHistory();
+
+    // ── 组件5 祝福弹幕（2026-10-15）──────────────────────────────
+    int blessingCooldownSec() const;
+    // QML → C++：岛内输入行「投稿」。返回 DanmakuWidget::BlessingResult
+    // （0=已入队 1=敏感词 2=冷却中 3=内容无效），QML 按码落成功/失败态。
+    Q_INVOKABLE int sendBlessing(const QString &text);
+
+    // ── 组件6 云端上报旁路（2026-10-15）──────────────────────────
+    // QML → C++ → 岛 → CloudReporter（main.cpp 注入的 g_ws 发送器）。
+    // 两条都是"点火后不管"：上报成败不影响本地行为（端侧先行），QML 无需回执。
+    // 「好听」单击：reportFeedback("like", 1)；点歌提交：submitSongRequest(标题, 歌手, 来源)。
+    Q_INVOKABLE void reportFeedback(const QString &kind, int value = 1);
+    Q_INVOKABLE void submitSongRequest(const QString &title, const QString &artist = QString(),
+                                       const QString &source = QStringLiteral("manual"));
 
     // 状态变了就调这个：一把全 NOTIFY。IslandOverlay 在每个改状态的点收口调用。
     void sync();

@@ -33,6 +33,7 @@
 #include <QStringList>
 #include <QVector>
 #include <QByteArray>
+#include <QJsonObject>     // 2026-10-15 组件6：CloudReporter 的 payload 形状
 #include <QPointer>
 #include <QTimer>
 #include <QPropertyAnimation>
@@ -43,6 +44,7 @@ class QPaintEvent;
 class QResizeEvent;      // 2026-10-11：resizeEvent(QResizeEvent*) 需要
 class QQuickWidget;
 class IslandBridge;
+class DanmakuWidget;     // 2026-10-15 组件5：祝福弹幕全屏浮层（懒建，见 ensureDanmaku）
 
 class IslandOverlay : public QWidget
 {
@@ -153,6 +155,47 @@ public:
     // 当前曲目名（岛底栏「正在播放」+ 播放时段对话框现状展示用；缺省为文件名）。
     QString mediaTitle() const { return m_mediaTitle; }
 
+    // ── 组件7 播放四态细化（2026-10-15，用户点单）──────────────────
+    // 原呈现只有「在播 / 不在播」两分：学生看不出"刚要开始 / 快结束了 /
+    // 已经播完 / 为什么没播"。这里补一个**相位**，相位由 C++ 单点判定
+    // （口径唯一，QML 只按串切文案/配色，不自己算）：
+    //   ""         无媒体内容
+    //   "starting" 广播开始 —— setMediaSession 后 2.5s 内（提示"即将播放"）
+    //   "playing"  播放中   —— 常态
+    //   "ending"   快结束   —— 剩余 ≤ max(15s, 总长 10%)（提示"即将结束 + 下一首"）
+    //   "ended"    播完     —— ffplay 自行退出，保留歌名 2.5s 再收起
+    //   "blocked"  禁播     —— 时段拦截，播放条家族的一态（alert + 无进度，3.5s 收）
+    QString mediaPhase() const { return m_mediaPhase; }
+    // 禁播提示：main.cpp 在 media_session_start 被播放时段拦住时调（替代原来的
+    // 纯 failed 回执——学生端也该知道"为什么没播"，不是只有管理端看到 failed）。
+    void mediaBlocked(const QString &reason);
+    // 播放自然结束：main.cpp 接 ffplay 的 finished 后调。
+    // ⚠️ 与"手动停"分开：stopMediaSession()（media_session_stop / 时段自动截断）
+    //    不走这里，否则"老师点了停止"会被岛报成"播放结束"。
+    void mediaFinished();
+
+    // ── 组件5 祝福弹幕（2026-10-15）──────────────────────────────
+    // 岛内输入行投稿 → DanmakuWidget 全屏浮层（设计文档裁决：弹幕是独立浮层，
+    // 非岛组件；岛内只留输入行）。端侧先行：本机冷却 + 敏感词闸门都在
+    // DanmakuWidget；云端投稿/审核端点由组件6 经 CloudReporter 旁路上报。
+    // 返回 DanmakuWidget::BlessingResult：0=已入队 1=敏感词 2=冷却中 3=内容无效。
+    int sendBlessing(const QString &text);
+    // 祝福冷却剩余秒数（0=可发）。QML 倒计时骑 bridge 的 blessingCooldownSec。
+    int blessingCooldownSec() const;
+
+    // ── 组件6 云端上报旁路（2026-10-15）──────────────────────────
+    // 岛**不直接依赖** main.cpp 的 g_ws / 云端协议：由 main.cpp 注入一个发送器
+    // （lambda 闭包捕获 g_ws + makeEnvelope），岛只负责"什么时候该上报什么"。
+    // 这样 island 单测/离屏探针不注入也能跑（reporter 为空即静默跳过），
+    // 且将来换传输方式（直连/插件宿主转发）不用改岛一个字符。
+    // payload 形状见 island.cpp reportXxx 的各注释（与云端 interact.js 的字段对应）。
+    using CloudReporter = std::function<void(const QString &type, const QJsonObject &payload)>;
+    void setCloudReporter(CloudReporter reporter);
+    // 反馈/点赞上报（kind: "like" | "feedback"）。QML「好听」单击后经桥调到这里。
+    void reportFeedback(const QString &kind, int value = 1);
+    // 点歌提交上报（source: "search" | "hot" | "manual"）。QML 搜索页提交钮经桥调到这里。
+    void submitSongRequest(const QString &title, const QString &artist, const QString &source);
+
 signals:
     void expandedChanged(bool expanded);
 
@@ -180,6 +223,19 @@ private:
     QRect geometryForForm(Form f) const;   // 按形态算目标几何
     void animateGeometry(const QRect &target);   // 弹性缓动改位置/大小
     // （原 positionForCurrent()/applyTheme() 只有声明、全工程无定义，按"不留看起来有能力其实没有的接口"删掉）
+
+    // ── 组件5 祝福弹幕（2026-10-15）──────────────────────────────
+    // 懒建并缓存弹幕层单例；首次拿到时把冷却倒计时信号（1Hz）转到 bridge，
+    // 由 sync() 全量 NOTIFY 送到 QML（与 media elapsed 同频率先例）。
+    DanmakuWidget *ensureDanmaku();
+
+    // ── 组件6 云端上报旁路（2026-10-15）──────────────────────────
+    // main.cpp 注入的发送器（见公开区 CloudReporter）。空 = 未接云端
+    // （离屏探针/单测场景）：所有上报静默跳过，本地行为不受影响。
+    CloudReporter m_cloudReporter;
+    // 上报收口：reporter 空即跳过。三个公开上报方法（reportFeedback /
+    // submitSongRequest / sendBlessing 内的 blessing）都走它。
+    void reportToCloud(const QString &type, const QJsonObject &payload);
 
     // ── 历史通知（2026-10-11 · 持久化）──────────────────────────
     // 一条历史通知的内存模型。JSON 落盘到 LOCALAPPDATA/xingjikong/island_history.json。
@@ -253,6 +309,18 @@ private:
     qint64  m_mediaTotalMs = 0;       // 总时长（管理端下发；<=0 未知）
     QString m_mediaNextTitle;         // 下一首名（"下一首封面小演示"）
     QString m_mediaNextCover;         // 下一首封面路径/URL（空=不显示）
+    // 2026-10-15 组件1（点歌互动）：媒体内容正占据岛面 —— 收起态画播放条、
+    // 展开态画互动区/弹幕行（QML mediaIsContent = 本标志 && 标题==媒体标题）。
+    // 另一职责：showIsland 归档守卫的"上一条是媒体 ⇒ 不归档"判据
+    // （"正在播放"不是通知，不进历史；歌2顶歌1也不归档）。
+    bool    m_mediaPresenting = false;
+
+    // ── 组件7 播放四态（2026-10-15）──
+    // 见公开区注释；相位字符串 + 一个复用的单发定时器（starting→playing /
+    // blocked→清 / ended→收起三种迁延都走它，避免为每态各养一个 QTimer）。
+    QString m_mediaPhase;
+    QTimer *m_mediaPhaseTimer = nullptr;
+    void armMediaPhaseTimer(int ms);
 
     QTimer *m_autoClose = nullptr;
     QTimer *m_dismissGuard = nullptr;   // dismiss 淡出的兜底：动画没走完也强制 hide
@@ -280,6 +348,10 @@ private:
     //    漏掉这一步的表现是"标称穿透、实际挡点击"，教室大屏上属于事故。
     QQuickWidget *m_quick = nullptr;
     IslandBridge *m_bridge = nullptr;
+
+    // ── 组件5 祝福弹幕：弹幕层单例缓存（2026-10-15）──
+    // 只是 danmakuWidget() 的缓存引用（单例活得比岛久），不负责生命周期。
+    DanmakuWidget *m_danmaku = nullptr;
 
     friend class IslandBridge;   // 桥要读私有成员（见 island_bridge.cpp 的头注释）
     friend class IslandPrivate;   // 既有前向声明（历史遗留，保留）
