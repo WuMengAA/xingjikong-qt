@@ -7,7 +7,12 @@
 //   GET  /api/frame?uid=...   最近一帧（管理端 D4 用；内存里，不落盘）
 //   GET  /api/instructions/notice?notice_id=...  按通知查回执（站点广播对账，2026-10-04）
 //   GET  /api/ota/latest?product=agent           该产品最新版本（OTA 清单，2026-10-05）
+//   GET  /api/interact/song-requests?state=...   点歌待审队列（管理端面板用，2026-10-15 组件6）
+//   GET  /api/interact/blessings?state=...       祝福待审队列（同上）
+//   GET  /api/interact/feedback/summary          点赞/反馈汇总（同上）
+//   POST /api/interact/handle                    审批动作 {kind,id,action}（祝福 approve 会向该班广播弹幕）
 //   指令队列：已下发未回执的落盘（见 store.js）——设备重连按原顺序补发、云端重启不丢
+//   互动数据：点歌/反馈/祝福三表落盘（见 interact.js，2026-10-15 组件6）
 
 import http from 'node:http';
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync, mkdirSync, readdirSync } from 'node:fs';
@@ -21,7 +26,7 @@ import { ensureQmlPatch, qmlPatchManifest, qmlPatchZipPath } from './qml-patch.j
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
-  OTA_MANIFEST_FILE } from './config.js';
+  INTERACT_SWEEP_INTERVAL_MS, OTA_MANIFEST_FILE } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENV_FILE = join(__dirname, '..', '.env');
@@ -104,6 +109,10 @@ function restartCloudTask() {
 import { verifyViewerTicket, mintViewerTicket, verifyAgentTicket } from './ticket.js';
 import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
+import { initInteract, interactReady, sweepInteract,
+  submitSongRequest, submitFeedback, submitBlessing,
+  listSongRequests, listBlessings, feedbackSummary,
+  handleSongRequest, handleBlessing } from './interact.js';
 import { latestFor, cmpVersion } from './ota.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 import { timingSafeEqual } from 'node:crypto';
@@ -192,12 +201,21 @@ if (!storeReady()) pushEvent('error', '指令队列不可持久化：本次运�
   }
 }
 loadRepairs();               // 打开设备报修表（repairs.json），重启后从这里恢复
+initInteract();              // 打开互动库（点歌/反馈/祝福三张表，2026-10-15 组件6）
+if (!interactReady()) pushEvent('error', '互动数据不可持久化：点歌/点赞/祝福提交将如实回 STORE_UNAVAILABLE');
 
 // 启动先清一次：把上轮残留的过期未回执/已回执行处理掉，再开始收新指令
 {
   const r = sweepQueue();
   if (r.expiredByTtl || r.expiredByCap || r.purged) {
     pushEvent('info', '启动队列清扫完成', r);
+  }
+}
+// 互动数据启动清扫（只扫已处理行，pending 待审内容永不扫）
+{
+  const r = sweepInteract();
+  if (r.songPurged || r.danmakuPurged || r.feedbackPurged) {
+    pushEvent('info', '启动互动数据清扫完成', r);
   }
 }
 
@@ -398,7 +416,7 @@ const server = http.createServer((req, res) => {
     u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
     u.pathname === '/api/ota/latest' || u.pathname.startsWith('/api/repairs') ||
     u.pathname === '/api/recordings' || u.pathname === '/api/qml-patch' ||
-    u.pathname === '/api/qml-patch/download' || isAdminApi;
+    u.pathname === '/api/qml-patch/download' || u.pathname.startsWith('/api/interact') || isAdminApi;
   if (isManageApi) {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -474,15 +492,22 @@ const server = http.createServer((req, res) => {
   }
 
   // ── 班级监控 / 设备元数据 / 云端存储（2026-10-08）──
-  // 这三条都归管理面鉴权（与 /api/ota/latest 同级）：Bearer CLOUD_VIEWER_TOKEN。
+  // 2026-10-15 修：这条路上原来**只认静态令牌**（CLOUD_VIEWER_TOKEN），登录票据 401。
+  // viewer 用「站点登录票据」访问 /api/classes /api/storage 时被拒（Host requires
+  // authentication），画面 0 帧的黑屏根因之一。改成与 isManageApi 一致：先静态后票据。
+  // 票据带 claims/scopes（权限契约 §4.3），是权限唯一入口 —— 只认静态令牌既漏票据用户
+  // 又绕开权限层，与「云端任何路径必须过 can()」冲突。
   const isViewerApi = u.pathname === '/api/storage' || u.pathname === '/api/classes'
     || u.pathname === '/api/device/bind-class' || u.pathname === '/api/me/classes';
   if (isViewerApi) {
     const vauth = req.headers.authorization || '';
     const vtoken = vauth.toLowerCase().startsWith('bearer ') ? vauth.slice(7).trim() : '';
-    if (!safeEqual(vtoken, VIEWER_TOKEN)) {
-      return send(401, { ok: false, ecode: 'AU1001', code: 'TOKEN_INVALID', error: '未授权：需要管理端令牌' });
+    const vStatic = !!vtoken && safeEqual(vtoken, VIEWER_TOKEN);
+    const vTicket = !!vtoken && !vStatic ? verifyViewerTicket(vtoken) : { ok: false };
+    if (!vtoken || (!vStatic && !vTicket.ok)) {
+      return send(401, { ok: false, ecode: 'AU1001', code: 'TOKEN_INVALID', error: '未授权：需要管理端令牌或登录票据' });
     }
+    req.__auth = vStatic ? { ok: true, mode: 'token', uid: null } : vTicket;
   }
   if (req.method === 'GET' && u.pathname === '/api/storage') {
     return send(200, { ok: true, ...getStorageInfo() });
@@ -513,6 +538,73 @@ const server = http.createServer((req, res) => {
       if (!isClassCodeValid(classCode)) return send(400, { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' });
       const r = bindDeviceToClass(classCode, uid, className);
       return send(r.ok ? 200 : 400, { ok: r.ok, ...r });
+    });
+    return;
+  }
+
+  // ── 互动数据（2026-10-15 · 灵动岛扩展组件6）──
+  // 点歌/祝福待审队列 + 反馈汇总 + 审批动作（HTTP 版）。管理端面板（候选，等用户点单）
+  // 与站点看板将来接这些；WS 上另有同数据的实时版（song-requests.list 等消息
+  // + song-request-new/blessing-new 广播）。两条路同一份 interact 库、同一套权限口径。
+  if (req.method === 'GET' && u.pathname === '/api/interact/song-requests') {
+    const ident = identityFromAuth(req.__auth);
+    const items = listSongRequests({
+      state: u.searchParams.get('state') || '',
+      limit: Number(u.searchParams.get('limit') || 100),
+    }).filter((it) => canAccess(ident, it.classCode || null));
+    return send(200, { ok: true, items });
+  }
+  if (req.method === 'GET' && u.pathname === '/api/interact/blessings') {
+    const ident = identityFromAuth(req.__auth);
+    const items = listBlessings({
+      state: u.searchParams.get('state') || '',
+      limit: Number(u.searchParams.get('limit') || 100),
+    }).filter((it) => canAccess(ident, it.classCode || null));
+    return send(200, { ok: true, items });
+  }
+  if (req.method === 'GET' && u.pathname === '/api/interact/feedback/summary') {
+    const ident = identityFromAuth(req.__auth);
+    const s = feedbackSummary();
+    if (ident && ident.scopes !== null && !isPlatformIdent(ident)) {
+      s.byClass = s.byClass.filter((c) => canAccess(ident, c.classCode || null));
+    }
+    return send(200, s);
+  }
+  if (req.method === 'POST' && u.pathname === '/api/interact/handle') {
+    // 审批动作。body: { kind:'song'|'blessing', id, action, reason? }。
+    // 与 WS 版同口径：先探条目验权限，再动状态机；approve 祝福顺带广播弹幕。
+    let raw = '';
+    req.on('data', (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch { /* 落 400 */ }
+      const kind = String(body.kind || '');
+      const id = Number(body.id || 0);
+      const action = String(body.action || '');
+      if ((kind !== 'song' && kind !== 'blessing') || !id || !action) {
+        return send(400, { ok: false, error: 'body 需要 { kind: "song"|"blessing", id, action }' });
+      }
+      const ident = identityFromAuth(req.__auth);
+      const probe = (kind === 'song' ? listSongRequests({ limit: 500 }) : listBlessings({ limit: 500 }))
+        .find((it) => it.id === id);
+      if (!probe) {
+        return send(404, { ok: false, error: `${kind === 'song' ? '点歌' : '祝福'} #${id} 不存在` });
+      }
+      if (!canAccess(ident, probe.classCode || null)) {
+        pushEvent('warn', '管理端越权：HTTP 审批被云端拒绝（目标不在其 scopes 内）',
+          { kind, id, path: u.pathname });
+        return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限处理该内容' });
+      }
+      const by = req.__ticketUid || 'http-viewer';
+      const r = kind === 'song'
+        ? handleSongRequest(id, action, by)
+        : handleBlessing(id, action, by, body.reason);
+      if (!r.ok) return send(409, { ok: false, code: r.code, error: r.message });
+      pushEvent('info', `HTTP 审批：${kind === 'song' ? '点歌' : '祝福'} #${id} ${action}`,
+        { uid: r.item.uid, by: r.item.handledBy });
+      if (kind === 'blessing' && action === 'approve') broadcastBlessingDanmaku(r.item);
+      broadcastToViewers(kind === 'song' ? 'song-request-handled' : 'blessing-handled', { ok: true, item: r.item });
+      return send(200, { ok: true, item: r.item });
     });
     return;
   }
@@ -1006,6 +1098,41 @@ function onViewerAuthed(ws, who) {
   snd(ws, 'devices', { devices: visible, at: new Date().toISOString() });
 }
 
+/** 平台级超管判定（perms.js 的 isPlatform 未导出，这里按同一口径复述一遍——
+ *  口径必须与 perms.js 逐字一致：schoolId=null 且 roles 含 platform_admin）。 */
+function isPlatformIdent(ident) {
+  return !!ident && ident.schoolId == null && Array.isArray(ident.roles) && ident.roles.includes('platform_admin');
+}
+
+/**
+ * 审批通过的祝福 → 该班在线设备的通知弹幕（kind=danmaku，组件5 的可信源路径）。
+ *
+ * 为什么走 notify 指令而不是新协议：被控端 notifyFromParams 已完整支持 kind=danmaku
+ * （DanmakuWidget::push：80 字/120px/s/颜色可指定/无过滤无冷却）——管理端审批过的
+ * 内容天然是可信源，与端侧 sendBlessingLocal（30 字/100px/s/过滤/冷却，学生不可信源）
+ * 形成「学生投稿 → 管理端审批 → 可信广播」的完整闭环，零新协议、零新端侧代码。
+ *
+ * 班级归属空（设备没绑班）→ 只发提交者那台（online 才发）；广播范围绝不默认"全班"，
+ * 否则一条漏绑班的祝福会滚到全校屏幕上。
+ * 设备不在线：sendInstruction 如实回 offline，这里只记流水不重试——祝福是即时内容，
+ * 隔天补播没有意义；要重放是管理端面板将来的事（组件6 范围外）。
+ */
+function broadcastBlessingDanmaku(item) {
+  const targets = item.classCode ? getDevicesOfClass(item.classCode) : [item.uid];
+  let hits = 0, offline = 0;
+  for (const t of targets) {
+    const r = sendInstruction(t, 'notify', {
+      kind: 'danmaku',
+      title: '祝福',
+      content: item.text,
+    });
+    if (r.state === 'sent') hits++;
+    else offline++;
+  }
+  pushEvent('info', `祝福 #${item.id} 已广播（${hits} 台在线${offline ? `，${offline} 台离线未发` : ''}）`,
+    { uid: item.uid, classCode: item.classCode || null, hits, offline });
+}
+
 viewerWss.on('connection', (ws) => {
   // 关键：鉴权通过前绝不 addViewer()。否则设备表和画面帧会被推给没通过鉴权的连接，
   // 加了 auth 也等于没加——这是最容易写歪的一处。
@@ -1174,6 +1301,71 @@ viewerWss.on('connection', (ws) => {
         });
         return;
       }
+      // ── 互动审批（2026-10-15 · 灵动岛扩展组件6）──
+      // 点歌/祝福待审队列 + 审批动作 + 反馈汇总。权限口径与 subscribe/instruction 一致
+      // （契约 §4.3：云端任何「返回内容 / 触发设备动作」的路径都必须过 can()）：
+      // 列表按本连接 scopes 过滤，审批动作先验目标条目的班级归属。
+      case 'song-requests.list': {
+        const ident = identityFromAuth(ws.__who);
+        const items = listSongRequests({ state: p.payload?.state, limit: p.payload?.limit })
+          .filter((it) => canAccess(ident, it.classCode || null));
+        snd(ws, 'song-requests.list', { ok: true, items });
+        return;
+      }
+      case 'blessings.list': {
+        const ident = identityFromAuth(ws.__who);
+        const items = listBlessings({ state: p.payload?.state, limit: p.payload?.limit })
+          .filter((it) => canAccess(ident, it.classCode || null));
+        snd(ws, 'blessings.list', { ok: true, items });
+        return;
+      }
+      case 'feedback.summary': {
+        const ident = identityFromAuth(ws.__who);
+        const s = feedbackSummary();
+        // byClass 同样按 scope 过滤（班级计数也是数据，不漏给没权限的连接）
+        if (ident && ident.scopes !== null && !isPlatformIdent(ident)) {
+          s.byClass = s.byClass.filter((c) => canAccess(ident, c.classCode || null));
+        }
+        snd(ws, 'feedback.summary', s);
+        return;
+      }
+      case 'song-request.handle': {
+        const id = Number(p.payload?.id);
+        const action = String(p.payload?.action || '');
+        const ident = identityFromAuth(ws.__who);
+        // 先按 id 探一次班级归属做权限判定（handle* 内部还会再校验状态机）
+        const probe = listSongRequests({ limit: 500 }).find((it) => it.id === id);
+        if (!probe) { snd(ws, 'song-request-handled', { ok: false, id, code: 'NOT_FOUND', message: `点歌 #${id} 不存在` }); return; }
+        if (!canAccess(ident, probe.classCode || null)) {
+          pushEvent('warn', '管理端越权：点歌审批被云端拒绝（目标不在其 scopes 内）', { id, who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
+          sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限处理点歌 #${id}`);
+          return;
+        }
+        const r = handleSongRequest(id, action, ws.__who?.uid || ws.__who?.mode || 'viewer');
+        if (!r.ok) { snd(ws, 'song-request-handled', { ok: false, id, code: r.code, message: r.message }); return; }
+        pushEvent('info', `点歌 #${id} ${action}：${r.item.title}`, { uid: r.item.uid, by: r.item.handledBy });
+        broadcastToViewers('song-request-handled', { ok: true, item: r.item });
+        return;
+      }
+      case 'blessing.handle': {
+        const id = Number(p.payload?.id);
+        const action = String(p.payload?.action || '');
+        const ident = identityFromAuth(ws.__who);
+        const probe = listBlessings({ limit: 500 }).find((it) => it.id === id);
+        if (!probe) { snd(ws, 'blessing-handled', { ok: false, id, code: 'NOT_FOUND', message: `祝福 #${id} 不存在` }); return; }
+        if (!canAccess(ident, probe.classCode || null)) {
+          pushEvent('warn', '管理端越权：祝福审批被云端拒绝（目标不在其 scopes 内）', { id, who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
+          sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限处理祝福 #${id}`);
+          return;
+        }
+        const r = handleBlessing(id, action, ws.__who?.uid || ws.__who?.mode || 'viewer', p.payload?.reason);
+        if (!r.ok) { snd(ws, 'blessing-handled', { ok: false, id, code: r.code, message: r.message }); return; }
+        pushEvent('info', `祝福 #${id} ${action}`, { uid: r.item.uid, by: r.item.handledBy });
+        broadcastToViewers('blessing-handled', { ok: true, item: r.item });
+        // approve → 向该班在线设备广播弹幕（走组件5 的可信通知路径，见 broadcastBlessingDanmaku）
+        if (action === 'approve') broadcastBlessingDanmaku(r.item);
+        return;
+      }
       default:
         // 未知类型**不关闭连接**：允许新客户端试探新能力（协议规范第十节）
         sndErr(ws, 'UNKNOWN_TYPE', p.type);
@@ -1217,6 +1409,17 @@ setInterval(() => {
     pushEvent('error', '指令队列清扫异常', { error: e.message });
   }
 }, QUEUE_SWEEP_INTERVAL_MS);
+
+// 互动数据清扫（2026-10-15 组件6）：已处理的点歌/祝福超 7 天删、反馈超 30 天删。
+// pending 永不扫 —— 那是等管理端审批的学生内容，不是垃圾。
+setInterval(() => {
+  try {
+    const r = sweepInteract();
+    if (r.songPurged || r.danmakuPurged || r.feedbackPurged) pushEvent('info', '互动数据清扫完成', r);
+  } catch (e) {
+    pushEvent('error', '互动数据清扫异常', { error: e.message });
+  }
+}, INTERACT_SWEEP_INTERVAL_MS);
 
 wss.on('connection', (ws) => {
   let registered = false;
@@ -1432,6 +1635,39 @@ wss.on('connection', (ws) => {
       if (p.type === 'noise_alert') {
         pushEvent('info', `噪音告警（${p.payload?.event || '?'}）已推给管理端`,
           { uid, viewers: hits, count: p.payload?.count ?? null });
+      }
+      return;
+    }
+
+    // ── 互动上报（2026-10-15 · 灵动岛扩展组件6）──
+    // 点歌 / 反馈点赞 / 祝福弹幕：学生不可信输入，云端落库（interact.js）+ 限额闸门，
+    // 再广播给管理端（待审队列实时可见）。班级归属以云端 knownDevices 表为准
+    // （设备自报的 classCode 只是兜底 —— 自报值不可信）。
+    // ⚠️ 与噪音不同，这三类**要落库**：它们是等审批的内容，不是实时遥测。
+    // ⚠️ 不走事件流水（一节课几十条会把运维事件挤掉）——审计走 interact 库本身。
+    if (p.type === 'song_request' || p.type === 'feedback' || p.type === 'blessing') {
+      const classCode = getDeviceClassCode(uid) || String(p.payload?.classCode || '').slice(0, 32);
+      const base = { uid, classCode };
+      let r;
+      if (p.type === 'song_request') {
+        r = submitSongRequest({ ...base, title: p.payload?.title, artist: p.payload?.artist, source: p.payload?.source });
+      } else if (p.type === 'feedback') {
+        r = submitFeedback({ ...base, kind: p.payload?.kind, value: p.payload?.value });
+      } else {
+        r = submitBlessing({ ...base, text: p.payload?.text });
+      }
+      if (r.ok) {
+        const ackType = p.type === 'song_request' ? 'song-request-ack'
+          : p.type === 'feedback' ? 'feedback-ack' : 'blessing-ack';
+        snd(ws, ackType, { ok: true, id: r.id, state: r.state || 'pending' });
+        // 待审内容实时推给管理端（新请求进审批面板，不用轮询）
+        const newType = p.type === 'song_request' ? 'song-request-new'
+          : p.type === 'feedback' ? 'feedback-new' : 'blessing-new';
+        broadcastToViewers(newType, { uid, classCode, id: r.id });
+      } else {
+        // 任何拒绝都如实回错（纪律：不许静默丢弃）——端侧看到 ok:false 只记日志，
+        // 本地体验已是第一公民（端侧先行），云端拒收不影响学生已完成的本地操作。
+        snd(ws, `${p.type}-ack`, { ok: false, code: r.code, message: r.message });
       }
       return;
     }
