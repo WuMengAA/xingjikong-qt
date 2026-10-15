@@ -119,6 +119,35 @@ export const SETTLED_RETENTION_MS = Number(process.env.CLOUD_SETTLED_RETENTION_M
 // 队列清扫周期：定期把"过期未回执 / 超上限 / 已回执超保留期"的行处理掉。
 export const QUEUE_SWEEP_INTERVAL_MS = Number(process.env.CLOUD_QUEUE_SWEEP_INTERVAL_MS || 5 * 60 * 1000);
 
+/* ---------- 互动数据落盘（2026-10-15 · 灵动岛扩展组件6）----------
+ * 点歌（song_requests）/ 反馈点赞（feedback）/ 祝福弹幕（danmaku）三张表。
+ * 为什么单独一个库文件而不并进 instruction-queue.db：关注点与保留策略都不同——
+ * 指令队列是"运维管道"（24h 强 TTL、每台上限、回执即删），互动数据是"内容审核流"
+ * （pending 永不扫、已处理行留 7 天供追溯、按班汇总）。混在一个库里，两边清扫
+ * 策略互相踩（sweepQueue 的 SETTLED_RETENTION_MS 会把待审的祝福当垃圾删掉）。
+ * 同样用 Node 内置 node:sqlite，零新增依赖（与 store.js 同理由）。
+ */
+export const INTERACT_DB_FILE = process.env.CLOUD_INTERACT_DB_FILE || 'interact.db';
+
+// 已处理（approved/rejected/played）行的保留期：只是短时审计追溯，过期即删。
+// 取 7 天：覆盖"这周谁点了什么歌、哪些祝福被拦"的日常核查；更早的没有意义。
+export const INTERACT_RETENTION_MS = Number(process.env.CLOUD_INTERACT_RETENTION_MS || 7 * 24 * 60 * 60 * 1000);
+
+// feedback 行保留期：汇总口径按天/按周看，留 30 天够月度对比。
+export const INTERACT_FEEDBACK_RETENTION_MS = Number(
+  process.env.CLOUD_INTERACT_FEEDBACK_RETENTION_MS || 30 * 24 * 60 * 60 * 1000);
+
+// 单台设备每小时上报上限（云端闸门，与端侧闸门并存 = 深度防御）：
+// 端侧有 30s 发送冷却（祝福≈120/h）与点歌配额 3，但端侧可被改包绕过，
+// 云端必须自己能兜底。取 60/20 的理由：正常课堂使用远低于此（一个班一节课
+// 点歌个位数、祝福十几条），超了的一律拒收并如实回错，不静默丢弃。
+export const INTERACT_SONG_PER_HOUR = Number(process.env.CLOUD_INTERACT_SONG_PER_HOUR || 60);
+export const INTERACT_DANMAKU_PER_HOUR = Number(process.env.CLOUD_INTERACT_DANMAKU_PER_HOUR || 20);
+export const INTERACT_FEEDBACK_PER_HOUR = Number(process.env.CLOUD_INTERACT_FEEDBACK_PER_HOUR || 120);
+
+// 互动数据清扫周期（只扫已处理行，pending 永不扫——那是待审批的内容，不是垃圾）。
+export const INTERACT_SWEEP_INTERVAL_MS = Number(process.env.CLOUD_INTERACT_SWEEP_INTERVAL_MS || 10 * 60 * 1000);
+
 /* ---------- OTA 版本清单（2026-10-05 · OTA 本期落地）----------
  * 云端按此文件声明"各产品最新版本 + 安装包 URL + sha256"；每次请求现读，改完即生效。
  * 文件缺失即"尚未发布过任何版本"（latestFor 返回 null，接口如实回 null，不谎报最新）。 */
