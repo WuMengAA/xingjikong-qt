@@ -137,7 +137,7 @@ function sndErr(ws, code, detail) {
 }
 import {
   pushEvent, markConnected, markDisconnected, addFrame, setRecentFrame,
-  listDevices, getDevice, sendInstruction, listEvents, listPending, ensureEventsFile,
+  listDevices, getDevice, getDeviceClassCode, sendInstruction, listEvents, listPending, ensureEventsFile,
   relayTerminalFrame, relayToSubscribers,
   addViewer, removeViewer, subscribeViewer, unsubscribeViewer, pinViewer, autoSubscribeViewers,
   broadcastFrame, broadcastDevices, broadcastToViewers, recordResult, getResult, viewerCount,
@@ -153,6 +153,8 @@ import {
 } from './registry.js';
 // 设备报修（2026-10-07，《设备报修-第一版设计》落地）：内存表 + repairs.json 落盘
 import { loadRepairs, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
+// 权限消费层（2026-10-15 · 契约《多校多身份-scope契约草案》§4.3：云端是唯一权限入口）
+import { identityFromAuth, canAccess, filterDevices } from './perms.js';
 import { expireTerminalHistory } from './store.js';
 
 /**
@@ -405,17 +407,23 @@ const server = http.createServer((req, res) => {
      *   ② 网站账号签出来的管理台票据 —— 有 uid，被抄走也能在事件流水里看到是谁的。
      * 顺序上是"先比静态令牌，再试票据"：静态令牌长得不像票，验它不会有任何副作用。 */
     const isStatic = !!token && safeEqual(token, VIEWER_TOKEN);
-    const isTicket = !!token && !isStatic ? verifyViewerTicket(token).ok : false;
+    const tver = !isStatic && token ? verifyViewerTicket(token) : { ok: false };
+    const isTicket = tver.ok;
     if (!token || (!isStatic && !isTicket)) {
       pushEvent('warn', 'HTTP 管理面鉴权失败，已拒绝', { path: u.pathname });
       // 错误码体系（2026-10-06）：REST 错误同样带 ecode（AU1003 令牌无效），站点/客户端可按码判断
       return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN> 或网站账号签发的票据' });
     }
-    if (isTicket) req.__ticketUid = verifyViewerTicket(token).uid;
+    if (isTicket) req.__ticketUid = tver.uid;
+    // 2026-10-15（权限契约）：鉴权结果挂到 req，REST 的「返回设备 / 下发指令」路径按 scopes 过滤
+    req.__auth = isStatic ? { ok: true, mode: 'token', uid: null } : tver;
   }
 
   if (req.method === 'GET' && u.pathname === '/api/devices') {
-    return send(200, { ok: true, count: listDevices().length, devices: listDevices() });
+    // 2026-10-15（权限契约 §4.3）：列表按本请求 scopes 过滤，不吐全班/全校给没权限的人。
+    const ident = identityFromAuth(req.__auth);
+    const visible = filterDevices(ident, listDevices());
+    return send(200, { ok: true, count: visible.length, devices: visible });
   }
 
   if (req.method === 'GET' && u.pathname === '/api/events') {
@@ -665,6 +673,11 @@ const server = http.createServer((req, res) => {
     const uid = u.searchParams.get('uid');
     const d = uid ? getDevice(uid) : null;
     if (!d || !d.recentFrame) return send(404, { ok: false, error: '该设备没有可取的帧（可能没推过或已掉线）' });
+    // 2026-10-15（权限契约 §4.3）：实时画面最敏感，读取同样过 can()
+    const ident = identityFromAuth(req.__auth);
+    if (!canAccess(ident, d.classCode ?? null)) {
+      return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限查看该设备画面' });
+    }
     res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': d.recentFrame.length });
     return res.end(d.recentFrame);
   }
@@ -684,6 +697,14 @@ const server = http.createServer((req, res) => {
       }
       const { uid, action, params } = payload;
       if (!uid || !action) return send(400, { ok: false, ecode: 'CM1002', code: 'CMD_PARAM_INVALID', error: '缺 uid 或 action' });
+      // 2026-10-15（权限契约 §4.3）：下发指令前必须过 can()——REST 入口同样防越权
+      const ident = identityFromAuth(req.__auth);
+      const tgtClass = getDeviceClassCode(uid);   // 离线设备也在 knownDevices 里有归属
+      if (!canAccess(ident, tgtClass)) {
+        pushEvent('warn', 'HTTP 管理面越权：指令被云端拒绝（目标不在其 scopes 内）',
+          { uid, action: String(action).slice(0, 48), who: req.__auth?.uid ?? req.__auth?.mode ?? '?' });
+        return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: `无权限向设备 ${uid} 下发指令` });
+      }
       const r = sendInstruction(uid, String(action), params ?? {});
       if (r.state === 'sent') return send(200, { ok: true, state: 'sent', uid, action });
       // 错误码体系（2026-10-06）：设备离线/不存在 → DV3001；其余写失败 → DV3002
@@ -967,7 +988,11 @@ function onViewerAuthed(ws, who) {
   //   ① 管理端后到（教室机早就在线）→ 这里立刻订阅第一台；
   //   ② 教室机后到（管理端先开机）  → autoSubscribeViewers 在设备上线时补（见 markConnected 之后那步）。
   // 2026-10-11 修：必须选**在线**设备（listDevices 含离线 known 表，取 [0] 可能订到离线 → rtc-start 白发）。
-  const firstOnline = listDevices().find((d) => d.online)?.uid;
+  // 2026-10-15（权限契约 §4.3）：初始设备表按本连接 scopes 过滤；自动订阅也只挑
+  // **能看**的第一台在线设备（否则把越权画面推到没权限的连接上，等于白加鉴权）。
+  const ident = identityFromAuth(who);
+  const visible = filterDevices(ident, listDevices());
+  const firstOnline = visible.find((d) => d.online)?.uid;
   if (firstOnline) {
     if (subscribeViewer(ws, firstOnline)) {
       snd(ws, 'subscribed', { uid: firstOnline, auto: true });
@@ -978,7 +1003,7 @@ function onViewerAuthed(ws, who) {
     }
   }
   snd(ws, 'viewer-ready', { viewers: viewerCount() });
-  snd(ws, 'devices', { devices: listDevices(), at: new Date().toISOString() });
+  snd(ws, 'devices', { devices: visible, at: new Date().toISOString() });
 }
 
 viewerWss.on('connection', (ws) => {
@@ -1031,6 +1056,7 @@ viewerWss.on('connection', (ws) => {
       }
       authed = true;
       clearTimeout(deadline);
+      ws.__who = r;   // 2026-10-15：鉴权结果挂到连接上，后面每个分支都用它做权限判断（perms.js）
       // 旧客户端认的是 auth-ok，v1 客户端收 authed（统一命名，旧名进兼容清单）
       snd(ws, ws.__v1 === true ? 'authed' : 'auth-ok', { mode: r.mode, uid: r.uid ?? null });
       onViewerAuthed(ws, r);
@@ -1049,6 +1075,14 @@ viewerWss.on('connection', (ws) => {
         return;
       }
       case 'subscribe': {
+        // 2026-10-15（权限契约 §4.3）：订阅 = 看画面，同样走 can()——越权订阅直接拒。
+        const ident = identityFromAuth(ws.__who);
+        const tgtUid = p.payload.uid;
+        const tgtClass = getDeviceClassCode(tgtUid);   // 离线设备也在 knownDevices 里有归属
+        if (!canAccess(ident, tgtClass)) {
+          sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限订阅设备 ${tgtUid}`);
+          return;
+        }
         pinViewer(ws); // 管理端自己挑了 → 以后不再自动给它补别的设备
         const uid = p.payload.uid;
         const ok = subscribeViewer(ws, uid);
@@ -1064,9 +1098,13 @@ viewerWss.on('connection', (ws) => {
         if (ok) rtcSignalToAgent(p.payload.uid, 'rtc-stop', { uid: p.payload.uid });
         return;
       }
-      case 'devices':
-        snd(ws, 'devices', { devices: listDevices(), at: new Date().toISOString() });
+      case 'devices': {
+        // 2026-10-15（权限契约 §4.3）：设备列表按本连接 scopes 过滤，不把全班/全校吐给没权限的人。
+        const ident = identityFromAuth(ws.__who);
+        const visible = filterDevices(ident, listDevices());
+        snd(ws, 'devices', { devices: visible, at: new Date().toISOString() });
         return;
+      }
       // 语音对讲（2026-10-07，设计文档 3.3）：老师开始/停止讲话。
       // 开始后云端接受该管理端的二进制音频帧并 fan-out；停止后拒绝新帧。
       // 第一版目标 = 全部在线设备（班级映射在站点侧）。
@@ -1100,6 +1138,17 @@ viewerWss.on('connection', (ws) => {
         const { uid, action, params } = p.payload;
         if (!uid || !action) {
           sndErr(ws, 'BAD_PAYLOAD', 'instruction 缺 uid 或 action');
+          return;
+        }
+        // 2026-10-15（权限契约 §4.3 + 不变量③）：**下发指令前必须过 can()**——
+        // 目标设备不在本连接 scopes 内（或设备无班级归属）直接拒，绝不下发。
+        // 这是本轮「云端全权无阻止」的核心补位：此前任何持票者能对任何设备做任何动作。
+        const ident = identityFromAuth(ws.__who);
+        const tgtClass = getDeviceClassCode(uid);   // 离线设备也在 knownDevices 里有归属
+        if (!canAccess(ident, tgtClass)) {
+          pushEvent('warn', '管理端越权：指令被云端拒绝（目标不在其 scopes 内）',
+            { uid, action: String(action).slice(0, 48), who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
+          sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限向设备 ${uid} 下发指令`);
           return;
         }
         const r = sendInstruction(uid, String(action), params ?? {});

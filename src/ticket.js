@@ -54,9 +54,24 @@ export function verifyViewerTicket(ticket) {
   if (!Number.isFinite(exp)) return { ok: false, reason: '票据有效期字段不可解析' };
   if (Date.now() > exp) return { ok: false, reason: '票据已过期' };
 
-  let uid = '';
-  try { uid = Buffer.from(uidB64, 'base64url').toString('utf8'); } catch { uid = ''; }
-  return { ok: true, mode: 'ticket', uid, exp };
+  let uid = '', claims = null;
+  try {
+    const raw = Buffer.from(uidB64, 'base64url').toString('utf8');
+    // 2026-10-15（权限契约 §4.1）：第 3 段可以是「纯 uid」（旧票）或「base64url(JSON claims)」
+    // （新票）。JSON.parse 失败 ⇒ 旧票纯 uid，行为与今天完全一致（全权，见 perms.js）。
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        claims = parsed;
+        uid = String(parsed.uid ?? '');
+      } else {
+        uid = raw;   // JSON 标量/空 → 不当 claims，按纯 uid 对待
+      }
+    } catch {
+      uid = raw;     // 旧票：纯 uid 字符串
+    }
+  } catch { uid = ''; }
+  return { ok: true, mode: 'ticket', uid, claims, exp };
 }
 
 /**

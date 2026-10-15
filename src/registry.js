@@ -360,6 +360,16 @@ export function getDevice(uid) {
 }
 
 /**
+ * 按 uid 查班级码（**含离线设备**）。getDevice() 只看得见在线表，离线后 devices 表里
+ * 没有该 uid ⇒ 权限判断（2026-10-15 perms.js）拿不到 classCode 会把离线设备误判为
+ * 「无归属」而拒绝。knownDevices 是离线保底表，班级归属在这里沿用到重连。
+ * @returns {string|null}
+ */
+export function getDeviceClassCode(uid) {
+  return knownDevices.get(uid)?.classCode ?? null;
+}
+
+/**
  * 设置设备的展示元数据（名字 / 班级）。被控端 register 时带上来、或管理端手动改。
  * 落「已知设备表」，重连沿用；不影响在线状态。
  */
