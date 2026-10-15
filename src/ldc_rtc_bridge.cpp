@@ -12,6 +12,15 @@ void ldcInitRtc(ViewerBackend *backend)
     if (!backend) return;
     LdcReceiver &r = LdcReceiver::instance();
 
+    // ⚠️ 2026-10-15 修（真机联调实证）：Qt 6 的 `Qt::UniqueConnection` **只支持成员函数指针**，
+    //    配 lambda 会直接连接失败（日志刷 QObject::connect(LdcReceiver, ViewerBackend):
+    //    unique connections require a pointer to member function of a QObject subclass）。
+    //    后果链：signalAnswer 没连上 ⇒ answer 永远发不出 ⇒ 被控端等不到 answer ⇒
+    //    track 不开 ⇒ 0 帧黑屏（webrtc 从未端到端建成的根因，恰好被日志实锤）。
+    //    frameReady / cameraFrameReady 同样没连上 ⇒ 即使通了帧也显示不出来。
+    //    ldcInitRtc 由 m_ldcInitialized 守卫（viewerbackend 只调一次），不会重复连接，
+    //    去掉 UniqueConnection 安全。
+
     // 信令出站：ldc 的 answer/candidate → 云端（与旧路同协议 rtc-* 消息）
     QObject::connect(&r, &LdcReceiver::signalAnswer, backend,
         [backend](const QByteArray &sdp) {
@@ -21,7 +30,7 @@ void ldcInitRtc(ViewerBackend *backend)
                 { QStringLiteral("sdp"), QString::fromUtf8(sdp) } });
             p.insert(QStringLiteral("from"), QStringLiteral("viewer"));
             backend->sendLdcSignal(QStringLiteral("rtc-answer"), p);
-        }, Qt::UniqueConnection);
+        });
     QObject::connect(&r, &LdcReceiver::signalCandidate, backend,
         [backend](const QByteArray &cand) {
             QJsonObject p;
@@ -30,7 +39,7 @@ void ldcInitRtc(ViewerBackend *backend)
                 { QStringLiteral("candidate"), QString::fromUtf8(cand) } });
             p.insert(QStringLiteral("from"), QStringLiteral("viewer"));
             backend->sendLdcSignal(QStringLiteral("rtc-ice"), p);
-        }, Qt::UniqueConnection);
+        });
     QObject::connect(&r, &LdcReceiver::failed, backend,
         [backend](const QString &reason) {
             // ⚠️ 2026-10-13 修：原来这里是连调两次 setLdcRtcState —— 第一句是**死代码**。
@@ -41,15 +50,13 @@ void ldcInitRtc(ViewerBackend *backend)
             //    语义态固定为 "failed"；原因只走日志（本端没有独立的 reason 通道）。
             backend->setLdcRtcState(QStringLiteral("failed"));
             logf("[viewer] RTC 失败：%s", reason.toUtf8().constData());
-        }, Qt::UniqueConnection);
+        });
     // 帧就绪：走既有帧显示通道（QML 画面区）
     QObject::connect(&r, &LdcReceiver::frameReady, backend,
-        [backend](const QImage &img) { backend->emitLdcFrame(img); },
-        Qt::UniqueConnection);
+        [backend](const QImage &img) { backend->emitLdcFrame(img); });
     // 摄像头第二轨帧（2026-10-12 · 四·双画面）：落 m_camFrame → QML 摄像头格
     QObject::connect(&r, &LdcReceiver::cameraFrameReady, backend,
-        [backend](const QImage &img) { backend->emitLdcCameraFrame(img); },
-        Qt::UniqueConnection);
+        [backend](const QImage &img) { backend->emitLdcCameraFrame(img); });
 
     backend->setLdcRtcState(QStringLiteral("ldc"));
 }
