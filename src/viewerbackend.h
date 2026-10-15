@@ -298,6 +298,15 @@ public:
     int lastFrameBytes() const { return m_lastFrameBytes; }
     /** 云端地址（设置页要显示；它是启动时从环境变量读的，不是用户填的）。 */
     QString cloudUrl() const { return m_url; }
+    /**
+     * 当前管理端令牌（2026-10-15 组件6 配套）。
+     *
+     * 为什么外露：互动审批面板（InteractBridge）走 HTTP `/api/interact/*`，
+     * 那些端点的鉴权与 /api/devices 同一条路（Bearer 令牌）。令牌的真源在
+     * backend.start()（环境变量 STE_VIEWER_TOKEN 或网站账号票据），面板不该
+     * 自己再读一遍环境变量 —— 抄两份必然在"账号登录"这条路上漂开。
+     */
+    QString viewerToken() const { return m_token; }
 
     /**
      * 管理端默认云端地址（没设 STE_VIEWER_URL 时用它）。

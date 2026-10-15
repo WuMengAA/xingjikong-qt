@@ -32,7 +32,7 @@ endif()
 # 完整标准见 docs/版本号命名规范-2026-10-07.md。
 # 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
 # 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
-set(VIEWER_VERSION "0.6.33")
+set(VIEWER_VERSION "0.6.34")
 add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
 
 # 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补；2026-10-07 正则收严到 X.Y.Z[-rc.N]）。
@@ -148,6 +148,10 @@ qt_add_executable(viewer-qt
   src/main.cpp
   src/viewerbackend.cpp
   src/viewerbackend.h
+  # 2026-10-15 组件6 配套：互动审批桥（审批数据面 + 共享灵动岛的桥面）。
+  # 独立编译单元（不给 2700 行的 viewerbackend.cpp 再加负担，同 ldc_rtc_bridge 的先例）。
+  src/interactbridge.cpp
+  src/interactbridge.h
   # 2026-10-13 架构拆分（审计 2.1）：文件推送状态机独立编译单元，给 viewerbackend.cpp 减负
   src/viewerbackend_file.cpp
   # 2026-10-13 架构拆分：语音对讲 + 屏幕广播子域独立编译单元
@@ -217,6 +221,7 @@ qt_add_qml_module(viewer-qt
     qml/ScheduleDialog.qml
     qml/FilePushDialog.qml
     qml/NotifyDialog.qml
+    qml/InteractDialog.qml
     qml/NotifyParams.js
     qml/schedule/ScheduleEditor.qml
     qml/schedule/ScheduleGrid.qml
@@ -243,9 +248,25 @@ endif()
 # 放子目录而不是 qml/ 根：那里是 windeployqt 的 Qt 插件地盘（QtQuick.2/、QtQml/…），
 # 我们自己的 .qml 混进去会跟它们的 qmldir 抢根目录。
 # ⚠️ 少了这一步，装出来的管理端会「双击没反应」：QML 加载失败 → 只有一行日志 → 直接 return 1。
+#
+# 2026-10-15（用户点单「抽共享目录」）：灵动岛视觉层**唯一真源**在根仓库
+#   <repo-root>/Stelarith-shared-qml/island/，被控端与管理端共用一份。
+#   这里把它拷到 qml/Stelarith/island/ —— 管理端审批面板要嵌一颗与被控端
+#   **一模一样**的灵动岛（用户原话），走的就是这份文件，不再另写一份。
+# ⚠️ 共享件属根仓库 ⇒ **必须整体 clone 根仓库**；单独 clone viewer 会缺件。
+set(STE_SHARED_ISLAND_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/island")
+if(NOT EXISTS "${STE_SHARED_ISLAND_DIR}/IslandRoot.qml")
+  message(FATAL_ERROR
+    "[viewer] 共享灵动岛目录缺失：${STE_SHARED_ISLAND_DIR}\n"
+    "  灵动岛 QML 真源在 Stelarith-shared-qml/island/（两端共用）。\n"
+    "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
+endif()
+
 add_custom_command(TARGET viewer-qt POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E copy_directory
           "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith"
+  COMMAND "${CMAKE_COMMAND}" -E copy_directory
+          "${STE_SHARED_ISLAND_DIR}" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/island"
   VERBATIM)
 
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg)

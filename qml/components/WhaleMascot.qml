@@ -17,7 +17,7 @@
 //
 // 用法（等 Main.qml 工作区解禁后，可嵌进 DynamicIsland 或独立角落）：
 //   WhaleMascot { width: 80; height: 80;
-//                 imagePath: "qrc:/assets/DSniang1.png"; light: false }
+//                 imagePath: "qrc:/whale/dsniang1.png"; light: false }
 import QtQuick
 
 Item {
@@ -26,7 +26,7 @@ Item {
     // 2026-10-11（F4）：默认改指 qrc 内素材（resources/whale/ 编进 exe，qrc:/whale/…）。
     // 原路径指向 dsh 原型包（C:/Users/.../dsh-whale-widget/assets），只在开发机存在，
     // 装到别的机器就是空白；qrc 版随 exe 走，跨机稳定。
-    property string imagePath: "qrc:/whale/DSniang1.png"
+    property string imagePath: "qrc:/whale/dsniang1.png"
     property bool light: false
     property real floatAmplitude: 3        // 呼吸浮动幅度 px
     property int speakMs: 3000             // 气泡停留

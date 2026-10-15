@@ -2388,6 +2388,10 @@ ApplicationWindow {
     ScheduleDialog { id: schedDlg; theme: root.th }
     // 通知弹窗（2026-10-06 加）：被控端的大屏通知早就实现了，只有管理端这个发送方漏了。
     NotifyDialog { id: notifyDlg; theme: root.th }
+    // 2026-10-15 组件6 配套：互动审批面板（点歌/祝福待审 + 右侧「学生在教室机上会看到」
+    // 的岛预览 —— 那颗岛与被控端**是同一份** IslandRoot.qml，真源在
+    // Stelarith-shared-qml/island/）。
+    InteractDialog { id: interactDlg; theme: root.th }
     // 注意类名是 FilePushDialog 不是 FileDialog：同个文件里要 import QtQuick.Dialogs 拿原生
     // 选文件对话框，两个 FileDialog 撞名 qml 编译期就冲突了，所以弹窗这侧改名（2026-10-03）
     FilePushDialog { id: fileDlg; theme: root.th }
@@ -2961,6 +2965,8 @@ ApplicationWindow {
             { name: "开始考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "全屏拦截 + 黑名单（无时长=手动结束）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode", { "minutes": 0, "blacklist": [] }); root.toast("考试模式已下发 → " + uid) } },
             { name: "结束考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "恢复教室机（全屏拦截收掉）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode_stop", {}); root.toast("已结束考试 → " + uid) } },
             { name: "刷新多班监控墙",   keys: ["multiband", "duoban", "db"], tip: "重订阅多班缩略图（最多 9 台在线）", run: function () { root.page = 1; openOnly("multiband") } },
+            // ── 互动（2026-10-15 · 灵动岛扩展组件6 配套）─────────────────
+            { name: "互动审批",         keys: ["interact", "shenpi", "sp", "diange", "zhufu"], tip: "审学生点的歌 / 祝福；右侧直接看教室机上会显示什么", run: function () { openOnly("interact") } },
             // ── 系统 ───────────────────────────────────────────────────
             { name: "刷新设备列表",     keys: ["refresh", "shuaxin", "sx"], tip: "重新拉一遍云端下发（也可按 F5）", run: function () { backend.requestDevices() } },
             { name: "用网站账号登录",   keys: ["login", "denglu", "dl"], tip: "走星璃账号授权，不用填密钥", run: function () { backend.loginWithSite() } },
@@ -3009,6 +3015,7 @@ ApplicationWindow {
         schedDlg.close()
         fileDlg.close()
         notifyDlg.close()
+        interactDlg.close()
         termDlg.close()
         changelogDlg.close()
         helpDlg.close()
@@ -3022,6 +3029,7 @@ ApplicationWindow {
         else if (which === "sched")    schedDlg.open()
         else if (which === "file")     fileDlg.open()
         else if (which === "notify")   notifyDlg.open()
+        else if (which === "interact") interactDlg.open()   // 互动审批（2026-10-15 组件6 配套）
         else if (which === "term")     termDlg.open()
         else if (which === "changelog") changelogDlg.open()   // 需求 #7
         else if (which === "help")       helpDlg.open()        // 需求 #7

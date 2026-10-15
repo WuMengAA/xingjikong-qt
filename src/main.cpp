@@ -9,6 +9,7 @@
 
 #include "singleinstance.h"
 #include "viewerbackend.h"
+#include "interactbridge.h"    // 2026-10-15 组件6 配套：互动审批桥（面板 + 共享岛）
 #include "updater.h"
 
 // ── 课表编辑器模块（从 schedule-qt 并入，2026-10-06）──
@@ -300,7 +301,7 @@ void stelarithNotifyTray(const QString &title, const QString &msg)
 // ⚠️ 命名标准为 DeepSeek Harness 同款：正式 X.Y.Z / 候选 X.Y.Z-rc.N（rc 号同核心递增、
 //    换核心归零、转正剥离后缀）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //    这一行是 CMake 校验用的回落值 —— 正常构建下由 CMakeLists.txt 的真源强制对齐。
-static constexpr const char *kViewerVersion = "0.6.33";
+static constexpr const char *kViewerVersion = "0.6.34";
 
 /**
  * 把窗口拉回屏幕内（2026-10-08）。
@@ -485,11 +486,19 @@ int main(int argc, char *argv[])
     // 是 QML 插件加载方式不直链它 → 放弃核对，留此注释：构建机务必用 Qt ≥ 6.12
     // （本项目已固定 D:\QTqwq\6.12.0，故实际恒生效；换机时注意）。
 
+    // 2026-10-15 组件6 配套：互动审批桥（审批数据面 + 共享灵动岛的桥面）。
+    // ⚠️ 必须声明在 engine **之前**：注册给 QML 的上下文属性是裸指针，QML 全程要用；
+    //    局部对象逆序析构 ⇒ 若声明在 engine 后面，它会先于 engine 销毁（悬垂）。
+    InteractBridge interactBridge(&backend);
+
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
     // 2026-10-08 lucide(morphicons 同款) SVG 图标：image://svgicon/<name>?color=<tint>
     engine.addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider);
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    // 用户点单「管理端审批面板里的灵动岛用被控端一模一样的」⇒ 管理端也挂一个 `bridge`：
+    // 共享 IslandRoot.qml 读的就是这个名字（被控端那份挂的是 IslandBridge，两端同形）。
+    engine.rootContext()->setContextProperty(QStringLiteral("bridge"), &interactBridge);
     // 自更新（2026-10-08）：QML 里 `updater.state / updater.checkForUpdate()`。
     engine.rootContext()->setContextProperty(QStringLiteral("updater"), &updater);
     // 课表编辑器 context property（2026-10-06 并入）

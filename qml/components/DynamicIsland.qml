@@ -180,7 +180,7 @@ Item {
             spacing: 6
 
             // ── F4（2026-10-11）：鲸鱼娘上岛（展开态左上角）──
-            // 用户最初需求"添加鲸鱼娘"。素材 qrc:/whale/DSniang1.png（随 exe 走）。
+            // 用户最初需求"添加鲸鱼娘"。素材 qrc:/whale/dsniang1.png（随 exe 走）。
             // 放展开态而非收起态：收起态只有 36px 高、宽度也紧，塞角色会挤压状态文字。
             // 40px 见方、带呼吸浮动；点一下 rua（组件内自带）。
             Item {
@@ -192,7 +192,7 @@ Item {
                     width: 40
                     height: 40
                     light: !isl.theme.dark
-                    imagePath: "qrc:/whale/DSniang1.png"
+                    imagePath: "qrc:/whale/dsniang1.png"
                     // ⚠️ 不在这儿绑 bubble：WhaleMascot 内部点击时自己写 bubble="rua～"，
                     //    外部再绑一个表达式 ⇒ 双向写同一属性 = Binding loop（QML 规矩）。
                     //    台词交给组件自管（点击 rua），父级只给主题 + 素材路径。
