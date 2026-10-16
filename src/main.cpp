@@ -244,7 +244,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.34";
+constexpr const char *kAppVersion = "0.6.36";
 
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
@@ -6513,22 +6513,24 @@ void captureAndSend(const QString &outDir)
             qInfo("[agent-qt] 云端不在，跳过抓屏（累计跳过 %d 次）", skipped);
         return;
     }
-    // 2026-10-12 用户命令「去掉轮询，只保留截图」：
-    // 周期性抓屏 → WS 单帧推送这条路**整体停用**（原来只在 RTC 推流时停）。
-    // 画面一律走 WebRTC 实时流；要看单张画面就用「截图」指令（回执带缩略图）。
-    //
-    // ⚠️ 连带影响（必须知道）：这条推送同时是「多班墙 / 快照」的画面来源之一。
-    //    停掉后，任何依赖 WS 单帧刷画面的界面都会没画面，需要改走 RTC 或改为按需单张截图。
-    //
-    // 逃生口：设 STE_ENABLE_WS_FRAME_PUSH=1 可临时恢复（排障 / A-B 对比用），默认关闭。
-    if (qgetenv("STE_ENABLE_WS_FRAME_PUSH") != "1") {
+    // 2026-10-12 用户命令「去掉轮询，只保留截图」：周期性抓屏 → WS 单帧推送停用
+    //（当时前提是 RTC 实时流可用、看单帧用截图指令）。
+    // ⚠️ 2026-10-16 生产兜底改造：RTC 链路未完全打通时，这路 WS 帧就是**唯一画面路**，
+    //    停掉 = 生产完全没画面。改为**默认启用 + RTC 真连通时自动停**（智能降级）：
+    //      · RTC connected → WS 帧停（实时流优先，不双路）
+    //      · RTC 未连（协商中/失败/卡死）→ WS 轮询帧照推（能看，慢）。
+    //    保留 STE_ENABLE_WS_FRAME_PUSH=0 显式关闭（回到 2026-10-12 行为）。
+    if (qgetenv("STE_ENABLE_WS_FRAME_PUSH") == "0") {
         static int offSkipped = 0;
         if (++offSkipped % 60 == 1)
-            qInfo("[agent-qt] WS 单帧轮询推送已停用（用户「只保留截图」），累计跳过 %d 次", offSkipped);
+            qInfo("[agent-qt] WS 单帧轮询推送已显式停用（STE_ENABLE_WS_FRAME_PUSH=0），累计跳过 %d 次", offSkipped);
         return;
     }
     // 逃生口打开时，仍保留原来的 RTC 优先逻辑
-    if (g_rtcOn) return;
+    // ⚠️ 2026-10-16 改：原来 `if (g_rtcOn) return;` —— g_rtcOn=true 表示「RTC 推流
+    //    已开始（意图）」，但**没接通**也一样挡掉 WS 帧 ⇒ RTC 卡死时生产零画面。
+    //    改成真正连上（ldc connected）才停 WS 帧：RTC 通 → 实时优先；RTC 未连 → WS 兜底。
+    if (LdcStreamer::instance().connected()) return;
 
     QScreen *screen = QGuiApplication::primaryScreen();
     if (!screen) {
@@ -6960,16 +6962,18 @@ int main(int argc, char *argv[])
     // ⚠️ 2026-10-13：原来无条件 start —— 而 captureAndSend 第一件事就是判
     //    STE_ENABLE_WS_FRAME_PUSH，默认关 ⇒ 每 2 秒空转一次事件循环、什么都不做，
     //    且那份判定落在每一次 tick 里。改为**启动时判定一次**：只有逃生口打开才建 timer。
+    // ⚠️ 2026-10-16 生产兜底改造：WS 单帧轮询默认启用（条件反转：只有显式=0 才关）。
+    //    captureAndSend 内部已有「RTC connected 就停」的智能降级，frameTimer 常驻即可。
     QTimer *frameTimer = nullptr;   // 供下面"立即触发首帧"用；关停时为 null
-    if (qgetenv("STE_ENABLE_WS_FRAME_PUSH") == "1") {
+    if (qgetenv("STE_ENABLE_WS_FRAME_PUSH") != "0") {
         frameTimer = new QTimer(&app);
         QObject::connect(frameTimer, &QTimer::timeout, &app, [storeFrames] {
             captureAndSend(storeFrames);
         });
         frameTimer->start(kFrameIntervalMs);
-        qInfo("[agent-qt] WS 单帧轮询推送已启用（STE_ENABLE_WS_FRAME_PUSH=1）");
+        qInfo("[agent-qt] WS 单帧轮询推送已启用（RTC 未连通时兜底；STE_ENABLE_WS_FRAME_PUSH=0 可关）");
     } else {
-        qInfo("[agent-qt] WS 单帧轮询推送已停用（要启用请设 STE_ENABLE_WS_FRAME_PUSH=1）");
+        qInfo("[agent-qt] WS 单帧轮询推送已停用（STE_ENABLE_WS_FRAME_PUSH=0）");
     }
 
     // 心跳定时器：独立于抓屏。抓屏失败/按需拉流不推帧时，云端仍要靠它判在线。
