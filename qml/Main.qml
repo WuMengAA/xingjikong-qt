@@ -18,6 +18,8 @@ import "island"          // SvgIcon 的唯一真源在共享岛目录（Stelarit
                       // 但那 4 个同名件里只有它的接口是超集且被**全套面板 + Main.qml**在用；
                       // 另 3 个（IslandClock/MarqueeText/WhaleMascot）确实只被岛用，删对了。
 import "UiPlugins.js" as UiPlugins   // U3：界面声明清单（「加一个界面=加一条声明」的入口）
+import "ActionDefs.js" as ActionDefs // U4：设备动作 / 命令的**唯一真源**（右栏 + 快捷行 + 命令面板
+                                     // 三处都从它派生；以前同一批动作在这三处各有一份硬编码）
 
 ApplicationWindow {
     id: root
@@ -433,28 +435,24 @@ ApplicationWindow {
                             // 2026-10-11：手机管理端隐藏「屏幕广播」（老师桌面推流，桌面专属）
                             // 2026-10-14：按钮文案「刷新多班墙」→「多班墙」（行为本就是把墙弹窗打开，
                             // 叫"刷新"名不副实；多设备入口留在概览，单设备操作列表不再放它）
-                            model: root.isPhone
-                                   ? [ { l: "锁屏", a: "lock" }, { l: "发通知", a: "notify" },
-                                       { l: "广播", a: "broadcast" }, { l: "语音对讲", a: "voice" },
-                                       { l: "多班墙", a: "multiband" } ]
-                                   : [ { l: "锁屏", a: "lock" }, { l: "发通知", a: "notify" },
-                                       { l: "广播", a: "broadcast" }, { l: "语音对讲", a: "voice" },
-                                       { l: "屏幕广播", a: "screen" }, { l: "考试模式", a: "exam" },
-                                       { l: "多班墙", a: "multiband" } ]
+                            // U4：清单改从声明派生（ActionDefs.js 里 quick:true 的那些）。
+                            // phone:false 的（屏幕广播 / 考试模式）由 quickList() 按 isPhone 滤掉，
+                            // 与 2026-10-11「手机管理端隐藏屏幕广播」同效。
+                            model: root.quickList()
                             delegate: Rectangle {
                                 width: 76; height: 30; radius: th.rCtrl
                                 color: qhMa.containsMouse ? th.hover2 : th.panel
                                 border.color: th.stroke; border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: modelData.l
+                                    text: modelData.quickTitle || modelData.title
                                     color: th.fg
                                     font.pixelSize: 12
                                 }
                                 MouseArea {
                                     id: qhMa
                                     anchors.fill: parent
-                                    onClicked: root.quickAction(modelData.a)
+                                    onClicked: root.runActionById(modelData.id, { quick: true })
                                 }
                             }
                         }
@@ -980,10 +978,8 @@ ApplicationWindow {
                     // 批量按钮沿用右栏 ActBtn 的外观（同高 30、同圆角 rCtrl）：
                     // 同一屏里一个方块一个方块地漂，比样式不统一更容易看出不对。
                     Repeater {
-                        model: [
-                            { l: "锁屏选中的", a: "lock" },
-                            { l: "关机选中的", a: "shutdown" }
-                        ]
+                        // U4：同样从声明派生（ActionDefs.js 里 bulk:true 的两条）
+                        model: root.bulkList()
                         delegate: Rectangle {
                             id: batBtn
                             width: 168; height: 30; radius: th.rCtrl
@@ -992,7 +988,7 @@ ApplicationWindow {
                             border.width: 1
                             Text {
                                 anchors.centerIn: parent
-                                text: modelData.l
+                                text: modelData.title
                                 color: th.op
                                 font.pixelSize: 13
                             }
@@ -1001,7 +997,7 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: root.runOnPicked(modelData.a)
+                                onClicked: root.runActionById(modelData.id)
                             }
                         }
                     }
@@ -1360,10 +1356,10 @@ ApplicationWindow {
 
                     Rectangle {
                         id: btnBody
-                    // d = { l 文案, a action, t 未实现, p 权限（"admin" = 只管理员）}；wide/heavy 由使用处注入
-                    // p 是**权限门控**（是不是管理员），和 capOk 那套（这台机器认不认这条指令）
-                    // 是两件事，别合并：前者看人，后者看机器。
-                    property var d: ({ l: "", a: "", t: false, p: "" })
+                    // d = **一条声明**（ActionDefs.js 的归一化对象，U4 起直接传它）。
+                    // 门控两套分开、别合并：role 看人（backend.mayDo），caps 看机器
+                    // （被控端上报的指令能力清单）。wide/heavy 由使用处注入。
+                    property var d: null
                         property bool wide: false
                         property bool heavy: false
                         property bool pressed2: false
@@ -1374,16 +1370,15 @@ ApplicationWindow {
                         height: 30
                         radius: th.rCtrl
                         // 未实现的：留白 + 极淡描边，看得出"还没做"，也不引诱人去点
-                        color: d.t ? "transparent"
-                             : pressed2 ? th.hover2
+                        color: pressed2 ? th.hover2
                              : ma.containsMouse ? th.hover : "transparent"
-                        border.color: d.t ? th.line : heavy ? th.op : th.stroke
+                        border.color: heavy ? th.op : th.stroke
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
-                            text: d.l
-                            color: d.t ? th.fg4 : heavy ? th.fg : th.op
+                            text: d ? d.title : ""
+                            color: heavy ? th.fg : th.op
                             font.pixelSize: 13
                         }
 
@@ -1395,28 +1390,27 @@ ApplicationWindow {
                             // 三者都置灰：没做的留白、不支持的照样看得见（灰着），
                             // 没权限的也灰着 —— 但 tooltip 得说清"为什么灰"（下面那段），
                             // 否则灰按钮看起来跟坏了的一样。
-                            enabled: !d.t && capOkAll(d) && permOk(d.p)
-                            hoverEnabled: !d.t && capOkAll(d)
+                            enabled: capOkAll(d) && permOk(d ? d.role : "")
+                            hoverEnabled: capOkAll(d)
                             // 以前鼠标移上去还是箭头，看不出这东西能点
-                            cursorShape: d.t ? Qt.ArrowCursor
-                                        : (capOkAll(d) && permOk(d.p)) ? Qt.PointingHandCursor
-                                        : Qt.ForbiddenCursor
+                            cursorShape: (capOkAll(d) && permOk(d ? d.role : ""))
+                                         ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onPressed: pressed2 = true
                             onReleased: pressed2 = false
                             onCanceled: pressed2 = false
-                            onClicked: root.runAction(d)
+                            onClicked: if (d) root.runActionById(d.id)
                         }
 
                         ToolTip {
                             // 不支持 / 没权限的也显示 tooltip（不然灰按钮 Why 都不问，像坏了），
                             // 文案分五种情况：不可逆 / 没选机器 / 这台机器不支持 / 没权限 / 正常
-                            visible: ma.containsMouse && (!d.t || !capOkAll(d) || !permOk(d.p))
+                            visible: ma.containsMouse && (!capOkAll(d) || !permOk(d ? d.role : ""))
                             delay: 500
-                            text: !permOk(d.p) ? "要管理员身份才做得到（顶栏账户那里能切）"
+                            text: !permOk(d ? d.role : "") ? "要管理员身份才做得到（顶栏账户那里能切）"
                                 : heavy ? "点了立刻执行，没法撤销"
                                 : root.currentUid === "" ? "先在左边选一台机器"
                                 : !capOkAll(d)
-                                  ? ("这台被控端不支持：它上报的能力里没有 " + capNeedOf(d).filter(function (x) { return !capOk(x) }).join(" / "))
+                                  ? ("这台被控端不支持：它上报的能力里没有 " + uiReg.capMissing(d).join(" / "))
                                 : ""
                         }
                     }
@@ -1453,7 +1447,7 @@ ApplicationWindow {
 
                 component ActBtn: Loader {
                     id: ld
-                    property var d: ({ l: "", a: "", t: false })
+                    property var d: null          // 一条声明（ActionDefs.js）
                     property bool wide: false
                     property bool heavy: false
                     sourceComponent: actBtn
@@ -1469,87 +1463,35 @@ ApplicationWindow {
                     }
                 }
 
-                // ── 通知：老师用得最多、也最该一眼看到，所以压在右栏最顶上 ──
-                //    它要**凑内容**（形态/标题/正文/时长/播报/紧急），所以占整行、用强调描边。
-                Column {
-                    spacing: 6
-                    ActBtn { d: ({ l: "通知", f: function () {
-                                            // 通知不是"点一下就发"——它要凑形态/标题/正文/时长/播报，所以开弹窗再发。
-                                            openOnly("notify")
-                                        }, t: false }); wide: true; heavy: true }
-                }
-
-                // ── 电源：这三个点下去就不可逆，所以独占整行、描边比别人重 ──
-                Column {
-                    spacing: 6
-                    GroupTitle { text: "电源" }
-                    Repeater {
-                        model: [
-                            { l: "锁屏", a: "lock",     t: false, p: "admin" },
-                            { l: "重启", a: "reboot",   t: false, p: "admin" },
-                            { l: "关机", a: "shutdown", t: false, p: "admin" }
-                        ]
-                        delegate: ActBtn { d: modelData; wide: true; heavy: true }
-                    }
-                }
-
-                // ── 看看：只读，不会动那台机器的状态 ──
-                Column {
-                    spacing: 6
-                    GroupTitle { text: "看看" }
-                    Grid {
-                        columns: 2
-                        columnSpacing: 7
-                        rowSpacing: 7
-                        Repeater {
-                            model: [
-                                { l: "截图",   a: "screenshot",       t: false },
-                                { l: "软件",   f: function () {
-                                    // 软件弹窗要两块数据：可打开（选自这台机器）+ 正在运行
-                                    backend.sendAction("list_shortcut_candidates")
-                                    backend.sendAction("process_list")
-                                } },
-                                { l: "监控",   f: function () { openOnly("camera") } },
-                                // 2026-10-14 修（UI 反馈 #4）：多班墙是多设备视图，不该出现在
-                                // 单设备「看看」操作列表里 —— 概览页顶部已有「多班墙」入口（quickAction）。
-                                { l: "音量",   f: function () { volumeDlg.open() } },
-                                { l: "文件",   f: function () { openOnly("file") } }
-                            ]
-                            delegate: ActBtn { d: modelData }
+                // ── 右栏动作区（U4：全部由声明派生）─────────────────────────
+                //    改造前这里是 5 段手写 QML：通知（独立 1 条）+ 电源 3 + 看看 5 +
+                //    任务 1 + 批量 2，每组一个 Repeater model 字面数组；而同一批动作在
+                //    命令面板里还有**另一份**（38 条）。改一处忘一处就静默不一致。
+                //    现在清单只有 qml/ActionDefs.js 一处：分组名、组内顺序、文案、
+                //    权限/能力门控、宽窄（wide/heavy）全从声明来。
+                //
+                //    布局由「组内是否全 wide」决定：全 wide 竖排（电源/任务/批量 各占整行），
+                //    否则 2 列网格（看看）。这与改造前逐组手写的结果一致。
+                Repeater {
+                    model: root.rightGroups()
+                    delegate: Column {
+                        spacing: 6
+                        GroupTitle { text: modelData.name }
+                        Grid {
+                            columns: modelData.wide ? 1 : 2
+                            columnSpacing: 7
+                            rowSpacing: 7
+                            Repeater {
+                                model: modelData.items
+                                delegate: ActBtn {
+                                    d: modelData
+                                    wide: modelData.wide
+                                    heavy: modelData.heavy
+                                }
+                            }
                         }
                     }
                 }
-
-                // ── 任务：会让教室机在未来某个时点自己做事 ──
-                //    远控开/关已从这里移除：选中班级（设备）即进入远控，开关是多余的（见 selectDevice）。
-                Column {
-                    spacing: 6
-                    GroupTitle { text: "任务" }
-                    ActBtn { d: ({ l: "定时任务", f: function () {
-                                            // 先拉一次，回执到了（onResultReceived）再开弹窗 —— 免得开出来是空的
-                                            backend.sendAction("list_schedules")
-                                            openOnly("sched")
-                                        }, t: false }); wide: true }
-                    // ⚠️ 远程终端是**开发者排障通道**（能跑任意命令），不占老师日常界面。
-                    //    入口收进命令面板（Ctrl+K 搜「终端」），避免误点。
-                }
-
-                // ── 批量：对"一批机器"生效的动作，统一收在这个面板里 ──
-                //    广播 / 考试模式 / 语音对讲 / 屏幕广播（2026-10-11 从已删的「批量管控」页搬来）
-                Column {
-                    spacing: 6
-                    GroupTitle { text: "批量" }
-                    ActBtn { d: ({ l: "管控…", f: function () {
-                                            openOnly("control")
-                                        }, t: false }); wide: true }
-                    // 2026-10-11：集控界面直达语音对讲（按住讲话 + 自动接收播放班级语音）
-                    ActBtn { d: ({ l: "语音对讲…", f: function () {
-                                            openOnly("speech")
-                                        }, t: false }); wide: true }
-                }
-
-                // （这里原先有个「给被控端打字」的输入框：老师日常用不上，且和通知/终端重复，
-                //   2026-10-11 按需求移除；要打字走命令面板或终端。）
 
                 Item { Layout.fillHeight: true }
 
@@ -2336,7 +2278,7 @@ ApplicationWindow {
         // 被控端上报的指令能力（选择设备后由云端广播带下来）；本清单的面板都没声明
         // caps，故当前不影响可见性 —— 接线是给 U4 的动作面用的。
         capabilities: backend.capActions
-        manifest: UiPlugins.manifest()
+        manifest: UiPlugins.manifest().concat(ActionDefs.manifest())
     }
     UiPanelHost {
         id: panelHost
@@ -2448,54 +2390,10 @@ ApplicationWindow {
     Component.onCompleted: {
         syncPageLive()   // 2026-10-08：启动即按当前页归一化拉流（默认 page=1，缩略图墙不预订阅）
         acctMenu.goSettings = function () { root.page = 2 }
-        pal.cmds = [
-            // ── 教室机动作 ─────────────────────────────────────────────
-            // 全部走 runAction()，和右栏按钮同一条路 —— 权限门控、能力门控都在那儿，
-            // 命令面板绕过去就等于开了条后门（界面置灰了，快捷键却点得动，最容易出事）。
-            { name: "锁屏教室机",       keys: ["lock", "suo", "sjb"], tip: "教室机立刻锁屏（要管理员身份）", run: function () { root.runAction({ l: "锁屏", a: "lock", t: false, p: "admin" }) } },
-            { name: "重启教室机",       keys: ["reboot", "chongqi", "cq"], tip: "重启教室机（要管理员身份）", run: function () { root.runAction({ l: "重启", a: "reboot", t: false, p: "admin" }) } },
-            { name: "关机教室机",       keys: ["shutdown", "guanji", "gj"], tip: "关掉教室机（要管理员身份）", run: function () { root.runAction({ l: "关机", a: "shutdown", t: false, p: "admin" }) } },
-            { name: "给教室机发通知",   keys: ["notify", "tongzhi", "tz"], tip: "填标题和正文后下发（要填内容）", run: function () { root.runAction({ l: "通知", a: "", t: false }) } },
-            { name: "打开终端",         keys: ["terminal", "cmd", "zhongduan"], tip: "命令行窗口（要管理员身份）", run: function () { root.runAction({ l: "终端", a: "", t: false, p: "admin" }) } },
-            { name: "开始远程控制",     keys: ["remote", "yuankong", "yk"], tip: "实时接管鼠标键盘（要管理员身份）", run: function () { root.runAction({ l: "远控开", a: "remote_control_start", t: false, p: "admin" }) } },
-            { name: "停止远程控制",     keys: ["remote", "yk"], tip: "把上一路的远控收掉", run: function () { root.runAction({ l: "远控关", a: "remote_control_stop", t: false, p: "admin" }) } },
-            { name: "截图",             keys: ["screenshot", "jieku", "jk"], tip: "抓一帧画面回来", run: function () { root.runAction({ l: "截图", a: "screenshot", t: false }) } },
-            { name: "看可打开的软件",   keys: ["software", "ruanjian", "rj"], tip: "这台机器上有的程序 + 正在跑的", run: function () { root.runAction({ l: "软件", a: "process_list", t: false }) } },
-            { name: "监控（摄像头）",   keys: ["camera", "shexiangtou", "sxt"], tip: "这台机器上有几个摄像头", run: function () { root.runAction({ l: "监控", a: "camera_list", t: false }) } },
-            { name: "调音量",           keys: ["volume", "yinliang", "yl"], tip: "打开音量浮层", run: function () { root.runAction({ l: "音量", a: "", t: false }) } },
-            { name: "分发文件",         keys: ["file", "wenjian", "wj"], tip: "选一个文件推给教室机", run: function () { root.runAction({ l: "文件", a: "", t: false }) } },
-            { name: "定时任务",         keys: ["schedule", "dingshi", "ds"], tip: "排一个定时关机 / 重启", run: function () { root.runAction({ l: "定时任务", a: "list_schedules", t: false }) } },
-            // ── 选择（4.4 / 4.7）──────────────────────────────────────
-            // 这四条走的是和多选按钮同一条路（runOnPicked），免得命令面板和按钮两条逻辑各写一版。
-            { name: "选中全部在线设备", keys: ["selectall", "quanxuan", "qx"], tip: "Ctrl+A：把在线设备全选上", run: function () { root.selectAll() } },
-            { name: "取消选择",         keys: ["clearpick", "quxiaoxuan", "qxz"], tip: "Esc/点空白：把选中的机器清掉", run: function () { root.clearPick() } },
-            { name: "锁屏选中的设备",   keys: ["locksel", "suoxuan", "sx"], tip: "Ctrl+L：只锁刚才选中的那几台", run: function () { root.runOnPicked("lock") } },
-            { name: "锁屏全部在线设备", keys: ["lockall", "quanbu", "qb"], tip: "Ctrl+Shift+L：锁所有在线机器（需管理员）", run: function () { root.runOnPicked("") } },
-            // ── 视图 ───────────────────────────────────────────────────
-            { name: "切到概览",         keys: ["overview", "gailan", "gl"], tip: "在线设备 + 最近回执 + 今日课表", run: function () { root.page = 0 } },
-            { name: "切到控制",         keys: ["control", "kongzhi", "kz"], tip: "看教室机画面 + 下发动作", run: function () { root.page = 1 } },
-            { name: "切到集控",         keys: ["jikong", "jk"], tip: "看教室机画面 + 下发动作", run: function () { root.page = 1 } },
-            { name: "切到设置",         keys: ["settings", "shezhi", "sz"], tip: "账户 / 连接 / 提醒 / 外观", run: function () { root.page = 2 } },
-            { name: "去广播给所有在线设备", keys: ["broadcast", "guangbo", "gb"], tip: "广播要填内容，点开弹窗填再发", run: function () { root.page = 1; openOnly("broadcast") } },
-            { name: "开始语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "全班可听，再点停", run: function () { if (backend.startSpeaking()) { root.refreshIsland(); root.toast("正在讲话") } else { root.toast("开麦失败：" + backend.speakError) } } },
-            { name: "停止语音对讲",     keys: ["voice", "yuyin", "yy"], tip: "把语音广播收掉（静音）", run: function () { backend.stopSpeaking(); root.refreshIsland(); root.toast("语音已停止") } },
-            { name: "开始屏幕广播",     keys: ["screen", "guangbo2", "gb2"], tip: "老师屏幕推给全部在线设备（再次点停）", run: function () { if (backend.startBroadcast()) { root.refreshIsland(); root.toast("正在屏幕广播") } else { root.toast("广播启动失败") } } },
-            { name: "停止屏幕广播",     keys: ["screen", "tingbo"], tip: "把屏幕广播收掉", run: function () { backend.stopBroadcast(); root.refreshIsland(); root.toast("屏幕广播已停止") } },
-            { name: "开始考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "全屏拦截 + 黑名单（无时长=手动结束）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode", { "minutes": 0, "blacklist": [] }); root.toast("考试模式已下发 → " + uid) } },
-            { name: "结束考试模式",     keys: ["exam", "kaoshi", "ks"], tip: "恢复教室机（全屏拦截收掉）", run: function () { const uid = backend.currentUid; if (!uid) { root.toast("先在控制页选中一台设备"); return }; backend.sendAction("exam_mode_stop", {}); root.toast("已结束考试 → " + uid) } },
-            { name: "刷新多班监控墙",   keys: ["multiband", "duoban", "db"], tip: "重订阅多班缩略图（最多 9 台在线）", run: function () { root.page = 1; openOnly("multiband") } },
-            // ── 互动（2026-10-15 · 灵动岛扩展组件6 配套）─────────────────
-            { name: "互动审批",         keys: ["interact", "shenpi", "sp", "diange", "zhufu"], tip: "审学生点的歌 / 祝福；右侧直接看教室机上会显示什么", run: function () { openOnly("interact") } },
-            // ── 系统 ───────────────────────────────────────────────────
-            { name: "刷新设备列表",     keys: ["refresh", "shuaxin", "sx"], tip: "重新拉一遍云端下发（也可按 F5）", run: function () { backend.requestDevices() } },
-            { name: "用网站账号登录",   keys: ["login", "denglu", "dl"], tip: "走星璃账号授权，不用填密钥", run: function () { backend.loginWithSite() } },
-            { name: "切成管理员身份",   keys: ["admin", "guanliyuan"], tip: "能操作教室机（电源 / 远控）", run: function () { backend.setRole("admin") } },
-            { name: "切成教师身份",     keys: ["teacher", "jiaoshi", "js"], tip: "只留看画面 / 发通知 / 推文件", run: function () { backend.setRole("teacher") } },
-            { name: "切到黑白外观",     keys: ["dark", "heibai", "hb"], tip: "默认外观", run: function () { backend.themeMode = 1 } },
-            { name: "切到浅色外观",     keys: ["light", "qianse", "qs"], tip: "换个亮堂的", run: function () { backend.themeMode = 0 } },
-            { name: "跟随系统外观",     keys: ["auto", "xitong", "xt"], tip: "跟着系统配色走", run: function () { backend.themeMode = 2 } },
-            { name: "打开官网下载页",   keys: ["download", "xiazai", "xz"], tip: "打开 www.245959623.xyz/download", run: function () { backend.openExternal("https://www.245959623.xyz/download") } }
-        ]
+        // U4：命令面板条目同样从声明派生（surfaces 含 "command" 的那些）。
+        // 每条回指声明 id，点击时统一走 root.runActionById —— 与右栏按钮、快捷行
+        // **同一条路**，所以权限 / 能力 / 危险确认这三道再也绕不过去。
+        pal.cmds = root.palCmds()
     }
 
     // ── 操作日志的 action → 中文（2026-10-14 加 · UI 反馈 #5）──
@@ -2552,29 +2450,13 @@ ApplicationWindow {
         if (!a || backend.capActions.length === 0) return true
         return backend.capActions.indexOf(a) >= 0
     }
-    // 几个 a 为空、实际走分支的按钮（音量/软件/定时/文件/通知/探活），真正依赖哪几条
-    // 指令得单独点名 —— 按钮上写的 a 是空串，光看 d.a 拦不住它们。
-    // 写成数组：像「软件」这种要同时拿到候选列表**和**进程列表才算真能开，单看一条会漏。
-    readonly property var capByLabel: ({
-        "音量": ["set_volume"],
-        "软件": ["list_shortcut_candidates", "process_list"],
-        // 2026-10-11 修：键必须与按钮文案（d.l）逐字一致——按钮是「定时任务」，
-        // 原来写「定时」→ capNeedOf 取 capByLabel["定时任务"]=undefined → 门控静默失效。
-        "定时任务": ["list_schedules"],
-        "文件": ["file_push"],
-        "通知": ["notify"],
-        "探活": ["ping"],
-        // 没带 terminal_open 的被控端（0.6.3 之前那批）开不了终端，
-        // 按钮得跟着置灰 —— 让"点下去只弹一句不支持"不如让入口就不亮。
-        "终端": ["terminal_open"]
-    })
     /** 这个按钮要哪些指令才点得动（[d.a] 或按文案取到的数组）。没声明 = 不参与门控。 */
-    function capNeedOf(d) {
-        return (d.a !== "" && d.a !== undefined) ? [d.a] : (capByLabel[d.l] || []);
-    }
-    /** 全部具备才放行。空数组 = 这条按钮不归门管。 */
-    function capOkAll(d) {
-        const need = capNeedOf(d);
+    /** 全部具备才放行。空数组 = 这条按钮不归门管。
+     *  U4：需要哪些指令改问契约（uiReg.capNeeds = 显式 caps 优先、否则用 action 兜底），
+     *  本文件里那份 capByLabel 手抄映射已删 —— 它就是"清单复制一份"病根本身。 */
+    function capOkAll(p) {
+        if (!p) return true
+        const need = uiReg.capNeeds(p);
         return need.length === 0 ? true : need.every(capOk);
     }
     /** 权限门控：p 是权限键（"lock"/"reboot"/"terminal_open"/"broadcast"），空 = 谁都能做。
@@ -2594,34 +2476,155 @@ ApplicationWindow {
     }
 
     // ── 概览页快捷操作分发（4.7 效率功能，2026-10-07）──
-    // 与命令面板同款调用（复用集控卡片/命令逻辑，不绕权限门控）。
-    // a ∈ lock | notify | broadcast | voice | screen | exam | multiband
-    function quickAction(a) {
-        if (a === "lock") {
-            if (!root.permOk("lock")) { backend.reportDenied("锁屏"); return }
-            root.runAction({ l: "锁屏", a: "lock", t: false, p: "admin" })
-        } else if (a === "notify") {
-            root.page = 1; openOnly("notify")
-        } else if (a === "broadcast") {
-            root.page = 1; openOnly("broadcast")
-        } else if (a === "voice") {
+    // ══ U4：动作的三个投影 + 唯一执行入口 ═══════════════════════════════
+    // 改造前「有哪些动作」写在三处（快捷行 model / 右栏 4 组 model / 命令面板 38 条字面量），
+    // 执行也分三条路（quickAction 的 if-else 链 / runAction 的 d.f 分支 / 命令面板各自的 run 闭包）。
+    // 现在清单只有 qml/ActionDefs.js 一处，执行只有下面 runActionById 一处。
+
+    /** 概览页快捷行（声明里 quick:true；手机端滤掉 phone:false 的）。 */
+    function quickList() {
+        const all = uiReg.quickActions()
+        if (!root.isPhone) return all
+        return all.filter(function (p) { return p.phone !== false })
+    }
+    /** 多选批量条（声明里 bulk:true）。 */
+    function bulkList() {
+        var out = [], a = uiReg.actionItems()
+        for (var i = 0; i < a.length; ++i) if (a[i].bulk) out.push(a[i])
+        return out
+    }
+    /** 右栏分组：[{ name, items, wide }]（wide = 整组都独占整行 ⇒ 竖排，否则 2 列）。 */
+    function rightGroups() {
+        const names = uiReg.actionGroups()
+        var out = []
+        for (var i = 0; i < names.length; ++i) {
+            const items = uiReg.actionsForGroup(names[i])
+            var wide = items.length > 0
+            for (var j = 0; j < items.length; ++j) if (!items[j].wide) wide = false
+            out.push({ name: names[i], items: items, wide: wide })
+        }
+        return out
+    }
+    /** 命令面板条目：注册表给形状，这里补 run（回指声明 id，统一走 runActionById）。 */
+    function palCmds() {
+        const m = uiReg.commandModel()
+        for (var i = 0; i < m.length; ++i) {
+            m[i].run = (function (cid) {
+                return function () { root.runActionById(cid) }
+            })(m[i].pluginId)
+        }
+        return m
+    }
+
+    // ── 唯一执行入口 ──────────────────────────────────────────────────────
+    // 闸门顺序与改造前一致：角色（看人）→ 能力（看机器）→ 危险确认。
+    // 右栏按钮、快捷行、批量条、命令面板**全部**汇到这里 ⇒ 任何一条路都绕不过去。
+    // opts.quick = 来自快捷行（那边历史上多一道 quickGuard，见 UiContract 注释）。
+    function runActionById(id, opts) {
+        const p = uiReg.byId(id)
+        const o = opts || {}
+        if (!p) { backend.reportUnsupported(String(id), "没有这条动作"); return false }
+        const label = p.palName || p.title
+
+        if (!root.permOk(p.role)) { backend.reportDenied(label); return false }
+        if (o.quick && p.quickGuard && !root.permOk(p.quickGuard)) {
+            backend.reportDenied(label); return false
+        }
+
+        const miss = uiReg.capMissing(p)
+        if (miss.length > 0) { backend.reportUnsupported(label, miss.join(" / ")); return false }
+
+        if (p.page >= 0) root.page = p.page
+        if (p.danger) { root.askDanger(p.action, 1, [], backend.currentUid); return true }
+
+        if (p.kind === "send") { backend.sendAction(p.action, {}); return true }
+        if (p.kind === "panel") { openOnly(p.panel); return true }
+        if (p.kind === "app") return root.runApp(p)
+
+        return root.runSpecial(p.id)
+    }
+
+    /** app 类（本地命令，不下发设备）。分支只有这 5 个 —— 声明里的 app 字段已校验。 */
+    function runApp(p) {
+        if (p.app === "page")     { root.page = parseInt(p.payload, 10) || 0; return true }
+        if (p.app === "theme")    { backend.themeMode = parseInt(p.payload, 10) || 0; return true }
+        if (p.app === "role")     { backend.setRole(p.payload); return true }
+        if (p.app === "login")    { backend.loginWithSite(); return true }
+        if (p.app === "external") { backend.openExternal(p.payload); return true }
+        backend.reportUnsupported(p.title, "未知的 app 类型：" + p.app)
+        return false
+    }
+
+    /** special 类（需要多步/条件）。分支体**照搬**改造前各处原实现，行为不变。 */
+    function runSpecial(id) {
+        switch (id) {
+        // ── 需要先拉数据再开面板 / 直接调浮层 ──
+        case "software-list":
+            backend.sendAction("list_shortcut_candidates")
+            backend.sendAction("process_list")
+            return true
+        case "volume":
+            volumeDlg.open(); return true
+        case "schedule":
+            backend.sendAction("list_schedules"); openOnly("sched"); return true
+
+        // ── 语音对讲（快捷行是切换语义，命令面板是分开的开 / 停）──
+        case "voice-toggle":
             if (backend.speaking) { backend.stopSpeaking(); root.toast("语音已停止") }
             else if (backend.startSpeaking()) { root.toast("正在讲话") }
             else { root.toast("开麦失败：" + backend.speakError) }
-            root.refreshIsland()
-        } else if (a === "screen") {
+            root.refreshIsland(); return true
+        case "voice-start":
+            if (backend.startSpeaking()) { root.refreshIsland(); root.toast("正在讲话") }
+            else { root.toast("开麦失败：" + backend.speakError) }
+            return true
+        case "voice-stop":
+            backend.stopSpeaking(); root.refreshIsland(); root.toast("语音已停止"); return true
+
+        // ── 屏幕广播 ──
+        case "screen-toggle":
             if (backend.broadcasting) { backend.stopBroadcast(); root.toast("屏幕广播已停止") }
             else if (backend.startBroadcast()) { root.toast("正在屏幕广播") }
             else { root.toast("广播启动失败") }
-            root.refreshIsland()
-        } else if (a === "exam") {
+            root.refreshIsland(); return true
+        case "screen-start":
+            if (backend.startBroadcast()) { root.refreshIsland(); root.toast("正在屏幕广播") }
+            else { root.toast("广播启动失败") }
+            return true
+        case "screen-stop":
+            backend.stopBroadcast(); root.refreshIsland(); root.toast("屏幕广播已停止"); return true
+
+        // ── 考试模式 ──
+        // ⚠️ 原来这段在每个分支里各抄一遍（快捷行 exam / 命令面板 exam-start / exam-stop
+        //    三处，uid 判空与 toast 文案逐字相同）。现在开 / 关各一份。
+        case "exam-toggle":
+        case "exam-start": {
             const uid = backend.currentUid
-            if (!uid) { root.toast("先在控制页选中一台设备"); return }
+            if (!uid) { root.toast("先在控制页选中一台设备"); return true }
             backend.sendAction("exam_mode", { "minutes": 0, "blacklist": [] })
             root.toast("考试模式已下发 → " + uid)
-        } else if (a === "multiband") {
-            root.page = 1; openOnly("multiband")
+            return true
         }
+        case "exam-stop": {
+            const uid = backend.currentUid
+            if (!uid) { root.toast("先在控制页选中一台设备"); return true }
+            backend.sendAction("exam_mode_stop", {})
+            root.toast("已结束考试 → " + uid)
+            return true
+        }
+
+        // ── 选择 / 批量（与多选按钮、Ctrl+L 走同一条 runOnPicked）──
+        case "select-all":    root.selectAll(); return true
+        case "pick-clear":    root.clearPick(); return true
+        case "pick-lock":     root.runOnPicked("lock"); return true
+        case "pick-lock-all": root.runOnPicked(""); return true
+        case "pick-shutdown": root.runOnPicked("shutdown"); return true
+
+        // ── 系统 ──
+        case "refresh-devices": backend.requestDevices(); return true
+        }
+        backend.reportUnsupported(id, "这一条没有动作")
+        return false
     }
 
     // ── 危险操作二次确认（2026-10-12 · UI 评审二.3）──
@@ -2655,39 +2658,6 @@ ApplicationWindow {
         }
     }
 
-    function runAction(d) {
-        if (d.t) return                      // 未实现的按钮：压根不该点得到
-
-        // 权限门控兜底：按钮已经置灰了，但状态行/快捷键/老界面可能绕过 runAction，
-        // 这里统一再拦一次，拦下就给一句话（reportUnsupported 里带日志，不静默）。
-        if (!permOk(d.p)) {
-            backend.reportDenied(d.l);
-            return;
-        }
-        if (!capOkAll(d)) {
-            const need = capNeedOf(d).filter(function (x) { return !capOk(x) });
-            backend.reportUnsupported(d.l, need.join(" / "));
-            return;
-        }
-
-        // ⚠️ 判据一律按**动作名**（d.f 自定义 / d.a 一条指令），绝不按中文文案。
-        //   2026-10-07 改：这条链原来是 if (d.l === "音量") … 一串 ——
-        //   把按钮文案从「音量」改成「喇叭」，这条链就断了：点下去走 sendAction("") 空转，
-        //   界面上什么报错都没有（灰按钮永远点不到，只有从状态行 / 快捷键触发才露出来）。
-        // 危险动作：先弹确认，别直接下发（2026-10-12 · UI 评审二.3）。
-        // 放在 d.f() 之前是必要的 —— 快捷操作有些是 d.f 自定义函数，
-        // 但 lock/reboot/shutdown 都是走 d.a，这里拦得住且不会误拦自定义函数。
-        if (root.isDanger(d.a)) { root.askDanger(d.a, 1, [], backend.currentUid); return }
-
-        if (typeof d.f === "function") { d.f(); return }
-        if (d.a !== "") { backend.sendAction(d.a, {}); return }
-
-        // 兜底：老调用点（命令面板 / 快捷键）只给了中文 label 的情况
-        // 2026-10-11 修：键与按钮文案一致（「定时任务」而非「定时」——原来永远走不到）
-        const legacy = { "音量": "volume", "探活": "ping", "软件": "process_list", "定时任务": "list_schedules" }
-        if (legacy[d.l]) { backend.sendAction(legacy[d.l], {}); return }
-        backend.reportUnsupported(d.l, "这一条没有动作");
-    }
 
     // 广播：原来这段逻辑写死在控制页那颗按钮的 onClicked 里，现在命令面板也要发广播，
     // 抽到这儿两边共用（顺序保持原样：权限 → 内容 → 有没有设备 → 逐台下发）。
