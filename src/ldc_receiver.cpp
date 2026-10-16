@@ -127,19 +127,22 @@ void LdcReceiver::createPc(const QByteArray &payload)
             }
         });
 
-        pc->setRemoteDescription(rtc::Description(payload.constData(), "offer"));
-        qDebug() << "[receiver] offer set, 等 HaveRemoteOffer 再生成 answer...";
-        // 2026-10-16 修（H264 真机「没画面、还是轮询」实证）：setRemoteDescription 是**异步**
-        // 的——answer 方必须在它落地（signalingState=HaveRemoteOffer）之后才能 addTrack +
-        // setLocalDescription。原来 setRemoteDescription 后**立即** setLocalDescription：
-        // 此时信号状态还是 Stable，会生成**第二个 offer 而非 answer**（_probe/webrtc-cycle
-        // 实验踩过同一坑），协商失败 ⇒ agent 侧 RTC 连不上 ⇒ 一直是 WS 轮询兜底画面。
-        // 接收轨改为**本端 recvonly**（不再 addTrack 对端 sendonly media，实证方向不匹配）：
+        // ── ⚠️ 顺序关键（2026-10-17 沙箱实证复现）：注册顺序必须「先注册回调，再 setRemoteDescription」。──
+        // setRemoteDescription 会**同步**驱动 signalingState 变成 HaveRemoteOffer 并触发回调；
+        // 若把 onSignalingStateChange 写在 setRemoteDescription **之后**（老代码就是），
+        // 状态转换早已发生 → 回调永不触发 → **answer 永不生成** → 被控端永远等不到 answer
+        // → RTC 连不上 → 真机现象就是「H264 没画面、一直吃 WS 轮询兜底」。
+        // 沙箱复现：_probe/webrtc-cycle/ws_answer_h264.cpp。同一坑导致的日志特征：
+        // viewer 侧只有 "offer set, 等 HaveRemoteOffer..." 之后再无 answer 行，而被控端
+        // 日志只有 "rtc-offer/rtc-ice 已投给 1 个对端"、始终**收不到 rtc-answer**。
+        // 接收轨改为本端 recvonly（不再 addTrack 对端 sendonly media，实证方向不匹配）：
         //   · screen = H264（96）；camera 至今发手动 JPEG-over-RTP（97），viewer 不挂
         //     depacketizer、建轨只为协商不 reject（保持老 onMessage 剥 JPEG 路径）。
         // lambda 持 pc（shared_ptr）而不是裸指针 —— stop() 会 reset m_pc，PC 靠这份引用保活到回调。
-        pc->onSignalingStateChange([this, pc](rtc::PeerConnection::SignalingState st) {
-            if (st != rtc::PeerConnection::SignalingState::HaveRemoteOffer) return;
+        auto answered = std::make_shared<bool>(false);
+        auto makeAnswer = [this, pc, answered]() {
+            if (*answered) return;   // 回调与下面的兜底检查可能都命中，只生成一次 answer
+            *answered = true;
             try {
                 rtc::Description::Video scMedia("screen", rtc::Description::Direction::RecvOnly);
                 scMedia.addH264Codec(96);
@@ -152,7 +155,15 @@ void LdcReceiver::createPc(const QByteArray &payload)
             } catch (const std::exception &e) {
                 emit failed(QStringLiteral("answer 生成: %1").arg(QString::fromLocal8Bit(e.what())));
             }
+        };
+        pc->onSignalingStateChange([makeAnswer](rtc::PeerConnection::SignalingState st) {
+            if (st == rtc::PeerConnection::SignalingState::HaveRemoteOffer) makeAnswer();
         });
+        pc->setRemoteDescription(rtc::Description(payload.constData(), "offer"));
+        // 兜底：某些路径下状态在 setRemoteDescription 内就已落地，上面的回调可能来不及；
+        // 这里补一次同步检查，保证 answer 一定会生成。
+        if (pc->signalingState() == rtc::PeerConnection::SignalingState::HaveRemoteOffer) makeAnswer();
+        qDebug() << "[receiver] offer set，answer 生成路径已就绪（回调已先注册）";
     } catch (const std::exception &e) {
         emit failed(QStringLiteral("offer: %1").arg(QString::fromLocal8Bit(e.what())));
     }
