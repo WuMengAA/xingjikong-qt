@@ -1,0 +1,23 @@
+// 被控端 QML 控制面板的**页声明**（U5-A3 第一批 · 2026-10-16）
+//
+// 与 viewer 的 `qml/UiPlugins.js` 是**同一份契约**（shared-qml/ui/UiContract.js）：
+//   · `surfaces: ["page"]` + `entry`（缺 entry 会被 validate 报错）
+//   · `order` 即导航顺序；`title`/`icon` 供底导航（Md3NavBar）显示
+//   · 加一页 = 加一条声明 + 一个 entry 文件；壳（AgentShell.qml）零改动
+//
+// ⚠️ 被控端页面规划（用户已定 5 页）：设置 / 自检 / 插件市场 / 记录 / 播放时段。
+//    第一批只上「设置」—— 每页都是真实功能（"不假装能用"），迁完一批上一批。
+.pragma library
+
+function manifest() {
+    return [
+        {
+            id: "settings",
+            surfaces: ["page"],
+            order: 1,
+            title: "设置",
+            icon: "设",          // 教室机 emoji 有 tofu 风险 ⇒ 导航图标用单字
+            entry: "pages/AgentSettingsPage.qml"
+        }
+    ];
+}

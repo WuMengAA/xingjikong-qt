@@ -6576,6 +6576,145 @@ void captureAndSend(const QString &outDir)
 
 } // namespace
 
+// ── U5-A3：QML 控制面板（2026-10-16）──────────────────────────────────
+// header-only（AgentUi + AgentShell 两个 Q_OBJECT 类），内联实现直接调用上面
+// 匿名域里的 static 自由函数与 AgentSettings —— 匿名域符号在本 TU 内全程可见，
+// 但本 include **绝不能放进匿名域**（Qt 头会被拽进域内 ⇒ QVariant/QtPrivate 与
+// 全局的同名声明冲突，C2872 ambiguous，实测首编即炸）。只被本文件 include，
+// 见 agent_ui.h 顶部说明。
+#include "agent_ui.h"
+
+/* ── U5-A3：QML 控制面板的数据接线（定义必须在本文件 —— 要访问匿名域符号）────
+ * agentUiFill 是 agent_ui.h 的 friend（直接改快照成员，不触发 switchChanged）。
+ * ⚠️ 不能加 static：friend 声明是 external linkage，加 static 就成另一个符号。
+ */
+void agentUiFill(AgentUi *ui)
+{
+    ui->m_appVersion = QString::fromLatin1(kAppVersion);
+    ui->m_uid = g_uid;
+    ui->m_cloudUrl = qEnvironmentVariable("STE_QT_WS_URL");
+    ui->m_connState = g_registered ? QStringLiteral("已连接（云端已确认）")
+                                   : QStringLiteral("未连接 / 正在重连");
+    ui->m_dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
+    ui->m_logPath = g_logPath;
+
+    // 升级状态四态 + canUpgrade（照 openInfoDialog 的口径，一字不差）
+    const QString cur = QString::fromLatin1(kAppVersion);
+    ui->m_hasNewer = g_updateChecked && !g_latestVer.isEmpty() && compareVersion(g_latestVer, cur) > 0;
+    ui->m_canUpgrade = ui->m_hasNewer && !g_updateUrl.isEmpty() && g_updateSha.length() == 64;
+    if (!g_updateChecked)            ui->m_latestText = QStringLiteral("还没查到（等云端回执）");
+    else if (g_latestVer.isEmpty())  ui->m_latestText = QStringLiteral("云端还没发布过版本");
+    else if (ui->m_hasNewer)         ui->m_latestText = QStringLiteral("有新版本 v%1 可升级").arg(g_latestVer);
+    else                             ui->m_latestText = QStringLiteral("已是最新（云端 v%1）").arg(g_latestVer);
+    ui->m_updateNotes = g_updateNotes;
+
+    ui->m_otaModeText = g_updateMandatory
+        ? QStringLiteral("强制：到点自动装（装完重启一次）")
+        : QStringLiteral("可选：只有点「立即升级」才装");
+    ui->m_otaPaused = otaPaused();
+    ui->m_otaAutoText = ui->m_otaPaused
+        ? QStringLiteral("已暂停（点「恢复自动升级」解除）")
+        : QStringLiteral("到点自动装");
+    {
+        const QJsonObject st = otaLoadState();
+        const QString lastRes = st.value(QStringLiteral("lastResult")).toString();
+        if (lastRes.isEmpty())
+            ui->m_otaLastText = QStringLiteral("（这台机器还没自动升级过）");
+        else if (lastRes == QLatin1String("ok"))
+            ui->m_otaLastText = QStringLiteral("成功（已升到 v%1）")
+                                    .arg(st.value(QStringLiteral("lastVer")).toString());
+        else
+            ui->m_otaLastText = QStringLiteral("失败 ×%1：%2")
+                .arg(st.value(QStringLiteral("failCount")).toInt(0))
+                .arg(st.value(QStringLiteral("lastError")).toString());
+        const qint64 nextAt = st.value(QStringLiteral("nextAt")).toVariant().toLongLong();
+        ui->m_otaNextText = nextAt > QDateTime::currentMSecsSinceEpoch()
+            ? QDateTime::fromMSecsSinceEpoch(nextAt).toString(QStringLiteral("MM-dd HH:mm"))
+            : QStringLiteral("立刻（有网就试）");
+    }
+
+    ui->m_notifyEnabled   = AgentSettings::notifyEnabled();
+    ui->m_voiceEnabled    = AgentSettings::voiceEnabled();
+    ui->m_noiseEnabled    = AgentSettings::noiseEnabled();
+    ui->m_islandIdle      = AgentSettings::islandIdle();
+    ui->m_lightMode       = AgentSettings::lightMode();
+    ui->m_autostart       = agentAutostartEnabled();
+    ui->m_desktopShortcut = agentDesktopShortcutExists();
+}
+
+void agentUiWire(AgentUi *ui)
+{
+    agentUiFill(ui);
+
+    // 打开面板 / QML 主动刷新：重读快照（连接/升级状态是"点开那一刻"的）。
+    QObject::connect(ui, &AgentUi::refreshRequested, ui, [ui] {
+        agentUiFill(ui);
+        ui->publish();
+    });
+
+    // 开关：真实写（QSettings / 岛联动 / 提权），写完**重读快照再 publish**
+    // —— 提权被拒时界面自动回弹，不会"勾上了、其实没改"。
+    QObject::connect(ui, &AgentUi::switchChanged, ui,
+                     [ui](const QString &key, bool v) {
+        if (key == QLatin1String("notifyEnabled"))       AgentSettings::setNotifyEnabled(v);
+        else if (key == QLatin1String("voiceEnabled"))   AgentSettings::setVoiceEnabled(v);
+        else if (key == QLatin1String("noiseEnabled"))   AgentSettings::setNoiseEnabled(v);
+        else if (key == QLatin1String("islandIdle")) {
+            AgentSettings::setIslandIdle(v);
+            if (IslandOverlay::instance()) IslandOverlay::instance()->setIdleEnabled(v);
+        } else if (key == QLatin1String("lightMode")) {
+            AgentSettings::setLightMode(v);
+            if (IslandOverlay::instance()) IslandOverlay::instance()->setLightMode(v);
+        } else if (key == QLatin1String("autostart")) {
+            if (!agentSetAutostart(v))
+                qWarning("[agent-shell] 开机自启没改成（多半 UAC 被拒）—— 界面将回弹真实状态");
+        } else if (key == QLatin1String("desktopShortcut")) {
+            if (!agentSetDesktopShortcut(v))
+                qWarning("[agent-shell] 桌面快捷方式没改成（多半 UAC 被拒）—— 界面将回弹真实状态");
+        }
+        agentUiFill(ui);
+        ui->publish();
+    });
+
+    QObject::connect(ui, &AgentUi::openLogDirRequested, ui, [] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(g_logPath).absolutePath()));
+    });
+    QObject::connect(ui, &AgentUi::openDataDirRequested, ui, [] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(
+            qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong")));
+    });
+    // 「立即升级」：走的就是云端下发 self_update 用的同一条链路（含四条护栏）。
+    QObject::connect(ui, &AgentUi::upgradeNowRequested, ui, [ui] {
+        if (!ui->canUpgrade()) return;
+        QJsonObject p;
+        p.insert(QStringLiteral("url"),     g_updateUrl);
+        p.insert(QStringLiteral("sha256"),  g_updateSha);
+        p.insert(QStringLiteral("version"), g_latestVer);
+        qInfo("[agent-qt] 用户在 QML 控制面板点了「立即升级」→ v%s", qPrintable(g_latestVer));
+        startSelfUpdate(QStringLiteral("manual"), p);
+        agentUiFill(ui);
+        ui->publish();
+    });
+    // 紧急刹车：往数据目录扔一个空文件就停手（删掉即恢复）。
+    QObject::connect(ui, &AgentUi::toggleOtaPauseRequested, ui, [ui] {
+        if (otaPaused()) {
+            QFile::remove(otaPausePath());
+            qInfo("[agent-qt] 操作员恢复了本机自动升级");
+        } else {
+            QDir().mkpath(otaBaseDir());
+            QFile f(otaPausePath());
+            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                f.write(QStringLiteral("paused by operator %1\n")
+                            .arg(QDateTime::currentDateTime().toString(Qt::ISODate)).toUtf8());
+                f.flush();
+            }
+            qWarning("[agent-qt] ⛔ 操作员暂停了本机自动升级（%s）", qPrintable(otaPausePath()));
+        }
+        agentUiFill(ui);
+        ui->publish();
+    });
+}
+
 /* ---------- 协议 v1 封装（本文件唯一的 makeEnvelope 定义） ----------
  * 为什么挪到这里：原定义就在上面那段匿名 namespace 里，匿名域符号**跨不了 TU**，
  * 而远程终端 terminal_console.cpp 要发 v1 信封 —— 一调用就 LNK2019。
@@ -6722,6 +6861,10 @@ int main(int argc, char *argv[])
         g_actStatus = menu->addAction(QStringLiteral("状态：正在启动…"));
         g_actStatus->setEnabled(false);      // 只显示，不可点
         menu->addSeparator();
+        // U5-A3（2026-10-16）：QML 控制面板（MD3 界面，两端同 shell 的被控端入口）。
+        // 逐页迁移 QDialog 的过渡期：旧菜单项并存，迁完一批撤一批。
+        auto *actPanel = menu->addAction(QStringLiteral("控制面板…"));
+        QObject::connect(actPanel, &QAction::triggered, &app, [] { AgentShell::openPanel(); });
         // 首次运行配置窗的入口：老师在界面里填云端地址/令牌/设备名，写回数据目录的 agent.env。
         auto *actConfig = menu->addAction(QStringLiteral("配置…"));
         QObject::connect(actConfig, &QAction::triggered, &app, [] { openConfigDialog(); });
@@ -6801,6 +6944,16 @@ int main(int argc, char *argv[])
         }
         isl->setLightMode(AgentSettings::lightMode());   // 浅色主题开关（P0-1）
         isl->ensureIdle();
+
+        // ── U5-A3 验证开关（2026-10-16）：STE_QT_SHELL_AUTOOPEN=1 → 启动 1.5s 后
+        //    自动开一次 QML 控制面板。面板是懒建的（不点托盘不加载 QML），
+        //    无人值守验证 QML 真实加载全靠它；日常不设即零影响。
+        if (qEnvironmentVariable("STE_QT_SHELL_AUTOOPEN") == QStringLiteral("1")) {
+            QTimer::singleShot(1500, &app, [] {
+                AgentShell::openPanel();
+                qInfo("[agent-shell] 自动打开控制面板（STE_QT_SHELL_AUTOOPEN=1）");
+            });
+        }
     } else {
         qWarning().noquote() << QStringLiteral("[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口");
     }

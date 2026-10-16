@@ -90,6 +90,7 @@ configure_file(src/version.nsh.in "${CMAKE_CURRENT_BINARY_DIR}/version.nsh" @ONL
 
 add_executable(stelarith-agent-qt
   src/main.cpp
+  src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
   src/singleinstance.cpp
   src/singleinstance.h
   # ── 课表时钟模块（2026-10-06 加：上下课提醒）──
