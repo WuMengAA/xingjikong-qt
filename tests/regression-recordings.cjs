@@ -81,7 +81,9 @@ function req(method, p, token, body, ctype) {
 
   // 5) 静态下载 → 200 video/mp4
   if (uploadedFname) {
-    r = await req('GET', `/${encodeURIComponent('recordings')}/${UID}/${uploadedFname}`, null);
+    // ⚠️ 2026-10-16 修：云端 2026-10-08 起 /recordings/* 与列表同鉴权（Bearer 管理令牌），
+    //    这里此前没带令牌 ⇒ 永远 401，把「产品行为正确」误报成测试失败。
+    r = await req('GET', `/${encodeURIComponent('recordings')}/${UID}/${uploadedFname}`, VIEWER_TOKEN);
     check('静态下载 mp4', r.status === 200 && String(r.headers['content-type'] || '').startsWith('video/mp4'),
       `status=${r.status} type=${r.headers['content-type']} bytes=${r.body.length}`);
   } else {
@@ -89,8 +91,15 @@ function req(method, p, token, body, ctype) {
   }
 
   // 6) 清理：删掉本测试建的 recordings/<uid>（只删自己的）
+  // ⚠️ 2026-10-16 修：清理路径必须跟随 CLOUD_RECORDINGS_DIR ——
+  //    云端 2026-10-16 起静态托管也改用 RECORDINGS_ROOT（与上传/列表同源），
+  //    若这里仍硬编码 <cloud-ws>/recordings，隔离实例下就会**删不到真实文件**、留残留
+  //    （而且因为 force:true 不报错，还会假装「自清理成功」）。
+  const recRoot = process.env.CLOUD_RECORDINGS_DIR
+    ? path.resolve(process.env.CLOUD_RECORDINGS_DIR)
+    : path.join(repo, 'recordings');
   try {
-    fs.rmSync(path.join(repo, 'recordings', UID), { recursive: true, force: true });
+    fs.rmSync(path.join(recRoot, UID), { recursive: true, force: true });
     check('测试数据自清理', true, `删 ${UID}`);
   } catch (e) {
     check('测试数据自清理', false, e.message);

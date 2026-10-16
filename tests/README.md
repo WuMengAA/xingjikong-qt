@@ -33,6 +33,7 @@ node tests/regression-broadcast.cjs 8095          # 屏幕广播链路（8/8）
 node tests/regression-voice.cjs 8095               # 语音对讲链路（8/8）
 node tests/regression-repairs.cjs 8095             # 设备报修 CRUD（37/37，自清理）
 node tests/regression-agent-ticket.mjs 8095        # 设备接入票 WS 握手（12/12，自清理）
+node tests/regression-interact-http.cjs 8095       # 审批面板 HTTP 路径（17/17，不写盘）
 ```
 
 `npm test` = 只跑单元测试（不依赖云端，最常用）。
@@ -49,6 +50,7 @@ node tests/regression-agent-ticket.mjs 8095        # 设备接入票 WS 握手�
 | `regression-voice.cjs` | 集成 | 管理端 audio.start → 云端进语音态 + 通知被控端 → PCM 帧含 v1 帧头不截断 → stop 后帧丢弃 | 8 |
 | `regression-repairs.cjs` | 集成 | 设备报修 CRUD：鉴权 3、POST 校验 7、列表 4、PATCH 5、DELETE 3、审计 3、字段正确性 9、自清理 1 | 37 |
 | `regression-agent-ticket.mjs` | 集成 | 设备票真实 WS 握手：票+fp 匹配注册、**持票冒名别的 uid → 拒**、未报 uid 取自票、持票不报 fp → 拒、票拷到别的机器 → 拒、静态令牌兜底、伪票（签名乱/夹带静态令牌）→ 拒、非 register 首帧 → AUTH_REQUIRED、不发首帧不假注册、在线表入表 | 12 |
+| `regression-interact-http.cjs` | 集成 | **审批面板 HTTP 路径**（viewer `InteractBridge` 契约，与上面的 WS 版互补）：agent 上报造数 → HTTP 拉 `song-requests`/`blessings`/`feedback/summary` → 条目带 classCode → 无/错令牌 401 → HTTP `handle` approve → pending 队列移出 → 弹幕 instruction/notify 下发到设备 → 重复处理 BAD_STATE → 点歌 approve → 坏 body 400 / 不存在 404 | 17 |
 
 ## 安全约定
 
