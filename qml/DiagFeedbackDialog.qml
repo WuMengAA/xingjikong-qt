@@ -13,6 +13,10 @@
 import QtQuick
 import QtQuick.Controls
 import "components"
+import "island"          // SvgIcon 的唯一真源在共享岛目录（Stelarith-shared-qml/island/，构建期拷到 qml/island/）——
+                      // 2026-10-16 修：A 档把 viewer 自己的 components/SvgIcon.qml 当"重复件"删了，
+                      // 但那 4 个同名件里只有它的接口是超集且被**全套面板 + Main.qml**在用；
+                      // 另 3 个（IslandClock/MarqueeText/WhaleMascot）确实只被岛用，删对了。
 
 Popup {
     id: dlg

@@ -23,6 +23,10 @@ import "island"          // IslandRoot —— 与被控端逐字同源的那份
 Popup {
     id: dlg
     property var theme: null
+    // U3：宿主注入的上下文（theme / window / open / closePanels）。
+    // 声明它之后，本面板就可由 UiPanelHost 按声明清单实例化；
+    // 老的「直接传 theme」写法仍然可用（theme 属性保留）。
+    property var ctx
 
     // ⚠️ 与被控端 IslandRoot.qml 同款防御：QML 的名字解析里，对象自身的属性优先于
     //    上下文属性。起个不冲突的名字（br），免得 `bridge` 被自身属性遮蔽。

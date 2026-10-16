@@ -13,6 +13,11 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
+import "island"          // SvgIcon 的唯一真源在共享岛目录（Stelarith-shared-qml/island/，构建期拷到 qml/island/）——
+                      // 2026-10-16 修：A 档把 viewer 自己的 components/SvgIcon.qml 当"重复件"删了，
+                      // 但那 4 个同名件里只有它的接口是超集且被**全套面板 + Main.qml**在用；
+                      // 另 3 个（IslandClock/MarqueeText/WhaleMascot）确实只被岛用，删对了。
+import "UiPlugins.js" as UiPlugins   // U3：界面声明清单（「加一个界面=加一条声明」的入口）
 
 ApplicationWindow {
     id: root
@@ -86,11 +91,11 @@ ApplicationWindow {
     // 不再跟随页签自动拉 —— 否则每次切页都在后台偷偷订阅一遍。
     onPageChanged: {
         backend.setScreenActive(root.page === 1)   // 单台大画面只在集控（带画面主页）拉
-        if (!multiThumbDlg.visible) backend.subscribeThumbnails([])
+        if (!panelHost.isOpen("multiband")) backend.subscribeThumbnails([])
     }
     function syncPageLive() {
         backend.setScreenActive(root.page === 1)
-        if (!multiThumbDlg.visible) backend.subscribeThumbnails([])
+        if (!panelHost.isOpen("multiband")) backend.subscribeThumbnails([])
     }
     property int volumeValue: 30
     // 远端确认过的音量（set_volume 回执里的 data.volume）。-1 = 还没拿到，就别往界面上写。
@@ -262,19 +267,19 @@ ApplicationWindow {
                 root.candidates = (data.apps || []).concat(data.desktop || [])
             }
             if (action === "process_list" && data && data.items) {
-                softwareDlg.items = data.items
-                softwareDlg.truncated = (data.truncated === true)
+                panelHost.item("software").items = data.items
+                panelHost.item("software").truncated = (data.truncated === true)
                 openOnly("software")
             } else if (action === "log_tail" && data && data.lines) {
-                logDlg.lines = data.lines
-                logDlg.logPath = data.path || ""
+                panelHost.item("log").lines = data.lines
+                panelHost.item("log").logPath = data.path || ""
                 openOnly("log")
             } else if (action === "media_list" && data) {
                 // 删完自动重拉时也会走到这儿（弹窗已开着）→ 先灌数据再开，开的时候顺手关掉别的
-                mediaDlg.setItems(data.items || [], data.dir || "", data.truncated === true)
+                panelHost.item("media").setItems(data.items || [], data.dir || "", data.truncated === true)
                 openOnly("media")
             } else if (action === "list_schedules" && data) {
-                schedDlg.setItems(data.items || [], data.file || "")
+                panelHost.item("sched").setItems(data.items || [], data.file || "")
                 openOnly("sched")
             }
 
@@ -2271,110 +2276,7 @@ ApplicationWindow {
     }
 
     // ── 语音对讲（2026-10-11 集控界面直达：按住讲话 + 自动接收播放班级语音）──
-    Popup {
-        id: speechDlg
-        anchors.centerIn: Overlay.overlay
-        width: 360
-        modal: true
-        padding: 0
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-        background: Rectangle {
-            color: th.cream
-            radius: th.rCard
-            border.color: th.stroke
-            border.width: 1
-        }
-
-        contentItem: Column {
-            padding: 16
-            spacing: 12
-
-            Row {
-                spacing: 8
-                Text { text: "语音对讲"; color: th.fg; font.pixelSize: 14; font.weight: Font.Medium }
-                Rectangle {
-                    width: 6; height: 6; radius: 3
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: backend.speaking ? "#e74c3c" : th.fg4
-                    opacity: backend.speaking ? (speechPulse.running ? 1 : 0.25) : 1
-                    Timer { id: speechPulse; running: backend.speaking; repeat: true; interval: 500
-                            onTriggered: parent.opacity = parent.opacity === 1 ? 0.25 : 1 }
-                }
-            }
-            Text { text: "目标：" + (backend.currentUid !== "" ? backend.currentUid : "未选设备")
-                   color: th.fg3; font.pixelSize: 12 }
-            // 2026-10-11：Android 录音权限状态 —— 弹框没出现也要看得见「未授权」，
-            // 并给一个「去设置」手动开关的入口（Android 13+ 二次请求不再弹框，
-            // 只能从系统设置里开；代码里 startSpeaking 会自动请求，但拒绝过就得靠这里）
-            Rectangle {
-                visible: root.isPhone && !backend.audioPermGranted
-                width: parent.width; height: 34; radius: th.rCtrl
-                color: "#b03a2e"; opacity: 0.92
-                Row {
-                    anchors.left: parent.left; anchors.leftMargin: 10
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 8
-                    Text { anchors.verticalCenter: parent.verticalCenter; text: "⚠ 麦克风权限未开启——按住讲话会弹系统授权框；若已拒绝请点这里去系统设置开启"
-                           color: "white"; font.pixelSize: 11; width: parent.width - 92; wrapMode: Text.Wrap }
-                    Rectangle {
-                        width: 76; height: 26; radius: 6; color: "white"
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "去设置"; color: "#b03a2e"; font.pixelSize: 12; font.weight: Font.Medium }
-                        MouseArea { anchors.fill: parent; onClicked: backend.openAudioSettings() }
-                    }
-                }
-            }
-            Text { text: backend.speaking
-                       ? ("时长：" + Math.max(0, 180 - backend.speakLeftSec) + " 秒（剩余 " + backend.speakLeftSec + " 秒）")
-                       : (backend.speakError !== "" ? ("上次开麦失败：" + backend.speakError) : "时长：未通话")
-                   color: th.fg3; font.pixelSize: 12 }
-            // 自动接收播放班级语音：audio_playback 已内置（B6），无需再开。
-
-            Row {
-                spacing: 10
-                Rectangle {
-                    width: 200; height: 48; radius: th.rCtrl
-                    color: speechPush.pressed ? "#a93226" : (backend.speaking ? "#e74c3c" : th.brand)
-                    Text {
-                        anchors.centerIn: parent
-                        text: speechPush.pressed ? "松开结束" : (backend.speaking ? "正在讲话…" : "按住讲话")
-                        color: "white"; font.pixelSize: 14; font.weight: Font.Medium
-                    }
-                    MouseArea {
-                        id: speechPush
-                        anchors.fill: parent
-                        onPressed: {
-                            if (!backend.startSpeaking()) root.toast("开麦失败：" + backend.speakError)
-                            else root.toast("正在讲话…松开结束；班级语音自动播放")
-                            root.refreshIsland()
-                        }
-                        onReleased: {
-                            if (backend.speaking) { backend.stopSpeaking(); root.toast("语音已停止（静音）") }
-                            root.refreshIsland()
-                        }
-                    }
-                }
-                Rectangle {
-                    visible: backend.speaking
-                    width: 96; height: 48; radius: th.rCtrl
-                    color: th.inv
-                    Text { anchors.centerIn: parent; text: "停止"; color: th.win; font.pixelSize: 14; font.weight: Font.Medium }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: { backend.stopSpeaking(); root.toast("语音已停止"); root.refreshIsland() }
-                    }
-                }
-            }
-        }
-    }
-
-    SoftwareDialog {
-        id: softwareDlg
-        theme: root.th
-        candidates: root.candidates
-    }
-    LogDialog { id: logDlg; theme: root.th }
     // 诊断与反馈（2026-10-12）：GUI 子系统后没控制台，出错看这里；托盘菜单也会拉起它。
     DiagFeedbackDialog { id: diagDlg; theme: root.th }
     // 托盘「诊断与反馈…」→ 打开弹窗（C++ 发信号，QML 收）
@@ -2382,473 +2284,77 @@ ApplicationWindow {
         target: backend
         function onDiagFeedbackRequested() { diagDlg.refreshLog(); diagDlg.open() }
     }
-    TerminalDialog { id: termDlg; theme: root.th }
 
-    MediaDialog { id: mediaDlg; theme: root.th }
-    ScheduleDialog { id: schedDlg; theme: root.th }
     // 通知弹窗（2026-10-06 加）：被控端的大屏通知早就实现了，只有管理端这个发送方漏了。
-    NotifyDialog { id: notifyDlg; theme: root.th }
     // 2026-10-15 组件6 配套：互动审批面板（点歌/祝福待审 + 右侧「学生在教室机上会看到」
     // 的岛预览 —— 那颗岛与被控端**是同一份** IslandRoot.qml，真源在
     // Stelarith-shared-qml/island/）。
-    InteractDialog { id: interactDlg; theme: root.th }
     // 注意类名是 FilePushDialog 不是 FileDialog：同个文件里要 import QtQuick.Dialogs 拿原生
     // 选文件对话框，两个 FileDialog 撞名 qml 编译期就冲突了，所以弹窗这侧改名（2026-10-03）
-    FilePushDialog { id: fileDlg; theme: root.th }
 
     // #93 监控＋摄像头绑定：把写好的 CameraCenter 组件真正挂进界面（此前只建未挂，
     // 所以「摄像头监控」功能在界面上完全够不着）。由监控区「摄像头监控」按钮打开。
     // 摄像头枚举 / 拍照回执经 backend.resultReceived 转发给 CameraCenter。
-    Popup {
-        id: camCenterDlg
-        anchors.centerIn: parent
-        width: 560
-        height: 440
-        modal: true
-        padding: 0
-        closePolicy: Popup.CloseOnEscape
-        background: Rectangle {
-            color: th.panel
-            radius: th.rCard
-            border.color: th.card
-            border.width: 1
-        }
-        CameraCenter {
-            id: camCenter
-            theme: root.th
-            backend: root.backendRef
-            anchors.fill: parent
-            anchors.margins: 12
-        }
-    }
 
     // ── 多班监控缩略图墙（2026-10-11：原在「批量管控」页，该页已删，改成弹窗）──
     // 一屏看多个教室画面（3×3 网格），点格子切到那台看大画面。
     // 订阅前 9 台在线设备；帧头 uid → backend 按 uid 分槽缓存缩略图。
     // ⚠️ 打开即订阅、关闭即退订：否则关掉弹窗后还在后台偷偷拉 9 路流。
-    Popup {
-        id: multiThumbDlg
-        anchors.centerIn: Overlay.overlay
-        width: 640
-        height: 520
-        modal: true
-        padding: 0
-        background: Rectangle {
-            color: th.panel
-            radius: th.rCard
-            border.color: th.card
-            border.width: 1
-        }
-        onOpened: multiThumb.watch()
-        onClosed: backend.subscribeThumbnails([])
-
-        Column {
-            id: thumbCol
-            anchors.fill: parent
-            anchors.margins: 16
-            spacing: 10
-
-            Row {
-                width: parent.width
-                spacing: 8
-                Text { text: "多班监控（缩略图墙）"; color: th.fg3; font.pixelSize: 11 }
-                Rectangle {
-                    width: 64; height: 26; radius: th.rCtrl
-                    color: th.inv
-                    Text { anchors.centerIn: parent; text: "刷新"; color: th.win; font.pixelSize: 12 }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            multiThumb.watch()
-                            root.toast("正在订阅多班缩略图…")
-                        }
-                    }
-                }
-            }
-
-            // 网格：最多 9 台（在线优先），每格一个设备的缩略图
-            GridLayout {
-                id: multiThumb
-                width: parent.width
-                columns: 3
-                columnSpacing: 6
-                rowSpacing: 6
-
-                property var watched: []   // 已订阅的设备 uid
-
-                function watch() {
-                    // 收集在线的设备 uid（最多 9 台），保持设备表顺序
-                    var uids = []
-                    var devs = backend.devices || []
-                    for (var i = 0; i < devs.length && uids.length < 9; ++i) {
-                        if (devs[i] && devs[i].online && devs[i].uid
-                                && uids.indexOf(devs[i].uid) < 0)
-                            uids.push(devs[i].uid)
-                    }
-                    watched = uids
-                    backend.subscribeThumbnails(uids)
-                }
-
-                Repeater {
-                    model: multiThumb.watched
-                    delegate: Rectangle {
-                        id: cell
-                        width: (multiThumb.width - 12) / 3
-                        height: 96
-                        radius: th.rCtrl
-                        color: th.canvas
-                        border.color: th.stroke
-                        border.width: 1
-                        clip: true
-
-                        // 缩略图：帧更新时 tick++ 换缓存键
-                        Image {
-                            id: thumbImg
-                            anchors.fill: parent
-                            fillMode: Image.PreserveAspectFit
-                            cache: false
-                            // ⚠️ 2026-10-10：tick 是**本 Image** 的属性，原来却写 `cell.tick++`
-                            //   （cell 是那一格的 Rectangle，没这属性）⇒ 每来一帧都刷
-                            //   `Cannot assign to non-existent property "tick"`，缓存键永不刷新、
-                            //   缩略图看着"不更新"。改用 Image 自己的 id 引用。
-                            property int tick: 0
-                            source: "image://frames/" + modelData + "?t" + tick
-                            Connections {
-                                target: backend
-                                function onThumbnailChanged(uid) { if (uid === modelData || uid === "") thumbImg.tick++ }
-                            }
-                        }
-
-                        // uid 标签（底部小条，别盖住画面太多）
-                        Rectangle {
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            height: 18
-                            color: Qt.rgba(0, 0, 0, 0.55)
-                            Text {
-                                anchors.centerIn: parent
-                                text: modelData
-                                color: "#FAFAFA"
-                                font.pixelSize: 9
-                                elide: Text.ElideRight
-                                width: parent.width - 8
-                            }
-                        }
-
-                        // 点击 → 切到这台看大画面（控制页）
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                backend.setCurrentUid(modelData)
-                                root.page = 1   // 集控页（带大画面）
-                                multiThumbDlg.close()
-        controlDlg.close()
-                                root.toast("已切换查看 " + modelData)
-                            }
-                        }
-
-                        // 空态：还没收到这台帧
-                        Text {
-                            anchors.centerIn: parent
-                            visible: thumbImg.tick === 0
-                            text: "等待画面…"
-                            color: th.fg4
-                            font.pixelSize: 10
-                        }
-                    }
-                }
-            }
-
-            Text {
-                text: "最多 9 台在线；点格切换大画面"
-                color: th.fg3; font.pixelSize: 10; wrapMode: Text.Wrap
-            }
-        }
-    }
 
     // ── 管控面板（2026-10-11：原在「批量管控」页的 4 张卡片，该页已删，改成弹窗）──
     // 广播 / 考试模式 / 语音对讲 / 屏幕广播 —— 都是"对一批机器生效"的批量动作，
     // 所以放在同一个面板里挨着排，不用老师在几个页面之间跳。
-    Popup {
-        id: controlDlg
-        anchors.centerIn: Overlay.overlay
-        width: 560
-        height: 560
-        modal: true
-        padding: 0
-        background: Rectangle {
-            color: th.panel
-            radius: th.rCard
-            border.color: th.card
-            border.width: 1
-        }
-
-        Flickable {
-            anchors.fill: parent
-            anchors.margins: 16
-            contentHeight: ctlCol.height
-            clip: true
-            Column {
-                id: ctlCol
-                width: parent.width
-                spacing: 14
-
-                // ── 广播（对所有在线设备）──
-                Rectangle {
-                    width: parent.width
-                    height: bcastCol.height + 32
-                    radius: th.rCard
-                    color: th.panel
-                    border.color: th.card
-                    border.width: 1
-                    Column {
-                        id: bcastCol
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.topMargin: 16
-                        spacing: 10
-                        Text { text: "广播（发给所有在线设备）"; color: th.fg3; font.pixelSize: 12 }
-                        InputField {
-                            th: root.th
-                            id: bcastText
-                            width: parent.width
-                            placeholderText: "广播内容"
-                        }
-                        Btn {
-                            theme: th
-                            width: parent.width
-                            text: "广播"
-                            // 真正的事（权限、空内容、逐台下发）都交给 root.broadcastAll()：
-                            // 命令面板上同一件事也得做一遍，抽出来才不会两边漂移
-                            onClicked: root.broadcastAll(bcastText.text)
-                        }
-                    }
-                }
-
-                // ── 考试模式（2026-10-06，设计文档 3.7 第一版）──
-                // 2026-10-09 改**黑名单**：语义从"名单之外全杀"反转为"只杀名单里的"。
-                //   起因是学校机房反复重启 —— 白名单制下没列全的系统进程会被杀，
-                //   杀到 critical 的 svchost 就是 CRITICAL_PROCESS_DIED(0xEF) 蓝屏。
-                //   黑名单的好处是"配错了最多没杀干净，绝不把机器弄崩"。
-                // ⚠️ 别为了"更严格"把这里改回白名单，也别给默认黑名单塞进程名。
-                Rectangle {
-                    width: parent.width
-                    height: examCol.height + 32
-                    radius: th.rCard
-                    color: th.panel
-                    border.color: th.card
-                    border.width: 1
-                    Column {
-                        id: examCol
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.topMargin: 16
-                        spacing: 10
-                        Text { text: "考试模式（全屏拦截 + 黑名单进程）"; color: th.fg3; font.pixelSize: 12 }
-                        Row {
-                            spacing: 8
-                            InputField {
-                                th: root.th
-                                id: examMinutes
-                                width: 90
-                                placeholderText: "时长(分钟)"
-                                validator: IntValidator { bottom: 0; top: 300 }
-                            }
-                            InputField {
-                                th: root.th
-                                id: examBlacklist
-                                width: 200
-                                placeholderText: "黑名单(逗号分隔，如 chrome,steam)"
-                            }
-                        }
-                        Row {
-                            spacing: 8
-                            Btn {
-                                theme: th
-                                width: 90
-                                text: "开始考试"
-                                onClicked: {
-                                    const uid = backend.currentUid
-                                    if (!uid) { root.toast("先在控制页选中一台设备"); return }
-                                    var blacklist = []
-                                    examBlacklist.text.split(",").forEach(function(s) {
-                                        var t = s.trim()
-                                        if (t) blacklist.push(t)
-                                    })
-                                    backend.sendAction("exam_mode", {
-                                        "minutes": parseInt(examMinutes.text, 10) || 0,
-                                        "blacklist": blacklist
-                                    })
-                                    root.toast("考试模式已下发 → " + uid)
-                                }
-                            }
-                            Btn {
-                                theme: th
-                                width: 90
-                                text: "结束考试"
-                                onClicked: {
-                                    const uid = backend.currentUid
-                                    if (!uid) { root.toast("先在控制页选中一台设备"); return }
-                                    backend.sendAction("exam_mode_stop", {})
-                                    root.toast("已请求结束考试 → " + uid)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ── 语音对讲（2026-10-07 设计 3.3 第一版，2026-10-11 改对话框式）──
-                // 老师→全班单向广播：开麦采集 PCM → 云端 fan-out → 学生端播放。
-                // 按住讲话：按下开麦、松开停（push-to-talk）；回传的班级语音自动播放
-                //（audio_playback，B6 已接——"自动接收播放班级语音"）。
-                Rectangle {
-                    width: parent.width
-                    height: speechCol.height + 32
-                    radius: th.rCard
-                    color: th.panel
-                    border.color: th.card
-                    border.width: 1
-                    Column {
-                        id: speechCol
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.topMargin: 16
-                        spacing: 10
-                        Row {
-                            width: parent.width
-                            Text { text: "语音对讲"; color: th.fg; font.pixelSize: 13; font.weight: Font.Medium }
-                            Rectangle {
-                                width: 6; height: 6; radius: 3; anchors.verticalCenter: parent.verticalCenter
-                                color: backend.speaking ? "#e74c3c" : th.fg4; anchors.left: parent.right; anchors.leftMargin: 8
-                                Timer {
-                                    running: backend.speaking; repeat: true; interval: 500
-                                    onTriggered: parent.opacity = parent.opacity === 1 ? 0.25 : 1
-                                }
-                            }
-                        }
-                        Text { text: "目标：" + (backend.currentUid !== "" ? backend.currentUid : "未选设备")
-                               color: th.fg3; font.pixelSize: 12 }
-                        // 时长：已讲秒数 = 180（kDefaultSpeakMaxMs 3 分钟）− 剩余；末尾同显剩余。
-                        Text { text: backend.speaking
-                                   ? ("时长：" + Math.max(0, 180 - backend.speakLeftSec) + " 秒（剩余 " + backend.speakLeftSec + " 秒）")
-                                   : (backend.speakError !== "" ? ("上次开麦失败：" + backend.speakError) : "时长：未通话")
-                               color: th.fg3; font.pixelSize: 12 }
-                        Row {
-                            spacing: 10
-                            // 按住讲话（push-to-talk）：按下说话、松开停；自动接收播放班级语音已内置。
-                            Rectangle {
-                                width: 170; height: 46; radius: th.rCtrl
-                                color: pushArea.pressed ? "#a93226" : (backend.speaking ? "#e74c3c" : th.brand)
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: pushArea.pressed ? "松开结束" : (backend.speaking ? "正在讲话…" : "按住讲话")
-                                    color: "white"; font.pixelSize: 14; font.weight: Font.Medium
-                                }
-                                MouseArea {
-                                    id: pushArea
-                                    anchors.fill: parent
-                                    onPressed: {
-                                        if (!backend.startSpeaking())
-                                            root.toast("开麦失败：" + backend.speakError)
-                                        else
-                                            root.toast("正在讲话…松开结束；班级语音自动播放")
-                                        root.refreshIsland()
-                                    }
-                                    onReleased: {
-                                        if (backend.speaking) { backend.stopSpeaking(); root.toast("语音已停止（静音）") }
-                                        root.refreshIsland()
-                                    }
-                                }
-                            }
-                            // 手动停止（保险：按住的话忘记松开也能停；也符合原来点按钮停的习惯）
-                            Rectangle {
-                                visible: backend.speaking
-                                width: 96; height: 46; radius: th.rCtrl
-                                color: th.inv
-                                Text { anchors.centerIn: parent; text: "停止"; color: th.win; font.pixelSize: 14; font.weight: Font.Medium }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: { backend.stopSpeaking(); root.toast("语音已停止"); root.refreshIsland() }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ── 屏幕广播（2026-10-07，设计文档《屏幕广播-第一版设计》）──
-                // 老师屏幕 → 全部在线设备全屏显示（3fps JPEG，60 台可承受）。
-                Rectangle {
-                    width: parent.width
-                    height: bcastCol2.height + 32
-                    radius: th.rCard
-                    color: th.panel
-                    border.color: th.card
-                    border.width: 1
-                    visible: !root.isPhone   // 屏幕广播 = 老师桌面推流，手机管理端不出现
-                    Column {
-                        id: bcastCol2
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.topMargin: 16
-                        spacing: 10
-                        Text { text: "屏幕广播（老师屏幕 → 全部在线设备）"; color: th.fg3; font.pixelSize: 12 }
-                        Text { text: "到点自动停，按钮显示剩余秒"; color: th.fg4; font.pixelSize: 12 }
-                        Row {
-                            spacing: 8
-                            Rectangle {
-                                width: backend.broadcasting ? 170 : 130
-                                height: 34; radius: th.rCtrl
-                                color: backend.broadcasting ? "#b03a2e" : th.inv
-                                Text { anchors.centerIn: parent; color: "white"; font.pixelSize: 13; font.weight: Font.Medium
-                                       text: backend.broadcasting ? ("停止广播（剩 " + backend.bcastLeftSec + " 秒）") : "开始广播" }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        if (backend.broadcasting) {
-                                            backend.stopBroadcast()
-                                            root.toast("屏幕广播已停止")
-                                        } else {
-                                            if (backend.startBroadcast()) {
-                                                root.toast("正在屏幕广播；再次点击停止")
-                                            } else {
-                                                root.toast("广播启动失败")
-                                            }
-                                        }
-                                        root.refreshIsland()   // 灵动岛广播胶囊跟手开/关
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-            }
-        }
-    }
 
     // #93：摄像头枚举 / 拍照 / 自检 / 绑定回执 → CameraCenter（与云端 instruction-result 路由对齐）
     Connections {
         target: backend
         function onResultReceived(uid, action, state, result, err, detail, data) {
             if (action === "camera_list") {
-                camCenter.onCams(data || {})
+                panelHost.item("camera").onCams(data || {})
             } else if (action === "camera_snapshot") {
-                camCenter.onShotResult(result === "done", detail || err)
+                panelHost.item("camera").onShotResult(result === "done", detail || err)
             } else if (action === "camera_test") {
-                camCenter.onTestResult(result === "done", detail || err, data || {})
+                panelHost.item("camera").onTestResult(result === "done", detail || err, data || {})
             } else if (action === "camera_bind") {
-                camCenter.onBindResult(result === "done", err || detail, data || {})
+                panelHost.item("camera").onBindResult(result === "done", err || detail, data || {})
             }
         }
     }
 
     // 课表编辑器独立窗口（2026-10-06 并入）：设置页按钮 schedEditor.show() 打开
     ScheduleEditor { id: schedEditor; visible: false }
+
+    // ══ U3：界面插件注册表 + 面板宿主（声明驱动）══════════════════════════
+    // 真源在 Stelarith-shared-qml/ui/（与岛同模式；两端将来共用同一份）。
+    // 原来「有哪些面板、怎么开」写死在本文件的 if-else 里，现在写进 qml/UiPlugins.js。
+    UiRegistry {
+        id: uiReg
+        scope: "viewer"
+        // 管理端当前没有"权限授权"这条链路 ⇒ 传空数组（契约是**容错**口径：
+        // 环境未上报权限时一律放行，不会因为这里空着就把面板藏起来）。
+        permissions: []
+        // 被控端上报的指令能力（选择设备后由云端广播带下来）；本清单的面板都没声明
+        // caps，故当前不影响可见性 —— 接线是给 U4 的动作面用的。
+        capabilities: backend.capActions
+        manifest: UiPlugins.manifest()
+    }
+    UiPanelHost {
+        id: panelHost
+        // ⚠️ 必须铺满窗口：面板里有 8 个用 `anchors.centerIn: parent` 定位（其余 6 个用
+        //    Overlay.overlay）。这些面板以前内联在本文件里，parent 就是窗口 ⇒ 居中正确；
+        //    现在 parent 变成了宿主，宿主没尺寸的话它们全会缩到左上角。
+        anchors.fill: parent
+        registry: uiReg
+        theme: root.th
+        // 面板透传用：从 Main.qml 抽出的那 6 个面板靠 ctx.window 够到主窗口
+        // （原来它们在同一文件里直接用 `root.`）。
+        window: root
+        scope: "viewer"
+        // entry 相对本文件所在目录（qml/）解析 —— 声明里写 "LogDialog.qml" /
+        // "panels/CameraCenterDialog.qml" 都能对得上。copy_directory 保留目录树，
+        // 故源码树与构建产物里的解析结果一致。
+        entryBase: Qt.resolvedUrl(".")
+    }
 
     // ══════════════ 弹窗互斥 ══════════════
     // 软件/日志/媒体/定时/文件 都是同一块居中 modal 弹窗，谁后开谁压在谁上面。
@@ -3021,39 +2527,16 @@ ApplicationWindow {
     }
 
 
+    // ── 弹窗互斥的唯一入口（U3 起由 UiPanelHost 承担）──────────────────────
+    // 以前这里是 14 行 closeAll + 14 行 if-else；现在「有哪些面板」写在声明清单
+    // （qml/UiPlugins.js）里，宿主按 id 按需实例化，并保证同一时刻只开一个。
+    // 保留同名同签名的包装 ⇒ 全文件 20+ 处调用点（右栏按钮 / 命令面板 / 快捷键）零改动。
     function openOnly(which) {
-        softwareDlg.close()
-        logDlg.close()
-        mediaDlg.close()
-        schedDlg.close()
-        fileDlg.close()
-        notifyDlg.close()
-        interactDlg.close()
-        termDlg.close()
-        changelogDlg.close()
-        helpDlg.close()
-        multiThumbDlg.close()
-        controlDlg.close()
-        speechDlg.close()
-        camCenterDlg.close()
-        if      (which === "software") softwareDlg.open()
-        else if (which === "log")      logDlg.open()
-        else if (which === "media")    mediaDlg.open()
-        else if (which === "sched")    schedDlg.open()
-        else if (which === "file")     fileDlg.open()
-        else if (which === "notify")   notifyDlg.open()
-        else if (which === "interact") interactDlg.open()   // 互动审批（2026-10-15 组件6 配套）
-        else if (which === "term")     termDlg.open()
-        else if (which === "changelog") changelogDlg.open()   // 需求 #7
-        else if (which === "help")       helpDlg.open()        // 需求 #7
-        else if (which === "multiband")  multiThumbDlg.open()  // 多班缩略图墙（2026-10-11 从「批量管控」页搬来）
-        else if (which === "control")    controlDlg.open()    // 广播/考试/语音/屏幕广播（同上）
-        else if (which === "speech")    speechDlg.open()    // 语音对讲（集控界面直达）
-        else if (which === "camera") {                       // 监控/摄像头绑定（#93 2026-10-11 修：原弹窗无打开入口）
-            camCenter.selUid = backend.currentUid
-            camCenter.refreshCams()
-            camCenterDlg.open()
-        }
+        // 兼容别名：命令面板里有一条 openOnly("broadcast")，而旧分支表里从来没有
+        // "broadcast" ⇒ 点它等于什么都没发生（既有死分支，本轮实测确认）。广播现并进
+        // 「管控」面板，故把别名指过去 —— 这是修 bug，不是新增行为。
+        var id = (which === "broadcast") ? "control" : which
+        return panelHost.open(id)
     }
 
     // 右侧所有动作按钮的统一入口。以前这段分支散在 Repeater 的 onClicked 里，
@@ -3591,101 +3074,8 @@ ApplicationWindow {
 
     // ── 更新日志（需求 #7：把官网已有的「版本历史」能力搬进管理端）──
     // 数据面是 changelogModel（内嵌、与官网同源），离线也能看；官网那份是发布归档唯一真源，这里只读镜像。
-    Popup {
-        id: changelogDlg
-        anchors.centerIn: Overlay.overlay
-        width: 560; height: 460
-        modal: true; focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: th.win; radius: th.rCard; border.color: th.card; border.width: 1 }
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 18
-            spacing: 12
-            Text { text: "更新日志"; color: th.fg; font.pixelSize: 16; font.weight: Font.Medium }
-            ScrollView {
-                Layout.fillWidth: true; Layout.fillHeight: true
-                clip: true
-                Column {
-                    spacing: 18
-                    Repeater {
-                        model: root.changelogModel
-                        delegate: Column {
-                            spacing: 6
-                            width: changelogDlg.width - 36
-                            Row { spacing: 8
-                                Text { text: modelData.version; color: th.inv; font.pixelSize: 13; font.weight: Font.Medium }
-                                Rectangle { width: 2; height: 12; color: th.stroke }
-                                Text { text: modelData.date; color: th.fg3; font.pixelSize: 12 }
-                            }
-                            Text { width: parent.width; wrapMode: Text.Wrap; text: modelData.title; color: th.fg; font.pixelSize: 14; font.weight: Font.Medium }
-                            Text { width: parent.width; wrapMode: Text.Wrap; text: modelData.highlight; color: th.fg3; font.pixelSize: 12 }
-                            Repeater {
-                                model: modelData.items
-                                delegate: Row { spacing: 7; width: parent.width
-                                    Text { text: ({ feat: "新增", fix: "修复", change: "调整" })[modelData.kind] || "·"; color: th.fg3; font.pixelSize: 12; width: 36 }
-                                    Text { width: parent.width - 43; wrapMode: Text.Wrap; text: modelData.text; color: th.op; font.pixelSize: 13 }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: 30; radius: th.rCtrl
-                color: th.hover; border.color: th.stroke; border.width: 1
-                Text { anchors.centerIn: parent; text: "关闭"; color: th.fg; font.pixelSize: 13 }
-                MouseArea { anchors.fill: parent; onClicked: changelogDlg.close() }
-            }
-        }
-    }
 
     // ── 帮助（需求 #7：把官网帮助能力搬进管理端）──
-    Popup {
-        id: helpDlg
-        anchors.centerIn: Overlay.overlay
-        width: 480; height: 420
-        modal: true; focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: th.win; radius: th.rCard; border.color: th.card; border.width: 1 }
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 18
-            spacing: 12
-            Text { text: "帮助"; color: th.fg; font.pixelSize: 16; font.weight: Font.Medium }
-            ScrollView {
-                Layout.fillWidth: true; Layout.fillHeight: true
-                clip: true
-                Column {
-                    spacing: 12
-                    width: helpDlg.width - 36
-                    Text { width: parent.width; wrapMode: Text.Wrap; text: "管理端统一管教室机。常用操作："; color: th.fg3; font.pixelSize: 13 }
-                    Repeater {
-                        model: [
-                            { t: "看某台教室机画面", d: "控制页左边选设备。" },
-                            { t: "发通知 / 广播", d: "集控页发通知或广播。" },
-                            { t: "按班级筛选设备", d: "设备列表上方点「全部班级」切换。" },
-                            { t: "锁屏 / 重启 / 关机", d: "控制页右侧「电源」，需管理员。" },
-                            { t: "查看更新历史", d: "设置页「更新日志」。" },
-                            { t: "跳页与触发动作", d: "顶部命令入口或快捷键。" }
-                        ]
-                        delegate: Column {
-                            spacing: 3
-                            width: parent.width
-                            Text { text: modelData.t; color: th.fg; font.pixelSize: 13; font.weight: Font.Medium }
-                            Text { width: parent.width; wrapMode: Text.Wrap; text: modelData.d; color: th.fg3; font.pixelSize: 12 }
-                        }
-                    }
-                }
-            }
-            Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: 30; radius: th.rCtrl
-                color: th.hover; border.color: th.stroke; border.width: 1
-                Text { anchors.centerIn: parent; text: "关闭"; color: th.fg; font.pixelSize: 13 }
-                MouseArea { anchors.fill: parent; onClicked: helpDlg.close() }
-            }
-        }
-    }
 
     // ── 首启引导（批次6：应用感；方案 §2.1）──
     // 未完成（backend.firstRunDone == false）时主窗叠这一层；走完三步点「完成」、或任意步点「跳过」都写标记收起。

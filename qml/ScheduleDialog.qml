@@ -13,10 +13,18 @@
 import QtQuick
 import QtQuick.Controls
 import "components"       // 2026-10-10：SvgIcon 等组件统一显式 import（Qt6.12 严格解析）
+import "island"          // SvgIcon 的唯一真源在共享岛目录（Stelarith-shared-qml/island/，构建期拷到 qml/island/）——
+                      // 2026-10-16 修：A 档把 viewer 自己的 components/SvgIcon.qml 当"重复件"删了，
+                      // 但那 4 个同名件里只有它的接口是超集且被**全套面板 + Main.qml**在用；
+                      // 另 3 个（IslandClock/MarqueeText/WhaleMascot）确实只被岛用，删对了。
 
 Popup {
     id: dlg
     property var theme: null
+    // U3：宿主注入的上下文（theme / window / open / closePanels）。
+    // 声明它之后，本面板就可由 UiPanelHost 按声明清单实例化；
+    // 老的「直接传 theme」写法仍然可用（theme 属性保留）。
+    property var ctx
     property var items: []        // list_schedules 的 items
     property string schedFile: ""
     property string chosenId: ""   // 当前选中要取消的那条

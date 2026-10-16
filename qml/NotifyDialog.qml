@@ -37,11 +37,19 @@ import QtQuick.Controls
 // 参数拼装抽到纯 JS 里，好让 node 能跑断言（scripts/test-notify-params.mjs）。
 // 见该文件顶部：契约来自 control-qt 的 notifyFromParams()，别凭记忆改。
 import "components"        // InputField：输入框必须走这一个组件，见它顶部那条白底白字的坑
+import "island"          // SvgIcon 的唯一真源在共享岛目录（Stelarith-shared-qml/island/，构建期拷到 qml/island/）——
+                      // 2026-10-16 修：A 档把 viewer 自己的 components/SvgIcon.qml 当"重复件"删了，
+                      // 但那 4 个同名件里只有它的接口是超集且被**全套面板 + Main.qml**在用；
+                      // 另 3 个（IslandClock/MarqueeText/WhaleMascot）确实只被岛用，删对了。
 import "NotifyParams.js" as NP
 
 Popup {
     id: dlg
     property var theme: null
+    // U3：宿主注入的上下文（theme / window / open / closePanels）。
+    // 声明它之后，本面板就可由 UiPanelHost 按声明清单实例化；
+    // 老的「直接传 theme」写法仍然可用（theme 属性保留）。
+    property var ctx
 
     // 截断上限从 NotifyParams.js 取（那边是唯一一处常量，同时被 node 断言盯着）。
     // 与被控端 NotifyWindow 的 kTitleCap / kContentCap 一致 —— 改这三个数要同步改那边。

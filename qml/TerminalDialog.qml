@@ -13,6 +13,10 @@ import "components"
 Popup {
     id: dlg
     property var theme: null
+    // U3：宿主注入的上下文（theme / window / open / closePanels）。
+    // 声明它之后，本面板就可由 UiPanelHost 按声明清单实例化；
+    // 老的「直接传 theme」写法仍然可用（theme 属性保留）。
+    property var ctx
     property string sid: ""
     // 输出区按行攒：terminal_data 是"一小段"（被控端 50ms 攒一块），不能直接拼，
     // 拼起来中间没有换行就成了一坨。这里统一按 \n 补齐再 append。
