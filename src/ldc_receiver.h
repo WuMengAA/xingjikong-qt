@@ -16,7 +16,9 @@
 
 #include <QObject>
 #include <QImage>
+#include <QBuffer>
 #include <QMutex>
+#include <QProcess>
 #include <memory>
 #include <atomic>
 
@@ -48,10 +50,20 @@ private:
     explicit LdcReceiver(QObject *parent = nullptr);
     void createPc(const QByteArray &sdp);   // 事件循环内建 PC（避免信号栈内并发）
 
+    // ── 屏幕轨 H264 解码（2026-10-16：ffmpeg 子进程 libavcodec —— 主方案；MF 作真机备选）──
+    void startDecoder();                    // 起 ffmpeg：h264 → rawvideo bgr24 stdout
+    void stopDecoder();
+    void feedDecoder(const QByteArray &h264);  // onFrame 重组帧 → ffmpeg stdin
+    void onDecStdout();                     // 读 bgr24 → 满一帧 → QImage → frameReady
+
     // libdatachannel 对象 shared_ptr 语义：裸 new 后无持有者会立即析构（0xC0000005）
     std::shared_ptr<void> m_pc;   // rtc::PeerConnection*
     QMutex m_mu;                  // 保护 m_track/m_pc（onTrack 回调线程 vs 主线程）
     void *m_track = nullptr;      // rtc::Track*（screen 轨）
     void *m_camTrack = nullptr;   // rtc::Track*（camera 轨，2026-10-12 四·双画面）
     std::atomic<bool> m_connected{false};   // 回调线程写，主线程读
+    // ── H264 解码（ffmpeg 子进程）──
+    QProcess *m_ffmpegDec = nullptr;   // ffmpeg -f h264 → rawvideo bgr24
+    QByteArray m_decBuf;               // bgr24 输出缓冲（跨 readyRead 的半帧残留）
+    int m_decW = 320, m_decH = 240;    // 解码输出尺寸（与被控端编码固定 320x240 一致）
 };
