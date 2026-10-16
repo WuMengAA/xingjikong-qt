@@ -1204,7 +1204,12 @@ viewerWss.on('connection', (ws) => {
       case 'rtc-offer':
       case 'rtc-answer':
       case 'rtc-ice': {
-        const uid = p.payload.uid;
+        const rawUid = String(p.payload.uid ?? '').trim();
+        // 2026-10-16（兜底）：viewer 回 answer/ice 曾不带 uid → rtcRelayToAgent('') →「设备不在线」
+        // → answer 到不了被控端 → 0 帧。viewer 侧已修（带 uid）；这里再做一层：没带时回退到
+        // 本连接最后涉及的那台设备（首次带 uid 的信令会记下），防再犯。
+        if (rawUid) ws.__rtcLastUid = rawUid;
+        const uid = rawUid || ws.__rtcLastUid || '';
         // 管理端主动建 offer 时用（from='viewer'）；收到 from='cloud' 说明是订阅开关，不该走信令分支
         const r = rtcRelayToAgent(uid, p.type, p.payload);
         snd(ws, 'rtc-relayed', { uid, ok: r.ok, to: r.to, type: p.type, detail: r.detail || '' });
