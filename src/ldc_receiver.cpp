@@ -96,9 +96,10 @@ void LdcReceiver::createPc(const QByteArray &payload)
         });
 
         // 收流：按 track mid 分流。
-        //   · "screen"（2026-10-16）：被控端已改 H264（ffmpeg libx264 + H264RtpPacketizer）——
-        //     本端挂 H264RtpDepacketizer 重组，帧走 **onFrame**（实证：depacketizer 的帧
-        //     输出是 onFrame 不是 onMessage），喂 ffmpeg 子进程解码 → frameReady。
+        //   · "screen"（2026-10-17）：数据接收在 **addTrack(recvonly) 返回的本端轨**上
+        //     （makeAnswer 里挂 H264RtpDepacketizer + onFrame，沙箱实证）。
+        //     onTrack 回调收到的是 reciprocate 的 remote track —— 只记录指针，不挂 handler
+        //     （挂在它上面收不到重组帧，0 帧；2026-10-17 ws_answer_h264.cpp 实证）。
         //   · "camera"（老路径）：被控端至今发手动 JPEG-over-RTP —— viewer 剥 12B RTP 头解 JPEG。
         pc->onTrack([this](std::shared_ptr<rtc::Track> track) {
             const bool isCam = (track->mid() == "camera");
@@ -116,15 +117,9 @@ void LdcReceiver::createPc(const QByteArray &payload)
                     if (img.loadFromData(reinterpret_cast<const uchar *>(raw + 12), int(n - 12), "JPEG"))
                         emit cameraFrameReady(img);
                 }, nullptr);
-            } else {
-                track->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(rtc::NalUnit::Separator::StartSequence));
-                startDecoder();
-                track->onFrame([this](rtc::binary frame, rtc::FrameInfo) {
-                    // 帧回调在 libdatachannel 线程；QProcess::write 内部定序，跨线程安全
-                    const QByteArray h(reinterpret_cast<const char *>(frame.data()), int(frame.size()));
-                    feedDecoder(h);
-                });
             }
+            // screen：不挂 handler —— 接收在 makeAnswer 里 addTrack 的本端轨上（见上注释）
+            Q_UNUSED(this);   // 保持 lambda 捕获一致性
         });
 
         // ── ⚠️ 顺序关键（2026-10-17 沙箱实证复现）：注册顺序必须「先注册回调，再 setRemoteDescription」。──
@@ -146,12 +141,21 @@ void LdcReceiver::createPc(const QByteArray &payload)
             try {
                 rtc::Description::Video scMedia("screen", rtc::Description::Direction::RecvOnly);
                 scMedia.addH264Codec(96);
-                pc->addTrack(scMedia);
+                // ⚠️ 接收轨必须在 **addTrack 返回的本端轨**上挂 depacketizer + onFrame；
+                //    onTrack 回调里给的是 reciprocate 的 remote track，挂上去收不到重组帧
+                //    （2026-10-17 沙箱实证：本端轨 PASS、onTrack 挂 0 帧 —— ws_answer_h264.cpp）。
+                auto scTrk = pc->addTrack(scMedia);
+                scTrk->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(rtc::NalUnit::Separator::StartSequence));
+                startDecoder();
+                scTrk->onFrame([this](rtc::binary frame, rtc::FrameInfo) {
+                    const QByteArray h(reinterpret_cast<const char *>(frame.data()), int(frame.size()));
+                    feedDecoder(h);
+                });
                 rtc::Description::Video camMedia("camera", rtc::Description::Direction::RecvOnly);
                 camMedia.addH264Codec(97);
                 pc->addTrack(camMedia);
                 pc->setLocalDescription();   // 此时才生成 answer
-                qDebug() << "[receiver] HaveRemoteOffer → addTrack + setLocalDescription（answer）";
+                qDebug() << "[receiver] HaveRemoteOffer → addTrack(本端轨挂 depacketizer) + setLocalDescription（answer）";
             } catch (const std::exception &e) {
                 emit failed(QStringLiteral("answer 生成: %1").arg(QString::fromLocal8Bit(e.what())));
             }
