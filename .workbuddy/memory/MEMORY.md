@@ -52,7 +52,8 @@
   - **U3** `viewer/qml/UiPlugins.js`（14 条面板声明）+ 6 个内联 Popup 抽成 `qml/panels/*.qml`；`openOnly` 28 行→1 行转发（**同名同签名 ⇒ 20+ 调用点零改动**）；Main.qml 3858→3237 行。viewer `4e2341d`。
   - **U4** `viewer/qml/ActionDefs.js`（44 条动作/命令声明，**纯数据**）+ `runActionById()` 唯一执行入口；右栏 5 组 / 快捷行 / 批量条 / 命令面板 38 条**全部从声明派生**。删掉 `quickAction`(7 分支)/`runAction`(d.f 链)/`capByLabel`(6 条手抄)/`capNeedOf`/命令面板 38 条字面量。viewer `05c3ade`（+589/−235）。
   - 归档 `docs/统一界面结构-U系列-加减归档-2026-10-16.md`（§一~§十一：U1/U2/U3/U4 各一节全账）。
-  - **U5（两端同 shell）与 D 档（IslandRoot 2207 行拆分 / 跨父级锚 / island.cpp↔QML 双绘常量）未开始。**
+  - **D 档（2026-10-16 晚 · 用户点单「U5 与 D 档」）**：① 跨父级锚**早已修完**（2026-10-14 `mediaRow` 移进 `expandedCol`，仅需记录无需改码）；② **双绘常量已统一**：`IslandTheme.shapeIdle 36→44`、`shapeExpanded 168→320`（旧值是管理端 `DynamicIsland` 残留，其中 expanded **零消费=死令牌**），新增跨仓门禁 `shared-qml/scripts/test-island-metrics.mjs`（11 断言，负向先跑 8/3）；③ **拆分完成 2/12**：抽 `island/IslandIdleFace.qml`(73) + `island/IslandActionRow.qml`(47)，`IslandRoot` **2207→2148 行**，三态探针**零差异**；新增基线比对器 `shared-qml/scripts/diff-island-tree.mjs`。归档 `docs/灵动岛-D档-加减归档-2026-10-16.md`（§3.5 有剩余 10 块切缝表 + 依赖清单）。
+  - **U5 未开工**：取证发现两端 shell **根本不对等**（被控端＝C++ 全绘 + 一颗岛，`qml/` 只有两个**不进 exe** 的探针；管理端＝`Main.qml` 3218 行完整 shell）⇒「两端同 shell」三种解读**代价差一个数量级**，**待用户裁决**（归档 §八；建议先「统一岛宿主契约」，与 D-1 已做一半的事重叠）。
   - ⚠️ 全程**未重链接 exe**（本机生产 viewer 在跑且被占）⇒ POST_BUILD 未真跑、产物手动 `cp` 同步；**未真机**；Android 未构建验证。一致性门禁 `shared-qml/scripts/check-island-parity.cmake` 参数化 `-DLABEL=` / `-DSUBSET=ON`（混放目录用子集、岛用严格）。
 - **island 系统性升级 A+C+D**：**C 档完成**（`cloud 5c25962` / `viewer 27dd592` / `control da8fae2`，含构建期 MD5 门禁）；**A 档完成**（`viewer 25b3b42`，+113/−553）：管理端主界面改跑**被控端同一份 `IslandRoot`**，`DynamicIsland`(287)+`IslandClock`+`MarqueeText`+`SvgIcon`+`WhaleMascot` 全部退役；新增 `qml/components/IslandHost.qml`（QML 侧复刻 C++ `geometryForContent` 尺寸预算，**几何真源尚未统一**）。⚠️ 外观变化（36高/400宽/alpha230 → 56高/640宽/alpha140）**640 宽可能需布局适配，未做**；**D 档未开始**。归档 `docs/灵动岛系统性升级-AC档-加减归档-2026-10-16.md`。
 - **灵动岛扩展组件 1–7 + 管理端审批面板**：已全部完成、入库、**随 0.6.36 上线**（实证＝云端 `assets/qml-patch/*.zip` 内含 `InteractDialog.qml`）。归档 `docs/灵动岛扩展-组件7与管理端审批面板-加减归档-2026-10-15.md`。P0–P3（设置扩充/自检向导/插件宿主/播放时段等）亦已上线（0.6.33 起）。
@@ -77,4 +78,9 @@
 - ⚠️ **排序键要按"面"分开**：右栏要「通知」压顶、命令面板要「锁屏」排头 ⇒ 一个 `order` 满足不了，需 `order`/`quickOrder`/`palOrder`。
 - ⚠️ **声明清单合并进同一注册表 ⇒ id 必须全局唯一**：动作 id 与面板 id 同名（`camera`/`file`/`software`）会被契约 `validate` 抓出（这是它该干的活）。
 - ⚠️ **探针日志机制**：`_island_qml_probe` 启动时以 WriteOnly 截断 `_probe/shots/_probe_result.txt` ⇒ 每轮只留本块；纯 QML 改动不触发 POST_BUILD，探针前须手动 `cp` 到 `build/qml`（症状：dump 全 `<invalid>`）。
+- ⚠️ **QML 匿名类名不是稳定标识**（2026-10-16 D 档）：`metaObject()->className()` 带 `_QML_21` / `_QMLTYPE_11` 序号，**同一份代码不同跑次也会变** ⇒ 凡以 class 名做基线比对的工具必须**先剥序号**；抽出的组件名用**显式 rename 映射**回匿名名（那是拆分**唯一允许**的差异）。
+- ⚠️ **基线比对的非确定项要按成因分开处理**：时间源（时钟 `HH:mm`）内置忽略；**动画相位**（鲸鱼呼吸 `Image.y` 三连跑 −1.01 / −1.02 / −1.10）用显式 `--ignore-line` 排除。**都不许靠放大 `--tol` 糊过去**（会同时放过真实的亚像素偏移）。
+- ⚠️ **"看着该生效"的探针参数，先验它真生效**：`_island_qml_probe.py --expand --actions` 实测 `root._actions.count = 0`（该参数**没把动作注入 QML**，既有探针缺口，非本轮引入）⇒ 差点把"零差异"误当"动作按钮可见态已验证"。
+- ⚠️ **冻基线的正确姿势**：拆分后才发现某态没冻基线时，用 `git show HEAD:<path>` 取原版临时放回、跑完**立即 `cp` 恢复**，并用 `diff` 校验恢复完整 —— 比"回滚改动"安全，比"不验证"负责。
+- ⚠️ **门禁正则要去注释再匹配**：`/kMinContentW/` 命中的是自己写的**注释**（那注释正在说明这个缺口）⇒ 假红。凡"检测代码特征"的门禁，先剥注释行。
 - 其他（灵动岛组件 1-6 期间实证，仍有效）：① QML `implicitWidth` 从不直接生效，岛宽由 C++ `geometryForContent` 定；② **锚链对不可见 item 依然起效**（隐藏须同时 `height:0` 清零）；③ **探针演示态编号 ≠ QML 状态机编号必须映射**；④ `setProperty` 同步但锚链重算要等事件循环 ⇒ 注入与点击之间 +100ms；⑤ **动画/注入要写的属性不能锚**；⑥ **`Repeater` delegate 内的 `objectName` 不在 QObject 树上** ⇒ 探针走 `childItems()` 递归；⑦ **云端下发统一走指令信封**（`type='instruction'` + `payload.action`，不是扁平 `type:'notify'`）；⑧ **QML 祖先链 `enabled` 传导 ⇒ 禁用控件的子孙收不到事件**，穿透守卫只能放 `gestureArea` 单点。

@@ -483,54 +483,15 @@ Item {
     }
 
     // ══════════════════════════════════════════════════════════
-    // 空闲态（对齐 island.cpp 644-689）
+    // 空闲态 —— 已抽为 island/IslandIdleFace.qml（D 档拆分·第一块）
     // ══════════════════════════════════════════════════════════
-    Item {
+    // 只搬不改：几何/锚/字号/动效逐字保留（验证＝diff-island-tree.mjs 零差异）。
+    // ⚠️ 实例化处必须**显式传依赖** —— 隐式作用域不会跟着搬进独立文件。
+    IslandIdleFace {
+        id: idleFace
         anchors.fill: parent
-        visible: root._idle
-        opacity: root._idle ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 160 } }
-
-            IslandClock {
-            id: idleClock
-            theme: root.th
-            timePx: root.th.fsBody
-            // 岛宽 130，鲸鱼占右 28px+6margin=34px，时钟右留 38px
-            anchors.right: parent.right
-            anchors.rightMargin: 38
-            anchors.verticalCenter: parent.verticalCenter
-        }
-
-        // 左半区：横杠 + 下三角
-        Item {
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            width: parent.width / 2
-            height: parent.height
-
-            Rectangle {
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: -3
-                width: 24; height: 4; radius: 2
-                color: root.th.idleFg
-            }
-
-            Canvas {
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: 5
-                width: 10; height: 6
-                onPaint: {
-                    var c = getContext("2d")
-                    c.reset(); c.beginPath()
-                    c.moveTo(0, 0); c.lineTo(width, 0); c.lineTo(width / 2, height)
-                    c.closePath()
-                    c.fillStyle = root.th.idleFg
-                    c.fill()
-                }
-            }
-        }
+        th: root.th
+        idle: root._idle
     }
 
     // ══════════════════════════════════════════════════════════
@@ -1956,17 +1917,11 @@ Item {
     }
 
     // ══════════════════════════════════════════════════════════
-    // 动作按钮（独立于展开/收起态，活动态显示）
+    // 动作按钮 —— 已抽为 island/IslandActionRow.qml（D 档拆分·第二块）
     // ══════════════════════════════════════════════════════════
-    // 空闲态不显示（_showActionsNow = _actions.length > 0 && !_idle）。
-    // C++ 侧有 actions 时会自动把形态升到 Centered/Capsule（够高放按钮）。
-    // 2026-10-11 修 bug「确认按钮点不到」：
-    //   原来 ActionButton 在 expandedCol 里（只有展开态可见），
-    //   且被根 MouseArea 吞掉点击。现在：
-    //   1) 移到根级（独立于展开/收走态）
-    //   2) z: 50（高于底壳和内容，低于鲸鱼 z:100）
-    //   3) ActionButton 自带 MouseArea，自己吃事件
-    Row {
+    // 根级的行**只锚 parent**（范式见 D 档归档：展开区内的行才做同父级兄弟互锚）。
+    // ⚠️ 锚定刻意留在实例化处，让这件事在 IslandRoot 里一眼可见。
+    IslandActionRow {
         id: actionRow
         anchors.left: parent.left
         anchors.leftMargin: root.padH
@@ -1974,24 +1929,10 @@ Item {
         anchors.rightMargin: root.padH + 40   // 给鲸鱼让位
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 8
-        spacing: 8
-        visible: root._showActionsNow
-        height: visible ? 32 : 0
-        z: 50    // 高于内容、低于鲸鱼
-
-        Repeater {
-            model: root._actions
-            delegate: ActionButton {
-                theme: root.th
-                label: modelData && modelData.label ? modelData.label : String(modelData)
-                role: modelData && modelData.role ? modelData.role
-                                                  : (index === 0 ? "primary" : "secondary")
-                onClicked: {
-                    if (root.bridgeRef && root.bridgeRef.fireAction)
-                        root.bridgeRef.fireAction(label)
-                }
-            }
-        }
+        th: root.th
+        showActions: root._showActionsNow
+        actions: root._actions
+        bridgeRef: root.bridgeRef
     }
 
     // ══════════════════════════════════════════════════════════

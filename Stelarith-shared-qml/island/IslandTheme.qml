@@ -63,9 +63,16 @@ QtObject {
     property int fsBodyLg:   15
 
     // ── 形态（island.h Shape/Form 对齐）─────────────────────
-    property int shapeIdle:      36
+    // ⚠️⚠️ 三档高度是**复刻值**，真源在 `control-qt/src/island.h::enum Shape`
+    //     （`{ Idle = 44, Collapsed = 56, Expanded = 320 }`）—— 被控端尺寸由
+    //     C++ `IslandOverlay::geometryForContent/geometryForForm` 定，QML 只拿它们当布局预算。
+    //     2026-10-16（U 系列 D 档）修正历史漂移：idle 曾是 36、expanded 曾是 168
+    //     （管理端旧 DynamicIsland 时代的残留值），与 C++ 分叉；其中 `shapeExpanded`
+    //     当时全仓零消费，属死令牌。两端同值由 `scripts/test-island-metrics.mjs` 机器盯。
+    //     `shapeIdle` 另有 4:3 约束：`shapeIdle * 3 === kIdleW(132)`（见 IslandRoot.implicitWidth）。
+    property int shapeIdle:      44
     property int shapeCollapsed: 56
-    property int shapeExpanded:  168
+    property int shapeExpanded:  320
 
     // ── 动效 ────────────────────────────────────────────────
     property int durShape: 380   // 几何缓动（管理端 DynamicIsland 同值）
