@@ -432,8 +432,12 @@ if(STE_IS_ANDROID)
   #   Main.qml 在 qrc:/Main.qml 上做 `import "components"`，解析到 qrc:/components/，
   #   故资源组 PREFIX /components + BASE 共享 ui 目录 ⇒ Md3.qml 落 qrc:/components/Md3.qml、
   #   md3/* 落 qrc:/components/md3/*，与相对导入位置一致。
+  # ⚠️ 2026-10-16（U2）：必须**同时收 .js** —— UiRegistry.qml 依赖 UiContract.js（纯函数契约）。
+  #   只 GLOB *.qml 的话 APK 里契约缺失，注册表整块解析失败（桌面走 copy_directory 不受影响，
+  #   所以只有手机端会中招 —— 正是最不容易发现的那类）。
   file(GLOB_RECURSE STE_SHARED_UI_FILES CONFIGURE_DEPENDS
-    "${STE_SHARED_UI_DIR}/*.qml")
+    "${STE_SHARED_UI_DIR}/*.qml"
+    "${STE_SHARED_UI_DIR}/*.js")
   qt_add_resources(viewer-qt "viewerui" PREFIX "/components"
     BASE "${STE_SHARED_UI_DIR}" FILES ${STE_SHARED_UI_FILES})
   # ② Android libdatachannel 静态链（mbedTLS 后端，路径与桌面 ldc_libs 平行）
