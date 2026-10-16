@@ -225,7 +225,7 @@ void LdcStreamer::captureAndSend()
     QPixmap pm = m_screen ? m_screen->grabWindow(0) : QPixmap();
     if (pm.isNull()) return;
     // 缩放到编码尺寸 → BGRA（QImage Format_RGB32 在 x86 小端内存 = B,G,R,A，与 ffmpeg -pix_fmt bgra 匹配）
-    const QImage img = pm.toImage().scaled(m_encW, m_encH, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+    const QImage img = pm.toImage().scaled(m_encW, m_encH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
                           .convertToFormat(QImage::Format_RGB32);
     if (img.isNull() || img.sizeInBytes() <= 0) return;
     m_ffmpeg->write(reinterpret_cast<const char *>(img.bits()), img.sizeInBytes());
