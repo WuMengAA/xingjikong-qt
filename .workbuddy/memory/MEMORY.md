@@ -1,119 +1,48 @@
-# Stelarith-xingjikong-qt · 项目笔记
+# Stelarith-xingjikong-qt · 项目笔记（速查；日记见 .workbuddy/memory/YYYY-MM-DD.md）
 
-## 0 铁律（冲突时最高优先）
-0. **全局总纲 = skill `stelarith-project-overview`**（回答"为什么/需求全景/冲突与遗漏/优先级怎么裁"）；**本文件是"可执行铁律与踩坑速查"**，两者不重复。改代码前先过总纲的「唯一裁决规则」：**生产事故 > 用户当轮点单 > 已就绪未接线 > 战略**。
-0b. **重要修复最高优先级、同轮闭环（2026-10-13 用户定）**：已确认属实的 bug/生产事故**直接修，不反复问**；"改完+编译过"不算完 —— **重启服务/发布 OTA/出构建必须同轮做掉**，不留"已改未生效"；每轮收尾**逐条对账**（修了/没修/卡在谁）。「不跑被控端/不动桌面」的取证避让仍守，但**云端重启让修复生效不算避让范围**（用户明确要求）。
-1. 只改工作区三工程 `{Stelarith-cloud-ws,Stelarith-control-qt,Stelarith-viewer-qt}`；`D:\Stelarith\` 下同名三份只读。
-2. **顺带发现 ≠ 点名重点** —— 只报清单，做不做等点单；审计交付物＝清单+判断。
-3. 不许在烂地基叠补丁；不许自顾自推进；交付别摊成"等你点单"的菜单。
-4. 截图验证是硬要求；本机取证**不开刀**（不跑被控端/不发指令/不重启服务/不动桌面）。
-5. "复制"只用 cp 绝不 mv；永不 `--force` 推。
-6. 定时任务只用于推进**大目标**，单步工作当场做完。
+## 0 铁律
+- 总纲=skill `stelarith-project-overview`；裁决序：**生产事故 > 用户点单 > 已就绪未接线 > 战略**。
+- 重要修复同轮闭环：属实 bug 直接修；重启/发布/出包同轮做；收尾逐条对账。
+- 只改三工程 `{cloud-ws,control-qt,viewer-qt}`；`D:\Stelarith\` 同名三份=**bare 远端**（2026-10-16 起 `control-qt`/`viewer-qt`/`cloud-ws` 三件齐），remote 名 `outer`，**只 push 不手改**。
+- 顺带发现≠点名重点：只报清单等点单；不许烂地基叠补丁、自顾自推进。
+- 取证避让：本机不跑被控端/不动桌面；**云端重启让修复生效不算避让**。「复制」只 cp 不 mv；定时只推大目标。
 
-## 1 部署拓扑
-- 公网唯一入口 **443/wss**：`control.245959623.xyz/ws/agent`（被控）/ `ws/viewer`（管理）。cloudflared 回源本机 8788（对外不通）⇒ 外机地址必须 wss 不带端口。
-- 两子域不互推：云端 `control.` / 站点 `www.`（站点公网 443、8090 内网）。官网在 `D:\Stelarith\Stelarith-website\stelarith`（不在工作区）。
-- 令牌 `CLOUD_WS_TOKEN`（设备）/ `CLOUD_VIEWER_TOKEN`（管理端，用错 401）。
-- 验发布打 `127.0.0.1:8788`；`www.../api/*` 404 正常。
+## 1 部署/发版
+- 443/wss：`control.245959623.xyz/ws/agent`(被控)/`ws/viewer`(管理)；cloudflared 回源本机 8788⇒外机 wss 不带端口。令牌 `CLOUD_WS_TOKEN`(设备)/`CLOUD_VIEWER_TOKEN`(管理)；验发布 `127.0.0.1:8788`。
+- 版本真源=云端 `ota.json`(UTF-8 无 BOM，带 BOM⇒`latest:null`)；`bump-version.mjs` 4 副本(两端 CMakeLists+main.cpp)出包前先 bump。`make-hotfix.mjs`：管理=zip(含 exe)、被控=NSIS exe。⚠️ `ota.json.url` 同时是装机卡链接⇒只挂全量件，热修包绝不挂。
+- 发布实操（2026-10-14 实证）：`cloud-ws/scripts/publish-release.mjs publish --product agent|viewer --version X --file <包>`（URL 沿用上一版 origin，倒退默认拒）；验发布＝check + `curl 127.0.0.1:8788/api/public/ota?product=X[&current=旧版]`（云端现读生效不重启）；**ota.json 被 cloud .gitignore 挡住不入库**（线上文件即真源，勿 -f 强提）。
+- 三仓 bare 远端 `D:/Stelarith/Stelarith-{control-qt,viewer-qt,cloud-ws}`（remote 名 `outer`）。⚠️ 别把 remote 指到**源仓自身**（`...xingjikong-qt\Stelarith-cloud-ws`）：push 恒 `Everything up-to-date`（目标 master 就是它自己）——先 `git push --dry-run <path>` 零副作用证伪，再动手。
 
-## 2 发版（两条路）
-- 版本真源=云端 `ota.json`（被控托盘 + 官网 `/download` 读 `/api/public/ota`）⇒ 免重构建。**ota.json 必须 UTF-8 无 BOM**（带 BOM ⇒ `latest:null`）。
-- `node scripts/bump-version.mjs show|bump|release|set <ver>`：版本号 **4 副本**（两端 CMakeLists + 两端 main.cpp）；CMake 只比对、不一致 FATAL_ERROR，**无自动回写** ⇒ 出包前先 bump。
-- `node scripts/make-hotfix.mjs`：热修包。管理端=**zip**（`updater.cpp` 解压+robocopy，**必须含 viewer-qt.exe** 才过自检）；被控端=**NSIS exe**（`/S`）。只带 `viewer-qt.exe`+`qml/**` / `agent.exe`；**运行时 DLL/plugins 不进热修包**（变了必发全量）。
-- 一律走脚本出包；文件名 ASCII；出包/删文件加 `CODEBUDDY_SAFE_DELETE_ENABLED=0`。
-- ⚠️ **`ota.json` 的 `url` 同时是官网装机卡下载链接** ⇒ 只挂"新装机也能用"的全量件（被控=NSIS、管理=绿色 zip）；**热修包绝不能挂**。发布前查 agent url 别指裸 exe。
+## 2 编译/自检
+- Qt **6.12.0** `D:/QTqwq/6.12.0/msvc2022_64`；被控端入口 **`control-qt/scripts/build-agent.sh`**(Git Bash 直连 cmake/ninja，自喂 MSVC/SDK+RC/MT)。`build-qt-agent.bat` 已废。
+- ⚠️ `C:\Program Files\Stelarith\` 曾残留 6.8.1 DLL，NSIS 覆盖回⇒打包源先升 6.12.0。离屏 `STE_ALLOW_MULTI=1 ... -platform offscreen`；`qoffscreen.dll` 每编被 windeployqt 删需重补。日志 `toLocal8Bit()`/`qInfo+qPrintable`。
 
-## 3 编译 / 自检
-- **Qt 6.12.0**（`D:/QTqwq/6.12.0/msvc2022_64`，注意是 `QTqwq`）。项目构建一直用 6.12.0。
-- ⚠️ **正式安装目录 `C:\Program Files\Stelarith\` 曾经残留旧 NSIS 包带来的 6.8.1 DLL**（2026-10-11 已用 6.12.0 DLL 覆盖修正，备份在 `backup-qt681-to-6120-20261011-162418/`）。如果之后跑 NSIS 安装器会再次把 6.8.1 DLL 覆盖回来 → NSIS 打包源必须先更新到 6.12.0。
-- viewer `build-qt-viewer.bat`（CMake Ninja）；agent `control-qt/scripts/build-agent.sh`。ninja 实体 `.../python/envs/default/Scripts/ninja.exe`。
-- ✅ **build-agent.sh 已更新（2026-10-11 `43b4258`）**：抽出 `configure()` 收敛全部 `-D`（含 `CMAKE_PREFIX_PATH=D:/QTqwq/6.12.0/msvc2022_64`、`CMAKE_C(XX)_COMPILER`、`CMAKE_RC_COMPILER`、`CMAKE_MT`），PATH 补 MSVC/SDK bin，缓存丢失自动补 configure。clean configure 已验证 exit 0。
-- ⚠️ **QML 磁盘加载**：importPath `<exe>/qml/Stelarith` + `load(fromLocalFile(Main.qml))`。改 `build/qml/Stelarith/*.qml` 可热更（重启 exe）；但副本只在构建 POST_BUILD 覆盖 ⇒ 探针前先同步源码→副本。
-- ⚠️ 离屏自检被单实例守卫拦 ⇒ `STE_ALLOW_MULTI=1 ... -platform offscreen`。`build/platforms/qoffscreen.dll` 每构建被 windeployqt 删 ⇒ 编后重补。
-- ⚠️ 日志出口一律 `toLocal8Bit()`；agent **无 `logf`** ⇒ `qInfo`+`qPrintable`。exe 被占用 ⇒ `scripts/_linknew.py` 链 `viewer-qt-new.exe`。
-- ⚠️ **`_probe` 真实位置 `D:/Stelarith/_probe`**（viewer CMake 写 `../../_probe`，相对 `Stelarith-viewer-qt` 上溯两级）。`ldc_libs/datachannel.lib`(43MB) 在那儿，viewer 能带 ldc 编（exe 1.19→2.5MB）。
-- ⚠️ `stream N finished with error: "Host requires authentication"`（可刷几百行）**不在我们源码** —— WebEngine/Chromium 内部经我们的消息处理器加 `[viewer]` 前缀打出。
-- C++ lambda `[&]` **够不到"后面才声明的局部变量"**（C2065）：要回调里用控件，须先声明指针、后 new 赋值。
+## 3 仓库/UI/NSIS/OTA
+- github WuMengAA/xingjikong-qt 四分支(agent/viewer/cloud/workspace)，main 别强推；curl 到 github 恒 000，push 用 `git -c credential.helper=`。
+- QML：字号 12/13/14/16(+20)；锚只锚 Item→锚 parent；非限定名只查「自身→组件根」两级；不用 Qt Button/TextField→Btn/InputField。
+- ⚠️ **QML 跨父级锚会被静默丢弃**（2026-10-14 实测：子栏锚另一容器内的兄弟 bottom ⇒ 该锚失效落 y=0，同父级锚却正常）：行要么放同一容器做兄弟互锚，要么锚自己 parent，要么用 `*H` 预算公式定位（IslandRoot 的 actionRow/historyPanel 即此范式；P3 mediaRow 曾踩坑已修）。符号字形（▶♪）教室机会 tofu ⇒ 用 SvgIcon 矢量图标。
+- 进程终止一律**黑名单**(只杀点名)，判能否杀问内核 NtQuery(29/61/25)；名字双侧剥 .exe 转小写比。
+- NSIS 源必须 `build/`；`.nsi` UTF-8 带 BOM；非 Qt 运行时(libssl/libcrypto/D3Dcompiler/opengl32sw)显式 File；删 `InstallDirRegKey` 改 `.onInit`。OTA 版本比较唯一真源=云端 `ota.js cmpVersion`。改大文件先查行尾；提交路径限定(永不 `-A`)。
+- **「真 viewer 壳」探针范式**（2026-10-16，viewer）：复用 viewer 已编好的**全部 obj**，只把 `main.cpp.obj` 换成探针 obj，用**响应文件** `@rsp` 链出探针 exe ⇒ **不重编 viewer** 就能跑真类（`scripts/_interact_rt_probe.cpp` 即此）。⚠️ 四个必备：① 探针须补 `logf`（它定义在 `main.cpp`，而 main 被顶替 ⇒ 否则 LNK2001）；② Windows 上 Qt 默认把 `qInfo` 交 `OutputDebugString`，**必须自己 `qInstallMessageHandler` 写 stdout** 否则一条看不见；③ `build/_interact_run/` 要备齐 `Qt6*.dll` + platforms/tls（真 viewer 壳比离屏探针多要 Widgets/WebSockets）；④ 编探针要抄足 `DEFINES`+`INCLUDES`+**`FLAGS`**（漏 FLAGS ⇒ C1189 缺 `/Zc:__cplusplus`、C4819 缺 `/utf-8`）。又：`build.ninja` 的 `build viewer-qt.exe:` 行**含 `|`/`||` 依赖段**，正则抓 obj 必须先在 `|` 处截断。
 
-## 4 登录（OAuth2 授权码 + loopback）
-临时端口 → `/oauth/authorize` → 回拨 → 会话令牌 → `/api/console/desktop/session`。站点地址 `kDefaultSiteUrl`（viewerbackend.h 单一真源）。⚠️ 回拨请求行必须 `section(' ',1,1)`；`QDesktopServices::openUrl` 起不来 Edge ⇒ 三层兜底，失败复位 `m_busy`。
+## 4 已修/绑定/库
+- #87 语音时长限→Q_PROPERTY；#90 关机重发→云端 no_resend+agent 延后2.5s+去重(⚠️ `*/` 提前闭合)；#94 暗色通知→InputField；#95 终端关不掉→m_termWait/Close/Closing；#88 考试模式/首启引导。
+- 班级绑定唯一入口 `main.cpp:applyClassBinding()`；站点 `/api/device/activate` 不回 code、classId 不合云端 6-16⇒修法=站点响应加 classCode(待授权)。
+- 云端 `/recordings/*` 静态托管改用 `RECORDINGS_ROOT`（2026-10-16，原硬编码工程目录）⇒ 修「设 `CLOUD_RECORDINGS_DIR` 后录像能存能列、点开 404」；⚠️ `const` TDZ ⇒ 定义必须**上移到静态托管之前**（不能只改一行）。连带：`tests/regression-recordings.cjs` 补令牌 + 清理路径跟随 env。
+- ⚠️ **`ViewerBackend::cloudUrl()` 返回的是 WebSocket 地址**（`wss://…/ws/viewer`），管理面 `/api/*` 必须走 **`httpBaseUrl()`**（新增，wss→https/ws→http + 截掉 `/ws/…`）。InteractBridge 曾直接拼 `cloudUrl()` ⇒ 拼出 `wss://…/api/…`，QNAM 不发 ⇒ **审批面板真机永远空**（2026-10-16 真桥探针抓到）。`viewerbackend.cpp` 另有 **5 处同款派生未收敛**（fetchEvents/requestClasses/fetchRecordings/…）待单独一笔。
+- 库：WebRTC(libdatachannel,MPL-2.0)+FFmpeg(LGPL `--disable-gpl` 动态链接，禁 libx264/265)；Qt 动态链接；OpenSSL3 取自 PG17 待改自带。CIMS 已废弃非目标。
 
-## 5 远端 github WuMengAA/xingjikong-qt
-四分支 agent/viewer/cloud/workspace；main 别碰别强推。push HTTPS；本机 curl 到 github 恒 000（验 API 用 python urllib）。GCM 弹交互挂死 ⇒ `git -c credential.helper= push "https://<token>@github.com/..."`。
+## 5 状态（2026-10-16 17:55）
+- **灵动岛扩展收口完成（2026-10-16，用户点单档A三项＋档B两项全做）**：① **组件7 播放四态**（`starting/playing/ending/ended/blocked`）**C++ 单点判定**＋`g_mediaStopping` 区分「主动停/播完」，补两个既有缺口（ffplay 播完不通知岛、学生端看不到禁播原因），探针五态图 `D:/Stelarith/_probe/shots/island_phase_*.png`；② **管理端审批面板**：viewer 新增 `InteractBridge`＋`InteractDialog`（独立弹窗，用户裁决），右栏内嵌**与被控端同源**共享岛，假桥离屏 5 图＋量化采样（深色岛区 44 / 浅色 231）；③ `!resources/whale/*.png` 白名单；④ **抽共享目录**（用户裁决）：真源 `Stelarith-shared-qml/island/`（根仓库，8 件），两端 POST_BUILD 拷贝、**QML 零改动**，md5 三处一致。**档B**：三仓 commit `5fcdad1`/`1dc9740`/`e77f1df` ＋ 根 `70edb7a`；push **control✅ viewer✅ cloud✅**（`outer` bare 目录 2026-10-16 补齐，见 §1）；**隔离验证**（端口 8991＋Temp cwd，生产 8788 未动）**245 过/0 败**（原 1 败＝脚本过时，已连带修）＋**顺带发现既有 bug**：`CLOUD_RECORDINGS_DIR` 未贯通静态托管（`src/index.js:271`）⇒ 设该 env 则录像能存不能播，**2026-10-16 已修**（见 §4）。归档 `docs/灵动岛扩展-组件7与管理端审批面板-加减归档-2026-10-15.md`＋`docs/隔离验证-云端回归全量复跑-2026-10-16.md`。⚠️ 探针离线渲染新认知：**offscreen 平台无 CJK 字体**（须 `addApplicationFont("C:/Windows/Fonts/msyh.ttc")`，否则中文全 tofu）；**改 CMakeLists 源文件列后 ninja 不一定重跑 configure**（症状＝只有 Linking＋LNK2019）⇒ 手动 `cmake -S . -B build`；viewer `.gitignore:34` 约定 `scripts/_*.py` 探针驱动不入库。
+- **规范落地批次（#297-#301，用户点单 ABCD 四档全做）已完成**：**A** 四份子工程 README（control/viewer/cloud/mobile）+ 根 README **§六 四端版本对齐表**；**B** `docs/命名与版本约定.md`（**只约束新文件**）；**C** 7 个 whale 资源改小写（`d1/d2/ya1/ya2.wav`、`dsniang1/dsniang02.png`）+ 引用改齐（whale_audio.cpp 4 条 qrc 路径 + 3 处 QML imagePath + 6 处注释）+ **双端编译验证**（control [8/8] 22s / viewer 46s，`qrc_*whale.cpp` 核出新名无旧名）；**D** 追溯补打 tag `agent-v0.6.33`(0d32ffb)/`viewer-v0.6.33`(720bd8d)/`release-0.6.33`(278dc3d)，**全本地未 push**。**对账结论**：根仓库**本身即 meta**（三子工程 mode 160000 gitlink）⇒ **不建 starcontrol-meta / versions.json**；建议「提交信息不加 scope」「不要写详细设计文档」**不采纳**。归档 `docs/规范落地-命名与版本-加减归档-2026-10-15.md`。⚠️ **顺带发现未处理**：control-qt `.gitignore:14` 的 `*.png` 通配把鲸鱼娘素材挡在版本库外 ⇒ 干净 clone 编译后被控端鲸鱼娘空白（viewer 侧同文件已入库）；修法候选 `!resources/whale/*.png` + `git add -f`。
+- **灵动岛扩展（用户点单）组件1-6 均已完成**（#276-#296：设计对账→组件1 播放呈现+互动骨架→组件2 点歌搜索页→组件3 投稿页→组件4 点赞动效→组件5 祝福弹幕全屏浮层→组件6 云端互动数据模型+管理端审批协议，六轮「实现→离屏探针/联调回归→加减归档」闭环）：组件1 媒体收起态胶囊上岛（320/640 专用宽）+ 展开互动区/弹幕骨架；组件2 点歌钮原地变形开搜索页五态（空态/骨架/结果/无结果/超额禁用，配额 3，本地占位目录+400ms 防抖，组件6 换云端）；组件3 输入/发送 pill 原地变形开投稿页四态（0 编辑 50 字计数 CJK 一字一计/超限红字+投稿钮禁用/1 提交中/2 成功✓ severityRemind/3 失败✗ severityUrgent+重试；本地 Timer 400ms 模拟，submitSimFail 驱失败路径；sendMa onClicked 从 TODO 直连提交**回改为开页携带文字**——行为差异已入归档§四）；组件4「好听」单击点赞（likeCount+1 + 飘心 600ms 上飘淡出 + 计数回弹 150ms + 一次制「已好听」置灰；详规双击飘心因 250ms 判别延迟按设计裁决**默认不做**）；组件5 DanmakuWidget **双入口同窗不同则**（通知弹幕可信源 80 字/120px/s/颜色可指定/无不过滤无冷却 push() 签名不变 vs 祝福学生不可信源 30 字/100px/s/敏感词过滤/30s 本机冷却 sendBlessingLocal；DanmakuItem 结构体 fg/speed **逐条携带**——旧实现是「最后一条 push 全局值」双来源互污必修；BlessingResult 码 0/1/2/3，被拦不启动冷却；QElapsedTimer 懒查+QTimer 1Hz tick；g_danmaku 全局删→danmakuWidget()/danmakuWidgetPeek() 单例；QML doSubmit 真实结果码驱动删 submitSimFail；**gestureArea 穿透守卫** hitDisabledControl 吞点到禁用控件的点击）。**（2026-10-16 已全部入库并收口，见 §5 首条）**。设计与六份归档在根 `docs/灵动岛扩展-*-2026-10-15.md`。⚠️ 实证：① QML implicitWidth 从不直接生效，岛宽由 C++ geometryForContent 定；② **锚链对不可见 item 依然起效**（visible:false 不减几何，隐藏须同时 height:0 清零，否则幽灵占位把后续行顶出 320 硬顶）；③ searchH/submitH 用同款自适应公式 `max(100, 320-(padH*2+headH+listH+mediaH+actH+12))`；④ **探针演示态编号 ≠ QML 状态机编号必须映射**（sphase 0-5 ↔ submitPhase 0-3；页内按钮前置态按目标所在态注入且**只枚举投稿页六钮**——abtn_like 被误伤过：注入 submitOn 藏互动区⇒目标不可见⇒点击穿透 gestureArea 把岛点收起）；⑤ setProperty 同步但锚链重算要等事件循环 ⇒ 注入与点击之间必须 +100ms polish；⑥ **探针编译失败不得吞输出**（吞报错+残留日志假象一度误判「点击偶发失效」）；⑦ **动画/注入要写的属性不能锚**（likeFly 双层：外层锚定位、内层自由 y——单层 verticalCenter 锚下注入 y=-14 被重置回 14，PropertyAnimation 同样被抗击）；⑧ historyPanel topMargin 与 implicitHeight 预算必须同公式同步（组件3 归档前补修 submitH）；⑨ **MSVC C1060（编译器堆爆）⇒ 串行构建 -j1**（本机提交内存常年见底 286MB/35.5GB，并行 cl 抢量即爆；探针链 qrc_agentwhale.cpp 24.5 万行鲸鱼 PNG hex 是最重 TU ⇒ python 加「obj 比 src 新就跳过」）；⑩ **QML 祖先链 enabled 传导 ⇒ 组件内吸收垫不可行**（禁用 ActionButton 后子孙 MouseArea 全收不到事件；吸收垫跟随父禁用则收不到、恒 true 则可绕过禁用 ⇒ 穿透守卫只能放 gestureArea 单点，且覆盖全部禁用钮 now and future）；⑪ **QQuickWidget 合成点击异步投递**（qApp->sendEvent 送出，QML onClicked 晚 ~400ms 执行 ⇒ 探针 waitsTimer 1400→2600ms，capture 与 1Hz tick 赛跑曾读到旧值）；⑫ 冷却 tick 精确 1Hz 实证（trace emit(30)@t0→emit(29)@t0+1000ms；QML 骑全量 changed() 与 media elapsed 同频率）；⑬ const 方法读单例状态用 peek 不用 ensure（读个数不该先造窗口）；⑭ **云端下发统一走指令信封**（`wrapOutgoing(true,'instruction',{action,params})` ⇒ 消息 `type='instruction'` + `payload.action='notify'`，**不是扁平 `type:'notify'`**——回归断言按错形状写会误报「没投递」，链路失败先看服务端流水分离「没发」与「断言读错」）；⑮ **Repeater delegate 内的 objectName 不在 QObject 树上**（delegate 物件由 QQmlDelegateModel 持有，`QObject::findChild` 查不到；但 delegate item 的 parentItem 在 **Item 树**里）⇒ 探针 `findItemByName()` 走 `childItems()` 递归，定位「先 Item 树、后 QObject 树兜底」；⑯ 隔离云端端口 8096 本机 EACCES（用 8991）；**云端启动会重建 `assets/qml-patch/latest.json`+zip**（运行产物，勿当代码改动回退——回退会致清单与 zip 不匹配）；⑰ **`file(GLOB)` 收集资源不自动重查 ⇒ 改 `resources/` 下文件名后必须重跑 configure**（`cmake -S . -B build`），只跑 build/ninja 打进包里的仍是旧路径、**运行期静默取不到资源**；`build-agent.sh` 只在 `CMakeCache.txt` 缺失时 configure、`_build_viewer.py` 只跑 ninja，**两脚本都不帮你重配**；⑱ 根仓库是 **gitlink 聚合**（`mode 160000`，无 `.gitmodules`）：子仓库提交后 `git add <子目录>` 推进指针；四仓库原零 tag，2026-10-15 起用 `agent-v*` / `viewer-v*` / `release-*` 前缀（命名/版本/提交约定见根 `docs/命名与版本约定.md`）。
+- **P0/P1/P2/P3 全部收工并已发布 OTA 0.6.33（agent+viewer 两端，mandatory=false）**：P0=设置扩充+自检向导+OTA提示；P1=灵动岛入口；P2=进程外插件宿主+`/api/plugins`+示例 echo；P3=播放时段管理+噪音/自习长期记录+第三方友好提示。0.6.31（P0-P2）与 0.6.33（P3+在途修复）均已上线；三仓已 commit 未 push（等指令：control→agent/viewer→viewer/cloud→cloud）。归档 `docs/发布加减归档-0.6.33-2026-10-14.md`。
+- ⚠️ **发布/真机验证红线（2026-10-14 实证）**：本机生产 agent（PID 1916）/viewer（27028）在跑——被控端安装器 `[Code]` ssInstall 会 `Stop-Process stelarith-agent-qt`（跑安装器=杀生产）；viewer NSIS `.onInit` 读注册表 InstallDir（会覆盖生产目录）。安装器实跑、exe 启动一律转真机清单。本机可做：OTA 语义(current 旧版→hasUpdate=true)/sha256 三方相符/离屏探针回归。
+- ⏸ 隔离验证：**云端数据面已全量复跑（2026-10-16 · 14 套 245 过 / 0 败；按用户边界排除关机/重启类 2 套）**；新增 **HTTP 审批路径**回归 `tests/regression-interact-http.cjs`（17/17，此前只覆盖 WS 路径；uid 须带随机后缀避限额闸门）；仍挂起的都是**真机类**：考试模式内核闸门实杀、#98 灵动岛观感、terminal cd 真机、file_push 打不开目标；P3 运行期行为仅静态审查+编译+离屏渲染，真机 9 项清单待执行（归档第六节）。InteractBridge **C++ 运行时**仍未跑（契约层全绿；真桥需链 viewerbackend.cpp，依赖 WebSocket/WebEngine/WebRTC 成本高）。
+- ⚠️ 探针日志机制（2026-10-15）：`_island_qml_probe` 启动时以 WriteOnly 截断 `_probe/shots/_probe_result.txt` ⇒ 每轮只留本块，多轮验收要逐轮 cp 留证；纯 QML 改动不触发 POST_BUILD，探针前须手动 cp 到 build/qml（症状：未 set 属性 dump 全 `<invalid>`）；**Bash 工具 cwd 不跨命令保持，每次必须显式 cd**。
+- viewer build/ 已知既有状态（不夹带修复）：tls 缺 qopensslbackend（schannel fallback 可用）；translations/position/resources 不部署（windeployqt `--no-translations` 有意）。
 
-## 6 UI / QML 约定（全量见 `viewer-qt/docs/UI规范-2026-10-07.md`）
-- 字号 `12注/13正/14徽标/16标题`（+20 只给大数字）；对比度算 WCAG 相对亮度；`inv` 当底字用 `win`。
-- QML 锚点只能锚 Item（Window/ApplicationWindow 不是 Item ⇒ 静默失效）→ 锚 parent。抽组件调用点别同名属性（`th: th` ⇒ Binding loop）→ `th: root.th`。
-- ⚠️ **QML 非限定名只查「自身对象 → 组件根」两级**：中间层元素的 `function`/`property` 子元素**看不见**。判据 `ReferenceError` 或 `Binding loop`。修法：① 提函数/属性到组件根；② 移进唯一使用者（如 MouseArea）；③ 挂子组件别 `backend: backend`（自身属性遮蔽上下文）改 `root.backendRef`。
-- 不用 Qt Button/TextField（走系统调色板变白）→ Btn/InputField；InputField 不给 background 吃系统白底。
-- 批量异步收口（isDevOnline 过滤+超时+按设备建明细一台一结）；报错带 `QFile::errorString()`；通知参数走 `qml/NotifyParams.js`；跨页调 `root.toast()` 非 `hint()`。
-- GridLayout 从 `anchors.fill` 改"按内容定高"后，靠 `Layout.fillHeight` 撑的卡塌成 0 ⇒ 卡写 `Layout.preferredHeight: col.implicitHeight+2*padding`，Column 改 left/right/top 三边锚。
-
-## 7 已修（易踩坑留存）
-- #87 语音时长限：QML 取无括号 Q_INVOKABLE 取到函数对象恒 true ⇒ 改 `Q_PROPERTY(READ)`。
-- #90 关机重启无限重发：云端 `no_resend`+`isTerminalAction`+`expireTerminalHistory`；agent 关机延后 2.5s+`terminal-done.json` 去重。⚠️ C++ 块注释出现 `*/` 会提前闭合。
-- #94 暗色通知不能输入：裸 TextInput 无 background 白底白字 ⇒ InputField。
-- #95 终端关不掉：`terminal_opened` 判据改 + `m_termWait`(20s)/`m_termCloseWait`(2.5s)/`m_termClosing` 去重。
-- #88 考试模式黑名单、两端 NSIS、通知不抢焦点、配置向导示例地址、首启引导 `WelcomeOverlay`+`firstRunDone()`（QSettings）均已落地。
-- Theme 单一真源：`qml/components/Theme.qml` 共享组件 + 深/浅两实例（纯 `pragma Singleton` 不可行，需深/浅并存切）。
-
-## 8 班级绑定（分班制）
-- **唯一入口** `control-qt/src/main.cpp:1169 applyClassBinding(rawCode,wsUrl,uid)`：「保存并连接」与「账号绑定」**共用**；新增绑定路径必须调它。
-- 链路：`saveClassCode` 落 `%LOCALAPPDATA%/xingjikong/classcode.txt` → `register` 带 classCode → 云端 `registry.js` 班级索引。云端班级码格式 `^[A-Za-z0-9_-]{6,16}$`。
-- ⚠️ 站点 `/api/device/activate` 只回 `classId/className`、**不回 code**，且站点 classId 形如 `class_xlzx_2028_08`（18 位）**不合云端 6-16 格式** ⇒ 走接入码绑的班，云端班名是一次性码 `XJK-XXXX-XXX`。修法=站点响应加 `classCode: class.code`（需站点授权）。
-
-## 9 进程终止铁律（蓝屏事故）
-- `0xEF`=CRITICAL_PROCESS_DIED。一律**黑名单**（只杀点名的），绝不白名单（名单外全杀→杀 critical→蓝屏）。
-- 判断能否杀**只问内核**：`NtQueryInformationProcess(h,29 ProcessBreakOnTermination)`、`61 ProcessProtectionInformation`、`25 Session`(Session0=服务放过)。OpenProcess/任一查询失败 ⇒ 当受保护跳过。
-- 名字归一化：双侧都剥 `.exe` 转小写再比（`tasklist` 给 `svchost.exe`，只一侧剥 ⇒ contains 恒 false）。自身进程强制剔除。
-
-## 10 NSIS 安装器硬规矩
-- 打包源必须 `build/`（`deploy/` 缺 resources/translations/QML ⇒ 装完没反应/崩）。
-- 🔒 绝不 `File /r "deploy\*.*"`：agent.env 含真实设备令牌 ⇒ 任何人冒充设备。
-- `.nsi` 必须 **UTF-8 带 BOM**（`Unicode true` 靠 BOM）；Edit 改完会丢 BOM ⇒ 每次补 BOM。
-- `OutFile` 相对脚本所在目录。目录 `File /r` 不带 `\*.*`（带通配符平铺到根，Qt 找插件失败）。空目录中止编译。
-- **DLL 通配只吃 `Qt6*`** ⇒ 非 Qt 的运行时（如 `libssl-3-x64.dll`/`libcrypto-3-x64.dll`）必须**显式点名 File**。`D3Dcompiler_47.dll`/`opengl32sw.dll` 只在 deploy/（windeployqt 不拷）。
-- ⚠️ **`InstallDirRegKey` 架空 `InstallDir` 默认值**：重装优先读注册表旧路径 ⇒ 改默认值白搭。要生效=删 `InstallDirRegKey`，改 `.onInit` 手动裁决（没装过=新默认；旧路径==旧默认=迁移并 `RMDir /r`；其它=原处覆盖）。viewer 已改，被控端默认本就 ASCII。
-- 升级安装段开头先 `Stop-Process <本端 exe>`+`Sleep 800`，避免 exe/DLL 被占用覆盖失败。
-
-## 11 OTA 铁律
-- 版本比较唯一真源=云端 `ota.js` `cmpVersion`（alpha0<rc1<正式2），客户端带 `?current=` 问云端读结论，**任何一端不许自己再写比较**。
-- 护栏：URL 只认 http(s)、sha256 必填(64 位小写 hex)、体积≤300MB、解压后必须见 exe。
-- 替换自身只能退出后外部脚本做（写 `apply-update.cmd`→startDetached→quit；脚本 tasklist 等消失→robocopy→start）。⚠️ 脚本 `toLocal8Bit()` 落盘；必须 `/XF viewer.env`；隔离验证给 exe 改名。
-
-## 12 其它工程 / 沙箱小坑
-- 官网构建旁路 `CODEBUDDY_SAFE_DELETE_ENABLED=0 node scripts/release-site.mjs build`→`switch`；`content/nav.json` gitignore。
-- safe-delete 拦 rm ⇒ python `os.remove` 绕；`shutil.copytree(dirs_exist_ok=True)` 绕 rmtree；Git Bash `/I<path>` ⇒ `MSYS_NO_PATHCONV=1`；探针放工程目录内。
-
-## 13 改大文件固定动作
-`git diff --stat` 行数异常 ⇒ 先查行尾。`\r`→`\n` → `re.sub(r'\n\n+','\n')` → 清 include 空行再重编。`git add --renormalize` 在 autocrlf=true 下弄脏索引 ⇒ `git reset -- <file>`。改动一律脚本化；删代码前锚点+行号双确认。
-
-## 14 我栽过的跟头
-1. 脚本写中文一律 Write 落盘再执行，绝不 bash heredoc（乱码）。
-2. 诊断要实证，别猜根因。
-3. "缺资源类"故障判据：照常启动+连云端，只在用某功能才崩 ⇒ 先疑包缺件。事件日志 Application Error(1000) 看模块+异常码+偏移，三次一致＝崩溃点。
-4. 已点单却拖着没做 ⇒ 可能变生产事故，每轮收尾报欠账。
-5. **多会话并行会吞未提交改动**：他方 `git add` 会卷走我的在途文件、重编覆盖我的产物。⇒ 提交**路径限定**（永不 `-A`）；出包前看 `build/*.exe` mtime 与 `git log -1`；发现他方在编 ⇒ 停手报告。
-
-## 15 待办 / 状态
-- **CIMS 定性（2026-10-10 用户更正）**：CIMS 是**已废弃的旧项目、原版无集控功能**。**"替代 CIMS"不是目标**，也不存在"CIMS 退伍/停 CIMS"路径 —— `星集控-定位书v2.md §六` 与 `docs/需求全景分析与改进建议-2026-10-10.md`(v2) 均已更正。`Stelarith-cims-eval/CIMS-backend` 只作**过渡期的课表/设备数据承载**。
-- **库引入决策（2026-10-10 用户决策）**：**正式引入 WebRTC（libdatachannel，MPL-2.0）与 FFmpeg（LGPL）**。`docs/第三方库合规.md` 已升 v2：FFmpeg 必须 **`--disable-gpl` 共享库构建 + 动态链接**；**libx264/libx265 是 GPL，禁用**（H.264 软件编码改走硬件编码器 nvenc/qsv/amf 或 libvpx/libaom）；Qt 实为**动态链接**（v1 误写"静态"）；**OpenSSL 3(Apache-2.0)** 已补登记（当前取自构建机 PG17，需改为自带）。
-- 已落地：批次 0-7 全部（NSIS 两端、通知、灵动岛、监控 CameraCenter 挂载、云端推+客户端拉、官网 3 条、首启引导、Theme、班级绑定）。
-- ✅ **2026-10-13 22:2x 状态**：云端 8 处审计修复**已生效**（8788 由计划任务 21:55 拉起，加载完 9540209+d9c8d23+7319539）；被控端 **0.6.30 已发布 ota.json**（agent `655a59e`：TLS 事故收口 + 登记项 4 处全修）；管理端 **0.6.30 已出包**（viewer `3942335`：dsh 拆分代提交 + 补 QWebSocket include + oauthlogin 超时修复进构建）。**viewer ota 条目未动**（OTA 吃 zip 与"不出 zip"矛盾待裁定）。
-- ⏸ 待复现/无正文：`file_push 打不开目标`（agent 已有 mkpath+改名兜底，无失败串难盲改）；#89/#99 归档查无需求正文。
-- ⏸ 隔离验证挂起（违取证避让）：考试模式内核闸门实杀效果；#98 灵动岛观感/折行；terminal cd 词法解析真机会话实测。
-- ⚠️ viewer `build/` 缺 `libssl-3-x64.dll`/`libcrypto-3-x64.dll` 时 NSIS 出包必 fail —— 从 PG17 `C:/Program Files/PostgreSQL/17/bin/` 拷入（windeployqt 不拷、nsi 显式点名）；build 目录清掉后要重拷。
-
-## 16 指挥台回写（跨 agent 同步）
-- **唯一跨会话同步真源 ＝ `docs/星集控-指挥台-唯一真源-2026-10-02.md` §一 当前指针**。铁律 2 **收工必须回写**；铁律 4 **上节没回写、下节不许开工**（防两个 AI 同改一处）。
-- ⚠️ **`.workbuddy/memory/` 是我（WorkBuddy）的私有记忆，dsh 看不到** ⇒ 写它**不等于**同步，两套都要写。
-- 回写格式：表内新增一行「**在办（时间 · WorkBuddy 回写，取代 XX 条）**」，含 交付+提交号 / **未验证（明说）** / 下一步。
-- 🚫 **2026-10-11 我虚报过**：口头称"已和 dsh 同步"，实际 10:10→23:19 近 13 小时产出只进了私有记忆，指挥台一行没写，被用户当场戳穿（与 dsh 点名的「WorkBuddy 提交信息虚报」同类）。**收工即回写，不许口头充数。**
-
-## 17 UI 唯一模板（2026-10-13 用户批准）
-- **Material 3 = 全项目唯一视觉模板**（用户看 MaterialLab 后裁决「都可以，两端都用这个」）。
-- 令牌单一真源 `qml/components/Md3.qml`（两端各一份、逐字相同）：baseline 十色 + surface 五级容器 + 字阶 13 级 + 形状 6 档 + 动效 + 状态层；深浅两实例（纯 Singleton 不可行，同 Theme.qml 模式）。
-- 组件库 `qml/components/md3/` 12 个（Btn 六变体/Fab/TextField/SwitchRow/CheckBox/Radio/Chip/Card/ListItem/NavBar/Dialog/Snackbar）。
-- **legacy 别名是迁移桥**：Md3 提供 win/panel/fg/acc/rCtrl 等旧 Theme 同名令牌 ⇒ 存量界面零改动换肤；全端组件迁移完成后删别名、退役 Theme.qml。
-- 灵动岛例外：只换色彩族（accent=MD3 primary、urgent=MD3 error），**形状 36/56/168 与半透明底不动**（身份组件）；改 IslandTheme 必同步 island.cpp（parity 铁律）。
-- 探针：`scripts/_md3_probe.py`（.py 被 gitignore；.cpp 在库）——StubBackend 假数据 + Md3 注入 + objectName 驱动分页/触发态；qmllint 对跨文件类型不报错但运行时要显式 import。
+## 6 同步/UI 模板
+- 指挥台回写真源 `docs/星集控-指挥台-唯一真源-2026-10-02.md` §一；收工即回写(2026-10-11 虚报过，禁口头充数)；`.workbuddy/memory/` 私有记忆≠同步。
+- **Material 3 = 全项目唯一视觉模板**，令牌 `qml/components/Md3.qml`(两端逐字同)；组件库 `md3/` 12 个；legacy 别名桥，迁完删 Theme.qml；灵动岛只换色彩族(形状36/56/168不动)。
+- **展示页位置约定**（2026-10-15 立）：HTML 展示页放 `docs/<中文名>.html`（与 141 个中文归档一致），**资源目录必须纯 ASCII**（如 `docs/island-showcase-assets/`，中文目录进 URL 有编码风险）；探针截图源在 `D:/Stelarith/_probe/shots/`，**只 cp 不 mv**。台账类汇总**不另立 md**（避免第 N 份「待办清单」分叉）。
