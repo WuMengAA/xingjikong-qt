@@ -227,6 +227,20 @@ if(NOT EXISTS "${STE_SHARED_ISLAND_DIR}/IslandRoot.qml")
     "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
 endif()
 
+# 2026-10-16（U1 共享 UI 基座 · 用户点单「插件化思维，统一界面结构」）：
+#   Md3 设计系统（Md3.qml 令牌 + md3/ 12 组件）真源收到根仓库 Stelarith-shared-qml/ui/。
+#   本工程当前界面＝灵动岛本身（C++ QQuickWidget 加载 qml/island/IslandRoot.qml），
+#   尚不直接消费 Md3；但 Md3 是**两端唯一视觉模板**（2026-10-13 用户裁决），
+#   存量界面后续迁移要 import 它 ⇒ 仍按同模式拷回 qml/components/，让 `import "components"`
+#   / `import "../components/md3"` 之类的既有写法在将来搬过来时不需要改路径。
+set(STE_SHARED_UI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/ui")
+if(NOT EXISTS "${STE_SHARED_UI_DIR}/Md3.qml")
+  message(FATAL_ERROR
+    "[agent] 共享 UI 基座目录缺失：${STE_SHARED_UI_DIR}\n"
+    "  Md3 设计系统真源在 Stelarith-shared-qml/ui/（两端共用）。\n"
+    "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
+endif()
+
 add_custom_command(TARGET stelarith-agent-qt POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           "${CMAKE_CURRENT_SOURCE_DIR}/qml"
@@ -240,6 +254,18 @@ add_custom_command(TARGET stelarith-agent-qt POST_BUILD
   COMMAND ${CMAKE_COMMAND}
           "-DSRC=${STE_SHARED_ISLAND_DIR}"
           "-DDST=$<TARGET_FILE_DIR:stelarith-agent-qt>/qml/island"
+          "-DLABEL=island"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
-  COMMENT "[agent] 拷贝 qml/ + 共享 island/ → 构建输出目录（灵动岛视觉层）")
+  # 共享 UI 基座（Md3）落回 qml/components/。
+  # ⚠️ SUBSET 模式：components/ 允许存放本工程自有件，多出来的不算残留。
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${STE_SHARED_UI_DIR}"
+          "$<TARGET_FILE_DIR:stelarith-agent-qt>/qml/components"
+  COMMAND ${CMAKE_COMMAND}
+          "-DSRC=${STE_SHARED_UI_DIR}"
+          "-DDST=$<TARGET_FILE_DIR:stelarith-agent-qt>/qml/components"
+          "-DLABEL=ui"
+          "-DSUBSET=ON"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
+  COMMENT "[agent] 拷贝 qml/ + 共享 island/ + 共享 ui/ → 构建输出目录（灵动岛视觉层）")
 
