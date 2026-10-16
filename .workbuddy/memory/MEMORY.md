@@ -28,6 +28,7 @@
   ② 头里不能 `#include "xxx.moc"`（C1083；AUTOMOC 走独立 moc_<name>.cpp 路线）；
   ③ 头必须**显式列入 add_executable**（否则 moc 产物不生成 ⇒ LNK2001 metaObject）。
   另：include 自家头**绝不能放进匿名 namespace**（Qt 头被拽进域内 ⇒ QVariant/QtPrivate C2872 fatal C1003）；Qt 6.12 `QQuickWidget::ResizeMode` 只有 `SizeViewToRootObject/SizeRootObjectToView`（无 ToQML）。
+  ④ **moc 对 .cpp 输入生成的 TU 不含原文件**（只认头文件输入）⇒ QObject 探针/夹具类必须拆头（`_agent_ui_probe_fakeui.h` 实证）。
 
 ## 3 仓库 / UI / NSIS
 - github `WuMengAA/xingjikong-qt` 四分支；curl 到 github 恒 000，push 用 `git -c credential.helper=`。
@@ -44,9 +45,13 @@
 - 云端 `/recordings/*` 静态托管用 `RECORDINGS_ROOT`（const TDZ ⇒ 定义上移）。
 - qml-patch 已并入共享岛 + version 计岛指纹；`CLOUD_ASSETS_DIR` 可覆盖。
 - 库：WebRTC(libdatachannel) + FFmpeg(LGPL 动态)；Qt 动态链接；OpenSSL3 取自 PG17。CIMS 废弃。
-- ⚠️ **待点单**：① U4 的 `permOk("admin")` 恒真越权（teacher 可锁屏，quickGuard 只保了快捷行）；② **IslandRoot 引用 `image://svgicon/check-circle` 而资源叫 `circle-check.svg`（存量图标名错配，岛历史列表图标加载失败，日志 948 行起）**；③ viewerbackend 5 处 URL 派生未收敛；④ 站点 `/api/device/activate` 不回 classCode。
+- **内置模块层**（2026-10-17 `b851e67`，control）：`src/modules/`（modulehost + usbmodule）编译进 agent，
+  与进程外插件 PluginHost 并列第二扩展通道；manifest 同口径；executeAction **前置内置优先**；
+  ModuleAgentApi 10 个 std::function 在 main.cpp 注入；AgentPluginsPage 有「内置模块」分区
+  （快照 Q_PROPERTY(modules) + 信号接线）。门禁 `test-module-registry.mjs`（10 断言）。
+- ⚠️ **待点单**：① U4 的 `permOk("admin")` 恒真越权（teacher 可锁屏，quickGuard 只保了快捷行）；② **IslandRoot 引用 `image://svgicon/check-circle` 而资源叫 `circle-check.svg`（存量图标名错配，岛历史列表图标加载失败，日志 948 行起）**；③ viewerbackend 5 处 URL 派生未收敛；④ 站点 `/api/device/activate` 不回 classCode；⑤ `md3/Md3Btn.qml:11` 自定义 `enabled` 盖掉 Item.enabled ⇒ 祖先 enabled 传导失效（探针 note 留痕，共享组件不擅自改）。
 
-## 5 状态（2026-10-16 深夜）
+## 5 状态（2026-10-17 01:30）
 - **U 系列（「插件化思维，统一界面结构」）**：U1–U4 完成（共享 ui 基座 Md3+md3/12 件、契约 UiContract.js+UiRegistry+UiPanelHost、14 面板声明化 Main 3858→3237、44 动作单一真源 ActionDefs.js）；**D 档完成**（双绘常量统一+`test-island-metrics.mjs` 11 断言门禁；IslandRoot 2207→2148 抽出 IslandIdleFace/IslandActionRow 2/12 块 + `diff-island-tree.mjs` 基线比对器）。
 - **U5（两端同 shell，用户裁决 A）· A-1/A-2/A-3 第一批全部完成**：
   - **A-1** 共享 `ui/UiPageHost.qml`(182，页无 open/close、全预建、ctx 转发 panelHost) + SamplePage + 页探针 28 断言。
@@ -56,6 +61,7 @@
 - **island**：A 档（管理端跑共享 IslandRoot，IslandHost 几何真源未统一）+ C 档（qml-patch 并岛+MD5 门禁）完成；扩展组件 1–7 + 审批面板随 0.6.36 上线。
 - ⏸ 隔离验证 245 过/0 败 + HTTP 审批 17/17。挂起的都是真机类（考试模式内核闸门、#98 岛观感、terminal cd、file_push）。
 - 出包前须再 bump（0.6.37 已在本机，云端 0.6.36）。
+- **「模块化插件」三件**（2026-10-17 用户点单）：① U盘模块 ✅ 已交付并真机上线（`b851e67`，岛 Centered 询问+只开根目录，USB 探针 19/19、面板探针 29/29）；② **#329 VoiceHub 联动模块（进行中）**：Open API `x-api-key`，读 `/api/music/broadcast`+`/api/songs/public`（免鉴权），岛展示正在播放/歌词/下一首，管理端信息展示，控制接口留可配默认关的桩；③ **#330 灵动岛多界面**：展开态 1+3 多面切换 + 形态多样化。
 
 ## 6 同步 / UI 模板
 - 指挥台回写真源 `docs/星集控-指挥台-唯一真源-2026-10-02.md` §一；收工即回写；`.workbuddy/memory/` 是私有记忆 ≠ 同步。
@@ -87,3 +93,9 @@
 - ⚠️ **被控端部署不含 QtQuick Controls**（exe 旁无 `Qt6QuickControls2.dll`）⇒ 被控端 qml/ 下**只能用
   QtQuick 基础类型**（`ScrollBar`/`TextArea` 等一律加载失败，症状是 `entry 解析失败`）；
   门禁 `test-agent-qml-deps.mjs`（import 白名单 + 40 类型黑名单）。viewer 侧有该模块，故两端不同。
+- ⚠️ **Windows 原生事件投递语义（2026-10-17 实测）**：`PostThreadMessageW` 投的 WM_DEVICECHANGE
+  **到不了** QAbstractNativeEventFilter（同法投 WM_APP 能到）；**SendMessage 到 Qt 顶层窗口能到**
+  （真实 DBT 广播本就是 SendMessage 到各顶层窗口 ⇒ Qt 转给过滤器）⇒ 合成消息探针必须走隐藏顶层窗口。
+- ⚠️ **探针宏值必须带冒号**（`STE_USB_PROBE_FAKE_REMOVABLE="X:"`——onDriveArrived 收到的 drive 是 `X:` 形态）。
+- ⚠️ **cl 链接步绝不带 /TP**（.lib 当 C++ 源码编 ⇒ Qt6Core.lib 一串 C2018）；MSYS/Git Bash 会把 `/EHsc`
+  当 POSIX 路径转换 ⇒ cl 参数一律走 Python subprocess（list 形式）不过 shell。
