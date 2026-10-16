@@ -126,34 +126,37 @@ bool AudioCapture::startCapture()
 
 void AudioCapture::stopCapture()
 {
+    HWAVEIN waveIn = nullptr;
+    WAVEHDR hdrForUnprepare = {};
     {
         QMutexLocker lock(&m_mu);
         if (!m_active && !m_waveIn) return;
         m_active = false;
         if (g_activeCapture == this) g_activeCapture = nullptr;
-        if (m_waveIn) {
-            // 2026-10-14 修（审计 P0）：原顺序是 Stop → Unprepare → Close，
-            // 而且这三个调用的返回值全部丢弃。两处问题：
-            //  ① 缺 waveInReset —— 驱动线程可能还握着已入队的缓冲，直接 Close 之后
-            //     handleBuffer() 会往一个**已关的句柄**上 waveInAddBuffer。
-            //  ② 不查返回值 —— 反复开关麦时句柄/缓冲会悄悄泄漏，日志上一个字都没有，
-            //     用户只觉得"麦怎么没声了"，真正原因根本查不出来。
-            waveInStop(m_waveIn);
-            if (const MMRESULT r = waveInReset(m_waveIn); r != MMSYSERR_NOERROR)
-                qWarning("[audio] waveInReset 失败：%s（继续回收）",
-                         waveErrText(r).toUtf8().constData());
-            if (m_header.lpData) {
-                if (const MMRESULT r = waveInUnprepareHeader(m_waveIn, &m_header, sizeof(m_header));
-                    r != MMSYSERR_NOERROR)
-                    qWarning("[audio] waveInUnprepareHeader 失败：%s",
-                             waveErrText(r).toUtf8().constData());
-            }
-            if (const MMRESULT r = waveInClose(m_waveIn); r != MMSYSERR_NOERROR)
-                qWarning("[audio] waveInClose 失败：%s", waveErrText(r).toUtf8().constData());
-            m_waveIn = nullptr;
-        }
+        // 锁内只做状态清理 + 把句柄/头**拷出来**，winmm 回收放锁外。
+        // 2026-10-16 修（语音对讲「点击录制就卡死」）：原实现**持锁调**
+        // waveInStop/Reset/Unprepare/Close —— waveInClose 需要驱动线程完成设备清理，
+        // 而驱动线程的 handleBuffer() 又在等这把锁 → 经典死锁：按住讲话松开
+        // （快速 start/stop 反复）时主线程卡死在 waveInClose，界面假死。
+        waveIn = m_waveIn;
+        m_waveIn = nullptr;
+        hdrForUnprepare = m_header;   // 拷走（m_header 马上清零，unprepare 用这把拷贝）
         m_header = {};
         m_buffer.clear();
+    }
+    // 锁已放：驱动线程此时可自由拿锁；handleBuffer() 判 !m_waveIn 会直接 return、
+    // 不再入队，不会触碰已关句柄。主线程锁外做设备回收，不再同锁互等。
+    if (waveIn) {
+        waveInStop(waveIn);
+        waveInReset(waveIn);
+        if (hdrForUnprepare.lpData) {
+            if (const MMRESULT r = waveInUnprepareHeader(waveIn, &hdrForUnprepare, sizeof(WAVEHDR));
+                r != MMSYSERR_NOERROR)
+                qWarning("[audio] waveInUnprepareHeader 失败：%s",
+                         waveErrText(r).toUtf8().constData());
+        }
+        if (const MMRESULT r = waveInClose(waveIn); r != MMSYSERR_NOERROR)
+            qWarning("[audio] waveInClose 失败：%s", waveErrText(r).toUtf8().constData());
     }
     qInfo("[audio] 🎤 麦克风已关（静音）");
 }
