@@ -51,12 +51,15 @@ Window {
         }
 
         // ── 一、注册表：模型派生 ──
-        ck("清单 4 条", reg.items.length === 4)
+        // 2026-10-16 U5：示例清单从 4 条扩到 6 条（加了两条 page 面的 sample-page-a/b）。
+        ck("清单 6 条", reg.items.length === 6)
         ck("声明全部合法（problems 空）", reg.problems.length === 0)
         ck("归一：notice 缺省 scope 变列表（agent-only-demo scope=[agent]）",
            reg.byId("agent-only-demo").scope.length === 1 && reg.byId("agent-only-demo").scope[0] === "agent")
         ck("viewer 可见面板 = 1（sample）",
            reg.panelItems().length === 1 && reg.panelItems()[0].id === "sample")
+        ck("viewer 可见页 = 2（sample-page-a/b）",
+           reg.navItems().length === 2 && reg.navItems()[0].id === "sample-page-a")
         ck("order 升序", reg.commandItems()[0].order <= reg.commandItems()[1].order)
 
         // ── 二、门控三态 ──
