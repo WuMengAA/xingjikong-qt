@@ -267,6 +267,13 @@ add_custom_command(TARGET viewer-qt POST_BUILD
           "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith"
   COMMAND "${CMAKE_COMMAND}" -E copy_directory
           "${STE_SHARED_ISLAND_DIR}" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/island"
+  # 2026-10-16（island 系统性升级 · C 档）：拷完立刻逐文件校验副本与真源一致。
+  # copy_directory 是「复制」语义 —— 产物里残留旧件、或有人手改副本，构建都**不会**报错，
+  # 但运行期跑的就是另一份岛（日志正常、界面不对，最难查）。不一致就让构建 FAIL。
+  COMMAND "${CMAKE_COMMAND}"
+          "-DSRC=${STE_SHARED_ISLAND_DIR}"
+          "-DDST=$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/island"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
   VERBATIM)
 
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg)
@@ -386,6 +393,15 @@ if(STE_IS_ANDROID)
     "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.js")
   qt_add_resources(viewer-qt "viewerqml" PREFIX "/" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
     FILES ${STE_VIEWER_QML_FILES})
+  # 2026-10-16（island 系统性升级 · C 档）：岛**不在**源 qml/ 树里（真源见
+  #   STE_SHARED_ISLAND_DIR），上面那个 GLOB 收不到它 ⇒ APK 首次安装（qml-live 尚未
+  #   建）时走 qrc 分支，InteractDialog 的 `import "island"` 解析失败。
+  #   单独挂一个资源组：PREFIX /island + BASE 真源目录 ⇒ 岛落在 qrc:/island/，
+  #   与相对导入 `import "island"` 的解析位置一致。
+  file(GLOB_RECURSE STE_SHARED_ISLAND_FILES CONFIGURE_DEPENDS
+    "${STE_SHARED_ISLAND_DIR}/*.qml")
+  qt_add_resources(viewer-qt "viewerisland" PREFIX "/island"
+    BASE "${STE_SHARED_ISLAND_DIR}" FILES ${STE_SHARED_ISLAND_FILES})
   # ② Android libdatachannel 静态链（mbedTLS 后端，路径与桌面 ldc_libs 平行）
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android")
     target_include_directories(viewer-qt PRIVATE
