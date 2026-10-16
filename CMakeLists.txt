@@ -235,5 +235,11 @@ add_custom_command(TARGET stelarith-agent-qt POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           "${STE_SHARED_ISLAND_DIR}"
           "$<TARGET_FILE_DIR:stelarith-agent-qt>/qml/island"
+  # 2026-10-16（island 系统性升级 · C 档）：拷完立刻逐文件校验副本与真源一致。
+  # copy_directory 不会因残留件/手改副本而报错，但运行期跑的就是另一份岛 ⇒ 不一致直接 FAIL。
+  COMMAND ${CMAKE_COMMAND}
+          "-DSRC=${STE_SHARED_ISLAND_DIR}"
+          "-DDST=$<TARGET_FILE_DIR:stelarith-agent-qt>/qml/island"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
   COMMENT "[agent] 拷贝 qml/ + 共享 island/ → 构建输出目录（灵动岛视觉层）")
 
