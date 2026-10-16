@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <QDebug>
 #include <cstring>
+#include <vector>
 
 // libdatachannel（仅本 .cpp 引入，头文件保持零依赖）
 #include "rtc/rtc.hpp"
@@ -115,6 +116,13 @@ void LdcStreamer::start(int captureMs)
         rtc::Description::Video media("screen", rtc::Description::Direction::SendOnly);
         media.addH264Codec(96);
         auto trk = pc->addTrack(media);
+        // H264RtpPacketizer（2026-10-16）：track->send(H264 帧) 自动打成 RTP
+        // （分片/seq/marker 全自动）；timestamp 在 sendH264Frame 每帧递增。
+        m_rtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(
+            42, "stelarith", 96, rtc::H264RtpPacketizer::ClockRate);
+        trk->setMediaHandler(std::make_shared<rtc::H264RtpPacketizer>(
+            rtc::NalUnit::Separator::StartSequence,
+            std::static_pointer_cast<rtc::RtpPacketizationConfig>(m_rtpCfg)));
         // 摄像头 track（"camera"）：与屏幕同一 PC，随首个 offer 一起协商（不额外 renegotiate）。
         // ⚠️ 只建轨、不推帧——摄像头帧要等管理端按需 startCamera() 才发（隐私红线：不看不采）。
         //    用不同 payload type（97）避免与屏幕轨的 96 在 SDP 里撞车。
@@ -149,7 +157,10 @@ void LdcStreamer::start(int captureMs)
         emit failed(QStringLiteral("start: %1").arg(QString::fromLocal8Bit(e.what())));
     }
 
-    if (m_active) m_capture.start(qMax(50, m_captureMs));
+    if (m_active) {
+        m_capture.start(qMax(50, m_captureMs));
+        startFfmpeg();        // 2026-10-16：起 ffmpeg libx264 编码器（屏幕 → H264）
+    }
 }
 
 void LdcStreamer::renegotiate()
@@ -177,6 +188,7 @@ void LdcStreamer::stop()
     if (!m_active && !m_pc) return;
     m_active = false;
     m_capture.stop();
+    stopFfmpeg();            // 2026-10-16：停 ffmpeg H264 编码器（先于 PC close）
     stopCamera();            // 先杀 ffmpeg 采集进程（否则推流停了它还占着摄像头）
     m_connected = false;
     if (m_pc) {
@@ -198,48 +210,154 @@ void LdcStreamer::stop()
     emit stateChanged(false);
 }
 
-// ── 抓屏 → JPEG → RTP 打包 → 发 track ──
-// 与官方 media-sender 示例同构：track->send 收 RTP 包（RtpHeader + 载荷）。
-// 约定载荷 = 完整 JPEG 帧（payload type 96，marker=1 单包成帧）；
-// H264 NAL 打包留给接线层精化（本组件验证通路优先）。
+// ── 抓屏 → ffmpeg 子进程编码（H264）→ H264RtpPacketizer→ track ──
+// 2026-10-16：屏幕轨从「手动 JPEG-over-RTP」改为「ffmpeg libx264 编码 + H264RtpPacketizer」。
+// 原因（实证）：track 的 media 声明了 addH264Codec(96)，若 track 实际发 JPEG 数据，
+// 接收端（H264RtpDepacketizer）解析必失败；且手动裸 RTP 不走 libdatachannel 分片。
+// 改用 libdatachannel 官方同构：track->setMediaHandler(H264RtpPacketizer)，
+// 抓屏帧经 ffmpeg 编码成 H264 NAL → track->send(帧) 自动 RTP 打包。
+// ffmpeg 复用被控端已有依赖（camera 也在用），libx264 软件编码跨机最稳（不挑 GPU）。
 void LdcStreamer::captureAndSend()
 {
     if (!m_active || !m_connected.load() || !m_pc) return;
-    QPixmap pm = m_screen ? m_screen->grabWindow(0) : QPixmap();
-    const QByteArray jpeg = encodeJpeg(pm);
-    if (jpeg.isEmpty()) return;
+    if (!m_ffmpeg || m_ffmpeg->state() != QProcess::Running) return;   // 编码器没起来就等
 
+    QPixmap pm = m_screen ? m_screen->grabWindow(0) : QPixmap();
+    if (pm.isNull()) return;
+    // 缩放到编码尺寸 → BGRA（QImage Format_RGB32 在 x86 小端内存 = B,G,R,A，与 ffmpeg -pix_fmt bgra 匹配）
+    const QImage img = pm.toImage().scaled(m_encW, m_encH, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+                          .convertToFormat(QImage::Format_RGB32);
+    if (img.isNull() || img.sizeInBytes() <= 0) return;
+    m_ffmpeg->write(reinterpret_cast<const char *>(img.bits()), img.sizeInBytes());
+}
+
+// ── ffmpeg 子进程 H264 编码器（屏幕轨）─────────────────────────────
+// ffmpeg 命令与 _probe/webrtc-cycle 验证一致：rawvideo bgra → libx264 → h264(Annex B) stdout。
+// zerolatency + ultrafast：低延迟（编码延迟 <100ms）；keyint 控制 IDR 间隔（新订阅者快速出画）。
+void LdcStreamer::startFfmpeg()
+{
+    if (m_ffmpeg) { delete m_ffmpeg; m_ffmpeg = nullptr; }
+    m_ffmpegBuf.clear();
+    m_ffmpeg = new QProcess(this);
+    m_ffmpeg->setProcessChannelMode(QProcess::SeparateChannels);
+    const QStringList args = {
+        QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"),
+        QStringLiteral("-f"), QStringLiteral("rawvideo"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("bgra"),
+        QStringLiteral("-s"), QStringLiteral("%1x%2").arg(m_encW).arg(m_encH),
+        QStringLiteral("-r"), QString::number(1000.0 / qMax(40, m_captureMs), 'f', 0),
+        QStringLiteral("-i"), QStringLiteral("pipe:0"),
+        QStringLiteral("-c:v"), QStringLiteral("libx264"),
+        QStringLiteral("-preset"), QStringLiteral("ultrafast"),
+        QStringLiteral("-tune"), QStringLiteral("zerolatency"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+        QStringLiteral("-x264-params"), QStringLiteral("keyint=60:min-keyint=60:scenecut=0"),
+        QStringLiteral("-f"), QStringLiteral("h264"),
+        QStringLiteral("pipe:1"),
+    };
+    // ffmpeg 定位：环境变量 > PATH（camera 用 ffmpegBin()，这里兜一层）
+    QString bin = qEnvironmentVariable("STELARITH_AGENT_FFMPEG");
+    if (bin.isEmpty()) bin = qEnvironmentVariable("STE_QT_FFMPEG");
+    if (bin.isEmpty()) bin = QStringLiteral("ffmpeg");
+    connect(m_ffmpeg, &QProcess::readyReadStandardOutput, this, &LdcStreamer::onFfmpegStdout);
+    m_ffmpeg->start(bin, args);
+    if (!m_ffmpeg->waitForStarted(5000)) {
+        qWarning("[rtc-ldc] FAIL ffmpeg 编码器启动失败（%s 不在/不可用），屏幕轨将无 H264",
+                 qPrintable(bin));
+        m_ffmpeg->deleteLater();
+        m_ffmpeg = nullptr;
+        return;
+    }
+    qInfo("[rtc-ldc] ffmpeg H264 编码器已启动（%dx%d，libx264）", m_encW, m_encH);
+}
+
+void LdcStreamer::stopFfmpeg()
+{
+    if (!m_ffmpeg) return;
+    QProcess *p = m_ffmpeg;
+    m_ffmpeg = nullptr;
+    m_ffmpegBuf.clear();
+    try {
+        if (p->state() == QProcess::Running) { p->closeWriteChannel(); p->terminate(); }
+        if (!p->waitForFinished(1500)) p->kill();
+    } catch (...) {}
+    p->deleteLater();
+}
+
+// 从 H264 流缓冲提取一个完整视频帧（SPS/PPS/SEI 前缀 + 一个 VCL NAL）；无完整帧返回空。
+// 只消费「有下一个 start code 保证完整」的 NAL；尾段不完整的留缓冲等 ffmpeg 补齐。
+namespace { // anonymous：本 TU 的帧切分工具
+inline int h264NalType(const QByteArray &acc, int start, int end)
+{
+    int k = start;
+    while (k + 3 < end && (uchar)acc[k] == 0 && (uchar)acc[k+1] == 0 && (uchar)acc[k+2] == 0 && (uchar)acc[k+3] == 1) k += 4;
+    while (k + 2 < end && (uchar)acc[k] == 0 && (uchar)acc[k+1] == 0 && (uchar)acc[k+2] == 1) k += 3;
+    while (k < end && (uchar)acc[k] == 0) ++k;
+    return (k < end) ? (((uchar)acc[k]) & 0x1F) : -1;
+}
+QByteArray takeNextH264Frame(QByteArray &acc)
+{
+    const int n = acc.size();
+    if (n < 8) return {};
+    // 收集 start codes（Annex B：00 00 01 / 00 00 00 01），末尾加哨兵 n
+    std::vector<int> sc;
+    int i = 0;
+    while (i + 2 < n) {
+        if (i + 3 < n && (uchar)acc[i] == 0 && (uchar)acc[i+1] == 0 && (uchar)acc[i+2] == 0 && (uchar)acc[i+3] == 1) { sc.push_back(i); i += 4; }
+        else if ((uchar)acc[i] == 0 && (uchar)acc[i+1] == 0 && (uchar)acc[i+2] == 1) { sc.push_back(i); i += 3; }
+        else ++i;
+    }
+    if (sc.empty()) return {};
+    sc.push_back(n);
+    for (size_t k = 0; k + 1 < sc.size(); ++k) {
+        const int end = sc[k + 1];
+        const bool nalComplete = (k + 2 < sc.size());   // 有下一个 start code = 本 NAL 数据完整
+        if (!nalComplete) break;                        // 尾段不完整，留缓冲
+        const int t = h264NalType(acc, sc[k], end);
+        if (t >= 1 && t <= 5) {                          // VCL → 一帧（含此前 SPS/PPS/SEI 前缀，前缀已在 acc 前部）
+            QByteArray frame = acc.left(end);
+            acc.remove(0, end);
+            return frame;
+        }
+        // 非 VCL（SPS/PPS/SEI/filler）→ 属于当前帧前缀，继续扫下一个 NAL
+    }
+    return {};
+}
+} // namespace
+
+void LdcStreamer::onFfmpegStdout()
+{
+    if (!m_ffmpeg) { m_ffmpegBuf.clear(); return; }
+    m_ffmpegBuf += m_ffmpeg->readAllStandardOutput();
+    while (!m_ffmpegBuf.isEmpty()) {
+        QByteArray frame = takeNextH264Frame(m_ffmpegBuf);
+        if (frame.isEmpty()) break;
+        sendH264Frame(frame);
+    }
+}
+
+void LdcStreamer::sendH264Frame(const QByteArray &frame)
+{
     rtc::Track *track = nullptr;
     {
         QMutexLocker lock(&m_mu);
         track = static_cast<rtc::Track *>(m_track);
     }
     if (!track) return;
-    // isOpen 在协商中可能抛/未就绪——包 try，未开就静默跳过（等下一帧）
     bool open = false;
     try { open = track->isOpen(); } catch (...) { open = false; }
     if (!open) return;
-
-    // 组 RTP 包：在缓冲上构造 RtpHeader（官方 media-sender 同款，不用栈对象——
-    // RtpHeader 含柔性数组 _csrc[]，栈对象按 getSize() 拷贝会越界，0xC0000005）
-    constexpr size_t kRtpHead = 12;   // 固定头 12B，无 csrc
-    QByteArray pkt;
-    pkt.resize(int(kRtpHead) + jpeg.size());
-    auto *rtp = reinterpret_cast<rtc::RtpHeader *>(pkt.data());
-    rtp->preparePacket();
-    rtp->setPayloadType(96);
-    rtp->setMarker(true);
-    rtp->setSsrc(42);
-    rtp->setSeqNumber(uint16_t(m_seq));
-    rtp->setTimestamp(uint32_t(m_seq) * 3000);   // 90kHz：每帧 1/30s
-    std::memcpy(pkt.data() + kRtpHead, jpeg.constData(), size_t(jpeg.size()));
-
+    // 更新 RTP timestamp（90kHz）：按实际帧间隔递增，接收端才能按帧重组
+    if (m_rtpCfg) {
+        auto *cfg = static_cast<rtc::RtpPacketizationConfig *>(m_rtpCfg.get());
+        cfg->timestamp += uint32_t(90000LL * qMax(40, m_captureMs) / 1000);
+    }
     try {
-        track->send(reinterpret_cast<const std::byte *>(pkt.constData()), size_t(pkt.size()));
+        track->send(reinterpret_cast<const std::byte *>(frame.constData()), size_t(frame.size()));
         ++m_seq;
         emit frameSent(m_seq);
     } catch (const std::exception &e) {
-        emit failed(QStringLiteral("track send: %1").arg(QString::fromLocal8Bit(e.what())));
+        emit failed(QStringLiteral("track send(H264): %1").arg(QString::fromLocal8Bit(e.what())));
     }
 }
 

@@ -69,8 +69,15 @@ signals:
 private:
     explicit LdcStreamer(QObject *parent = nullptr);
 
-    void captureAndSend();   // 抓一帧 → JPEG → 发 track
-    QByteArray encodeJpeg(const QPixmap &pm);
+    void captureAndSend();   // 抓一帧 → 写 ffmpeg 编码器 → 读 H264 → 发 track
+
+    // ── 屏幕轨 H264（2026-10-16：ffmpeg 子进程 libx264 + libdatachannel H264RtpPacketizer）──
+    void startFfmpeg();               // 启动 ffmpeg 编码器子进程（rawvideo→libx264→h264 stdout）
+    void stopFfmpeg();
+    void onFfmpegStdout();            // ffmpeg stdout → 切 H264 帧 → track->send
+    void sendH264Frame(const QByteArray &frame);
+
+    QByteArray encodeJpeg(const QPixmap &pm);   // 保留（camera/兼容路径备用）
 
     void onCamStdout();                       // ffmpeg stdout → 按 SOI/EOI 切帧 → 发 camera track
     void sendCameraFrame(const QByteArray &jpeg);
@@ -88,6 +95,11 @@ private:
     std::atomic<bool> m_connected{false};   // libdatachannel 回调线程写，主线程读
     int m_seq = 0;
     int m_captureMs = 200;
+    // ── H264 编码（2026-10-16）──
+    QProcess *m_ffmpeg = nullptr;       // ffmpeg 编码器子进程（屏幕 → H264 NAL）
+    QByteArray m_ffmpegBuf;             // H264 stdout 跨 readyRead 缓冲（半帧残留）
+    std::shared_ptr<void> m_rtpCfg;     // rtc::RtpPacketizationConfig*（screen 轨；timestamp 递增靠它）
+    int m_encW = 320, m_encH = 240;     // 编码尺寸（ffmpeg -s 固定；抓屏先 scale）
     // ── 摄像头第二轨（2026-10-12）──
     void *m_camTrack = nullptr;   // rtc::Track*（camera 轨；由 PC 持有）
     QProcess *m_camProc = nullptr;  // ffmpeg -f mjpeg pipe（连续采集）
