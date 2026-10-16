@@ -20,16 +20,32 @@ LdcReceiver::LdcReceiver(QObject *parent) : QObject(parent) {}
 void LdcReceiver::onSignal(const QString &type, const QByteArray &payload)
 {
     if (type == QLatin1String("offer")) {
-        // 已有 PC：二次 offer = 重协商，setRemoteDescription 到同一 PC 即可
+        // 已有 PC：判断它是否还活着。⚠️ 2026-10-16 修（真机实证）：老代码此时直接
+        // setRemoteDescription(新 offer) —— 被控端因**另一条 viewer 订阅**renegotiate
+        // 出的 offer 带新 ICE 参数（ice restart），叠到正在用的 PC 上抛
+        // 「renegotiate offer: Invalid ICE settings from remote SDP」→ PeerConnection Failed
+        // → 整条连接被搞挂。日志实锤：0.6.35 下 rtc-answer/ice ok=true 后仍 Failed。
         if (m_pc) {
             auto *pc = static_cast<rtc::PeerConnection *>(m_pc.get());
             try {
-                pc->setRemoteDescription(rtc::Description(payload.constData(), "offer"));
-                pc->setLocalDescription();
+                const auto cs = pc->state();
+                if (cs == rtc::PeerConnection::State::Failed || cs == rtc::PeerConnection::State::Closed) {
+                    // PC 已判死：新 offer 值得用来重建（别复用半死 PC）。
+                    const QByteArray sdp = payload;
+                    QTimer::singleShot(0, this, [this, sdp]() { createPc(sdp); });
+                    return;
+                }
+                // PC 还活着（连接中或已连）：这是重复 offer，我们这条已建立/建立中，
+                // 忽略——不动它，让现有 ICE 继续。
+                qInfo() << "[viewer-ldc] 已有活动 PC，忽略重复 offer（连接已建立）";
+                return;
             } catch (const std::exception &e) {
-                emit failed(QStringLiteral("renegotiate offer: %1").arg(QString::fromLocal8Bit(e.what())));
+                // 状态查询极端情况抛了 → 兜底重建
+                qWarning() << "[viewer-ldc] 查询 PC 状态异常，重建:" << e.what();
+                const QByteArray sdp = payload;
+                QTimer::singleShot(0, this, [this, sdp]() { createPc(sdp); });
+                return;
             }
-            return;
         }
         // ⚠️ 不能在发送方的信号发射栈内**同步**建 PC：发送方 PC 正在协商，
         // 此时新建第二个 PC 会并发触碰 libdatachannel 全局 Init（PollService 线程），
