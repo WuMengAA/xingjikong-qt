@@ -51,7 +51,8 @@
 - **U5（两端同 shell，用户裁决 A）· A-1/A-2/A-3 第一批全部完成**：
   - **A-1** 共享 `ui/UiPageHost.qml`(182，页无 open/close、全预建、ctx 转发 panelHost) + SamplePage + 页探针 28 断言。
   - **A-2** viewer 三页抽两页：`pages/SettingsPage.qml`(575，Main −542) + `pages/ControlPage.qml`(814，Main −781 ⇒ **Main.qml 现 1914 行**)。概览页未抽（362 行/root. 8 处）。**StackLayout 仍直接管三子项，UiPageHost 未接管**。
-  - **A-3 第一批**（control `2b30a7a`）：被控端 QML 控制面板——`src/agent_ui.h`(AgentUi+AgentShell) + `qml/shell/`(AgentShell 壳+AgentPages.js 声明+AgentSettingsPage 设置页=openInfoDialog 真实迁移) + 托盘「控制面板…」+ AUTOOPEN 验证开关。**真机已上线**（生产 exe 已换 + qml 全量同步，备份在；心跳/注册/帧流正常，面板加载 0 QML ERROR）。**剩余 4 页**（自检/插件市场/记录/播放时段）QDialog 并存待逐批迁；被控端页面规划=5 页。
+  - **A-3 第一批**（control `2b30a7a`）：被控端 QML 控制面板——`src/agent_ui.h`(AgentUi+AgentShell) + `qml/shell/`(AgentShell 壳+AgentPages.js 声明+AgentSettingsPage 设置页=openInfoDialog 真实迁移) + 托盘「控制面板…」+ AUTOOPEN 验证开关。**真机已上线**（生产 exe 已换 + qml 全量同步，备份 `.bak-pre-u5a3` 在）。
+  - **A-3 第二批（`a8b843e`，5 页全部就位）**：用户截图抓到**设置页全白**（Flickable 未设 `contentWidth` ⇒ contentItem 宽度塌陷 0 ⇒ **新纪律：Flickable 内容必须显式 `contentWidth: width`**）；随后自检/插件市场/记录/播放时段 4 页全部迁完（判据/文案逐字保留），多行编辑妥协用 QtQuick.Controls TextArea（md3/ 无多行输入件，待补 Md3TextArea）。真机 0 QML ERROR。
 - **island**：A 档（管理端跑共享 IslandRoot，IslandHost 几何真源未统一）+ C 档（qml-patch 并岛+MD5 门禁）完成；扩展组件 1–7 + 审批面板随 0.6.36 上线。
 - ⏸ 隔离验证 245 过/0 败 + HTTP 审批 17/17。挂起的都是真机类（考试模式内核闸门、#98 岛观感、terminal cd、file_push）。
 - 出包前须再 bump（0.6.37 已在本机，云端 0.6.36）。
