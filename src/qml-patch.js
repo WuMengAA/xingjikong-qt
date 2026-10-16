@@ -15,6 +15,7 @@
 // QML 文本也不大，store 足够；避免引第三方 zip 依赖。
 
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ASSETS_DIR } from './config.js';
@@ -22,13 +23,49 @@ import { ASSETS_DIR } from './config.js';
 /** 打包源：viewer-qt 的 qml/ 目录（与桌面热更同一棵树）。 */
 const QML_SRC = process.env.CLOUD_QML_SRC || 'D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-viewer-qt/qml';
 
+// 附加源：共享灵动岛。
+// ⚠️ 2026-10-16（抽共享目录后）：岛的**真源不在 viewer 源树里** —— 它被抽到了
+//    <repo-root>/Stelarith-shared-qml/island/，两端在 CMake POST_BUILD 各自拷贝。
+//    而 qml-patch 的打包源一直是 QML_SRC（viewer 源 qml/）⇒ 热更包里**没有岛**，
+//    于是 InteractDialog.qml 的 `import "island"` 在热更树上解析不到 ⇒
+//    手机端热更后打开审批面板失败（安装包/桌面不受影响，它们由 CMake 补拷）。
+//    并入时前缀统一映射为 "island/"，与桌面产物 qml/Stelarith/island/ 的相对结构一致。
+const ISLAND_SRC = process.env.CLOUD_ISLAND_SRC
+  || 'D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-shared-qml/island';
+const ISLAND_PREFIX = 'island/';
+
 const PATCH_DIR = join(ASSETS_DIR, 'qml-patch');
 const MANIFEST = join(PATCH_DIR, 'latest.json');
 
-/** 版本 = viewer-qt git HEAD 前 7 位；拿不到（无 .git）就用 qml 树 mtime 和。 */
+/** 共享岛目录的内容指纹（前 6 位 hex）。
+ *  ⚠️ 必须参与 version：岛不在 viewer 源树里 ⇒ 只取 viewer HEAD 的话，
+ *  「改了岛但 viewer 没提交」会让 version 不变，手机端判「已是最新」跳过下载
+ *  （viewerbackend.cpp: localVer == ver），新岛永远下发不出去。 */
+function islandHash() {
+  try {
+    if (!existsSync(ISLAND_SRC)) return '';
+    const h = createHash('md5');
+    const walk = (d) => {
+      for (const n of readdirSync(d).sort()) {
+        const p = join(d, n);
+        const s = statSync(p);
+        if (s.isDirectory()) walk(p);
+        else { h.update(n); h.update(readFileSync(p)); }
+      }
+    };
+    walk(ISLAND_SRC);
+    return h.digest('hex').slice(0, 6);
+  } catch { return ''; }
+}
+
+/** 版本 = viewer-qt git HEAD 前 7 位 + 共享岛内容指纹；
+ *  拿不到 .git（无版本控制的工作区）就用 qml 树 mtime 和。
+ *  手机端只做字符串比较，不解析该格式。 */
 function currentVersion() {
   const r = spawnSync('git', ['-C', 'D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-viewer-qt', 'rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8' });
-  if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
+  const ih = islandHash();
+  const suffix = ih ? '-' + ih : '';
+  if (r.status === 0 && r.stdout.trim()) return r.stdout.trim() + suffix;
   let sum = 0;
   const walk = (d) => {
     for (const n of readdirSync(d)) {
@@ -39,7 +76,7 @@ function currentVersion() {
     }
   };
   try { walk(QML_SRC); } catch { return 'unknown'; }
-  return 'm' + (sum % 0xffffffff).toString(16);
+  return 'm' + (sum % 0xffffffff).toString(16) + suffix;
 }
 
 /** store 模式 zip：本地文件头 + 中央目录 + EOCD（无压缩，CRC 算一下）。 */
@@ -52,14 +89,15 @@ function crc32(buf) {
   return ~c >>> 0;
 }
 
-/** 递归收集 qml 树文件（跳过非 qml/目录、隐藏文件）。 */
-function collectFiles(dir, out, base) {
+/** 递归收集 qml 树文件（跳过隐藏文件）。
+ *  prefix：给来自**另一个源根**的文件加路径前缀（共享岛统一挂到 island/ 下）。 */
+function collectFiles(dir, out, base, prefix = '') {
   for (const n of readdirSync(dir)) {
     if (n.startsWith('.')) continue;
     const p = join(dir, n);
     const s = statSync(p);
-    if (s.isDirectory()) collectFiles(p, out, base);
-    else out.push({ abs: p, rel: relative(base, p).split('\\').join('/') });
+    if (s.isDirectory()) collectFiles(p, out, base, prefix);
+    else out.push({ abs: p, rel: prefix + relative(base, p).split('\\').join('/') });
   }
 }
 
@@ -77,6 +115,8 @@ export function ensureQmlPatch() {
     }
     const files = [];
     collectFiles(QML_SRC, files, QML_SRC);
+    // 并入共享灵动岛（挂到 island/ 前缀下）—— 见 ISLAND_SRC 注释。
+    if (existsSync(ISLAND_SRC)) collectFiles(ISLAND_SRC, files, ISLAND_SRC, ISLAND_PREFIX);
     const chunks = [];
     const central = [];
     let offset = 0;
