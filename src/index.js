@@ -249,6 +249,17 @@ const server = http.createServer((req, res) => {
     res.end(body);
   };
 
+  // 录制根目录（⚠️ 2026-10-16 从下方的录音上传分支**上移**至此）。
+  // 原因：静态托管（下方数行）/ 录音上传 / 录音列表 三处必须共用同一目录真源；
+  // 而 `const` 存在 TDZ，若定义在下面，静态托管处引用它会抛 ReferenceError。
+  // ⚠️ 2026-10-09 加 env 覆盖：默认 <cloud-ws>/recordings。
+  // 教训（10-08 实测）：隔离实例（起另一个端口测试）没隔离本目录，
+  // 测试上传的 mp4 落进了**生产** recordings/（testcam01/prodtest01），
+  // 事后手工清理。测试必须设 CLOUD_RECORDINGS_DIR 指到临时目录。
+  const RECORDINGS_ROOT = process.env.CLOUD_RECORDINGS_DIR
+      ? resolve(process.env.CLOUD_RECORDINGS_DIR)
+      : join(__dirname, '..', 'recordings');
+
   // /recordings/* 静态托管（2026-10-07 · 班级监控回放）：录制 mp4 只读下载/播放。
   // 与管理面鉴权同位置（在鉴权之前）——管理端播放器直接拉 mp4，不带令牌；
   // 文件本身已在 /api/recordings 列表里由管理端令牌保护（列表不可见=URL 不可知）。
@@ -268,7 +279,10 @@ const server = http.createServer((req, res) => {
     if (!/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.mp4$/.test(rel)) {
       return send(404, { ok: false, error: '路径不合法' });
     }
-    const file = join(__dirname, '..', 'recordings', rel);
+    // ⚠️ 2026-10-16 修复：原为硬编码 join(__dirname, '..', 'recordings', rel)，
+    //    与 RECORDINGS_ROOT（env CLOUD_RECORDINGS_DIR 可覆盖）不是同一目录 ⇒
+    //    设了该 env 后，录像「能上传、能在列表里看到、却点开 404」。
+    const file = join(RECORDINGS_ROOT, rel);
     if (!existsSync(file)) return send(404, { ok: false, error: '录制不存在' });
     const st = statSync(file);
     const fname = asciiHeaderName(file.split(/[\\/]/).pop());
@@ -613,13 +627,8 @@ const server = http.createServer((req, res) => {
   // 录制 = 被控端 ffmpeg DirectShow 本地录制（既有 camera_record_*）→ record_stop 后
   // 上传到云端 recordings/<uid>/<时间戳>.mp4 → 管理端列表 + 直接播放（HTTP 托管，第一版不切 HLS）。
   // 上传鉴权 = 设备令牌（DEV_TOKEN 或 agent ticket）；列表鉴权 = 管理端令牌。
-  // 录制根目录。⚠️ 2026-10-09 加 env 覆盖：默认 <cloud-ws>/recordings。
-  // 教训（10-08 实测）：隔离实例（起另一个端口测试）没隔离本目录，
-  // 测试上传的 mp4 落进了**生产** recordings/（testcam01/prodtest01），
-  // 事后手工清理。测试必须设 CLOUD_RECORDINGS_DIR 指到临时目录。
-  const RECORDINGS_ROOT = process.env.CLOUD_RECORDINGS_DIR
-      ? resolve(process.env.CLOUD_RECORDINGS_DIR)
-      : join(__dirname, '..', 'recordings');
+  // RECORDINGS_ROOT 已在文件上方（/recordings/* 静态托管之前）定义 ——
+  // 上传 / 列表 / 静态托管 三处共用同一目录真源（2026-10-16 修 TDZ + 目录不一致）。
   // ⚠️ 2026-10-13 三端审计修复：上传此前只有**下限**（<1KB 拒绝）、**没有上限** ——
   //    持设备令牌者可发无限大 body，chunks 全攒在内存里 ⇒ 直接把云端 OOM 掉。
   //    默认 300MB（与 OTA 护栏同量级），可用 env 覆盖。
