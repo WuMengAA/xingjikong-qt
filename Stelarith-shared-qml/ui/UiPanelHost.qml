@@ -22,6 +22,12 @@ Item {
     property var registry                    // UiRegistry 实例
     property var theme                       // 设计令牌（Md3 实例），透传给 entry
     property string scope: "viewer"
+    // 主窗口引用，作为 ctx.window 透传给 entry。
+    // ⚠️ 存在的理由：面板从 Main.qml 抽出成独立文件后，就没法再靠 id 直接够到主窗口了
+    //   （抽出前它们用 `root.xxx`）。实测这些引用面很小且可枚举（th / isPhone / toast /
+    //   refreshIsland / page / backendRef / broadcastAll / changelogModel），
+    //   统一走 ctx.window 比逐个改写成 ctx.xxx 更省事、也不会漏。
+    property var window: null
     // entry 相对此目录解析。默认＝本文件所在目录（共享 ui 目录），
     // copy_directory 保留目录树 ⇒ 源码树与构建产物里的解析结果一致。
     property url entryBase: Qt.resolvedUrl(".")
@@ -44,11 +50,13 @@ Item {
     function _ctx() {
         return {
             theme: theme,
+            window: window,
             registry: registry,
             host: host,
             scope: scope,
             open: function (id, args) { return host.open(id, args) },
-            close: function () { return host.closeAll() }
+            close: function () { return host.closeAll() },
+            closePanels: function () { return host.closeAll() }
         }
     }
 
@@ -93,6 +101,16 @@ Item {
     }
 
     function toggle(id, args) { return _currentId === id ? closeAll() : open(id, args) }
+
+    /**
+     * 取某面板的实例（没有就按需建）。给"先把数据灌进面板、再打开"的既有路径用 ——
+     * 例如收到 process_list 回执时先 item("software").items = ... 然后 open("software")。
+     * 与 open() 共用同一份缓存 ⇒ 不会出现两个实例。
+     */
+    function item(id) { return _item(id) }
+
+    /** 某面板当前是否开着（不创建实例）。 */
+    function isOpen(id) { return _currentId === id }
 
     function closeAll() {
         var had = _currentId

@@ -59,7 +59,12 @@ var FIELDS = [
 
 // 宿主注入给 entry（panel/page）的上下文对象字段。
 // entry 里声明 `property var ctx` 即可拿到；声明 `property var args` 收 open(id, args) 的载荷。
-var CTX_FIELDS = ["theme", "registry", "host", "scope", "open", "close"];
+//   window      主窗口（面板从大文件抽出后，靠它够到原来的 `root.xxx`）
+//   theme       设计令牌
+//   registry/host/scope  注册表、宿主、本端
+//   open/close  跨面板跳转 / 关掉当前面板
+//   closePanels 把面板全部关掉（原来直接调另一个面板的 close()，抽出后做不到）
+var CTX_FIELDS = ["window", "theme", "registry", "host", "scope", "open", "close", "closePanels"];
 
 // entry 必须实现的接口（宿主调用的只有这两个，外加可选的 openWith）
 var ENTRY_API = ["open", "close"];
