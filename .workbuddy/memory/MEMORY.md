@@ -75,3 +75,15 @@
 - ⚠️ QML 匿名类名（`_QML_21`）同代码不同跑次也会变 ⇒ 基线比对先剥序号；探针参数「看着该生效」先验它真生效（--actions 实测没注入动作）。
 - ⚠️ 测量方法自身的错会污染判断：划范围看缩进层级+闭合标记（粗量把页外算进依赖）；`uniq -c -f1` 在"行号:匹配"上不生效。
 - ⚠️ **门禁正则剥注释再匹配**（`/kMinContentW/` 会命中说明该缺口的注释 ⇒ 假红）。
+- ⚠️⚠️ **截图/几何取证必须声明 DPI 感知**（2026-10-16 实测，最贵的坑）：未 `SetProcessDpiAwareness(2)` 时
+  `GetWindowRect`/`PrintWindow` 返回**虚拟化（逻辑）坐标**；本机屏幕物理 2560×1440(150%)、窗口物理 1342×1016，
+  却只抓到左上 895×677 ⇒ **右侧一列 + 底部一条永远在截图外**，被误判成"渲染器不画/界面少东西"。
+  判据：用彩条标尺（每段 80 逻辑在截图里若量到 120px 即缩放 1.5）。`_probe/_*.py` 三个脚本已加 DPI 声明。
+- ⚠️ **普通 `Item` 的 `height` 不跟随 `implicitHeight`**（只有 Image/Text 那类才有此默认绑定）
+  ⇒ `Md3NavBar{implicitHeight:80}` 不写 `height` 就落成 0、整条导航不可见（真机实证）。
+- ⚠️ **契约默认值是"对一半人正确"的陷阱**：`UiContract.js:60` 的 `scope` 默认 `["viewer"]`
+  ⇒ 被控端声明漏写 scope 就被全过滤（页+导航一起消失，零错误零日志）。agent 端声明**必须显式写**，
+  门禁 `test-manifest-scope.mjs` 盯着。
+- ⚠️ **被控端部署不含 QtQuick Controls**（exe 旁无 `Qt6QuickControls2.dll`）⇒ 被控端 qml/ 下**只能用
+  QtQuick 基础类型**（`ScrollBar`/`TextArea` 等一律加载失败，症状是 `entry 解析失败`）；
+  门禁 `test-agent-qml-deps.mjs`（import 白名单 + 40 类型黑名单）。viewer 侧有该模块，故两端不同。
