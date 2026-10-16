@@ -262,6 +262,20 @@ if(NOT EXISTS "${STE_SHARED_ISLAND_DIR}/IslandRoot.qml")
     "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
 endif()
 
+# 2026-10-16（U1 共享 UI 基座 · 用户点单「插件化思维，统一界面结构」）：
+#   Md3 设计系统（Md3.qml 令牌 + md3/ 12 组件）此前在两端**各存一份逐字副本**
+#   （13 件，仅 Md3Dialog 差一行 import "."）—— 正是「改一处不生效」的病灶。
+#   真源收到根仓库 Stelarith-shared-qml/ui/，构建期拷回 qml/Stelarith/components/。
+#   ⚠️ 落点必须与既有相对导入逐字对齐（本工程用 `import "components"` 与
+#   `import "../components/md3"`）⇒ 消费方 QML **零改动**，与岛同一套路。
+set(STE_SHARED_UI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/ui")
+if(NOT EXISTS "${STE_SHARED_UI_DIR}/Md3.qml")
+  message(FATAL_ERROR
+    "[viewer] 共享 UI 基座目录缺失：${STE_SHARED_UI_DIR}\n"
+    "  Md3 设计系统真源在 Stelarith-shared-qml/ui/（两端共用）。\n"
+    "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
+endif()
+
 add_custom_command(TARGET viewer-qt POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E copy_directory
           "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith"
@@ -273,6 +287,18 @@ add_custom_command(TARGET viewer-qt POST_BUILD
   COMMAND "${CMAKE_COMMAND}"
           "-DSRC=${STE_SHARED_ISLAND_DIR}"
           "-DDST=$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/island"
+          "-DLABEL=island"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
+  # 共享 UI 基座落回 components/（Md3.qml + md3/），消费方相对导入逐字不变。
+  # ⚠️ 用 SUBSET 模式：components/ 与各端自有组件**混放**（Btn/Card/AccountMenu…），
+  #    那里多出来的件是本工程自己的，不是残留 —— 严格双向会误报。
+  COMMAND "${CMAKE_COMMAND}" -E copy_directory
+          "${STE_SHARED_UI_DIR}" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/components"
+  COMMAND "${CMAKE_COMMAND}"
+          "-DSRC=${STE_SHARED_UI_DIR}"
+          "-DDST=$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/components"
+          "-DLABEL=ui"
+          "-DSUBSET=ON"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
   VERBATIM)
 
@@ -402,6 +428,14 @@ if(STE_IS_ANDROID)
     "${STE_SHARED_ISLAND_DIR}/*.qml")
   qt_add_resources(viewer-qt "viewerisland" PREFIX "/island"
     BASE "${STE_SHARED_ISLAND_DIR}" FILES ${STE_SHARED_ISLAND_FILES})
+  # 2026-10-16（U1）：Md3 基座同理**不在**源 qml/ 树里 ⇒ 上面那个 GLOB 收不到它。
+  #   Main.qml 在 qrc:/Main.qml 上做 `import "components"`，解析到 qrc:/components/，
+  #   故资源组 PREFIX /components + BASE 共享 ui 目录 ⇒ Md3.qml 落 qrc:/components/Md3.qml、
+  #   md3/* 落 qrc:/components/md3/*，与相对导入位置一致。
+  file(GLOB_RECURSE STE_SHARED_UI_FILES CONFIGURE_DEPENDS
+    "${STE_SHARED_UI_DIR}/*.qml")
+  qt_add_resources(viewer-qt "viewerui" PREFIX "/components"
+    BASE "${STE_SHARED_UI_DIR}" FILES ${STE_SHARED_UI_FILES})
   # ② Android libdatachannel 静态链（mbedTLS 后端，路径与桌面 ldc_libs 平行）
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android")
     target_include_directories(viewer-qt PRIVATE
