@@ -26,6 +26,7 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class QTimer;
 class ViewerBackend;
 
 class InteractBridge : public QObject
@@ -87,12 +88,17 @@ public:
     QString severity() const { return QString(); }
     bool light() const { return m_light; }
     void setLight(bool v) { if (m_light == v) return; m_light = v; emit changed(); }
-    bool idle() const { return m_title.isEmpty(); }
+    // idle：无通知、无状态 ⇒ 岛彻底消失（对齐被控端 IslandBridge::idle 语义）。
+    // ⚠️ 2026-10-16 主界面接入：原来只看 m_title，管理端多设备状态走 states
+    //   ⇒ 必须一并判空，否则"有状态但没通知"时岛会误判为空而不显示。
+    bool idle() const { return m_title.isEmpty() && m_states.isEmpty(); }
     bool expanded() const { return m_expanded; }
     void setExpanded(bool v) { if (m_expanded == v) return; m_expanded = v; emit changed(); }
-    bool interactive() const { return false; }
+    // 管理端主界面接入后岛是**可交互**的（点击展开/收起）；审批面板预览仍设 false。
+    bool interactive() const { return m_interactive; }
+    void setInteractive(bool v) { if (m_interactive == v) return; m_interactive = v; emit changed(); }
     QVariantList actions() const { return {}; }
-    QVariantList states() const { return {}; }
+    QVariantList states() const { return m_states; }
     QString whaleBubble() const { return QString(); }
     bool whaleAudioOn() const { return false; }
     QVariantList history() const { return {}; }
@@ -111,8 +117,19 @@ public:
     QString mediaPhase() const { return m_mediaPhase; }
     int blessingCooldownSec() const { return 0; }
 
-    // ── 岛桥面：QML → C++（管理端预览场景不会被点到，最小实现）─────
+    // ── 岛桥面：QML → C++ ─────────────────────────────────────
+    // 管理端主界面接入后，以下不再只是"预览空实现"：
     Q_INVOKABLE void fireAction(const QString &) {}
+    // 管理端把主界面的多设备状态表喂进来（[{k,t,d,p}]，与被控端同结构）。
+    Q_INVOKABLE void setIslandStates(const QVariantList &s) {
+        if (m_states == s) return;
+        m_states = s;
+        emit changed();
+    }
+    // 瞬态提示（对齐被控端岛的统一通知入口）：title/desc/icon + 毫秒后自动收起。
+    // 管理端 Main.qml 的 onIslandNote 走这里（原来调 DynamicIsland.showNote）。
+    Q_INVOKABLE void showNote(const QString &title, const QString &desc,
+                              const QString &icon, int ms);
     Q_INVOKABLE void requestExpand(bool on) { setExpanded(on); }
     Q_INVOKABLE void showHistoryItem(int) {}
     Q_INVOKABLE void clearHistory() {}
@@ -169,6 +186,9 @@ private:
     QString m_title, m_desc, m_icon;
     bool    m_light = false;
     bool    m_expanded = true;      // 预览默认展开（面板里就是要看展开态）
+    QVariantList m_states;          // 管理端多设备状态（主界面喂入）
+    bool    m_interactive = false;  // 主界面接入时置 true
+    QTimer *m_noteTimer = nullptr;  // showNote 的自动收起
     bool    m_mediaActive = false;
     bool    m_mediaPresenting = false;
     QString m_mediaTitle;

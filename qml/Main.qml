@@ -2888,13 +2888,26 @@ ApplicationWindow {
             // 掉线是教室里最高频的异常，之前灵动岛对它是瞎的。
             function onDevicesChanged() { root.refreshIsland() }
             // 云端状态通知（断线重连 / 指令执行完成）统一走灵动岛，不再弹系统托盘气泡
-            function onIslandNote(title, desc, icon) { island.showNote(title, desc, icon, 3000) }
+            function onIslandNote(title, desc, icon) { bridge.showNote(title, desc, icon, 3000) }
         }
         // 启动时没有任何输入进来，灵动岛从来没被刷过一次（一直是空的）。
         // 这里补一次：空的也得是"真的空"。
-        Component.onCompleted: root.refreshIsland()
+        Component.onCompleted: {
+            // 主界面接入：岛从此**可交互**（点击展开/收起）；审批面板预览态才设 false。
+            bridge.setInteractive(true)
+            bridge.setDark(root.darkMode)
+            root.refreshIsland()
+        }
+        // 深浅跟随：岛的色彩族来自共享 IslandTheme，light 由桥转达（岛读的是 bridge.light）。
+        Connections {
+            target: root
+            function onDarkModeChanged() { bridge.setDark(root.darkMode) }
+        }
 
-        DynamicIsland { id: island; theme: root.th; states: root.islandStates }
+        // 2026-10-16（island 系统性升级）：管理端主界面**直接跑被控端同一份岛**。
+        // 原 DynamicIsland（管理端自有实现，287 行）及其 4 个自有部件已退役 ——
+        // 两颗岛的开合 / 配色 / 几何从此一处定义（用户裁决：「直接用被控端那一颗」）。
+        IslandHost { id: island }
     }
 
     // 批量的超时兜底（见 batchTimeoutClose）。放窗口层：跟老师在哪个标签页无关。
@@ -3221,7 +3234,7 @@ ApplicationWindow {
     //    广播发出去了、一句回话没有，看着跟"点了没反应"一模一样（4.6 点名的头号体验杀手）。
     // 一律走 root.toast()；集控页那颗旧的保留（它贴着卡片、就在手边，换掉反而别扭）。
     function toast(s) {
-        island.showNote(s, "", "bell", 3000)
+        bridge.showNote(s, "", "bell", 3000)
     }
 
     // 灵动岛：把"正在进行 / 需要处理"的事聚成一条（3.8）。
@@ -3266,6 +3279,9 @@ ApplicationWindow {
                      p: -1 })
 
         islandStates = s
+        // 喂给桥 —— 管理端的岛是共享 IslandRoot，它读的是 bridge.states，不是 QML 属性。
+        // 这里是状态聚合的**唯一出口**：算完立刻同步给岛。
+        bridge.setIslandStates(s)
     }
 
     // 设备表里"没在线"的那几台（online === false 才算离线；字段缺失按在线）。

@@ -16,15 +16,36 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDebug>
+#include <QTimer>
 
 InteractBridge::InteractBridge(ViewerBackend *backend, QObject *parent)
     : QObject(parent), m_backend(backend)
 {
     m_nam = new QNetworkAccessManager(this);
+    // 瞬态提示的自动收起（惰性建一次）
+    m_noteTimer = new QTimer(this);
+    m_noteTimer->setSingleShot(true);
+    connect(m_noteTimer, &QTimer::timeout, this, [this] {
+        m_title.clear(); m_desc.clear(); m_icon.clear();
+        emit changed();
+    });
 }
 
 // 管理端主题 → 岛深浅。岛里 light=true 是浅色，管理端 dark 与之相反。
 void InteractBridge::setDark(bool dark) { setLight(!dark); }
+
+// 瞬态提示：写 title/desc/icon → 岛按通知态呈现 → ms 后自动清回 idle。
+// ⚠️ 与 preview() 共用同一组字段（m_title/m_desc/m_icon）：任一时刻只有
+//   「主界面提示」或「面板预览」其中之一在驱动岛，不必分两套。
+void InteractBridge::showNote(const QString &title, const QString &desc,
+                              const QString &icon, int ms)
+{
+    m_title = title;
+    m_desc  = desc;
+    m_icon  = icon.isEmpty() ? QStringLiteral("bell") : icon;
+    emit changed();
+    if (m_noteTimer) m_noteTimer->start(ms > 0 ? ms : 3000);
+}
 
 void InteractBridge::setFilterState(const QString &s)
 {
