@@ -175,8 +175,15 @@ void LdcReceiver::stop()
 // ffmpeg 定位：viewer 安装目录 ffmpeg.exe（出包附带）> STE_VIEWER_FFMPEG > PATH。
 void LdcReceiver::startDecoder()
 {
-    if (m_ffmpegDec) return;
+    if (m_ffmpegDec || m_useMf) return;
     m_decBuf.clear();
+    // ① 主方案：ffmpeg 子进程（沙箱已验证）。ffmpeg 212MB 全量版不打进安装包；
+    //    安装目录 / STE_VIEWER_FFMPEG / PATH 有就用（老师机可自行装）。
+    QString bin = QCoreApplication::applicationDirPath() + QStringLiteral("/ffmpeg.exe");
+    if (!QFileInfo::exists(bin)) {
+        bin = qEnvironmentVariable("STE_VIEWER_FFMPEG");
+        if (bin.isEmpty()) bin = QStringLiteral("ffmpeg");   // PATH
+    }
     m_ffmpegDec = new QProcess(this);
     m_ffmpegDec->setProcessChannelMode(QProcess::SeparateChannels);
     const QStringList args = {
@@ -188,17 +195,15 @@ void LdcReceiver::startDecoder()
         QStringLiteral("-r"), QStringLiteral("10"),
         QStringLiteral("pipe:1"),
     };
-    QString bin = QCoreApplication::applicationDirPath() + QStringLiteral("/ffmpeg.exe");
-    if (!QFileInfo::exists(bin)) {
-        bin = qEnvironmentVariable("STE_VIEWER_FFMPEG");
-        if (bin.isEmpty()) bin = QStringLiteral("ffmpeg");
-    }
     connect(m_ffmpegDec, &QProcess::readyReadStandardOutput, this, &LdcReceiver::onDecStdout);
     m_ffmpegDec->start(bin, args);
     if (!m_ffmpegDec->waitForStarted(5000)) {
-        qWarning("[receiver] FAIL ffmpeg 解码器启动失败（%s），屏幕轨将无画面", qPrintable(bin));
+        // ② 备选：MF 兜底（零依赖）。真机验证（沙箱 MF 不可靠，见 mfx_h264_decode.h）
+        qWarning("[receiver] ffmpeg 解码器不可用（%s）→ 走 MF 兜底", qPrintable(bin));
         m_ffmpegDec->deleteLater();
         m_ffmpegDec = nullptr;
+        m_useMf = m_mfDec.init(m_decW, m_decH);
+        if (!m_useMf) { qWarning("[receiver] MF 兜底也失败，屏幕轨将无 H264 画面"); }
         return;
     }
     qDebug() << "[receiver] ffmpeg H264 解码器已启动:" << bin;
@@ -206,21 +211,30 @@ void LdcReceiver::startDecoder()
 
 void LdcReceiver::stopDecoder()
 {
-    if (!m_ffmpegDec) return;
-    QProcess *p = m_ffmpegDec;
-    m_ffmpegDec = nullptr;
-    m_decBuf.clear();
-    try {
-        if (p->state() == QProcess::Running) { p->closeWriteChannel(); p->terminate(); }
-        if (!p->waitForFinished(1500)) p->kill();
-    } catch (...) {}
-    p->deleteLater();
+    if (m_ffmpegDec) {
+        QProcess *p = m_ffmpegDec;
+        m_ffmpegDec = nullptr;
+        m_decBuf.clear();
+        try {
+            if (p->state() == QProcess::Running) { p->closeWriteChannel(); p->terminate(); }
+            if (!p->waitForFinished(1500)) p->kill();
+        } catch (...) {}
+        p->deleteLater();
+    }
+    m_mfDec.shutdown();
+    m_useMf = false;
 }
 
 void LdcReceiver::feedDecoder(const QByteArray &h264)
 {
-    if (!m_ffmpegDec || m_ffmpegDec->state() != QProcess::Running) return;
-    m_ffmpegDec->write(h264);
+    if (m_ffmpegDec && m_ffmpegDec->state() == QProcess::Running) {
+        m_ffmpegDec->write(h264);
+        return;
+    }
+    if (m_useMf) {
+        QImage img;
+        if (m_mfDec.decodeFrame(h264, img)) emit frameReady(img);
+    }
 }
 
 void LdcReceiver::onDecStdout()

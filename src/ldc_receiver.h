@@ -21,6 +21,7 @@
 #include <QProcess>
 #include <memory>
 #include <atomic>
+#include "mfx_h264_decode.h"
 
 class LdcReceiver : public QObject {
     Q_OBJECT
@@ -62,8 +63,10 @@ private:
     void *m_track = nullptr;      // rtc::Track*（screen 轨）
     void *m_camTrack = nullptr;   // rtc::Track*（camera 轨，2026-10-12 四·双画面）
     std::atomic<bool> m_connected{false};   // 回调线程写，主线程读
-    // ── H264 解码（ffmpeg 子进程）──
-    QProcess *m_ffmpegDec = nullptr;   // ffmpeg -f h264 → rawvideo bgr24
+    // ── H264 解码 ──
+    QProcess *m_ffmpegDec = nullptr;   // 主方案：ffmpeg -f h264 → rawvideo bgr24
     QByteArray m_decBuf;               // bgr24 输出缓冲（跨 readyRead 的半帧残留）
     int m_decW = 320, m_decH = 240;    // 解码输出尺寸（与被控端编码固定 320x240 一致）
+    MfxH264Decoder m_mfDec;            // 备选：MF 兜底（老师机没 ffmpeg 时）
+    bool m_useMf = false;              // true = 走 MF 兜底通道
 };

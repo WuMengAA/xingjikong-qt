@@ -200,6 +200,9 @@ qt_add_executable(viewer-qt
   # ── WebRTC 收流（2026-10-09：libdatachannel 替换 QWebEngine 离屏，探针全绿）──
   src/ldc_receiver.cpp
   src/ldc_receiver.h
+  # ── H264 MF 解码兜底（2026-10-16：viewer 无 ffmpeg 时的备选解码通道）──
+  src/mfx_h264_decode.cpp
+  src/mfx_h264_decode.h
   # ── WebRTC ldc 桥接（2026-10-09：独立编译单元，viewerbackend.cpp 大文件不膨胀）──
   src/ldc_rtc_bridge.cpp
   src/ldc_rtc_bridge.h
