@@ -60,6 +60,8 @@ class AgentUi : public QObject
     // ── A-3 第二批：自检 / 插件市场 / 记录 / 播放时段 ──
     Q_PROPERTY(QVariantList selfCheckItems READ selfCheckItems NOTIFY infoChanged)
     Q_PROPERTY(QVariantList plugins        READ plugins        NOTIFY infoChanged)
+    // ── 内置模块层（2026-10-16「模块化插件」）：编译进 agent 的官方模块，可启停不可卸载 ──
+    Q_PROPERTY(QVariantList modules        READ modules        NOTIFY infoChanged)
     Q_PROPERTY(QString      noiseLogText   READ noiseLogText   NOTIFY infoChanged)
     Q_PROPERTY(QString      studyLogText   READ studyLogText   NOTIFY infoChanged)
     Q_PROPERTY(bool         playScheduleEnabled READ playScheduleEnabled WRITE setPlayScheduleEnabled NOTIFY infoChanged)
@@ -102,6 +104,7 @@ public:
     bool desktopShortcut() const { return m_desktopShortcut; }
     QVariantList selfCheckItems() const { return m_selfCheckItems; }
     QVariantList plugins() const { return m_plugins; }
+    QVariantList modules() const { return m_modules; }
     QString noiseLogText() const { return m_noiseLogText; }
     QString studyLogText() const { return m_studyLogText; }
     bool playScheduleEnabled() const { return m_playScheduleEnabled; }
@@ -139,6 +142,9 @@ public slots:
     void pluginEnable(const QString &id, bool enable) { emit pluginEnableRequested(id, enable); }
     void pluginUninstall(const QString &id) { emit pluginUninstallRequested(id); }
     void pluginInstallSample() { emit pluginSampleInstallRequested(); }
+    // ── 内置模块层 ──
+    void modulesRefresh() { emit modulesRefreshRequested(); }
+    void moduleEnable(const QString &id, bool enable) { emit moduleEnableRequested(id, enable); }
     void openNoiseFolder() { emit noiseFolderRequested(); }
     void openStudyFolder() { emit studyFolderRequested(); }
     void savePlaySchedule() { emit playScheduleSaveRequested(); }
@@ -159,6 +165,9 @@ signals:
     void pluginEnableRequested(const QString &id, bool enable);
     void pluginUninstallRequested(const QString &id);
     void pluginSampleInstallRequested();
+    // ── 内置模块层 ──
+    void modulesRefreshRequested();
+    void moduleEnableRequested(const QString &id, bool enable);
     void noiseFolderRequested();
     void studyFolderRequested();
     void playScheduleSaveRequested();
@@ -170,7 +179,7 @@ private:
     bool m_notifyEnabled = true, m_voiceEnabled = true, m_noiseEnabled = true;
     bool m_islandIdle = true, m_lightMode = false, m_autostart = false, m_desktopShortcut = false;
     // ── A-3 第二批 ──
-    QVariantList m_selfCheckItems, m_plugins;
+    QVariantList m_selfCheckItems, m_plugins, m_modules;
     QString m_noiseLogText, m_studyLogText, m_playWindowsText, m_playStateText;
     bool m_playScheduleEnabled = false;
 };

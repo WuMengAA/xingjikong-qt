@@ -104,6 +104,13 @@ add_executable(stelarith-agent-qt
   # ── 插件宿主（P2 · 2026-10-14：进程外插件 ABI）──
   src/plugin/pluginhost.cpp
   src/plugin/pluginhost.h
+  # ── 内置模块层（2026-10-16「模块化插件」）：编译进 agent 的官方模块
+  #    （U盘 / VoiceHub 联动 / 灵动岛多界面…），与进程外插件共用形状与门控。
+  #    ⚠️ AUTOMOC：含 Q_OBJECT 的头**必须显式列入**，否则不生成 moc 产物 ⇒ LNK2001。
+  src/modules/modulehost.cpp
+  src/modules/modulehost.h
+  src/modules/usbmodule.cpp
+  src/modules/usbmodule.h
   src/schedule/profile.h
   # ── 远程终端（2026-10-06 加：REPL 命令行，需确认 + 单会话）──
   src/terminal_console.cpp

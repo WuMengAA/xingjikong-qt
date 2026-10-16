@@ -104,6 +104,8 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include "plugin/pluginhost.h"   // P2：插件宿主（进程外插件 ABI）
+#include "modules/modulehost.h"  // 2026-10-16：内置模块层（编译进 agent 的官方模块，与进程外插件共用门控）
+#include "modules/usbmodule.h"
 #include <QMessageBox>         // P2：插件市场对话框
 #include <QListWidget>         // P2：插件市场列表
 #include <QUrlQuery>
@@ -3882,6 +3884,7 @@ static void sendNoiseSample(const QJsonObject &p)
     if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
     g_ws->sendTextMessage(makeEnvelope(QStringLiteral("noise_sample"), p));
     if (g_pluginHost) g_pluginHost->forwardEvent(QStringLiteral("noise_sample"), p);   // P2：转发给订阅插件
+    ModuleHost::instance()->forwardEvent(QStringLiteral("noise_sample"), p);           // 内置模块：同事件同口径
 }
 static void sendNoiseAlert(const QJsonObject &p)
 {
@@ -4096,6 +4099,19 @@ static void stopMediaSession()
 ExecOut executeAction(const QString &action, const QJsonObject &params)
 {
     ExecOut out;
+
+    // ── 内置模块前置路由（2026-10-16）：官方模块**优先于**进程外插件认领 ──
+    // 顺序理由：内置模块是官方能力（U盘/联动/岛界面），第三方插件只能补它没覆盖的洞；
+    // 反过来会让第三方插件有机会顶掉官方实现（"装了个插件，U 盘提示就变了"）。
+    {
+        ModuleResult mr;
+        if (ModuleHost::instance()->dispatch(action, params, mr)) {
+            out.result = mr.result;
+            out.error = mr.error;
+            out.data = mr.data;
+            return out;
+        }
+    }
 
     // ── P2 插件前置路由：插件 register 的 action 优先走插件宿主（本地 WS 同步调用）──
     if (g_pluginHost) {
@@ -6771,6 +6787,7 @@ void agentUiFill(AgentUi *ui)
     // ── A-3 第二批：自检 / 插件 / 记录 / 播放时段 ──
     ui->m_selfCheckItems = buildSelfCheckItems();
     ui->m_plugins        = buildPluginList();
+    ui->m_modules        = ModuleHost::instance()->snapshot().toVariantList();
     ui->m_noiseLogText   = buildNoiseLogText();
     ui->m_studyLogText   = buildStudyLogText();
     ui->m_playScheduleEnabled = AgentSettings::playScheduleEnabled();
@@ -6895,6 +6912,16 @@ void agentUiWire(AgentUi *ui)
             ui->publish();
         });
         agentUiFill(ui);   // 先给本地快照
+        ui->publish();
+    });
+    // ── 内置模块层：刷新 / 启停（不可卸载——它编译在 agent 里）──
+    QObject::connect(ui, &AgentUi::modulesRefreshRequested, ui, [ui] {
+        agentUiFill(ui);
+        ui->publish();
+    });
+    QObject::connect(ui, &AgentUi::moduleEnableRequested, ui, [ui](const QString &id, bool enable) {
+        ModuleHost::instance()->setEnabled(id, enable);
+        agentUiFill(ui);
         ui->publish();
     });
     // 安装：已装 ⇒ 启用；未装 ⇒ 下载 zip → 解压 → installAndLaunch（照 openPluginStore）。
@@ -7518,6 +7545,68 @@ int main(int argc, char *argv[])
     g_pluginHost->setAgentApi(api);
     if (g_pluginHost->start()) {
         g_pluginHost->loadEnabled();   // 启动 QSettings 中已启用的插件
+    }
+
+    // ── 内置模块层启动（2026-10-16「模块化插件」）──
+    // 与进程外插件的区别：模块编译在本进程内，够得到原生窗口消息与岛本体；
+    // 能力面**形状相同**（岛/通知/设置/上报），权限词表同一份，只是不需要跨进程。
+    {
+        ModuleHost *mh = ModuleHost::instance();
+        ModuleAgentApi mapi;
+        mapi.islandShow = [](const QString &title, const QString &desc, const QString &icon,
+                             int form, int durationMs) {
+            islandShow(title, desc, icon, durationMs, false, QString(),
+                       static_cast<IslandOverlay::Form>(form), false);
+        };
+        mapi.islandAsk = [](const QString &title, const QString &desc, const QString &icon, int form,
+                            const QStringList &actions,
+                            const std::function<void(const QString &)> &onAction, int durationMs) {
+            IslandOverlay::instance()->showWithActions(title, desc, icon,
+                                                       static_cast<IslandOverlay::Form>(form),
+                                                       actions, onAction, durationMs);
+        };
+        mapi.notify = [](const QJsonObject &params) { notifyFromParams(params); };
+        mapi.settingsGet = [](const QString &key) -> QJsonValue {
+            if (key == QStringLiteral("noiseEnabled"))  return AgentSettings::noiseEnabled();
+            if (key == QStringLiteral("voiceEnabled"))  return AgentSettings::voiceEnabled();
+            if (key == QStringLiteral("notifyEnabled")) return AgentSettings::notifyEnabled();
+            if (key == QStringLiteral("islandIdle"))    return AgentSettings::islandIdle();
+            if (key == QStringLiteral("lightMode"))     return AgentSettings::lightMode();
+            return QJsonValue();
+        };
+        mapi.settingsSet = [](const QString &key, const QJsonValue &v) {
+            const bool on = v.toBool();
+            if (key == QStringLiteral("noiseEnabled"))       AgentSettings::setNoiseEnabled(on);
+            else if (key == QStringLiteral("voiceEnabled"))  AgentSettings::setVoiceEnabled(on);
+            else if (key == QStringLiteral("notifyEnabled")) AgentSettings::setNotifyEnabled(on);
+            else if (key == QStringLiteral("islandIdle"))    AgentSettings::setIslandIdle(on);
+            else if (key == QStringLiteral("lightMode"))     AgentSettings::setLightMode(on);
+        };
+        // 模块私有设置：QSettings 的 modules/<moduleId>/<key>，模块之间互不干扰。
+        // ⚠️ QSettings::value 返回 QVariant（要显式转成 QJsonValue——两者没有隐式转换，
+        //    直接 return 是 C2440）；QVariant::toJsonValue 是 Qt6 的转换口。
+        mapi.moduleGet = [](const QString &moduleId, const QString &key, const QJsonValue &dflt) -> QJsonValue {
+            const QVariant v = QSettings().value(QStringLiteral("modules/") + moduleId
+                                                 + QLatin1Char('/') + key, dflt.toVariant());
+            return v.isValid() ? QJsonValue::fromVariant(v) : dflt;
+        };
+        mapi.moduleSet = [](const QString &moduleId, const QString &key, const QJsonValue &v) {
+            QSettings().setValue(QStringLiteral("modules/") + moduleId + QLatin1Char('/') + key, v);
+        };
+        mapi.reportCloud = [](const QString &type, const QJsonObject &payload) {
+            if (!g_ws) return;
+            g_ws->sendTextMessage(makeEnvelope(type, payload));
+        };
+        // ⚠️ 只开**文件夹**：与岛的 openInShell 同口径（explorer 打开目录，绝不运行文件）。
+        mapi.openFolder = [](const QString &path) {
+            ShellExecuteW(nullptr, L"open", reinterpret_cast<LPCWSTR>(path.utf16()),
+                          nullptr, nullptr, SW_SHOWNORMAL);
+        };
+        mapi.examActive = []() { return ExamMode::inst().active(); };
+        mh->setAgentApi(mapi);
+
+        mh->registerModule(new UsbModule());
+        mh->startEnabled();
     }
 
     const int rc = app.exec();
