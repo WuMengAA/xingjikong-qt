@@ -29,6 +29,11 @@ void ldcInitRtc(ViewerBackend *backend)
                 { QStringLiteral("kind"), QStringLiteral("answer") },
                 { QStringLiteral("sdp"), QString::fromUtf8(sdp) } });
             p.insert(QStringLiteral("from"), QStringLiteral("viewer"));
+            // ⚠️ 2026-10-16 修（真机联调实证）：answer 不带 uid → 云端 rtc-answer 分支
+            // `const uid = p.payload.uid` 拿到空串 → rtcRelayToAgent('') →「设备不在线」
+            // → answer 永远到不了被控端 → track 不开 → 0 帧。被控端 offer 是带 uid 的
+            //（rtcSendSignal），viewer 回 answer 必须同样带（当前正在看的那台）。
+            p.insert(QStringLiteral("uid"), backend->currentUid());
             backend->sendLdcSignal(QStringLiteral("rtc-answer"), p);
         });
     QObject::connect(&r, &LdcReceiver::signalCandidate, backend,
@@ -38,6 +43,7 @@ void ldcInitRtc(ViewerBackend *backend)
                 { QStringLiteral("kind"), QStringLiteral("ice") },
                 { QStringLiteral("candidate"), QString::fromUtf8(cand) } });
             p.insert(QStringLiteral("from"), QStringLiteral("viewer"));
+            p.insert(QStringLiteral("uid"), backend->currentUid());   // 同 rtc-answer：不带 uid 云端无法中继
             backend->sendLdcSignal(QStringLiteral("rtc-ice"), p);
         });
     QObject::connect(&r, &LdcReceiver::failed, backend,
