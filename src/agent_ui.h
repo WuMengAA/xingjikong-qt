@@ -34,6 +34,9 @@
 #include <QQmlEngine>
 #include <QUrl>
 #include <QCoreApplication>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QRect>
 
 class AgentUi : public QObject
 {
@@ -205,7 +208,20 @@ private:
         : QQuickWidget(parent), m_ui(this)
     {
         setWindowTitle(QStringLiteral("星集控 · 被控端"));
-        resize(880, 640);
+        // 尺寸/位置**跟着可用屏幕走**——真机实证（2026-10-16）：固定 880×640 在
+        // 1244×701 的桌面上、窗口 y 还被放到 130 ⇒ 一打开底部（含底导航）就落到屏幕外，
+        // 用户报的就是「控制面板看不见」。取「不超可用区 86%、也不超设计尺寸」并居中。
+        QScreen *sc = QGuiApplication::primaryScreen();
+        if (sc) {
+            const QRect av = sc->availableGeometry();
+            const int w = qMin(880, qMax(560, int(av.width()  * 0.86)));
+            const int h = qMin(640, qMax(420, int(av.height() * 0.86)));
+            resize(w, h);
+            move(av.x() + (av.width()  - w) / 2,
+                 av.y() + (av.height() - h) / 2);
+        } else {
+            resize(880, 640);
+        }
         // ⚠️ Qt 6.12 的枚举只有 SizeViewToRootObject / SizeRootObjectToView
         //    （没有 SizeRootObjectToQML —— 首编即抓）；与岛同款用 ToView。
         setResizeMode(QQuickWidget::SizeRootObjectToView);

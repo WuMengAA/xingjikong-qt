@@ -1,13 +1,14 @@
 import QtQuick
-import QtQuick.Controls
 import "../../components"
 import "../../components/md3" as M
 
 // 被控端 · 播放时段页（openPlayScheduleDialog 的真实迁移 · U5-A3 第二批）
 // 开关走 switchChanged("playScheduleEnabled") 落 QSettings；
 // 「保存」把多行文本解析成窗口列表交给 C++（解析口径与 Widgets 版一致：trim + 跳空行）。
-// ⚠️ 多行编辑用 QtQuick.Controls TextArea —— 共享 md3/ 组件库暂无多行输入件，
-//    只做 token 配色（妥协点，已记归档；后续若补 Md3TextArea 再换）。
+// ⚠️ 多行编辑用 **QtQuick 原生 TextEdit**（不是 QtQuick.Controls 的 TextArea）：
+//    被控端部署不含 QtQuick Controls 运行库，真机实证 `Cannot load library
+//    qtquickcontrols2plugin.dll` ⇒ 整页 entry 解析失败 ⇒ 面板空白（2026-10-16）。
+//    占位提示与滚动自己来（TextEdit 没有 placeholderText / 自带滚动）。
 Item {
     id: page
     anchors.fill: parent
@@ -67,21 +68,38 @@ Item {
                         border.width: 1
                         border.color: page.tok ? page.tok.cOutline : "#938F99"
 
-                        TextArea {
-                            id: winEdit
+                        Flickable {
+                            id: winScroll
                             anchors.fill: parent
                             anchors.margins: 8
-                            text: agentUi.playWindowsText
-                            font.pixelSize: 13
-                            font.family: "Consolas"
-                            color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
-                            placeholderText: "08:00-11:30\n14:00-17:00"
-                            placeholderTextColor: page.tok ? page.tok.cOutline : "#938F99"
-                            background: null
-                            wrapMode: TextArea.Wrap
-                            // 编辑期间不回写 ctx（避免 fill 把正在输入的文本顶掉）；
-                            // 焦点离开或保存时由 C++ fill 统一刷新。
-                            onActiveFocusChanged: if (!activeFocus) text = agentUi.playWindowsText
+                            clip: true
+                            contentWidth: width
+                            contentHeight: winEdit.contentHeight + 8
+                            boundsBehavior: Flickable.StopAtBounds
+
+                            TextEdit {
+                                id: winEdit
+                                width: winScroll.width
+                                text: agentUi.playWindowsText
+                                font.pixelSize: 13
+                                font.family: "Consolas"
+                                color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                                selectByMouse: true
+                                wrapMode: TextEdit.Wrap
+                                // 编辑期间不回写 ctx（避免 fill 把正在输入的文本顶掉）；
+                                // 焦点离开或保存时由 C++ fill 统一刷新。
+                                onActiveFocusChanged: if (!activeFocus) text = agentUi.playWindowsText
+                            }
+                            // 占位提示（TextEdit 无 placeholderText，自己叠一层）
+                            Text {
+                                anchors.top: winEdit.top
+                                anchors.left: winEdit.left
+                                visible: winEdit.text.length === 0
+                                text: "08:00-11:30\n14:00-17:00"
+                                font.pixelSize: 13
+                                font.family: "Consolas"
+                                color: page.tok ? page.tok.cOutline : "#938F99"
+                            }
                         }
                     }
                     Text {

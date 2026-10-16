@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import "../qml/shell/AgentPages.js" as AgentPages
 
 // AgentShell（U5-A3 被控端 QML 控制面板）的加载探针（2026-10-16）
 //
@@ -105,10 +106,42 @@ Window {
         }
         ck("壳的子结构建成（顶栏 / 页宿主 / 底导航 ≥3 个子对象）", it.children.length >= 3)
 
+        // ── 四、★ 页派生数量（2026-10-16 真机漏检的那一条）──
+        // 教训：本探针原来只验「编译 Ready + 子结构 ≥3」，结果「声明漏写 scope」
+        // 导致 agent 端 5 页被门控全过滤（页宿主空 + 底导航空）时**照样绿**。
+        // 现在的判据直接打在契约的派生结果上。
+        var regComp = Qt.createComponent("../build/qml/components/UiRegistry.qml",
+                                         Component.PreferSynchronous)
+        ck("UiRegistry 编译 Ready", regComp.status === Component.Ready)
+        // ⚠️ 不用 createObject(win, {...}) 传 manifest —— 实测那样传进去 manifest 仍是
+        //    默认空数组（声明=0），会得出「0 页」的**假红**。分步赋值才可靠。
+        var reg = regComp.status === Component.Ready ? regComp.createObject(win) : null
+        if (reg !== null) {
+            var mf = AgentPages.manifest()
+            ck("AgentPages.manifest() 返回 5 条声明", mf.length === 5)
+            reg.scope = "agent"
+            reg.permissions = []
+            reg.capabilities = []
+            reg.manifest = mf
+        }
+        ck("agent 端派生出 5 页（漏写 scope ⇒ 默认 [viewer] ⇒ 全被过滤，页与导航一起消失）",
+           reg !== null && reg.navItems().length === 5)
+        ck("声明零问题（problems 空）", reg !== null && reg.problems.length === 0)
+        if (reg !== null && reg.navItems().length !== 5)
+            console.log("  ⇒ 实际派生 " + reg.navItems().length + " 页；summary: " + reg.summary())
+
+        // 找壳内的注册表实例（QtObject 非视觉子对象在 `data` 里，不在 `children` 里；
+        // ⚠️ QQuickItem 的 findChildren 在 Qt 6.12 的 JS 里不可用 —— 实测 is not a function）
+        var regs = []
+        var datas = it.data
+        for (var i = 0; i < datas.length; i++) {
+            var o = datas[i]
+            if (o && typeof o.navItems === "function" && typeof o.manifest !== "undefined") regs.push(o)
+        }
+        ck("壳内注册表就是要用的那份（找到 1 个）", regs.length === 1)
+
         console.log("UI-AGENT-SHELL-PROBE bad=" + bad
-                    + "（本探针验「壳加载 + 子结构」；⚠️ 不验尺寸 —— 探针里根对象没锚，"
-                    + "真机由 QQuickWidget SizeRootObjectToView 给几何。"
-                    + "agentUi 数据链路需真跑 exe）")
+                    + "（壳编译 + 实例化 + ★页派生数量 = " + (reg ? reg.navItems().length : "?") + "）")
         Qt.exit(bad === 0 ? 10 : 20)
     }
 }

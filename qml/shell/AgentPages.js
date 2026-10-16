@@ -15,6 +15,9 @@ function manifest() {
         {
             id: "settings",
             surfaces: ["page"],
+            scope: ["agent"],     // ⚠️ 必写！契约的 scope 默认是 ["viewer"]（UiContract.js:60）
+                                  //    ⇒ 漏写会在 agent 端被门控全过滤（页与导航一起消失，
+                                  //    2026-10-16 真机实证：白底 + 无底导航）
             order: 1,
             title: "设置",
             icon: "设",          // 教室机 emoji 有 tofu 风险 ⇒ 导航图标用单字
@@ -23,6 +26,9 @@ function manifest() {
         {
             id: "selfcheck",
             surfaces: ["page"],
+            scope: ["agent"],     // ⚠️ 必写！契约的 scope 默认是 ["viewer"]（UiContract.js:60）
+                                  //    ⇒ 漏写会在 agent 端被门控全过滤（页与导航一起消失，
+                                  //    2026-10-16 真机实证：白底 + 无底导航）
             order: 2,
             title: "自检",
             icon: "检",
@@ -31,6 +37,9 @@ function manifest() {
         {
             id: "plugins",
             surfaces: ["page"],
+            scope: ["agent"],     // ⚠️ 必写！契约的 scope 默认是 ["viewer"]（UiContract.js:60）
+                                  //    ⇒ 漏写会在 agent 端被门控全过滤（页与导航一起消失，
+                                  //    2026-10-16 真机实证：白底 + 无底导航）
             order: 3,
             title: "插件",
             icon: "件",
@@ -39,6 +48,9 @@ function manifest() {
         {
             id: "records",
             surfaces: ["page"],
+            scope: ["agent"],     // ⚠️ 必写！契约的 scope 默认是 ["viewer"]（UiContract.js:60）
+                                  //    ⇒ 漏写会在 agent 端被门控全过滤（页与导航一起消失，
+                                  //    2026-10-16 真机实证：白底 + 无底导航）
             order: 4,
             title: "记录",
             icon: "录",
@@ -47,6 +59,9 @@ function manifest() {
         {
             id: "playschedule",
             surfaces: ["page"],
+            scope: ["agent"],     // ⚠️ 必写！契约的 scope 默认是 ["viewer"]（UiContract.js:60）
+                                  //    ⇒ 漏写会在 agent 端被门控全过滤（页与导航一起消失，
+                                  //    2026-10-16 真机实证：白底 + 无底导航）
             order: 5,
             title: "时段",
             icon: "播",

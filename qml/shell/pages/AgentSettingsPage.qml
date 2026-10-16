@@ -57,8 +57,6 @@ Item {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-
         Column {
             id: col
             anchors.left: parent.left
@@ -263,5 +261,22 @@ Item {
                 }
             }
         }
+    }
+
+    // ── 滚动指示条（原生自绘，不用 QtQuick.Controls）────────────────
+    // ⚠️ 被控端部署**不含 QtQuick Controls 运行库**（真机实证：`ScrollBar is not a type`
+    //    ⇒ 本页 entry 解析失败 ⇒ 面板打开即空白，2026-10-16）。壳与页只用 QtQuick 基础类型，
+    //    这条硬约束由共享门禁 scripts/test-agent-qml-deps.mjs 盯着。
+    Rectangle {
+        id: scrollInd
+        width: 3
+        radius: 1.5
+        visible: scroller.contentHeight > scroller.height + 1
+        x: scroller.width - 6
+        y: scroller.height * (scroller.contentY / Math.max(scroller.contentHeight, 1))
+        height: Math.max(28, scroller.height * (scroller.height / Math.max(scroller.contentHeight, 1)))
+        color: page.tok ? page.tok.cOutline : "#938F99"
+        opacity: scroller.moving ? 0.85 : 0.35
+        Behavior on opacity { NumberAnimation { duration: 140 } }
     }
 }
