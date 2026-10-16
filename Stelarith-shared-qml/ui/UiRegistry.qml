@@ -42,13 +42,35 @@ QtObject {
     function actionItems() { return forSurface("action") }   // 设备动作
     function commandItems() { return forSurface("command") } // 命令面板
 
+    // ── U4：动作面的三个投影（右栏分组 / 概览快捷行 / 命令面板）──
+    /** 右栏要显示的分组名（按声明里首次出现的 order）。 */
+    function actionGroups() { return C.groups(items, env) }
+    /** 某个分组的动作（已过门控）。 */
+    function actionsForGroup(g) { return C.forGroup(items, g, env) }
+    /** 概览页快捷行（phone === false 的由调用方按 isPhone 过滤）。 */
+    function quickActions() { return C.quickActions(items, env) }
+    /** 这条声明要设备具备哪些指令能力（已过门控后仍要显示原因的场合用）。 */
+    function capNeeds(p) { return C.capNeeds(p) }
+    /** 单独查一条见过的门控：缺哪些能力（给"为什么置灰"的那句话用）。 */
+    function capMissing(p) {
+        var need = C.capNeeds(p)
+        var miss = []
+        for (var i = 0; i < need.length; i++)
+            if (!C.visible({ caps: [need[i]], scope: p.scope, perm: "" }, env)) miss.push(need[i])
+        return miss
+    }
+
     // 命令面板认的形状（现有 CommandPalette 的项目结构 + 回指声明 id）
+    // name 用 palName（命令面板要能自解释）回落 title。
+    // ⚠️ 顺序按 palOrder（不是 order）：右栏要「通知」压顶、命令面板要「锁屏」排头，
+    //    同一个动作满足不了两边 —— 所以排序键分开。
     function commandModel() {
         var src = commandItems()
+        src.sort(function (a, b) { return a.palOrder - b.palOrder })
         var out = []
         for (var i = 0; i < src.length; i++) {
             var p = src[i]
-            out.push({ name: p.title, keys: p.keys, tip: p.tip, pluginId: p.id,
+            out.push({ name: p.palName || p.title, keys: p.keys, tip: p.tip, pluginId: p.id,
                        danger: p.danger, admin: p.admin })
         }
         return out

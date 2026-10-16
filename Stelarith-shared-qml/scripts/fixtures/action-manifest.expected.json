@@ -1,0 +1,395 @@
+{
+  "note": "改造前（U4 之前）Main.qml 里三份硬编码清单的原文 —— 只作对照基线，不参与构建。",
+  "pal": [
+    {
+      "name": "锁屏教室机",
+      "keys": [
+        "lock",
+        "suo",
+        "sjb"
+      ],
+      "tip": "教室机立刻锁屏（要管理员身份）"
+    },
+    {
+      "name": "重启教室机",
+      "keys": [
+        "reboot",
+        "chongqi",
+        "cq"
+      ],
+      "tip": "重启教室机（要管理员身份）"
+    },
+    {
+      "name": "关机教室机",
+      "keys": [
+        "shutdown",
+        "guanji",
+        "gj"
+      ],
+      "tip": "关掉教室机（要管理员身份）"
+    },
+    {
+      "name": "给教室机发通知",
+      "keys": [
+        "notify",
+        "tongzhi",
+        "tz"
+      ],
+      "tip": "填标题和正文后下发（要填内容）"
+    },
+    {
+      "name": "打开终端",
+      "keys": [
+        "terminal",
+        "cmd",
+        "zhongduan"
+      ],
+      "tip": "命令行窗口（要管理员身份）"
+    },
+    {
+      "name": "开始远程控制",
+      "keys": [
+        "remote",
+        "yuankong",
+        "yk"
+      ],
+      "tip": "实时接管鼠标键盘（要管理员身份）"
+    },
+    {
+      "name": "停止远程控制",
+      "keys": [
+        "remote",
+        "yk"
+      ],
+      "tip": "把上一路的远控收掉"
+    },
+    {
+      "name": "截图",
+      "keys": [
+        "screenshot",
+        "jieku",
+        "jk"
+      ],
+      "tip": "抓一帧画面回来"
+    },
+    {
+      "name": "看可打开的软件",
+      "keys": [
+        "software",
+        "ruanjian",
+        "rj"
+      ],
+      "tip": "这台机器上有的程序 + 正在跑的"
+    },
+    {
+      "name": "监控（摄像头）",
+      "keys": [
+        "camera",
+        "shexiangtou",
+        "sxt"
+      ],
+      "tip": "这台机器上有几个摄像头"
+    },
+    {
+      "name": "调音量",
+      "keys": [
+        "volume",
+        "yinliang",
+        "yl"
+      ],
+      "tip": "打开音量浮层"
+    },
+    {
+      "name": "分发文件",
+      "keys": [
+        "file",
+        "wenjian",
+        "wj"
+      ],
+      "tip": "选一个文件推给教室机"
+    },
+    {
+      "name": "定时任务",
+      "keys": [
+        "schedule",
+        "dingshi",
+        "ds"
+      ],
+      "tip": "排一个定时关机 / 重启"
+    },
+    {
+      "name": "选中全部在线设备",
+      "keys": [
+        "selectall",
+        "quanxuan",
+        "qx"
+      ],
+      "tip": "Ctrl+A：把在线设备全选上"
+    },
+    {
+      "name": "取消选择",
+      "keys": [
+        "clearpick",
+        "quxiaoxuan",
+        "qxz"
+      ],
+      "tip": "Esc/点空白：把选中的机器清掉"
+    },
+    {
+      "name": "锁屏选中的设备",
+      "keys": [
+        "locksel",
+        "suoxuan",
+        "sx"
+      ],
+      "tip": "Ctrl+L：只锁刚才选中的那几台"
+    },
+    {
+      "name": "锁屏全部在线设备",
+      "keys": [
+        "lockall",
+        "quanbu",
+        "qb"
+      ],
+      "tip": "Ctrl+Shift+L：锁所有在线机器（需管理员）"
+    },
+    {
+      "name": "切到概览",
+      "keys": [
+        "overview",
+        "gailan",
+        "gl"
+      ],
+      "tip": "在线设备 + 最近回执 + 今日课表"
+    },
+    {
+      "name": "切到控制",
+      "keys": [
+        "control",
+        "kongzhi",
+        "kz"
+      ],
+      "tip": "看教室机画面 + 下发动作"
+    },
+    {
+      "name": "切到集控",
+      "keys": [
+        "jikong",
+        "jk"
+      ],
+      "tip": "看教室机画面 + 下发动作"
+    },
+    {
+      "name": "切到设置",
+      "keys": [
+        "settings",
+        "shezhi",
+        "sz"
+      ],
+      "tip": "账户 / 连接 / 提醒 / 外观"
+    },
+    {
+      "name": "去广播给所有在线设备",
+      "keys": [
+        "broadcast",
+        "guangbo",
+        "gb"
+      ],
+      "tip": "广播要填内容，点开弹窗填再发"
+    },
+    {
+      "name": "开始语音对讲",
+      "keys": [
+        "voice",
+        "yuyin",
+        "yy"
+      ],
+      "tip": "全班可听，再点停"
+    },
+    {
+      "name": "停止语音对讲",
+      "keys": [
+        "voice",
+        "yuyin",
+        "yy"
+      ],
+      "tip": "把语音广播收掉（静音）"
+    },
+    {
+      "name": "开始屏幕广播",
+      "keys": [
+        "screen",
+        "guangbo2",
+        "gb2"
+      ],
+      "tip": "老师屏幕推给全部在线设备（再次点停）"
+    },
+    {
+      "name": "停止屏幕广播",
+      "keys": [
+        "screen",
+        "tingbo"
+      ],
+      "tip": "把屏幕广播收掉"
+    },
+    {
+      "name": "开始考试模式",
+      "keys": [
+        "exam",
+        "kaoshi",
+        "ks"
+      ],
+      "tip": "全屏拦截 + 黑名单（无时长=手动结束）"
+    },
+    {
+      "name": "结束考试模式",
+      "keys": [
+        "exam",
+        "kaoshi",
+        "ks"
+      ],
+      "tip": "恢复教室机（全屏拦截收掉）"
+    },
+    {
+      "name": "刷新多班监控墙",
+      "keys": [
+        "multiband",
+        "duoban",
+        "db"
+      ],
+      "tip": "重订阅多班缩略图（最多 9 台在线）"
+    },
+    {
+      "name": "互动审批",
+      "keys": [
+        "interact",
+        "shenpi",
+        "sp",
+        "diange",
+        "zhufu"
+      ],
+      "tip": "审学生点的歌 / 祝福；右侧直接看教室机上会显示什么"
+    },
+    {
+      "name": "刷新设备列表",
+      "keys": [
+        "refresh",
+        "shuaxin",
+        "sx"
+      ],
+      "tip": "重新拉一遍云端下发（也可按 F5）"
+    },
+    {
+      "name": "用网站账号登录",
+      "keys": [
+        "login",
+        "denglu",
+        "dl"
+      ],
+      "tip": "走星璃账号授权，不用填密钥"
+    },
+    {
+      "name": "切成管理员身份",
+      "keys": [
+        "admin",
+        "guanliyuan"
+      ],
+      "tip": "能操作教室机（电源 / 远控）"
+    },
+    {
+      "name": "切成教师身份",
+      "keys": [
+        "teacher",
+        "jiaoshi",
+        "js"
+      ],
+      "tip": "只留看画面 / 发通知 / 推文件"
+    },
+    {
+      "name": "切到黑白外观",
+      "keys": [
+        "dark",
+        "heibai",
+        "hb"
+      ],
+      "tip": "默认外观"
+    },
+    {
+      "name": "切到浅色外观",
+      "keys": [
+        "light",
+        "qianse",
+        "qs"
+      ],
+      "tip": "换个亮堂的"
+    },
+    {
+      "name": "跟随系统外观",
+      "keys": [
+        "auto",
+        "xitong",
+        "xt"
+      ],
+      "tip": "跟着系统配色走"
+    },
+    {
+      "name": "打开官网下载页",
+      "keys": [
+        "download",
+        "xiazai",
+        "xz"
+      ],
+      "tip": "打开 www.245959623.xyz/download"
+    }
+  ],
+  "right": {
+    "通知": [
+      "通知"
+    ],
+    "电源": [
+      "锁屏",
+      "重启",
+      "关机"
+    ],
+    "看看": [
+      "截图",
+      "软件",
+      "监控",
+      "音量",
+      "文件"
+    ],
+    "任务": [
+      "定时任务"
+    ],
+    "批量": [
+      "管控…",
+      "语音对讲…"
+    ]
+  },
+  "quickDesktop": [
+    "锁屏",
+    "发通知",
+    "广播",
+    "语音对讲",
+    "屏幕广播",
+    "考试模式",
+    "多班墙"
+  ],
+  "quickPhone": [
+    "锁屏",
+    "发通知",
+    "广播",
+    "语音对讲",
+    "多班墙"
+  ],
+  "bulk": [
+    {
+      "title": "锁屏选中的",
+      "action": "lock"
+    },
+    {
+      "title": "关机选中的",
+      "action": "shutdown"
+    }
+  ]
+}
