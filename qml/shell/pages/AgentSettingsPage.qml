@@ -52,6 +52,7 @@ Item {
     Flickable {
         id: scroller
         anchors.fill: parent
+        contentWidth: width          // ⚠️ 不设这个 contentItem 宽度塌陷为 0 ⇒ 内容全白（真机截图实证）
         contentHeight: col.height + 24
         clip: true
         boundsBehavior: Flickable.StopAtBounds

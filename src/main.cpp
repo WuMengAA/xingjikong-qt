@@ -6588,6 +6588,133 @@ void captureAndSend(const QString &outDir)
  * agentUiFill 是 agent_ui.h 的 friend（直接改快照成员，不触发 switchChanged）。
  * ⚠️ 不能加 static：friend 声明是 external linkage，加 static 就成另一个符号。
  */
+/* ── A-3 第二批：四页的数据 builder（static，只产出数据不碰 AgentUi 成员）──── */
+
+// 自检四项（判据照 runSelfCheck 一字不差）
+static QVariantList buildSelfCheckItems()
+{
+    QVariantList items;
+    auto add = [&items](const QString &name, bool ok, const QString &fix) {
+        QVariantMap m;
+        m.insert(QStringLiteral("name"), name);
+        m.insert(QStringLiteral("ok"), ok);
+        m.insert(QStringLiteral("fix"), ok ? QString() : fix);
+        items.append(m);
+    };
+    add(QStringLiteral("配置完整（云端地址 + 设备令牌）"), g_configured, QStringLiteral("去配置 / 绑定"));
+    const bool connected = g_ws && g_ws->state() == QAbstractSocket::ConnectedState;
+    add(QStringLiteral("已连接云端"), connected, QStringLiteral("重试连接"));
+    add(QStringLiteral("已注册（云端已确认）"), g_registered, QStringLiteral("重试连接"));
+    add(QStringLiteral("班级已绑定（管理端按班可见）"), !g_classCode.isEmpty(), QStringLiteral("绑定班级"));
+    return items;
+}
+
+// 插件列表（本地快照 + 云端条目缓存；口径照 openPluginStore::render）
+static QHash<QString, QJsonObject> s_storeEntries;   // id -> 云端条目（pluginsRefresh 刷新）
+static QString pluginRegistryUrl()
+{
+    QString u = qEnvironmentVariable("STE_PLUGIN_REGISTRY");
+    return u.isEmpty() ? QStringLiteral("https://control.245959623.xyz/api/plugins") : u;
+}
+static QVariantList buildPluginList()
+{
+    QVariantList out;
+    QHash<QString, QJsonObject> localById;
+    if (g_pluginHost) {
+        const QJsonArray local = g_pluginHost->snapshot();
+        for (const QJsonValue &v : local) {
+            const QJsonObject o = v.toObject();
+            localById.insert(o.value(QStringLiteral("id")).toString(), o);
+        }
+    }
+    QStringList ids;
+    for (auto it = s_storeEntries.begin(); it != s_storeEntries.end(); ++it) ids << it.key();
+    for (const QString &id : localById.keys()) if (!ids.contains(id)) ids << id;
+    for (const QString &id : ids) {
+        const QJsonObject cloud = s_storeEntries.value(id);
+        const QJsonObject loc = localById.value(id);
+        const bool inst = localById.contains(id);
+        const bool en = loc.value(QStringLiteral("enabled")).toBool();
+        const bool run = loc.value(QStringLiteral("running")).toBool();
+        const QString status = inst ? (en ? (run ? QStringLiteral("● 运行中")
+                                                 : QStringLiteral("○ 已装未运行"))
+                                         : QStringLiteral("× 已禁用"))
+                                    : QStringLiteral("— 未安装");
+        QVariantMap m;
+        m.insert(QStringLiteral("id"), id);
+        m.insert(QStringLiteral("name"), cloud.value(QStringLiteral("name")).toString(loc.value(QStringLiteral("name")).toString(id)));
+        m.insert(QStringLiteral("version"), cloud.value(QStringLiteral("version")).toString(loc.value(QStringLiteral("version")).toString()));
+        m.insert(QStringLiteral("author"), cloud.value(QStringLiteral("author")).toString());
+        m.insert(QStringLiteral("description"), cloud.value(QStringLiteral("description")).toString());
+        m.insert(QStringLiteral("installed"), inst);
+        m.insert(QStringLiteral("enabled"), en);
+        m.insert(QStringLiteral("status"), status);
+        out.append(m);
+    }
+    return out;
+}
+
+// 记录文本（照 openNoiseLogDialog / openStudyLogDialog 的生成口径）
+static QString buildNoiseLogText()
+{
+    const QJsonArray all = readJsonlDir(QStringLiteral("noise_log"));
+    if (all.isEmpty())
+        return QStringLiteral("还没有噪音记录。\n开启「噪音监测」或「自习模式」后，每次采样都会记到这里。");
+    QMap<QString, QVector<double>> byDay;
+    for (const QJsonValue &v : all) {
+        const QJsonObject o = v.toObject();
+        const qint64 ts = o.value(QStringLiteral("ts")).toVariant().toLongLong();
+        byDay[QDateTime::fromSecsSinceEpoch(ts).toString(QStringLiteral("yyyy-MM-dd"))]
+            .append(o.value(QStringLiteral("db")).toDouble());
+    }
+    QString out; QTextStream ts(&out);
+    ts << QStringLiteral("共 %1 天、%2 条采样\n\n").arg(byDay.size()).arg(all.size());
+    for (auto it = byDay.begin(); it != byDay.end(); ++it) {
+        const QVector<double> &v = it.value();
+        double sum = 0, mn = 1e9, mx = -1e9;
+        for (double d : v) { sum += d; if (d < mn) mn = d; if (d > mx) mx = d; }
+        ts << QStringLiteral("%1：采样 %2 次，均值 %3 dB，区间 [%4, %5] dB\n")
+              .arg(it.key()).arg(v.size())
+              .arg(QString::number(sum / v.size(), 'f', 1))
+              .arg(QString::number(mn, 'f', 1)).arg(QString::number(mx, 'f', 1));
+    }
+    return out;
+}
+static QString buildStudyLogText()
+{
+    const QJsonArray all = readJsonlDir(QStringLiteral("study_log"));
+    if (all.isEmpty())
+        return QStringLiteral("还没有自习记录。\n开启「自习模式」后，每次会话（开始/结束/时长/异常次数）都会记到这里。");
+    QVector<QJsonObject> sessions;
+    QMap<qint64, QJsonObject> pending;
+    for (const QJsonValue &v : all) {
+        QJsonObject o = v.toObject();
+        const QString ev = o.value(QStringLiteral("event")).toString();
+        if (ev == QStringLiteral("start")) {
+            pending.insert(o.value(QStringLiteral("ts")).toVariant().toLongLong(), o);
+        } else if (ev == QStringLiteral("stop")) {
+            const qint64 st = o.value(QStringLiteral("startTs")).toVariant().toLongLong();
+            QJsonObject s = pending.take(st);
+            s.insert(QStringLiteral("endTs"), o.value(QStringLiteral("ts")));
+            s.insert(QStringLiteral("durationSec"), o.value(QStringLiteral("durationSec")));
+            s.insert(QStringLiteral("alertCount"), o.value(QStringLiteral("alertCount")));
+            sessions.append(s);
+        }
+    }
+    QString out; QTextStream ts(&out);
+    ts << QStringLiteral("共 %1 次自习会话\n\n").arg(sessions.size());
+    for (const QJsonObject &s : sessions) {
+        const qint64 st = s.value(QStringLiteral("ts")).toVariant().toLongLong();
+        const int dur = s.value(QStringLiteral("durationSec")).toInt();
+        ts << QStringLiteral("%1：时长 %2 分 %3 秒，异常录制 %4 次（阈值 %5 dB）\n")
+              .arg(QDateTime::fromSecsSinceEpoch(st).toString(QStringLiteral("yyyy-MM-dd HH:mm")))
+              .arg(dur / 60).arg(dur % 60)
+              .arg(s.value(QStringLiteral("alertCount")).toInt())
+              .arg(QString::number(s.value(QStringLiteral("thresholdDb")).toDouble(), 'f', 0));
+    }
+    return out;
+}
+
 void agentUiFill(AgentUi *ui)
 {
     ui->m_appVersion = QString::fromLatin1(kAppVersion);
@@ -6640,6 +6767,21 @@ void agentUiFill(AgentUi *ui)
     ui->m_lightMode       = AgentSettings::lightMode();
     ui->m_autostart       = agentAutostartEnabled();
     ui->m_desktopShortcut = agentDesktopShortcutExists();
+
+    // ── A-3 第二批：自检 / 插件 / 记录 / 播放时段 ──
+    ui->m_selfCheckItems = buildSelfCheckItems();
+    ui->m_plugins        = buildPluginList();
+    ui->m_noiseLogText   = buildNoiseLogText();
+    ui->m_studyLogText   = buildStudyLogText();
+    ui->m_playScheduleEnabled = AgentSettings::playScheduleEnabled();
+    ui->m_playWindowsText     = AgentSettings::playWindows().join(QStringLiteral("\n"));
+    {
+        const QString cur = (IslandOverlay::instance() && IslandOverlay::instance()->mediaOn())
+            ? QStringLiteral("正在播放：%1").arg(IslandOverlay::instance()->mediaTitle())
+            : QStringLiteral("当前无媒体在播");
+        ui->m_playStateText = QStringLiteral("当前状态：%1 · 时段内允许播放：%2")
+                                  .arg(cur).arg(isPlayAllowedNow() ? QStringLiteral("是") : QStringLiteral("否"));
+    }
 }
 
 void agentUiWire(AgentUi *ui)
@@ -6671,6 +6813,8 @@ void agentUiWire(AgentUi *ui)
         } else if (key == QLatin1String("desktopShortcut")) {
             if (!agentSetDesktopShortcut(v))
                 qWarning("[agent-shell] 桌面快捷方式没改成（多半 UAC 被拒）—— 界面将回弹真实状态");
+        } else if (key == QLatin1String("playScheduleEnabled")) {
+            AgentSettings::setPlayScheduleEnabled(v);
         }
         agentUiFill(ui);
         ui->publish();
@@ -6710,6 +6854,121 @@ void agentUiWire(AgentUi *ui)
             }
             qWarning("[agent-qt] ⛔ 操作员暂停了本机自动升级（%s）", qPrintable(otaPausePath()));
         }
+        agentUiFill(ui);
+        ui->publish();
+    });
+
+    // ── A-3 第二批：自检 / 插件市场 / 记录 / 播放时段 ──────────────────
+    QObject::connect(ui, &AgentUi::selfCheckRequested, ui, [ui] {
+        agentUiFill(ui);
+        ui->publish();
+    });
+    // 一键修复（判据与 doFix 一字不差）：配置缺/班级缺 → 配置向导；否则立即重连。
+    QObject::connect(ui, &AgentUi::selfCheckFixRequested, ui, [ui] {
+        if (!g_configured || g_classCode.isEmpty()) {
+            openConfigDialog();
+        } else {
+            g_backoffMs = 1000;
+            if (g_ws && g_ws->state() != QAbstractSocket::UnconnectedState) {
+                g_reconnectNow = true; g_ws->close();
+            } else {
+                updateTray(TrayState::Disconnected, QStringLiteral("正在重连…"));
+                connectNow();
+            }
+        }
+        agentUiFill(ui);
+        ui->publish();
+    });
+    QObject::connect(ui, &AgentUi::pluginsRefreshRequested, ui, [ui] {
+        QNetworkAccessManager *nam = new QNetworkAccessManager(ui);
+        QNetworkRequest req((QUrl(pluginRegistryUrl())));
+        QNetworkReply *rep = nam->get(req);
+        QObject::connect(rep, &QNetworkReply::finished, ui, [ui, rep, nam] {
+            const QByteArray data = rep->readAll();
+            rep->deleteLater(); nam->deleteLater();
+            if (rep->error() == QNetworkReply::NoError) {
+                const QJsonArray arr = QJsonDocument::fromJson(data).array();
+                for (const QJsonValue &v : arr)
+                    s_storeEntries.insert(v.toObject().value(QStringLiteral("id")).toString(), v.toObject());
+            }   // 离线也能看本地已装（照 openPluginStore 口径）
+            agentUiFill(ui);
+            ui->publish();
+        });
+        agentUiFill(ui);   // 先给本地快照
+        ui->publish();
+    });
+    // 安装：已装 ⇒ 启用；未装 ⇒ 下载 zip → 解压 → installAndLaunch（照 openPluginStore）。
+    QObject::connect(ui, &AgentUi::pluginInstallRequested, ui, [ui](const QString &id) {
+        if (!g_pluginHost) return;
+        bool installed = false;
+        for (const QJsonValue &v : g_pluginHost->snapshot())
+            if (v.toObject().value(QStringLiteral("id")).toString() == id) { installed = true; break; }
+        if (installed) { g_pluginHost->enable(id, true); agentUiFill(ui); ui->publish(); return; }
+        const QString url = s_storeEntries.value(id).value(QStringLiteral("downloadUrl")).toString();
+        if (url.isEmpty()) {
+            qWarning("[agent-shell] 插件 %s 暂无可下载包（需先在商店后台上传）", qPrintable(id));
+            return;
+        }
+        QNetworkAccessManager *nam = new QNetworkAccessManager(ui);
+        QNetworkReply *rep = nam->get(QNetworkRequest(QUrl(url)));
+        QObject::connect(rep, &QNetworkReply::finished, ui, [ui, rep, nam, id] {
+            const QByteArray data = rep->readAll();
+            rep->deleteLater(); nam->deleteLater();
+            if (rep->error() != QNetworkReply::NoError) {
+                qWarning("[agent-shell] 插件 %s 下载失败", qPrintable(id));
+                return;
+            }
+            const QString tmp = QDir::tempPath() + QStringLiteral("/stelarith-plugin-%1.zip").arg(id);
+            { QFile f(tmp); if (f.open(QIODevice::WriteOnly)) { f.write(data); f.close(); } }
+            const QString dir = g_pluginHost->pluginDir() + QLatin1Char('/') + id;
+            QDir().mkpath(dir);
+            QProcess::execute(QStringLiteral("powershell"),
+                QStringList() << QStringLiteral("-Command")
+                              << QStringLiteral("Expand-Archive -Force '%1' '%2'").arg(tmp, dir));
+            g_pluginHost->installAndLaunch(id);
+            qInfo("[agent-shell] 已安装并启动插件：%s", qPrintable(id));
+            agentUiFill(ui);
+            ui->publish();
+        });
+    });
+    QObject::connect(ui, &AgentUi::pluginEnableRequested, ui, [ui](const QString &id, bool enable) {
+        if (g_pluginHost) g_pluginHost->enable(id, enable);
+        agentUiFill(ui);
+        ui->publish();
+    });
+    QObject::connect(ui, &AgentUi::pluginUninstallRequested, ui, [ui](const QString &id) {
+        if (g_pluginHost) g_pluginHost->uninstall(id);
+        agentUiFill(ui);
+        ui->publish();
+    });
+    QObject::connect(ui, &AgentUi::pluginSampleInstallRequested, ui, [ui] {
+        if (!g_pluginHost) return;
+        const QString src = QCoreApplication::applicationDirPath() + QStringLiteral("/plugins/samples/echo");
+        const QString dst = g_pluginHost->pluginDir() + QStringLiteral("/echo");
+        if (!QFile::exists(src)) {
+            qWarning("[agent-shell] 未找到内置示例（plugins/samples/echo）");
+            return;
+        }
+        QDir().mkpath(dst);
+        for (const QString &f : QStringList() << QStringLiteral("manifest.json") << QStringLiteral("echo.py"))
+            QFile::copy(src + QLatin1Char('/') + f, dst + QLatin1Char('/') + f);
+        g_pluginHost->installAndLaunch(QStringLiteral("echo"));
+        qInfo("[agent-shell] 已安装示例插件 echo");
+        agentUiFill(ui);
+        ui->publish();
+    });
+    QObject::connect(ui, &AgentUi::noiseFolderRequested, ui, [] { openFolder(QStringLiteral("noise_log")); });
+    QObject::connect(ui, &AgentUi::studyFolderRequested, ui, [] { openFolder(QStringLiteral("study_log")); });
+    QObject::connect(ui, &AgentUi::playScheduleSaveRequested, ui, [ui] {
+        AgentSettings::setPlayScheduleEnabled(ui->playScheduleEnabled());
+        QStringList list;
+        for (const QString &line : ui->playWindowsText().split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+            const QString s = line.trimmed();
+            if (!s.isEmpty()) list.append(s);
+        }
+        AgentSettings::setPlayWindows(list);
+        qInfo("[play] 🎵 播放时段已保存（QML 面板）：enabled=%d, windows=%d",
+              ui->playScheduleEnabled() ? 1 : 0, list.size());
         agentUiFill(ui);
         ui->publish();
     });

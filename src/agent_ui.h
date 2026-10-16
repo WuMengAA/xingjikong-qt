@@ -54,6 +54,14 @@ class AgentUi : public QObject
     Q_PROPERTY(QString otaLastText  READ otaLastText   NOTIFY infoChanged)
     Q_PROPERTY(QString otaNextText  READ otaNextText   NOTIFY infoChanged)
     Q_PROPERTY(bool    otaPausedNow READ otaPausedNow  NOTIFY infoChanged)
+    // ── A-3 第二批：自检 / 插件市场 / 记录 / 播放时段 ──
+    Q_PROPERTY(QVariantList selfCheckItems READ selfCheckItems NOTIFY infoChanged)
+    Q_PROPERTY(QVariantList plugins        READ plugins        NOTIFY infoChanged)
+    Q_PROPERTY(QString      noiseLogText   READ noiseLogText   NOTIFY infoChanged)
+    Q_PROPERTY(QString      studyLogText   READ studyLogText   NOTIFY infoChanged)
+    Q_PROPERTY(bool         playScheduleEnabled READ playScheduleEnabled WRITE setPlayScheduleEnabled NOTIFY infoChanged)
+    Q_PROPERTY(QString      playWindowsText     READ playWindowsText     WRITE setPlayWindowsText     NOTIFY infoChanged)
+    Q_PROPERTY(QString      playStateText       READ playStateText       NOTIFY infoChanged)
     // 开关（QML 写 → switchChanged → main.cpp 真实写 → fill 回弹）
     Q_PROPERTY(bool notifyEnabled   READ notifyEnabled   WRITE setNotifyEnabled   NOTIFY infoChanged)
     Q_PROPERTY(bool voiceEnabled    READ voiceEnabled    WRITE setVoiceEnabled    NOTIFY infoChanged)
@@ -89,6 +97,13 @@ public:
     bool lightMode() const { return m_lightMode; }
     bool autostart() const { return m_autostart; }
     bool desktopShortcut() const { return m_desktopShortcut; }
+    QVariantList selfCheckItems() const { return m_selfCheckItems; }
+    QVariantList plugins() const { return m_plugins; }
+    QString noiseLogText() const { return m_noiseLogText; }
+    QString studyLogText() const { return m_studyLogText; }
+    bool playScheduleEnabled() const { return m_playScheduleEnabled; }
+    QString playWindowsText() const { return m_playWindowsText; }
+    QString playStateText() const { return m_playStateText; }
 
     // ── setter（写成员 + 通知；真实持久化在 main.cpp 的 switchChanged 接收端）──
     void setNotifyEnabled(bool v)   { if (m_notifyEnabled == v) return;   m_notifyEnabled = v;   emit infoChanged(); emit switchChanged(QStringLiteral("notifyEnabled"), v); }
@@ -98,6 +113,8 @@ public:
     void setLightMode(bool v)       { if (m_lightMode == v) return;       m_lightMode = v;       emit infoChanged(); emit switchChanged(QStringLiteral("lightMode"), v); }
     void setAutostart(bool v)       { if (m_autostart == v) return;       m_autostart = v;       emit infoChanged(); emit switchChanged(QStringLiteral("autostart"), v); }
     void setDesktopShortcut(bool v) { if (m_desktopShortcut == v) return; m_desktopShortcut = v; emit infoChanged(); emit switchChanged(QStringLiteral("desktopShortcut"), v); }
+    void setPlayScheduleEnabled(bool v) { if (m_playScheduleEnabled == v) return; m_playScheduleEnabled = v; emit infoChanged(); emit switchChanged(QStringLiteral("playScheduleEnabled"), v); }
+    void setPlayWindowsText(const QString &v) { if (m_playWindowsText == v) return; m_playWindowsText = v; emit infoChanged(); }
 
     // 快照写入专用（main.cpp 的 agentUiFill 经 friend 直接改成员，不触发 switchChanged）
     friend void agentUiFill(AgentUi *ui);
@@ -111,6 +128,17 @@ public slots:
     void openDataDir() { emit openDataDirRequested(); }
     void upgradeNow() { emit upgradeNowRequested(); }
     void toggleOtaPause() { emit toggleOtaPauseRequested(); }
+    // ── A-3 第二批 ──
+    void runSelfCheckCheck() { emit selfCheckRequested(); }
+    void selfCheckFix() { emit selfCheckFixRequested(); }
+    void pluginsRefresh() { emit pluginsRefreshRequested(); }
+    void pluginInstall(const QString &id) { emit pluginInstallRequested(id); }
+    void pluginEnable(const QString &id, bool enable) { emit pluginEnableRequested(id, enable); }
+    void pluginUninstall(const QString &id) { emit pluginUninstallRequested(id); }
+    void pluginInstallSample() { emit pluginSampleInstallRequested(); }
+    void openNoiseFolder() { emit noiseFolderRequested(); }
+    void openStudyFolder() { emit studyFolderRequested(); }
+    void savePlaySchedule() { emit playScheduleSaveRequested(); }
 
 signals:
     void infoChanged();
@@ -120,6 +148,17 @@ signals:
     void openDataDirRequested();
     void upgradeNowRequested();
     void toggleOtaPauseRequested();
+    // ── A-3 第二批 ──
+    void selfCheckRequested();
+    void selfCheckFixRequested();
+    void pluginsRefreshRequested();
+    void pluginInstallRequested(const QString &id);
+    void pluginEnableRequested(const QString &id, bool enable);
+    void pluginUninstallRequested(const QString &id);
+    void pluginSampleInstallRequested();
+    void noiseFolderRequested();
+    void studyFolderRequested();
+    void playScheduleSaveRequested();
 
 private:
     QString m_appVersion, m_uid, m_cloudUrl, m_connState, m_dataDir, m_logPath;
@@ -127,6 +166,10 @@ private:
     bool m_hasNewer = false, m_canUpgrade = false, m_otaPaused = false;
     bool m_notifyEnabled = true, m_voiceEnabled = true, m_noiseEnabled = true;
     bool m_islandIdle = true, m_lightMode = false, m_autostart = false, m_desktopShortcut = false;
+    // ── A-3 第二批 ──
+    QVariantList m_selfCheckItems, m_plugins;
+    QString m_noiseLogText, m_studyLogText, m_playWindowsText, m_playStateText;
+    bool m_playScheduleEnabled = false;
 };
 
 // 由 main.cpp 提供（那里能访问匿名域的 static 自由函数与 AgentSettings）：
