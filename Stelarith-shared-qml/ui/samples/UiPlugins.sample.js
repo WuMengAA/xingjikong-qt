@@ -1,10 +1,12 @@
-// 示例界面声明清单（U2 参考实现）—— 纯数据，照 UiContract.js 的形状写。
+// 示例界面声明清单（U2 / U5 参考实现）—— 纯数据，照 UiContract.js 的形状写。
 //
-// 四条各自演示一种门控，方便 U2 的宿主探针一次性验完：
-//   sample           panel + command      常规（两端都可见）
-//   notify-demo      command + perm       权限门控
+// 六条各自演示一种门控或一种扩展面，方便宿主探针一次性验完：
+//   sample           panel + command       常规（两端都可见）
+//   notify-demo      command + perm        权限门控
 //   agent-only-demo  command + scope:agent 适用端过滤
 //   lock-demo        action  + caps        被控端能力门控
+//   sample-page-a/b  page                  「整屏页」面（U5 新增）—— 两条指向**同一个 entry**，
+//                                          用于验证"同一 entry 被多条声明引用 ⇒ 建出多个独立实例"
 .pragma library
 
 function manifest() {
@@ -52,6 +54,26 @@ function manifest() {
             caps: ["lock"],
             keys: ["lockdemo"],
             tip: "被控端未上报能力时放行；上报了但不含 lock 则隐藏"
+        },
+        {
+            id: "sample-page-a",
+            title: "示例页 A",
+            icon: "circle",
+            scope: ["both"],
+            order: 100,
+            surfaces: ["page"],
+            entry: "samples/SamplePage.qml",
+            tip: "U5 参考实现：整屏页由 UiPageHost 按声明实例化"
+        },
+        {
+            id: "sample-page-b",
+            title: "示例页 B",
+            icon: "monitor",
+            scope: ["both"],
+            order: 110,
+            surfaces: ["page"],
+            entry: "samples/SamplePage.qml",
+            tip: "与 A 指向同一 entry ⇒ 宿主应建出两个独立实例（按声明 id 缓存）"
         }
     ];
 }
