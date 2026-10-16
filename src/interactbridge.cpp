@@ -43,7 +43,7 @@ void InteractBridge::reload()
         emit dataChanged();
         return;
     }
-    const QString base  = m_backend->cloudUrl();
+    const QString base  = m_backend->httpBaseUrl();
     const QString token = m_backend->viewerToken();
     if (base.isEmpty()) {
         m_state = QStringLiteral("error");
@@ -139,7 +139,7 @@ void InteractBridge::finishReload()
 void InteractBridge::postHandle(const QString &kind, int id, const QString &action)
 {
     if (!m_backend) return;
-    const QString base  = m_backend->cloudUrl();
+    const QString base  = m_backend->httpBaseUrl();
     const QString token = m_backend->viewerToken();
     if (base.isEmpty()) return;
 

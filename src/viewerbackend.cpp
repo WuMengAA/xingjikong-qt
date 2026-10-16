@@ -1882,6 +1882,19 @@ QString ViewerBackend::defaultCloudUrl()
     return kDefaultViewerUrl;
 }
 
+// ── 管理面 HTTP 基址（m_url 是 WebSocket 地址，派生见头文件注释）──
+// 2026-10-16 新增：把原先散在 5 处的同款派生收成单一真源；InteractBridge 漏做这步
+// 导致审批面板在真机上永远 404，由真桥运行时探针实测发现。
+QString ViewerBackend::httpBaseUrl() const
+{
+    QString httpUrl = m_url;
+    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
+           .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0) httpUrl.truncate(wsIdx);
+    return httpUrl;
+}
+
 // ── 2026-10-11：拉事件流水（/api/events，最近 50 条）→ m_events + eventsChanged ──
 // 手机端告警页数据源（桌面 NotifyDialog 已有本地通知，不需要它；仅手机端拉）。
 void ViewerBackend::fetchEvents()

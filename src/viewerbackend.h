@@ -299,6 +299,22 @@ public:
     /** 云端地址（设置页要显示；它是启动时从环境变量读的，不是用户填的）。 */
     QString cloudUrl() const { return m_url; }
     /**
+     * 管理面 HTTP 基址（由 m_url 派生）。
+     *
+     * ⚠️ m_url 是 **WebSocket** 地址（默认 `wss://control.245959623.xyz/ws/viewer`），
+     *    而 `/api/*` 那一族走 HTTP ⇒ 必须先换 scheme（wss→https / ws→http），
+     *    再把 `/ws/...` 那段路径截掉。
+     *
+     * 此前这段派生在 fetchEvents / requestClasses / fetchRecordings / requestStorage /
+     * requestOnce 里各抄了一份（5 处）；**InteractBridge 当时漏了这一步** ⇒ 拼出
+     * `wss://…/ws/viewer/api/interact/…`，而 QNetworkAccessManager 不支持 wss scheme
+     * ⇒ 审批面板在真机上永远拉不到数据（HTTP 契约层测试用 curl 直连 http，绕过了
+     * 这段派生，所以当时全绿也没发现）。2026-10-16 由真桥运行时探针实测暴露。
+     *
+     * 收成一个函数：以后新增管理面接口只调它，不会再漏。
+     */
+    QString httpBaseUrl() const;
+    /**
      * 当前管理端令牌（2026-10-15 组件6 配套）。
      *
      * 为什么外露：互动审批面板（InteractBridge）走 HTTP `/api/interact/*`，
