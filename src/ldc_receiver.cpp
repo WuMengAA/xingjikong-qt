@@ -128,21 +128,31 @@ void LdcReceiver::createPc(const QByteArray &payload)
         });
 
         pc->setRemoteDescription(rtc::Description(payload.constData(), "offer"));
-        qDebug() << "[receiver] offer set, generating answer...";
-        // 2026-10-16 改：**不再** addTrack(对端 offer 的 sendonly media)。
-        // 实证（_probe/webrtc-cycle）：把对端 sendonly media 当本端轨 add 进去是错的
-        // （方向不匹配），且接收方必须显式 addTrack **本端 recvonly 轨**——reciprocate
-        // 自动建的 remote 轨不算本端轨，否则 answer 的 media 被 removed、track 永不 open。
-        // 屏幕轨 H264 / 摄像头轨（camera 至今发手动 JPEG-over-RTP，viewer 侧不挂
-        // depacketizer，建轨只为协商不 reject —— 保持老 onMessage 剥 JPEG 路径）。
-        rtc::Description::Video scMedia("screen", rtc::Description::Direction::RecvOnly);
-        scMedia.addH264Codec(96);
-        pc->addTrack(scMedia);
-        rtc::Description::Video camMedia("camera", rtc::Description::Direction::RecvOnly);
-        camMedia.addH264Codec(97);
-        pc->addTrack(camMedia);
-        pc->setLocalDescription();   // 生成 answer
-        qDebug() << "[receiver] setLocalDescription returned";
+        qDebug() << "[receiver] offer set, 等 HaveRemoteOffer 再生成 answer...";
+        // 2026-10-16 修（H264 真机「没画面、还是轮询」实证）：setRemoteDescription 是**异步**
+        // 的——answer 方必须在它落地（signalingState=HaveRemoteOffer）之后才能 addTrack +
+        // setLocalDescription。原来 setRemoteDescription 后**立即** setLocalDescription：
+        // 此时信号状态还是 Stable，会生成**第二个 offer 而非 answer**（_probe/webrtc-cycle
+        // 实验踩过同一坑），协商失败 ⇒ agent 侧 RTC 连不上 ⇒ 一直是 WS 轮询兜底画面。
+        // 接收轨改为**本端 recvonly**（不再 addTrack 对端 sendonly media，实证方向不匹配）：
+        //   · screen = H264（96）；camera 至今发手动 JPEG-over-RTP（97），viewer 不挂
+        //     depacketizer、建轨只为协商不 reject（保持老 onMessage 剥 JPEG 路径）。
+        // lambda 持 pc（shared_ptr）而不是裸指针 —— stop() 会 reset m_pc，PC 靠这份引用保活到回调。
+        pc->onSignalingStateChange([this, pc](rtc::PeerConnection::SignalingState st) {
+            if (st != rtc::PeerConnection::SignalingState::HaveRemoteOffer) return;
+            try {
+                rtc::Description::Video scMedia("screen", rtc::Description::Direction::RecvOnly);
+                scMedia.addH264Codec(96);
+                pc->addTrack(scMedia);
+                rtc::Description::Video camMedia("camera", rtc::Description::Direction::RecvOnly);
+                camMedia.addH264Codec(97);
+                pc->addTrack(camMedia);
+                pc->setLocalDescription();   // 此时才生成 answer
+                qDebug() << "[receiver] HaveRemoteOffer → addTrack + setLocalDescription（answer）";
+            } catch (const std::exception &e) {
+                emit failed(QStringLiteral("answer 生成: %1").arg(QString::fromLocal8Bit(e.what())));
+            }
+        });
     } catch (const std::exception &e) {
         emit failed(QStringLiteral("offer: %1").arg(QString::fromLocal8Bit(e.what())));
     }
