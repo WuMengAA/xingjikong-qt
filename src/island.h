@@ -264,14 +264,28 @@ private:
     // submitSongRequest / sendBlessing 内的 blessing）都走它。
     void reportToCloud(const QString &type, const QJsonObject &payload);
 
-    // ── 历史通知（2026-10-11 · 持久化）──────────────────────────
+    // ── 历史通知（2026-10-11 · 持久化；2026-10-17 「记录与逻辑」升级）──────
     // 一条历史通知的内存模型。JSON 落盘到 LOCALAPPDATA/xingjikong/island_history.json。
+    //
+    // 2026-10-17 升级（用户点单「通知记录与逻辑」）：
+    //   ① 原来只有 title/desc/icon/ts/timeStr —— 无法分类、无法标未读、无法搜索。
+    //      补 id/category/level/read/dateGroup 四个语义字段（见 docs/目标/
+    //      灵动岛通用简单历史通知 §二「所有通知走同一套格式」）。
+    //   ② dateGroup 在**归档时**就格式化好（"今天"/"昨天"/"M月d日"）—— 不让 QML
+    //      现算：被控端 QML 没有可信的时区/本地化保证，且列表滚动时反复算日期。
+    //   ③ 老 JSON 缺字段 → loadHistory 给默认值（read=false / category=消息 /
+    //      level=info / dateGroup 由 ts 现推），**不丢任何历史条目**。
     struct HistoryItem {
+        QString id;               // 唯一 id（"<ts>-<seq>"），QML 标记已读/删除用
         QString title;
         QString desc;
         QString icon;
         qint64  ts = 0;           // Unix 时间戳（秒）
         QString timeStr;          // 预格式化时间串（"HH:mm" 或 "昨天 HH:mm" 或 "M/d HH:mm"）
+        QString dateGroup;        // 分组标题（"今天"/"昨天"/"10月3日"）
+        QString category;         // 分类（指令/告警/消息/系统）
+        QString level;            // 级别（info/success/warning/error）
+        bool    read = false;     // 已读标记（未读 = 有蓝点 + 计入未读数）
         bool    fromAdmin = false; // 2026-10-13：管理端下发（历史排序时置顶）
     };
     QVector<HistoryItem> m_history;
@@ -285,6 +299,26 @@ private:
     void saveHistory() const;    // 写 JSON
     void pruneHistory();         // 剔除超期（>7 天）条目；不落盘，调用方决定何时 save
     QString historyPath() const; // LOCALAPPDATA/xingjikong/island_history.json
+
+    // ── 历史记录逻辑（2026-10-17）────────────────────────────────
+    // 返回空串 = **不该进历史**（纯技术状态：心跳/重连/更新下载/连接中）。
+    // 判据写在 island.cpp 的 historyCategoryOf()，集中一处，新增触发源不用改归档代码。
+    static QString historyCategoryOf(const QString &title, const QString &desc,
+                                     const QString &icon, bool fromAdmin);
+    // 级别由文案推断（失败→error，完成→success，提醒→warning，其余 info）。
+    static QString historyLevelOf(const QString &title, const QString &desc);
+    // 日期分组标题（今天 / 昨天 / M月d日），按 ts 现算。
+    static QString historyDateGroupOf(qint64 ts);
+    // 未读条数（QML 角标用）
+    int historyUnreadCount() const;
+    // 把某条按 id 标已读（找不到静默忽略）；返回是否真的变了
+    bool markHistoryRead(const QString &id);
+    // 全部标已读；返回本次由未读转已读的条数
+    int  markAllHistoryRead();
+    // 按 id 删一条；返回是否删掉了
+    bool removeHistory(const QString &id);
+    // 生成 id（ts + 同秒内递增序号，避免同秒两条撞 id）
+    QString nextHistoryId(qint64 ts) const;
 
     QString m_title;
     QString m_desc;

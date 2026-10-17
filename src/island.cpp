@@ -37,6 +37,11 @@
 #include <QGuiApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonArray>      // 2026-10-17：历史记录升级用到（原先靠 island.h 间接带进来）
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStringList>
+#include <QDateTime>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -405,7 +410,29 @@ void IslandOverlay::loadHistory()
         h.icon = o.value(QStringLiteral("icon")).toString();
         h.ts = o.value(QStringLiteral("ts")).toVariant().toLongLong();
         h.timeStr = o.value(QStringLiteral("timeStr")).toString();
+        h.fromAdmin = o.value(QStringLiteral("fromAdmin")).toBool(false);
+        // ── 2026-10-17 新字段：老 JSON 没有这些键 → 就地推导，**不丢条** ──
+        h.id = o.value(QStringLiteral("id")).toString();
+        h.category = o.value(QStringLiteral("category")).toString();
+        h.level = o.value(QStringLiteral("level")).toString();
+        h.dateGroup = o.value(QStringLiteral("dateGroup")).toString();
+        // 老数据的 read 键不存在 ⇒ 视为**已读**（历史遗留不该一升级就冒出 50 个红点，
+        // 那会让用户以为刚收到一堆通知）。只有明确 false 的才是未读。
+        h.read = o.contains(QStringLiteral("read"))
+                     ? o.value(QStringLiteral("read")).toBool(true)
+                     : true;
+        // 缺字段就地补（顺序重要：category 依赖 title/desc）
+        if (h.category.isEmpty()) {
+            const QString c = historyCategoryOf(h.title, h.desc, h.icon, h.fromAdmin);
+            h.category = c.isEmpty() ? QStringLiteral("消息") : c;   // 老条目已落盘，不强删
+        }
+        if (h.level.isEmpty()) h.level = historyLevelOf(h.title, h.desc);
+        if (h.dateGroup.isEmpty()) h.dateGroup = historyDateGroupOf(h.ts);
         m_history.append(h);
+    }
+    // 老 JSON 完全没有 id ⇒ 补一遍（否则 markHistoryRead 无法定位）
+    for (auto &h : m_history) {
+        if (h.id.isEmpty()) h.id = nextHistoryId(h.ts);
     }
     // 限制条数
     while (m_history.size() > kMaxHistory)
@@ -422,11 +449,18 @@ void IslandOverlay::saveHistory() const
     QJsonArray arr;
     for (const auto &h : m_history) {
         QJsonObject o;
+        o.insert(QStringLiteral("id"), h.id);
         o.insert(QStringLiteral("title"), h.title);
         o.insert(QStringLiteral("desc"), h.desc);
         o.insert(QStringLiteral("icon"), h.icon);
         o.insert(QStringLiteral("ts"), qint64(h.ts));
         o.insert(QStringLiteral("timeStr"), h.timeStr);
+        // 2026-10-17 新字段（缺任何一个，重启后分类/未读/分组就退回默认值）
+        o.insert(QStringLiteral("dateGroup"), h.dateGroup);
+        o.insert(QStringLiteral("category"), h.category);
+        o.insert(QStringLiteral("level"), h.level);
+        o.insert(QStringLiteral("read"), h.read);
+        o.insert(QStringLiteral("fromAdmin"), h.fromAdmin);
         arr.append(o);
     }
     QJsonDocument doc(arr);
@@ -451,6 +485,168 @@ void IslandOverlay::pruneHistory()
     }
 }
 
+// ── 历史记录逻辑（2026-10-17 · 用户点单「通知记录与逻辑」）──────────────
+// 设计依据：docs/目标/灵动岛通用简单历史通知 §二/§十 ——
+//   「历史只记有意义的事件，不是所有事件」。所以这里的第一职责是**决定要不要记**，
+//   返回空串即拒绝归档（调用方 archiveToHistory 直接 return，连落盘都不做）。
+
+QString IslandOverlay::historyCategoryOf(const QString &title, const QString &desc,
+                                        const QString &icon, bool fromAdmin)
+{
+    // ── 1. 纯技术状态：不进历史（§十 表）──
+    // 判据用「关键词 + 图标」双条件收紧，避免误杀正常文案：
+    //   只有文案里出现"重连/心跳/下载/更新"并且**确实是技术动作**的才丢。
+    // 说明：这些提示本来就走 showIsland 短暂展示，用户看得见，只是不该占历史。
+    static const QStringList kTechWords = {
+        QStringLiteral("重连"), QStringLiteral("心跳"), QStringLiteral("连接中"),
+        QStringLiteral("重新连接"), QStringLiteral("下载中"), QStringLiteral("更新包"),
+        QStringLiteral("正在下载"), QStringLiteral("校验中")
+    };
+    const QString probe = title + QLatin1Char(' ') + desc;
+    for (const QString &w : kTechWords) {
+        if (probe.contains(w)) return QString();   // 空 = 不进历史
+    }
+
+    // ── 2. 分类（§二 category：指令/告警/课表/消息/系统）──
+    // 被控端场景没有"课表"独立源（课表走 ClassIsland 对接），故只用四类。
+    const QString t = title;
+    // 告警：失败/错误/异常/超时/不足 —— 这类必须留痕给老师回看
+    static const QStringList kAlert = {
+        QStringLiteral("失败"), QStringLiteral("错误"), QStringLiteral("异常"),
+        QStringLiteral("超时"), QStringLiteral("不足"), QStringLiteral("断开"),
+        QStringLiteral("离线"), QStringLiteral("警告")
+    };
+    for (const QString &w : kAlert)
+        if (t.contains(w)) return QStringLiteral("告警");
+
+    // 指令：管理端下发的动作回执（锁屏/关机/广播/分发/音量/进程…）
+    // fromAdmin 是 2026-10-13 就有的标记（管理端 notify 指令），优先认它。
+    static const QStringList kCmd = {
+        QStringLiteral("锁屏"), QStringLiteral("关机"), QStringLiteral("重启"),
+        QStringLiteral("广播"), QStringLiteral("分发"), QStringLiteral("推送"),
+        QStringLiteral("音量"), QStringLiteral("进程"), QStringLiteral("截图"),
+        QStringLiteral("文件"), QStringLiteral("接管"), QStringLiteral("考试"),
+        QStringLiteral("静音"), QStringLiteral("解锁")
+    };
+    for (const QString &w : kCmd)
+        if (t.contains(w)) return QStringLiteral("指令");
+    if (fromAdmin) return QStringLiteral("指令");
+
+    // 系统：本机自身状态（更新完成/已连接/设备接入）
+    static const QStringList kSys = {
+        QStringLiteral("更新"), QStringLiteral("已连接"), QStringLiteral("设备"),
+        QStringLiteral("U盘"), QStringLiteral("启动"), QStringLiteral("网络")
+    };
+    for (const QString &w : kSys)
+        if (t.contains(w)) return QStringLiteral("系统");
+
+    // icon 兜底：bell 类（管理端通知）算消息，其余按消息处理
+    Q_UNUSED(icon);
+    return QStringLiteral("消息");
+}
+
+QString IslandOverlay::historyLevelOf(const QString &title, const QString &desc)
+{
+    const QString probe = title + QLatin1Char(' ') + desc;
+    static const QStringList kErr = {
+        QStringLiteral("失败"), QStringLiteral("错误"), QStringLiteral("异常"),
+        QStringLiteral("超时"), QStringLiteral("拒绝"), QStringLiteral("断开")
+    };
+    for (const QString &w : kErr)
+        if (probe.contains(w)) return QStringLiteral("error");
+
+    static const QStringList kWarn = {
+        QStringLiteral("警告"), QStringLiteral("注意"), QStringLiteral("不足"),
+        QStringLiteral("提醒"), QStringLiteral("即将")
+    };
+    for (const QString &w : kWarn)
+        if (probe.contains(w)) return QStringLiteral("warning");
+
+    static const QStringList kOk = {
+        QStringLiteral("完成"), QStringLiteral("成功"), QStringLiteral("已发送"),
+        QStringLiteral("已连接"), QStringLiteral("已接收")
+    };
+    for (const QString &w : kOk)
+        if (probe.contains(w)) return QStringLiteral("success");
+
+    return QStringLiteral("info");
+}
+
+QString IslandOverlay::historyDateGroupOf(qint64 ts)
+{
+    if (ts <= 0) return QStringLiteral("更早");
+    const QDateTime dt = QDateTime::fromSecsSinceEpoch(ts);
+    const QDate today = QDate::currentDate();
+    if (dt.date() == today) return QStringLiteral("今天");
+    if (dt.date() == today.addDays(-1)) return QStringLiteral("昨天");
+    // 同年只显示月日，跨年带年份 —— 7 天保留期下基本只有同月，但跨年那两天会用到
+    return dt.date().year() == today.year()
+               ? dt.toString(QStringLiteral("M月d日"))
+               : dt.toString(QStringLiteral("yyyy年M月d日"));
+}
+
+int IslandOverlay::historyUnreadCount() const
+{
+    int n = 0;
+    for (const auto &h : m_history)
+        if (!h.read) ++n;
+    return n;
+}
+
+bool IslandOverlay::markHistoryRead(const QString &id)
+{
+    if (id.isEmpty()) return false;
+    for (auto &h : m_history) {
+        if (h.id == id) {
+            if (h.read) return false;
+            h.read = true;
+            saveHistory();
+            return true;
+        }
+    }
+    return false;
+}
+
+int IslandOverlay::markAllHistoryRead()
+{
+    int changed = 0;
+    for (auto &h : m_history) {
+        if (!h.read) { h.read = true; ++changed; }
+    }
+    if (changed > 0) saveHistory();
+    return changed;
+}
+
+bool IslandOverlay::removeHistory(const QString &id)
+{
+    if (id.isEmpty()) return false;
+    for (int i = 0; i < m_history.size(); ++i) {
+        if (m_history.at(i).id == id) {
+            m_history.removeAt(i);
+            saveHistory();
+            return true;
+        }
+    }
+    return false;
+}
+
+QString IslandOverlay::nextHistoryId(qint64 ts) const
+{
+    // ts 打头便于人工排查；同秒撞车时追加序号（-2/-3…）
+    const QString base = QString::number(ts);
+    QString id = base;
+    int seq = 2;
+    bool clash = true;
+    while (clash) {
+        clash = false;
+        for (const auto &h : m_history) {
+            if (h.id == id) { clash = true; break; }
+        }
+        if (clash) id = base + QLatin1Char('-') + QString::number(seq++);
+    }
+    return id;
+}
+
 void IslandOverlay::archiveToHistory()
 {
     // 有标题才归档（空内容/空闲态不该进历史）
@@ -461,6 +657,10 @@ void IslandOverlay::archiveToHistory()
         if (last.title == m_title && (QDateTime::currentSecsSinceEpoch() - last.ts) < 5)
             return;
     }
+    // 2026-10-17：逻辑判据 —— 空分类 = 纯技术状态，不进历史。
+    // 放在 5 秒去重之后：技术上重复的提示也不该因为"分类为空"而绕过去重判断顺序。
+    const QString category = historyCategoryOf(m_title, m_desc, m_icon, m_fromAdmin);
+    if (category.isEmpty()) return;
 
     HistoryItem h;
     h.title = m_title;
@@ -468,6 +668,11 @@ void IslandOverlay::archiveToHistory()
     h.icon = m_icon;
     h.ts = QDateTime::currentSecsSinceEpoch();
     h.fromAdmin = m_fromAdmin;   // 2026-10-13：管理端通知打标（历史排序置顶用）
+    h.id = nextHistoryId(h.ts);
+    h.category = category;
+    h.level = historyLevelOf(m_title, m_desc);
+    h.dateGroup = historyDateGroupOf(h.ts);
+    h.read = false;              // 新归档默认未读（未读点 + 未读计数）
 
     // 格式化时间串
     const QDateTime dt = QDateTime::fromSecsSinceEpoch(h.ts);

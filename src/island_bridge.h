@@ -67,12 +67,21 @@ class IslandBridge : public QObject
     Q_PROPERTY(QString whaleBubble      READ whaleBubble      NOTIFY changed)
     Q_PROPERTY(bool     whaleAudioOn    READ whaleAudioOn     NOTIFY changed)
 
-    // ── 历史通知（2026-10-11 · 持久化）────────────────────────────
+    // ── 历史通知（2026-10-11 · 持久化；2026-10-17 「记录与逻辑」升级）──
     // 通知消失（dismiss/enterIdle/showIsland 顶掉旧通知）时自动归档到历史。
     // 历史列表由 IslandOverlay 维护（QVector + JSON 落盘）。
     // QML 侧展开态显示历史面板：点项恢复详情，可清空。
-    // 每项格式：{title, desc, icon, ts, timeStr}
+    // 每项格式：{id, title, desc, icon, ts, timeStr, dateGroup, category, level, read, fromAdmin}
     Q_PROPERTY(QVariantList history  READ history  NOTIFY changed)
+    // 未读条数（收起态角标 / 历史面标签用）
+    Q_PROPERTY(int historyUnreadCount READ historyUnreadCount NOTIFY changed)
+    // 筛选条件（2026-10-17）：空串/「全部」= 不筛。改它会 emit changed 让 history 重算。
+    // ⚠️ 过滤放在 C++ 侧做，不让 QML 用 JS filter —— history 是 QVariantList，
+    //    QML 里每次绑定重算都要跑一遍 JS 数组，50 条 × 每次 changed 不划算。
+    Q_PROPERTY(QString historyCategoryFilter READ historyCategoryFilter
+               WRITE setHistoryCategoryFilter NOTIFY changed)
+    Q_PROPERTY(QString historyKeyword        READ historyKeyword
+               WRITE setHistoryKeyword        NOTIFY changed)
 
     // ── 文件传输进度（2026-10-11 · #198 接收进度条）──
     Q_PROPERTY(bool    fileTransferActive READ fileTransferActive NOTIFY changed)
@@ -142,6 +151,11 @@ public:
 
     // 历史通知
     QVariantList history() const;
+    int    historyUnreadCount() const;
+    QString historyCategoryFilter() const { return m_histCategory; }
+    void    setHistoryCategoryFilter(const QString &c);
+    QString historyKeyword() const { return m_histKeyword; }
+    void    setHistoryKeyword(const QString &k);
     // 文件传输进度
     bool   fileTransferActive() const;
     QString fileTransferName() const;
@@ -166,7 +180,14 @@ public:
     // 频谱状态变了就调这个：**只发频谱那一路**（高频，别用全量 sync()）。
     void syncSpectrum();
     // QML → C++：点历史项，恢复该通知到展开态
+    // ⚠️ index 是**当前筛选后的显示序**（与 history() 严格同一套过滤 + 排序）。
     Q_INVOKABLE void showHistoryItem(int index);
+    // 2026-10-17：更稳的入口 —— 按 id 打开（列表重排/过滤变化后 index 会漂移）
+    Q_INVOKABLE void showHistoryById(const QString &id);
+    // QML → C++：标一条已读 / 全部已读 / 删一条
+    Q_INVOKABLE void markHistoryRead(const QString &id);
+    Q_INVOKABLE void markAllHistoryRead();
+    Q_INVOKABLE void removeHistory(const QString &id);
     // QML → C++：清空全部历史
     Q_INVOKABLE void clearHistory();
 
@@ -199,9 +220,13 @@ private:
     // 2026-10-13（用户「历史通知第一位优先显示管理端通知」）：历史**显示序** ——
     // 管理端在前、本地事件在后，组内保持原有先后（**稳定**，不重排时间序）。
     // history() 与 showHistoryItem() 必须共用它，否则「看到的第 N 条」≠「点开的第 N 条」。
+    // 2026-10-17：在排序之前先过 m_histCategory / m_histKeyword 两个筛子；
+    // **两个入口共用同一个 historyOrder()**，所以加了过滤也不会错位（这是本轮的重点）。
     QVector<int> historyOrder() const;
 
     IslandOverlay *m_host = nullptr;   // 不持有（IslandOverlay 是单例，活得比本对象久）
+    QString m_histCategory;            // 空 / "全部" = 不限
+    QString m_histKeyword;             // 空 = 不搜（标题+描述包含即命中）
 
 signals:
     void changed();

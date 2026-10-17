@@ -158,18 +158,40 @@ bool IslandBridge::whaleAudioOn() const
     return QSettings().value(QStringLiteral("settings/whaleAudioOn"), false).toBool();
 }
 
-// ── 历史通知（2026-10-11 · 持久化）──────────────────────────────
+// ── 历史通知（2026-10-11 · 持久化；2026-10-17 记录与逻辑升级）────────
 // 从 IslandOverlay 的 m_history 取，桥不缓存。
+//
+// 2026-10-17：加了分类/关键词两个筛子。**筛在排序之前**，且 history() 与
+// showHistoryItem() 都走这一个函数 —— 这是关键：上一轮（10-13）已经踩过
+// 「管理端置顶后 m_history 下标 ≠ 显示序」，如果这次再在 history() 里单独过滤、
+// 而 showHistoryItem 用未过滤的 order，就会变成"点第 3 条打开第 5 条"。
 QVector<int> IslandBridge::historyOrder() const
 {
     QVector<int> order;
     if (!m_host) return order;
     const int n = m_host->m_history.size();
     order.reserve(n);
+
+    // 「全部」/空 = 不限分类；关键词为空 = 不搜
+    const QString cat = (m_histCategory == QStringLiteral("全部")) ? QString() : m_histCategory;
+    const QString kw  = m_histKeyword.trimmed();
+
+    auto pass = [&](const IslandOverlay::HistoryItem &h) {
+        if (!cat.isEmpty() && h.category != cat) return false;
+        if (!kw.isEmpty()) {
+            // 标题 + 描述 都搜（老师通常记得一句内容而不是标题）
+            if (!h.title.contains(kw, Qt::CaseInsensitive)
+                && !h.desc.contains(kw, Qt::CaseInsensitive)) return false;
+        }
+        return true;
+    };
+
     for (int i = 0; i < n; ++i)
-        if (m_host->m_history.at(i).fromAdmin) order.append(i);   // 第一批：管理端下发
+        if (m_host->m_history.at(i).fromAdmin && pass(m_host->m_history.at(i)))
+            order.append(i);   // 第一批：管理端下发
     for (int i = 0; i < n; ++i)
-        if (!m_host->m_history.at(i).fromAdmin) order.append(i);  // 第二批：本机事件
+        if (!m_host->m_history.at(i).fromAdmin && pass(m_host->m_history.at(i)))
+            order.append(i);   // 第二批：本机事件
     return order;
 }
 
@@ -181,15 +203,39 @@ QVariantList IslandBridge::history() const
     for (int idx : order) {
         const auto &h = m_host->m_history.at(idx);
         QVariantMap m;
+        m.insert(QStringLiteral("id"), h.id);
         m.insert(QStringLiteral("title"), h.title);
         m.insert(QStringLiteral("desc"), h.desc);
         m.insert(QStringLiteral("icon"), h.icon);
         m.insert(QStringLiteral("ts"), h.ts);
         m.insert(QStringLiteral("timeStr"), h.timeStr);
-        m.insert(QStringLiteral("fromAdmin"), h.fromAdmin);   // 2026-10-13：QML 可据此加"管理端"标记
+        m.insert(QStringLiteral("dateGroup"), h.dateGroup);   // 2026-10-17：ListView section 用
+        m.insert(QStringLiteral("category"), h.category);     // 指令/告警/消息/系统
+        m.insert(QStringLiteral("level"), h.level);           // info/success/warning/error
+        m.insert(QStringLiteral("read"), h.read);             // 未读点
+        m.insert(QStringLiteral("fromAdmin"), h.fromAdmin);   // QML 可据此加"管理端"标记
         out.append(m);
     }
     return out;
+}
+
+int IslandBridge::historyUnreadCount() const
+{
+    return m_host ? m_host->historyUnreadCount() : 0;
+}
+
+void IslandBridge::setHistoryCategoryFilter(const QString &c)
+{
+    if (m_histCategory == c) return;
+    m_histCategory = c;
+    emit changed();
+}
+
+void IslandBridge::setHistoryKeyword(const QString &k)
+{
+    if (m_histKeyword == k) return;
+    m_histKeyword = k;
+    emit changed();
 }
 
 // ── 文件传输进度（2026-10-11 · #198 接收进度条）──
@@ -260,11 +306,53 @@ void IslandBridge::showHistoryItem(int index)
     if (!m_host) return;
     // ⚠️ index 是**显示序**（historyOrder）里的位置，**不是** m_history 的下标 ——
     //    两列表在"管理端置顶"后不再相同，直接拿 index 索引 m_history 会点开错的条。
+    //    2026-10-17：加了分类/关键词过滤后，显示序还会被筛子缩短，所以必须走同一个
+    //    historyOrder()（它已经内含过滤），这里一行都不用改 —— 这也是当初把
+    //    排序收口成一个函数的好处。
     const QVector<int> order = historyOrder();
     if (index < 0 || index >= order.size()) return;
     const auto &h = m_host->m_history.at(order.at(index));
+    // 打开即已读（设计稿 §5.4「跳转后自动标记已读」）
+    if (!h.read) {
+        m_host->markHistoryRead(h.id);
+        emit changed();
+    }
     // 把历史项恢复为岛的通知（纯展示，不自动关）；来源标记一并带回去（再归档时不丢标）
     m_host->showIsland(h.title, h.desc, h.icon, 0, IslandOverlay::Form::Capsule, h.fromAdmin);
+}
+
+void IslandBridge::showHistoryById(const QString &id)
+{
+    if (!m_host || id.isEmpty()) return;
+    // 用 id 定位：不受过滤/重排影响（QML 列表滚动或筛选变化后 index 会漂）
+    for (const auto &h : m_host->m_history) {
+        if (h.id != id) continue;
+        if (!h.read) {
+            m_host->markHistoryRead(h.id);
+            emit changed();
+        }
+        m_host->showIsland(h.title, h.desc, h.icon, 0, IslandOverlay::Form::Capsule, h.fromAdmin);
+        return;
+    }
+    qWarning("[island] showHistoryById：找不到 id=%s（可能已被 7 天清理）", qPrintable(id));
+}
+
+void IslandBridge::markHistoryRead(const QString &id)
+{
+    if (!m_host) return;
+    if (m_host->markHistoryRead(id)) emit changed();
+}
+
+void IslandBridge::markAllHistoryRead()
+{
+    if (!m_host) return;
+    if (m_host->markAllHistoryRead() > 0) emit changed();
+}
+
+void IslandBridge::removeHistory(const QString &id)
+{
+    if (!m_host) return;
+    if (m_host->removeHistory(id)) emit changed();
 }
 
 void IslandBridge::clearHistory()
