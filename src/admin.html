@@ -306,6 +306,41 @@
       </table>
     </div>
 
+    <!-- CIMS 课表供给：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件写回宿主档案 -->
+    <div class="card" style="margin-bottom:16px;">
+      <h2>CIMS 课表供给 <span class="badge" id="cimsState">—</span></h2>
+      <div class="row">
+        <label>拉取目标</label>
+        <span id="cimsTarget" class="tag">—</span>
+        <label>周期同步</label>
+        <span id="cimsInterval" class="tag">—</span>
+        <label>自动下发</label>
+        <span id="cimsAuto" class="tag">—</span>
+      </div>
+      <div class="row">
+        <label>uid 映射</label>
+        <span id="cimsMap" class="note" style="font-family:var(--mono); font-size:12px;">—</span>
+      </div>
+      <div class="row">
+        <label>最近全量同步</label>
+        <span id="cimsLast" class="note">—</span>
+        <button class="btn sm" onclick="cimsSync('apply')">立即同步（拉取 + 下发）</button>
+        <button class="btn outline sm" onclick="cimsSync('pull')">仅拉取</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>设备</th><th>CIMS 客户端</th><th>课表</th><th>作息</th><th>科目</th><th>拉取时间</th><th>下发时间</th><th></th></tr>
+        </thead>
+        <tbody id="cimsTable">
+          <tr><td colspan="8" style="color:var(--text-dim); text-align:center; padding:12px;">读取中…</td></tr>
+        </tbody>
+      </table>
+      <div class="note" id="cimsHint" style="margin-top:6px;">
+        课表/作息/科目由云端从 CIMS 拉取，变化才经被控端下发 <b>classisland_apply_profile</b>，由 ClassIsland 插件写回教室机宿主档案；
+        「下发时间」为空表示内容无变化（幂等，不重复下发）。设备未在 CIMS 绑班会拿到租户默认资源（可能是空占位）。
+      </div>
+    </div>
+
     <!-- 设备列表 -->
     <div class="card" style="margin-bottom:16px;">
       <h2>设备列表 <span class="badge" id="devCountBadge"></span></h2>
@@ -573,7 +608,7 @@ function startPolling() {
 
 // ---- 刷新 ----
 async function refreshAll() {
-  await Promise.all([refreshDevices(), refreshEvents(), loadConfig(), loadOta(), loadProvision()]);
+  await Promise.all([refreshDevices(), refreshEvents(), loadConfig(), loadOta(), loadProvision(), loadCims()]);
 }
 
 async function refreshDevices() {
@@ -622,6 +657,60 @@ async function refreshEvents() {
       return `<div class="event"><span class="time">${t}</span><span class="lv lv-${ev.level}">[${ev.level}]</span><span class="msg">${esc(ev.msg)}</span></div>`;
     }).join('');
   } catch(e) {}
+}
+
+// ---- CIMS 课表供给（2026-10-18 面板接线；端点见 src/index.js /api/admin/cims/*）----
+async function loadCims() {
+  try {
+    const r = await api('/api/admin/cims/status');
+    const c = r.cims;
+    if (!c) return;   // 老云端没这个端点：卡片留着但不吵
+    document.getElementById('cimsState').textContent =
+      c.enabled ? (c.autoApply ? '已启用 · 自动下发' : '已启用 · 仅拉取') : '未启用';
+    document.getElementById('cimsTarget').textContent = `${c.slug}.${c.baseDomain} → ${c.baseUrl}`;
+    document.getElementById('cimsInterval').textContent = c.pullIntervalSec > 0 ? c.pullIntervalSec + 's' : '关';
+    document.getElementById('cimsAuto').textContent = c.autoApply ? '开' : '关';
+    const map = c.uidMap || {};
+    document.getElementById('cimsMap').textContent =
+      Object.keys(map).length ? JSON.stringify(map) : '恒等（设备 uid 即 CIMS 客户端 uid）';
+    const s = c.lastSyncAllSummary;
+    document.getElementById('cimsLast').textContent = s
+      ? `${new Date(s.at).toLocaleTimeString('zh-CN', { hour12: false })} · 共 ${s.total} 台 · 下发 ${s.applied} · 失败 ${s.failed}`
+      : '还没有同步过';
+    const tb = document.getElementById('cimsTable');
+    if (!c.devices || !c.devices.length) {
+      tb.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim); text-align:center; padding:12px;">缓存里还没有设备（等上线钩子或手动同步）</td></tr>';
+      return;
+    }
+    tb.innerHTML = c.devices.map(d => {
+      const v = d.versions || {}, sz = d.sizes || {};
+      const cell = (t) => v[t]
+        ? `<span class="tag online" title="CIMS 版本 ${esc(v[t])}">${sz[t] || 0}B</span>`
+        : '<span class="tag offline">无</span>';
+      return `<tr>
+        <td style="font-family:var(--mono); font-size:12px;">${esc(d.uid)}${d.ok ? '' : ' ⚠'}</td>
+        <td class="note">${esc(map[d.uid] || d.uid)}</td>
+        <td>${cell('ClassPlan')}</td><td>${cell('TimeLayout')}</td><td>${cell('Subjects')}</td>
+        <td class="note">${d.at ? new Date(d.at).toLocaleTimeString('zh-CN', { hour12: false }) : '-'}${d.ok ? '' : '（' + esc(d.error || '失败') + '）'}</td>
+        <td class="note">${d.appliedAt ? new Date(d.appliedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '未下发'}</td>
+        <td style="white-space:nowrap;"><button class="btn outline sm" onclick="cimsSync('apply','${esc(d.uid)}')">同步</button></td>
+      </tr>`;
+    }).join('');
+  } catch (e) { /* 轮询失败静默 */ }
+}
+
+async function cimsSync(mode, uid) {
+  const path = mode === 'pull' ? '/api/admin/cims/pull' : '/api/admin/cims/apply';
+  let r;
+  try { r = await api(path, 'POST', uid ? { uid } : {}); }
+  catch (e) { return toast('同步请求失败：' + e.message, 'err'); }
+  if (r.ok) {
+    const res = r.result || {};
+    toast(uid ? `${uid} 同步成功` : `全量同步完成：共 ${res.total ?? '?'} 台，下发 ${res.applied ?? '?'}`, 'ok');
+  } else {
+    toast('同步失败：' + (r.error || ('HTTP ' + r._status)), 'err');
+  }
+  loadCims();
 }
 
 // ---- 安全配置 ----
