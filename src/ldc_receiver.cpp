@@ -16,7 +16,13 @@ LdcReceiver &LdcReceiver::instance()
     return inst;
 }
 
-LdcReceiver::LdcReceiver(QObject *parent) : QObject(parent) {}
+LdcReceiver::LdcReceiver(QObject *parent) : QObject(parent)
+{
+    // 2026-10-17：ICE/DTLS 排障开关（STE_LDC_LOG=1 开 libdatachannel Debug 日志，
+    // 真机看候选类型/打洞状态；平时不开免得刷爆日志）
+    if (qgetenv("STE_LDC_LOG") == "1")
+        rtc::InitLogger(rtc::LogLevel::Debug);
+}
 
 // ── 信令入口：被控端 offer / candidate 经云端转来 ──
 void LdcReceiver::onSignal(const QString &type, const QByteArray &payload)
