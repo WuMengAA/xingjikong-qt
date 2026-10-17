@@ -81,6 +81,13 @@ void LdcReceiver::createPc(const QByteArray &payload)
                 : envStun;
             cfg.iceServers.push_back(rtc::IceServer(stun.constData()));
         }
+        // ⚠️ 2026-10-17 真机 Failed 修复（与沙箱 PASS 路径对齐）：必须关闭自动协商。
+        //    否则 setRemoteDescription 在 HaveRemoteOffer 后**内部自动**
+        //    setLocalDescription(Answer)（公共层 :280-283），此时本端轨还没 addTrack，
+        //    populate 生成的是「无本地 track」的 answer → 协议状态与沙箱 PASS 不一致。
+        //    工具（ws_answer_h264.cpp）正是 disableAutoNegotiation=true + addTrack 提前
+        //    之后才 PASS 的；viewer 此前缺这一对 → 真机 PeerConnection Failed。
+        cfg.disableAutoNegotiation = true;
         auto pc = std::make_shared<rtc::PeerConnection>(cfg);
         m_pc = pc;
         qInfo() << "[viewer-rtc] 收流 PeerConnection 已建，等待协商";
@@ -142,45 +149,47 @@ void LdcReceiver::createPc(const QByteArray &payload)
         // 接收轨改为本端 recvonly（不再 addTrack 对端 sendonly media，实证方向不匹配）：
         //   · screen = H264（96）；camera 至今发手动 JPEG-over-RTP（97），viewer 不挂
         //     depacketizer、建轨只为协商不 reject（保持老 onMessage 剥 JPEG 路径）。
-        // lambda 持 pc（shared_ptr）而不是裸指针 —— stop() 会 reset m_pc，PC 靠这份引用保活到回调。
+        // ⚠️ 2026-10-17 真机 Failed 修复：addTrack **必须提前到 setRemoteDescription 之前**，
+        //    与沙箱 PASS 的工具（ws_answer_h264.cpp）逐字节同构。
+        //    旧代码把 addTrack 放在 makeAnswer 回调里（HaveRemoteOffer 触发后才 addTrack），
+        //    setRemoteDescription 内部 processRemoteDescription 已先为 mid 建了 remote incoming
+        //    track（weak_ptr、无人持住）→ populate 时本端轨未就位 → 协商出的 answer 与 PASS
+        //    形态不一致 → 真机 PeerConnection Failed。setRemoteDescription 本身会同步推进
+        //    signaling state 触发回调，但 addTrack 必须是**它之前**的已定事实，
+        //    使 processRemoteDescription 复用本端轨而非另建（peerconnection.cpp:1137 continue）。
+        // ── 本端两条 recvonly 轨（sprite + camera），addTrack 返回值成员持住 ──
+        {
+            rtc::Description::Video scMedia("screen", rtc::Description::Direction::RecvOnly);
+            scMedia.addH264Codec(96);
+            auto scTrk = pc->addTrack(scMedia);
+            // 持住：mTracks 存 weak_ptr，局部 shared_ptr 析构 → track 销毁 → answer m=video 0
+            m_scTrackHold = scTrk;
+            // 接收轨必须在 addTrack 本端轨上挂 depacketizer（onTrack 的 remote track 收不到帧）
+            scTrk->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(rtc::NalUnit::Separator::StartSequence));
+            startDecoder();
+            scTrk->onFrame([this](rtc::binary frame, rtc::FrameInfo) {
+                const QByteArray h(reinterpret_cast<const char *>(frame.data()), int(frame.size()));
+                feedDecoder(h);
+            });
+            rtc::Description::Video camMedia("camera", rtc::Description::Direction::RecvOnly);
+            camMedia.addH264Codec(97);
+            auto camTrk = pc->addTrack(camMedia);
+            m_camTrackHold = camTrk;
+            camTrk->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(rtc::NalUnit::Separator::StartSequence));
+            startCamDecoder();
+            camTrk->onFrame([this](rtc::binary frame, rtc::FrameInfo) {
+                const QByteArray h(reinterpret_cast<const char *>(frame.data()), int(frame.size()));
+                feedCamDecoder(h);
+            });
+        }
+        // makeAnswer 现在只负责 setLocalDescription（answer 本体）——与 PASS 工具同构
         auto answered = std::make_shared<bool>(false);
         auto makeAnswer = [this, pc, answered]() {
             if (*answered) return;   // 回调与下面的兜底检查可能都命中，只生成一次 answer
             *answered = true;
             try {
-                rtc::Description::Video scMedia("screen", rtc::Description::Direction::RecvOnly);
-                scMedia.addH264Codec(96);
-                // ⚠️ 接收轨必须在 **addTrack 返回的本端轨**上挂 depacketizer + onFrame；
-                //    onTrack 回调里给的是 reciprocate 的 remote track，挂上去收不到重组帧
-                //    （2026-10-17 沙箱实证：本端轨 PASS、onTrack 挂 0 帧 —— ws_answer_h264.cpp）。
-                auto scTrk = pc->addTrack(scMedia);
-                // ⚠️ 2026-10-17 修（H264 0 帧根因·answer 侧）：scTrk 必须用成员持住。
-                //    libdatachannel 的 mTracks 存 weak_ptr，局部 shared_ptr 在 makeAnswer
-                //    lambda 返回后析构 → track 销毁 → answer 里该 media 变 m=video 0（拒绝）
-                //    → agent sendonly 轨永远打不开。与 agent 侧 ldc_streamer 修复同构。
-                m_scTrackHold = scTrk;
-                scTrk->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(rtc::NalUnit::Separator::StartSequence));
-                startDecoder();
-                scTrk->onFrame([this](rtc::binary frame, rtc::FrameInfo) {
-                    const QByteArray h(reinterpret_cast<const char *>(frame.data()), int(frame.size()));
-                    feedDecoder(h);
-                });
-                rtc::Description::Video camMedia("camera", rtc::Description::Direction::RecvOnly);
-                camMedia.addH264Codec(97);
-                auto camTrk = pc->addTrack(camMedia);  // 同坑：也持住 camera 轨
-                m_camTrackHold = camTrk;
-                // ⚠️ 2026-10-17（摄像头 H264 化）：camera 轨与 screen 同构——挂
-                //    H264RtpDepacketizer（agent 现在发 H264，不再手动 JPEG-over-RTP）。
-                //    onTrack 回调里的旧「剥 12B RTP 头解 JPEG」路径删除（见下方 onTrack
-                //    注释）；数据接收统一走 addTrack 本端轨。
-                camTrk->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(rtc::NalUnit::Separator::StartSequence));
-                startCamDecoder();
-                camTrk->onFrame([this](rtc::binary frame, rtc::FrameInfo) {
-                    const QByteArray h(reinterpret_cast<const char *>(frame.data()), int(frame.size()));
-                    feedCamDecoder(h);
-                });
-                pc->setLocalDescription();   // 此时才生成 answer
-                qDebug() << "[receiver] HaveRemoteOffer → addTrack(本端轨挂 depacketizer) + setLocalDescription（answer）";
+                pc->setLocalDescription();   // 本端轨已提前 addTrack，这里只产出 answer
+                qDebug() << "[receiver] HaveRemoteOffer → setLocalDescription（answer）";
             } catch (const std::exception &e) {
                 emit failed(QStringLiteral("answer 生成: %1").arg(QString::fromLocal8Bit(e.what())));
             }
