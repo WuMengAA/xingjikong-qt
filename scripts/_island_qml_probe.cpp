@@ -164,6 +164,9 @@ static void captureAndSave(IslandOverlay *isl, QQuickWidget *q, const QString &o
         dumpProp("_light");
         dumpProp("_interactive");
         dumpProp("_severity");
+        dumpProp("_formKind");         // #330：形态串 capsule|centered|fullscreen|banner|mini
+        dumpProp("_compactForm");      // #330：紧凑外框（Banner/Mini）判据
+        dumpProp("_miniOrb");          // #330：Mini 正圆档（无描述）判据
         dumpProp("_spectrumActive");   // §6.3：频谱态（2026-10-13）
         dumpProp("_mediaPresenting");  // 组件1：媒体占据岛面标志（2026-10-15）
         dumpProp("mediaIsContent");    // 组件1：presenting && 标题==媒体标题
@@ -369,6 +372,11 @@ int main(int argc, char *argv[])
     // 面只在展开态存在 ⇒ 隐含 --expand；1 隐含 --media（媒体面要有媒体）；
     // 2 会自动铺 3 条历史（见下方 show 段）。
     int faceArg = 0;
+    // #330（2026-10-17）形态多样化：直接走**真实 C++ 入口**进 Banner / Mini。
+    // ⚠️ 不用 setProperty 注入：几何是 C++ geometryForForm 算出来的，只有
+    //    走 showIsland(..., Form::X) 才验证得到"窗口几何 + QML 版式"整条链。
+    //    取值：banner（长文案通栏）/ mini（有描述 方牌）/ mini-nodesc（无描述 正圆）。
+    QString formArg;
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
@@ -400,6 +408,8 @@ int main(int argc, char *argv[])
             expand = true;
             if (faceArg == 1) media = true;                     // 媒体面要有媒体
         }
+        if (a == QLatin1String("--form") && i + 1 < argc)   // #330 形态多样化
+            formArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--out") && i + 1 < argc)
             outPath = QString::fromLocal8Bit(argv[++i]);
     }
@@ -410,6 +420,35 @@ int main(int argc, char *argv[])
 
     if (idle) {
         isl->ensureIdle();
+    } else if (!formArg.isEmpty()) {
+        // #330 三档场景（2026-10-17）
+        //   banner      长文案通栏：验"单行 elide 不折行、高度不涨"
+        //   mini        有描述 ⇒ 112 方牌（radius 28）
+        //   mini-nodesc 无描述 ⇒ 96 正圆（C++ 的 m_desc.isEmpty() 与 QML 的
+        //               root._miniOrb 必须同口径，否则"窗口圆、底色方"一眼假）
+        const IslandOverlay::Form f = (formArg == QLatin1String("banner"))
+                                          ? IslandOverlay::Form::Banner
+                                          : IslandOverlay::Form::Mini;
+        if (formArg == QLatin1String("banner")) {
+            isl->showIsland(
+                QStringLiteral("全校广播：今天下午 3 点开始消防演练，请各班按指定路线撤离到操场集合，班主任带队"),
+                QStringLiteral("学生处 · 全程保持安静，到操场后按班级列队"),
+                QStringLiteral("speaker"), 0, f);
+        } else if (formArg == QLatin1String("mini-nodesc")) {
+            isl->showIsland(QStringLiteral("在播"), QString(),
+                            QStringLiteral("music"), 0, f);
+        } else {
+            isl->showIsland(QStringLiteral("正在接收 课件.pdf"),
+                            QStringLiteral("42%"), QStringLiteral("download"), 0, f);
+        }
+        // 守卫回归（--form banner --actions）：紧凑形态放不下按钮 ⇒
+        // showWithActions 必须**降级 Centered**（断言看 dump 的 _formKind）。
+        if (actions) {
+            isl->showWithActions(QStringLiteral("确认收到"),
+                                 QStringLiteral("紧凑形态放不下按钮，应降级为居中卡片"),
+                                 QStringLiteral("bell"), f,
+                                 { QStringLiteral("知道了") }, nullptr, 0);
+        }
     } else if (actions) {
         isl->showWithActions(QStringLiteral("考试模式已开始"),
                              QStringLiteral("本次考试 45 分钟，请勿切换窗口"),

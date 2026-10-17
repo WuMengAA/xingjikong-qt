@@ -3356,9 +3356,14 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
     // （岛已覆盖全屏/居中/胶囊/确认/紧急，是被控端唯一展示入口）。
     //   popup / 未知 → Centered（屏幕正中卡片，安全默认）
     //   fullscreen → Fullscreen（铺满整屏） ｜ island → Capsule（顶部胶囊）
+    //   2026-10-17（#330 形态多样化）：banner → 顶部通栏（长文案单行横幅）
+    //                                   mini   → 右下角角标（常驻轻状态，不挡课件）
+    // ⚠️ 未知 kind 必须继续落 Centered —— 管理端老版本发的 kind 不能被新枚举带偏。
     IslandOverlay::Form f = IslandOverlay::Form::Centered;
     if (kind == QLatin1String("island"))          f = IslandOverlay::Form::Capsule;
     else if (kind == QLatin1String("fullscreen")) f = IslandOverlay::Form::Fullscreen;
+    else if (kind == QLatin1String("banner"))     f = IslandOverlay::Form::Banner;
+    else if (kind == QLatin1String("mini"))       f = IslandOverlay::Form::Mini;
 
     // ── 弹幕（2026-10-09 接线 · §1.2/§6.1）：kind=danmaku → 字幕式横向滚动 ──
     if (kind == QLatin1String("danmaku")) {
@@ -7266,6 +7271,51 @@ int main(int argc, char *argv[])
                 AgentShell::openPanel();
                 qInfo("[agent-shell] 自动打开控制面板（STE_QT_SHELL_AUTOOPEN=1）");
             });
+        }
+
+        // ── #330 形态验证开关（2026-10-17）：STE_QT_ISLAND_DEMO_FORM=banner|mini|mini-nodesc
+        //    → 启动 2.5s 后弹一次该形态，12s 自动收回，并把**落定后**的几何打进日志。
+        //    为什么需要它：离屏探针的屏幕是 800×800 且**没有任务栏**，Banner 的
+        //    "宽 = 可用宽 − 48" 与 Mini 的"躲开底部任务栏"这两件事只有真机能验。
+        //    日常不设即零影响（与 STE_QT_SHELL_AUTOOPEN 同款约定）。
+        {
+            const QString demoForm = qEnvironmentVariable("STE_QT_ISLAND_DEMO_FORM").trimmed();
+            if (!demoForm.isEmpty()) {
+                QTimer::singleShot(2500, &app, [demoForm] {
+                    IslandOverlay *demoIsl = IslandOverlay::instance();
+                    const IslandOverlay::Form f = (demoForm == QStringLiteral("banner"))
+                                                      ? IslandOverlay::Form::Banner
+                                                      : IslandOverlay::Form::Mini;
+                    if (demoForm == QStringLiteral("banner")) {
+                        demoIsl->showIsland(
+                            QStringLiteral("全校广播：今天下午 3 点开始消防演练，请各班按指定路线撤离到操场集合"),
+                            QStringLiteral("学生处 · 全程保持安静，到操场后按班级列队"),
+                            QStringLiteral("speaker"), 12000, f);
+                    } else if (demoForm == QStringLiteral("mini-nodesc")) {
+                        demoIsl->showIsland(QStringLiteral("在播"), QString(),
+                                            QStringLiteral("music"), 12000, f);
+                    } else {
+                        demoIsl->showIsland(QStringLiteral("正在接收 课件.pdf"),
+                                            QStringLiteral("42%"), QStringLiteral("download"), 12000, f);
+                    }
+                    // ⚠️ 几何要等**动画落定**再读：showIsland 走 animateGeometry，
+                    //    立刻读 geometry() 拿到的是上一条的旧几何（探针也踩过同款）。
+                    // ⚠️ 接收者用 qApp 而不是 &app：`app` 是 main 的局部变量，
+                    //    外层 lambda 没捕获它 ⇒ 内层再捕获也拿不到（C2326 实测）。
+                    QTimer::singleShot(1200, qApp, [demoForm] {
+                        const QRect g = IslandOverlay::instance()->geometry();
+                        const QScreen *sc = QGuiApplication::primaryScreen();
+                        const QRect ag = sc ? sc->availableGeometry() : QRect();
+                        // 顺手把**可用区**也打出来：Banner 的宽度与 Mini 的右下角都
+                        // 按 availableGeometry 算（要躲任务栏），离屏探针没有任务栏，
+                        // 真机核对时没有这个基准就只能靠反推（本轮就因此对不上号）。
+                        qInfo("[island-demo] 形态=%s 落定几何=%dx%d@(%d,%d) 可用区=%dx%d@(%d,%d) dpr=%.2f",
+                              demoForm.toUtf8().constData(), g.width(), g.height(), g.x(), g.y(),
+                              ag.width(), ag.height(), ag.x(), ag.y(),
+                              sc ? sc->devicePixelRatio() : 0.0);
+                    });
+                });
+            }
         }
     } else {
         qWarning().noquote() << QStringLiteral("[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口");

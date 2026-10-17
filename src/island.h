@@ -68,7 +68,22 @@ public:
     //   Fullscreen 铺满整屏（紧急广播/强制提示，压住整个桌面）
     // ⚠️ 与 Shape 正交：Shape 只描述**胶囊那三档高度**，Form 描述"这条提示摆在哪、多大"。
     //    把两者混成一个枚举会让"全屏"被迫带一个高度值，是错的。
-    enum class Form { Capsule, Centered, Fullscreen };
+    //
+    // ── 2026-10-17 形态多样化（#330 剩余件）：新增两档外框 ──────────────
+    //   Banner  顶部通栏横幅：宽 = 屏宽 − 48（上限 1280）、高 72（无描述 60）。
+    //           解决的是胶囊**做不到**的事 —— 长文案。胶囊宽度由内容定且上限 640，
+    //           长句子会被迫折成两行、高度跟着涨；Banner 是定宽通栏 + 单行省略，
+    //           视觉上是"系统的横幅"，只吃顶部一条，不占中间课件区。
+    //   Mini    右下角迷你角标：112×112（无描述时 96×96 且收成正圆）。
+    //           给"常驻轻状态"用（传输中/在播/静默计时）—— 这些内容不值得占用
+    //           屏幕顶部正中，但完全看不见又不放心。点一下**升格**成顶部胶囊并展开
+    //           （角标只有 112px，读不全；见 setExpanded 里的升格分支）。
+    //           ⚠️ 本岛默认**鼠标穿透**（m_interactive=false），角标常驻右下角，
+    //              默认吃鼠标会把"点任务栏/桌面右下角"吞掉。要可点，由调用方
+    //              自己 setInteractive(true)（届时点击走升格；不开就纯展示）。
+    //   ⚠️ 这两档都**不能带交互按钮**（在 showWithActions 里强制降级到 Centered）：
+    //      72px 高的横幅和 112px 的角标放不下「确认 / 快捷回复」那一排。
+    enum class Form { Capsule, Centered, Fullscreen, Banner, Mini };
 
     // 显示一条（icon 为 lucide 图标名；title 主文案，desc 次文案）
     // fromAdmin（2026-10-13）：这条是**管理端**下发的通知 —— 归档进历史时打标，
@@ -229,6 +244,7 @@ private:
     bool hitActionButton(const QPoint &pt, int *index) const;        // 命中哪一枚按钮
     void enterIdle();          // 收回成空闲半胶囊
     void paintBigForm();       // Centered / Fullscreen 的独立绘制（与胶囊绘制分开，互不干扰）
+    void paintCompactForm();   // Banner / Mini 的手绘兜底（QML 缺失时的退路，形态见 Form 注释）
     QRect geometryForIdle() const;
     QRect geometryForContent(int shapeHeight) const;
     QRect geometryForForm(Form f) const;   // 按形态算目标几何

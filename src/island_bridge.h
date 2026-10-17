@@ -41,7 +41,7 @@ class IslandBridge : public QObject
     Q_PROPERTY(QString descHtml READ descHtml NOTIFY changed)
     Q_PROPERTY(QString icon     READ icon     NOTIFY changed)
     // ── 形态 ────────────────────────────────────────────────
-    // "capsule" | "centered" | "fullscreen"（对齐 IslandOverlay::Form）
+    // "capsule" | "centered" | "fullscreen" | "banner" | "mini"（对齐 IslandOverlay::Form）
     Q_PROPERTY(QString form     READ form     NOTIFY changed)
     // "" | "urgent" | "inform" | "remind"（仅全屏生效，白名单与旧 NotifyWindow 同）
     Q_PROPERTY(QString severity READ severity NOTIFY changed)

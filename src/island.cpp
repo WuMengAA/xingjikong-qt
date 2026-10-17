@@ -96,6 +96,19 @@ static const int kExpandMaxMs = 20000;
 // 空闲态展开（无活跃通知，只是看一眼"暂无通知"）的自动收起时间：5s 够看一眼就收。
 static const int kIdleExpandMs = 5000;
 
+// ── 2026-10-17 形态多样化（#330 剩余件）：Banner / Mini 两档外框的尺寸真源 ──
+// ⚠️ 这组值与 QML（IslandRoot 的 shell 圆角、两个面的版式）**必须同改**——
+//    与"island.cpp ↔ QML 双绘常量"同一纪律（门禁 test-island-metrics 盯着岛的几何常量）。
+//    C++ 侧只负责算窗口几何（QQuickWidget 用 SizeRootObjectToView，根随视图），
+//    QML 侧负责版式；两边值不一致的症状是"留白一圈"或"文字被裁"。
+static const int kBannerPadX  = 24;    // 通栏左右各留 24（与 y=24 对称）
+static const int kBannerMaxW  = 1280;  // 超宽屏不拉成一根线，封顶 1280
+static const int kBannerH     = 72;    // 有描述
+static const int kBannerHFlat = 60;    // 只有标题
+static const int kMiniBox     = 112;   // 有描述：圆角方牌
+static const int kMiniOrb     = 96;    // 无描述：正圆（radius = 半边）
+static const int kMiniMargin  = 24;    // 距可用区（含任务栏）右下角的留白
+
 IslandOverlay *IslandOverlay::instance()
 {
     if (!g_island)
@@ -303,6 +316,27 @@ QRect IslandOverlay::geometryForForm(Form f) const
 
     if (f == Form::Capsule)
         return geometryForContent(m_expanded ? int(Expanded) : int(Collapsed));
+
+    // ── Banner：顶部通栏（2026-10-17 · #330 形态多样化）──────────────
+    // 用 **availableGeometry** 而不是 geometry：通栏贴顶，任务栏在顶部时会压住它。
+    // 宽度 = 可用宽 − 2*24（上限 1280），高度按有没有描述分两档 —— 单行布局，
+    // 长文案 elide 而不是折行（折行就退化成"更高的胶囊"，失去横幅的意义）。
+    if (f == Form::Banner) {
+        const QRect ag = screen->availableGeometry();
+        const int w = qMin(ag.width() - 2 * kBannerPadX, kBannerMaxW);
+        const int h = m_desc.isEmpty() ? kBannerHFlat : kBannerH;
+        return QRect(ag.x() + (ag.width() - w) / 2, ag.y() + 24, w, h);
+    }
+
+    // ── Mini：右下角角标（2026-10-17 · #330 形态多样化）──────────────
+    // 同样吃 availableGeometry（任务栏在底部时必须浮在它上面，不能压进任务栏里）。
+    // 有描述 → 112 方牌；无描述 → 96 正圆（纯图标状态收成正圆更像"角标"）。
+    if (f == Form::Mini) {
+        const QRect ag = screen->availableGeometry();
+        const int s = m_desc.isEmpty() ? kMiniOrb : kMiniBox;
+        return QRect(ag.right() - kMiniMargin - s + 1,
+                     ag.bottom() - kMiniMargin - s + 1, s, s);
+    }
 
     if (f == Form::Centered) {
         // 屏幕正中的卡片：宽不超过屏宽 40%，高度 200（够放图标+标题+两行描述）
@@ -545,6 +579,13 @@ void IslandOverlay::showWithActions(const QString &title, const QString &desc, c
                                     bool fromAdmin)
 {
     const bool inter = !actions.isEmpty();
+    // 2026-10-17（#330 形态多样化）：Banner(72px 高) / Mini(112px 见方) 放不下
+    // 「确认 / 快捷回复」那一排按钮 ⇒ 有按钮就强制升到 Centered。
+    // ⚠️ 这条守卫放在**调用 showIsland 之前**：showIsland 里按 form 算几何，
+    //    晚改就变成"几何按角标算、内容按卡片画"的错位（按钮被裁在窗外，点不到）。
+    //    与 main.cpp 里"胶囊 + 按钮 ⇒ 升 Centered"是同一口径，只是这里收口在源头。
+    if (inter && (form == Form::Banner || form == Form::Mini))
+        form = Form::Centered;
     if (inter) setInteractive(true);
     showIsland(title, desc, icon, inter ? 0 : durationMs, form, fromAdmin);
     m_actions = actions;
@@ -1003,6 +1044,31 @@ void IslandOverlay::setExpanded(bool on)
         return;
     }
 
+    // ── Mini 角标：点一下"升格"成顶部胶囊并展开（2026-10-17 · #330 形态多样化）──
+    // 角标只有 112px（标题 2 行 + 描述 1 行），读不全；用户点它就是想看详情。
+    // 升格是**形态变化**（右下角 → 顶部居中、变宽），走 animateGeometry 自然补间。
+    // ⚠️ 不升格的话这里只会改一个看不见的 m_expanded 标志 —— 表现为"点了没反应"。
+    if (m_form == Form::Mini) {
+        if (!on) {                    // 角标没有"收起"语义，收起方向什么都不改
+            m_expanded = false;
+            emit expandedChanged(false);
+            if (m_bridge) m_bridge->sync();
+            return;
+        }
+        m_form = Form::Capsule;
+        m_idle = false;
+        m_expanded = true;
+        animateGeometry(geometryForContent(int(Expanded)));
+        // 时长语义沿用 showIsland：m_durationMs<=0（常驻内容）不排自动收起，
+        // 只留 expandGuard 那道硬回收（展开态压着屏幕顶部，必须有兜底）。
+        m_autoClose->stop();
+        if (m_durationMs > 0) m_autoClose->start(qMax(5000, m_durationMs));
+        m_expandGuard->start(m_contentActive ? kExpandMaxMs : kIdleExpandMs);
+        emit expandedChanged(true);
+        if (m_bridge) m_bridge->sync();
+        return;
+    }
+
     // ⚠️ 展开/收起是**胶囊**那一档的概念（56↔168 高度切换）。
     //    Centered / Fullscreen 形态下点一下不该把它压回顶部胶囊 —— 那会让全屏通知
     //    被误触后瞬间缩成一条，看着像崩了。非胶囊形态：保持原几何，只记状态。
@@ -1251,6 +1317,106 @@ void IslandOverlay::paintBigForm()
     }
 }
 
+// Banner / Mini 的手绘兜底（2026-10-17 · #330 形态多样化）。
+// ⚠️ 与 paintBigForm 同一性质：**只在 QML 没起来时**才走到（paintEvent 顶部判空）。
+//    但不能省 —— 被控端是教室机上跑的软件，外观文件缺失时宁可退回朴素观感，
+//    也不能在屏幕右下角/顶部留一块透明空气（师生会以为程序崩了）。
+//    QML 侧对应 island/IslandBannerFace.qml 与 island/IslandMiniFace.qml，
+//    改版式请以 QML 为准、这里同步（双绘 parity 纪律）。
+void IslandOverlay::paintCompactForm()
+{
+    const bool banner = (m_form == Form::Banner);
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    // 角标/横幅都是"常驻轻状态"，比居中卡片更不透明一点（字小，透太多会糊）
+    const QColor bg = m_light ? QColor(250, 250, 250, 242) : QColor(20, 20, 22, 234);
+    const QColor fg = m_light ? QColor(10, 10, 10) : QColor(250, 250, 250);
+    const QColor sub = m_light ? QColor(90, 90, 90) : QColor(168, 168, 178);
+
+    // 角标无描述 ⇒ 正圆（radius = 半边）；有描述 ⇒ 28 圆角方牌；横幅 ⇒ 20 通栏
+    const qreal radius = banner ? 20.0 : (m_desc.isEmpty() ? rect().height() / 2.0 : 28.0);
+    QPainterPath path;
+    path.addRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), radius, radius);
+    p.fillPath(path, bg);
+    p.setPen(m_light ? QColor(210, 210, 210, 180) : QColor(70, 70, 70, 180));
+    p.drawPath(path);
+
+    if (banner) {
+        // 单行：图标 + 标题（中粗） + 描述（次色），两侧留 20
+        const int padX = 20;
+        const int cy = rect().center().y();
+        int x = rect().left() + padX;
+        if (!m_icon.isEmpty()) {
+            const int is = 26;
+            const QPixmap ipm = renderSvgIcon(m_icon, is, fg);
+            if (!ipm.isNull()) {
+                p.drawPixmap(QRect(x, cy - is / 2, is, is), ipm);
+                x += is + 12;
+            }
+        }
+        const int avail = rect().right() - padX - x;
+        QFont tf = font();
+        tf.setPixelSize(16);
+        tf.setBold(true);
+        const QFontMetrics tfm(tf);
+        // 有描述时标题最多吃 45%，剩下全给描述（横幅的价值在描述那句话）
+        const int titleW = m_desc.isEmpty()
+                               ? avail
+                               : qMin(tfm.horizontalAdvance(m_title) + 4, avail * 45 / 100);
+        p.setFont(tf);
+        p.setPen(fg);
+        p.drawText(QRect(x, cy - 12, titleW, 24), Qt::AlignVCenter | Qt::AlignLeft,
+                   tfm.elidedText(m_title, Qt::ElideRight, titleW));
+        x += titleW + 12;
+        if (!m_desc.isEmpty()) {
+            QFont df = font();
+            df.setPixelSize(13);
+            const QFontMetrics dfm(df);
+            const int dw = qMax(0, rect().right() - padX - x);
+            p.setFont(df);
+            p.setPen(sub);
+            p.drawText(QRect(x, cy - 11, dw, 22), Qt::AlignVCenter | Qt::AlignLeft,
+                       dfm.elidedText(m_desc, Qt::ElideRight, dw));
+        }
+        return;
+    }
+
+    // Mini：图标居中偏上，标题（1~2 行，居中省略），描述 1 行
+    const int is = m_desc.isEmpty() ? 30 : 34;
+    int y = rect().top() + (m_desc.isEmpty() ? (rect().height() - is) / 2 - 8 : 20);
+    if (!m_icon.isEmpty()) {
+        const QPixmap ipm = renderSvgIcon(m_icon, is, fg);
+        if (!ipm.isNull()) {
+            p.drawPixmap(QRect(rect().center().x() - is / 2, y, is, is), ipm);
+            y += is + 8;
+        }
+    }
+    QFont tf = font();
+    tf.setPixelSize(12);
+    tf.setBold(true);
+    const QFontMetrics tfm(tf);
+    const int tw = qMax(0, rect().width() - 16);
+    p.setFont(tf);
+    p.setPen(fg);
+    if (m_desc.isEmpty()) {
+        p.drawText(QRect(rect().left() + 8, y, tw, 18), Qt::AlignHCenter | Qt::AlignTop,
+                   tfm.elidedText(m_title, Qt::ElideRight, tw));
+        return;
+    }
+    // 两行标题：直接让 Qt 折行，再按行高裁到 2 行（超出的自然被裁掉）
+    const QRect tr(rect().left() + 8, y, tw, tfm.lineSpacing() * 2);
+    p.drawText(tr, Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, m_title);
+    y = tr.bottom() + 2;
+    QFont df = font();
+    df.setPixelSize(10);
+    const QFontMetrics dfm(df);
+    p.setFont(df);
+    p.setPen(sub);
+    p.drawText(QRect(rect().left() + 8, y, tw, 14), Qt::AlignHCenter | Qt::AlignTop,
+               dfm.elidedText(m_desc, Qt::ElideRight, tw));
+}
+
 // 窗口改尺寸：QQuickWidget 要跟着铺满。
 // ⚠️ 不能只靠 setGeometry(rect()) 在构造时设一次：几何动画（m_geoAnim 改的是
 //    本窗口的 "geometry" 属性）每一次补间都会触发 resizeEvent，子控件不跟就会
@@ -1274,6 +1440,11 @@ void IslandOverlay::paintEvent(QPaintEvent *)
     //    被控端是教室里跑的软件，外观组件坏掉时宁可退回旧观感，也不能一片空。
     //    改 QML 时请以 IslandRoot.qml 为准，这里只做同步（别只改一边）。
 
+    // Banner / Mini 走各自的紧凑版式（把居中大卡片塞进 72px 高 / 112px 宽里会全溢出）
+    if (m_form == Form::Banner || m_form == Form::Mini) {
+        paintCompactForm();
+        return;
+    }
     // #98：居中卡片 / 全屏走独立绘制路径，不吃下面那套胶囊逻辑
     if (m_form != Form::Capsule) {
         paintBigForm();

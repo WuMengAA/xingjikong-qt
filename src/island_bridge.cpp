@@ -91,6 +91,10 @@ QString IslandBridge::form() const
     switch (m_host->m_form) {
     case IslandOverlay::Form::Centered:   return QStringLiteral("centered");
     case IslandOverlay::Form::Fullscreen: return QStringLiteral("fullscreen");
+    // 2026-10-17（#330 形态多样化）：QML 侧新增两档外框。
+    // ⚠️ 字符串必须与 QML 的 `_formKind` 判定逐字一致（IslandRoot 里按小写比）。
+    case IslandOverlay::Form::Banner:     return QStringLiteral("banner");
+    case IslandOverlay::Form::Mini:       return QStringLiteral("mini");
     case IslandOverlay::Form::Capsule:
     default:                              return QStringLiteral("capsule");
     }
