@@ -112,6 +112,7 @@ function restartCloudTask() {
   pushEvent('info', '已触发云端重启（2 秒后执行）');
 }
 import { verifyViewerTicket, mintViewerTicket, verifyAgentTicket } from './ticket.js';
+import { createTunnel } from './tunnel.js';   // 2026-10-18：远控隧道（RFB over WS，替代 WebRTC 主路）
 import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
 import { initInteract, interactReady, sweepInteract,
@@ -161,6 +162,7 @@ import {
   broadcastFrame, broadcastDevices, broadcastToViewers, recordResult, getResult, viewerCount,
   touchHeartbeat, sweepStale,
   rtcSignalToAgent, rtcRelayToViewers, rtcRelayToAgent,
+  sendToAgentMsg,   // 2026-10-18：远控隧道的 tunnel.open 走这条
   broadcastAudioToAgents, setAudioBroadcasting, isAudioBroadcasting,
   duplexActive, sendAudioToTeacher,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
@@ -1116,6 +1118,13 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });        // 被控端接入（最大是 JPEG 帧）
 const viewerWss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });  // 管理端（看的人）
 
+// 2026-10-18：远控隧道（RFB over WS）。两条专用端点，只搬字节，不解析。
+// 权限口径与"看画面"一致；目标地址由 agent 决定（它只连 127.0.0.1:5900）。
+const tunnel = createTunnel({
+  authorizeViewer, identityFromAuth, canAccess, getDeviceClassCode,
+  getDevice, sendToAgentMsg, pushEvent,
+});
+
 server.on('upgrade', (req, socket, head) => {
   const u = new URL(req.url, 'http://127.0.0.1');
   if (u.pathname === '/ws/agent') {
@@ -1124,6 +1133,15 @@ server.on('upgrade', (req, socket, head) => {
   }
   if (u.pathname === '/ws/viewer') {
     viewerWss.handleUpgrade(req, socket, head, (ws) => viewerWss.emit('connection', ws, req));
+    return;
+  }
+  // 远控隧道：viewer 侧 / agent 侧各一条（只搬字节）
+  if (u.pathname === '/ws/tunnel') {
+    tunnel.handleViewerUpgrade(req, socket, head);
+    return;
+  }
+  if (u.pathname === '/ws/tunnel-agent') {
+    tunnel.handleAgentUpgrade(req, socket, head);
     return;
   }
   pushEvent('warn', '拒绝了非 agent/viewer 路径的 WS 升级', { path: u.pathname });

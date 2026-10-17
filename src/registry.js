@@ -814,6 +814,22 @@ export function rtcSignalToAgent(uid, type, payload = {}) {
   }
 }
 
+/** 通用：向某台设备的**主连接**发一条文本消息（v1 信封按对端能力自动选）。
+ *  与 rtcSignalToAgent 的区别只有一点：type 不做 'rtc-' 前缀加工。
+ *  2026-10-18 为远控隧道（tunnel.open）加的；设备不在线时如实返回 ok:false，不假装发过。 */
+export function sendToAgentMsg(uid, type, payload = {}) {
+  const key = String(uid || '').trim();
+  const d = devices.get(key);
+  if (!d || !d.ws || d.ws.readyState !== 1) return { ok: false, to: 0, detail: '设备不在线' };
+  try {
+    sendTo(d.ws, type, { uid: key, from: 'cloud', ...payload });
+    return { ok: true, to: 1 };
+  } catch (e) {
+    pushEvent('error', '发给设备的文本消息失败', { uid: key, type, error: e.message });
+    return { ok: false, to: 0, detail: e.message };
+  }
+}
+
 /** 设备 -> 管理端的 WebRTC 信令（offer/answer/ice）转发，只投给订阅了这个 uid 的管理端。
  *  @returns {{ok:boolean, to:number, detail?:string}} */
 export function rtcRelayToViewers(uid, type, payload = {}) {
