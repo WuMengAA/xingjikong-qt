@@ -62,6 +62,13 @@ private:
     QMutex m_mu;                  // 保护 m_track/m_pc（onTrack 回调线程 vs 主线程）
     void *m_track = nullptr;      // rtc::Track*（screen 轨）
     void *m_camTrack = nullptr;   // rtc::Track*（camera 轨，2026-10-12 四·双画面）
+    // ⚠️ 2026-10-17 修（H264 0 帧根因·answer 侧）：libdatachannel 的 mTracks 存 weak_ptr，
+    //    addTrack() 返回的 shared_ptr 是 track 的唯一持有者 —— makeAnswer 里局部变量析构
+    //    → track 销毁 → 生成 answer 时该 media 被 markRemoved → SDP 里 m=video 0（port 0
+    //    = 拒绝该媒体）→ agent 的 sendonly track 永远 isOpen=false → H264 0 帧。
+    //    必须用成员 shared_ptr 持住 addTrack 返回值（与 agent 侧 ldc_streamer 修复同构）。
+    std::shared_ptr<void> m_scTrackHold;   // rtc::Track*（screen 轨唯一持有者）
+    std::shared_ptr<void> m_camTrackHold;  // rtc::Track*（camera 轨唯一持有者）
     std::atomic<bool> m_connected{false};   // 回调线程写，主线程读
     // ── H264 解码 ──
     QProcess *m_ffmpegDec = nullptr;   // 主方案：ffmpeg -f h264 → rawvideo bgr24

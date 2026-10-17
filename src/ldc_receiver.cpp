@@ -162,6 +162,11 @@ void LdcReceiver::createPc(const QByteArray &payload)
                 //    onTrack 回调里给的是 reciprocate 的 remote track，挂上去收不到重组帧
                 //    （2026-10-17 沙箱实证：本端轨 PASS、onTrack 挂 0 帧 —— ws_answer_h264.cpp）。
                 auto scTrk = pc->addTrack(scMedia);
+                // ⚠️ 2026-10-17 修（H264 0 帧根因·answer 侧）：scTrk 必须用成员持住。
+                //    libdatachannel 的 mTracks 存 weak_ptr，局部 shared_ptr 在 makeAnswer
+                //    lambda 返回后析构 → track 销毁 → answer 里该 media 变 m=video 0（拒绝）
+                //    → agent sendonly 轨永远打不开。与 agent 侧 ldc_streamer 修复同构。
+                m_scTrackHold = scTrk;
                 scTrk->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(rtc::NalUnit::Separator::StartSequence));
                 startDecoder();
                 scTrk->onFrame([this](rtc::binary frame, rtc::FrameInfo) {
@@ -170,7 +175,7 @@ void LdcReceiver::createPc(const QByteArray &payload)
                 });
                 rtc::Description::Video camMedia("camera", rtc::Description::Direction::RecvOnly);
                 camMedia.addH264Codec(97);
-                pc->addTrack(camMedia);
+                m_camTrackHold = pc->addTrack(camMedia);  // 同坑：也持住 camera 轨
                 pc->setLocalDescription();   // 此时才生成 answer
                 qDebug() << "[receiver] HaveRemoteOffer → addTrack(本端轨挂 depacketizer) + setLocalDescription（answer）";
             } catch (const std::exception &e) {
@@ -205,6 +210,8 @@ void LdcReceiver::stop()
     {
         QMutexLocker lock(&m_mu);
         m_pc.reset();
+        m_scTrackHold.reset();    // 2026-10-17：释放 track 唯一持有者（PC 已 close）
+        m_camTrackHold.reset();
         m_track = nullptr;
         m_camTrack = nullptr;
     }
