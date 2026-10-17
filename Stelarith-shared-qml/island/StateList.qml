@@ -31,8 +31,25 @@ Item {
 
     // k → lucide 图标名（提到组件根：QML 非限定名只查「自身→组件根」两级，
     //   delegate 里直接写 iconNameFor() 会 ReferenceError —— 项目已踩过的坑）
+    //
+    // ⚠️ 2026-10-18 T 档：桥现在把 **Task.icon 原样**塞进 k（"download"/"music"/"mic"/…），
+    //    不再是旧的那套语义 key（"voice"/"file"/"exam"…）。原白名单只认旧 key ⇒
+    //    music/mic/bell 全落到 default 画成空心圆 —— 图标看着"都一样"。
+    //    这里新旧通吃：先查新名（直透），再回落旧语义 key，最后才 default。
     function iconNameFor(k) {
         switch (k) {
+        // ── T 档：桥直透的 Task.icon（与 C++ 侧 upsertTask 写的图标名对齐）──
+        case "download":  return "download"       // 文件传输
+        case "music":     return "music"          // 媒体播放
+        case "mic":       return "mic"            // 对讲中
+        case "bell":      return "bell"           // 通知
+        // ⚠️ 资源名是 circle-check（lucide 原名），不是 check-circle ——
+        //    2026-10-18 实测 resources/icons/ 里没有 check-circle.svg，
+        //    旧白名单里写 check-circle 的分支一直画空白（既有 bug，顺手修）。
+        case "check-circle": return "circle-check"
+        case "circle-check": return "circle-check"
+        case "triangle-alert": return "triangle-alert"
+        // ── 旧语义 key（管理端聚合那套，保留勿删）──
         case "voice":     return "bell"           // 老师讲话
         case "offline":   return "circle-dashed"  // 断连
         case "command":   return "layout-grid"    // 批量指令
@@ -43,6 +60,15 @@ Item {
         case "exam":      return "ban"            // 考试模式
         case "clock":     return "clock"
         default:          return "circle"
+        }
+    }
+
+    // 状态 → 文案（state: 0=running 1=paused 3=failed；2=done 已被桥过滤掉）
+    function stateLabelFor(s) {
+        switch (s) {
+        case 1:  return "已暂停"
+        case 3:  return "失败"
+        default: return ""
         }
     }
 
@@ -60,9 +86,15 @@ Item {
                 // ⚠️ model 是 int（行数）时 modelData 不存在 ⇒ 一律用 index 从 items 取
                 readonly property var it: (list.items && index < list.items.length)
                                           ? list.items[index] : null
+                // p 可能是 undefined（旧契约无该字段）⇒ 归一化成 -1（无进度条）
+                readonly property real prog: (row.it && typeof row.it.p === "number") ? row.it.p : -1
+                readonly property bool hasBar: row.prog >= 0
                 width: col.width
+                // ⚠️ 行高必须把进度条算进去（原实现只算图标/标题/描述 ⇒ 进度条被裁在行外，
+                //    看着像"没画出来" —— 2026-10-18 T 档修）
                 height: Math.max(iconBox.height,
                                  titleText.implicitHeight + descText.implicitHeight + 4)
+                        + (row.hasBar ? barBox.height + 3 : 0)
 
                 Rectangle {
                     anchors.fill: parent
@@ -110,6 +142,57 @@ Item {
                     font.pixelSize: 12
                     elide: Text.ElideRight
                     visible: text !== ""
+                }
+
+                // ── T 档：进度条（p ∈ [0,1] 才画；-1 = 无进度条）──────────
+                // 与 ftRow 的进度槽同款视觉（8px 高 / 4 圆角 / accent 色），
+                // 保证"岛内所有进度条长得一样"（UI 布局统一）。
+                Item {
+                    id: barBox
+                    anchors.left: titleText.left
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.top: descText.visible ? descText.bottom : titleText.bottom
+                    anchors.topMargin: 3
+                    height: 8
+                    visible: row.hasBar
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 4
+                        color: list.theme
+                               ? (list.theme.light ? Qt.rgba(0, 0, 0, 0.10)
+                                                   : Qt.rgba(1, 1, 1, 0.14))
+                               : Qt.rgba(1, 1, 1, 0.14)
+                        clip: true
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            width: Math.max(0, parent.width * Math.min(1, row.prog))
+                            radius: 4
+                            color: list.theme ? list.theme.accent : "#5B8CFF"
+                            Behavior on width { NumberAnimation { duration: 120 } }
+                        }
+                    }
+                }
+
+                // ── T 档：状态标（暂停/失败；running 不画，免得每行都挂个字）──
+                Text {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.top: titleText.top
+                    text: list.stateLabelFor(row.it ? row.it.state : 0)
+                    visible: text !== ""
+                    // 失败态复用主题已有的严重度色（severityUrgent = MD3 error 色系），
+                    // 不新造 theme.err —— 那个属性不存在（2026-10-18 查证），
+                    // 取 undefined 会静默画成黑色，且在浅色底上看不清。
+                    color: (row.it && row.it.state === 3)
+                           ? (list.theme ? list.theme.severityUrgent
+                                         : Qt.rgba(179/255, 38/255, 30/255, 1))
+                           : (list.theme ? list.theme.sub : "#C8C8C8")
+                    font.pixelSize: 11
                 }
             }
         }

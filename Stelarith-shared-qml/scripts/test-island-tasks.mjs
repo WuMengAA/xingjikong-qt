@@ -159,8 +159,49 @@ check(/for \(const auto &t : m_tasks\)/.test(idleSeg), 'enterIdle 回落分支�
 check(/t\.tag\s*==\s*QStringLiteral\("notice"\)\s*\)\s*continue/.test(idleSeg),
       '回落排除 notice 任务（防"通知过期又把自己显示回来"）');
 
-// ── 六、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
-console.log('── 五、反向检查 ──');
+// ── 六、渲染层（StateList.qml）：进度条 / 状态 / 图标 / 不与 ftRow 重复 ──────
+console.log('── 六、渲染层 StateList / 图标资源 ──');
+const qmlDir = 'Stelarith-shared-qml/island';
+const STATE_QML = fs.readFileSync(path.join(ROOT, qmlDir, 'StateList.qml'), 'utf8');
+// 进度条：p ∈ [0,1] 才画，且行高必须把进度条算进去（否则被裁在行外＝看着没画）
+check(/row\.hasBar/.test(STATE_QML), 'StateList 有 hasBar（p>=0 才画进度条）');
+check(/barBox\.height/.test(STATE_QML), '行高把进度条算进去（否则进度条被裁掉）');
+check(/parent\.width \* Math\.min\(1, row\.prog\)/.test(STATE_QML), '进度条宽度按 prog 钳制到 [0,1]');
+// 状态标：失败/暂停要能看出来；running 不挂字（免得每行都挂）
+check(/stateLabelFor/.test(STATE_QML), 'StateList 有状态文案映射');
+check(/it\.state === 3/.test(STATE_QML), '失败态有独立配色');
+// ⚠️ 失败态必须用主题真实存在的色（severityUrgent）。曾误写 theme.err —— 该属性不存在，
+//    取 undefined 会静默画黑色（2026-10-18 查证并修）。这条断言防回归。
+// ⚠️ 断言只看**代码**：注释里会提到 theme.err 这个"曾经的错"，剥注释后再查，
+//    否则注释自己就把门禁顶红了（同 §七 的教训）。
+const STATE_QML_CODE = stripCComments(STATE_QML);
+check(!/theme\.err\b/.test(STATE_QML_CODE), 'StateList 不得引用不存在的 theme.err');
+check(/severityUrgent/.test(STATE_QML), '失败态复用 severityUrgent（主题真实属性）');
+// 图标：桥直透的 Task.icon 必须能被 iconNameFor 认识，否则一律画成空心圆
+for (const ic of ['download', 'music', 'mic', 'bell']) {
+  check(new RegExp(`case "${ic}"`).test(STATE_QML), `iconNameFor 认得桥直透的 ${ic}`);
+}
+// ⚠️ 图标名必须是 resources/icons 里真实存在的 svg（曾把 check-circle 写进去，
+//    实际文件叫 circle-check ⇒ 一直画空白）
+check(/case "check-circle": return "circle-check"/.test(STATE_QML),
+      'check-circle 映射到真实资源名 circle-check');
+const iconDir = 'Stelarith-control-qt/resources/icons';
+for (const ic of ['download', 'music', 'mic', 'bell', 'circle-check', 'triangle-alert']) {
+  check(fs.existsSync(path.join(ROOT, iconDir, `${ic}.svg`)), `图标资源 ${ic}.svg 存在`);
+}
+// ⚠️ ft 进度不得两处渲染：ftRow 已画进度卡，StateList 若再输出 file 项 ⇒
+//    同一件事显示两遍，且 ftH 与 StateList 行高被重复计入几何预算（实测布局错位）
+check(/t\.tag == QStringLiteral\("file"\)\s*\)\s*continue/.test(B),
+      '桥 states() 排除 file 项（ft 进度只由 ftRow 画，避免重复计高）');
+// ⚠️ 进度必须**持续更新**，不能只在登记时设一次 0（曾如此 ⇒ 播放中进度条永远空，
+//    比不画更糟：看着像卡住）。2026-10-18 修，这条断言防回归。
+const advSeg = C.slice(C.indexOf('void IslandOverlay::advanceMediaElapsed'),
+                       C.indexOf('void IslandOverlay::armMediaPhaseTimer'));
+check(/t\.tag == QStringLiteral\("media"\)\s*\)\s*\{\s*t\.progress = p/.test(advSeg),
+      '播放推进时同步更新 media 任务进度（不只登记时设一次）');
+
+// ── 七、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
+console.log('── 七、反向检查 ──');
 check(/QVector<IslandOverlay::Task>|\bQVector<Task>/.test(H), 'island.h 声明任务表容器');
 check(/const QVector<Task> &tasks\(\) const/.test(H), 'tasks() 只读访问器存在（桥与快照共用）');
 // 快照里带任务表，供沙箱验证"每条状态源都进表"
