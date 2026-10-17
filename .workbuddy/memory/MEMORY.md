@@ -15,6 +15,7 @@
 - 版本真源＝云端 `ota.json`（UTF-8 无 BOM；**带 BOM ⇒ latest:null**）。`bump-version.mjs` 改 4 副本，**出包前先 bump**。发布 `publish-release.mjs publish --product agent|viewer --version X --file <包>`；验证 `curl 127.0.0.1:8788/api/public/ota?product=X[&current=旧]`。
 - ⚠️ `ota.json` 不入库（线上文件即真源）；`ota.json.url` 同时是装机卡链接 ⇒ **只挂全量件**。
 - **线上（2026-10-16 深夜）：agent/viewer 均 0.6.36；本机生产 agent 已手动换成含 QML 面板的 0.6.37 build（未走 OTA，备份 `.bak-pre-u5a3`）**。⚠️ kAppVersion 已是 0.6.37。
+- ⚠️ **本机生产真源＝`C:\Program Files\Stelarith\`（安装版）**，不是 build 产物：计划任务 `StelarithAgentGuard` 每 10 分钟检查进程名，没了就把安装版拉起来（`StelarithAgentQt` 登录自启同路径）。**换生产=换安装目录 exe+qml 整目录**（备份 `.bak-pre-<名>`）。2026-10-17 已换成含模块层的 0.6.38 构建（备份 `.bak-pre-vh`）。守门只在「进程名不存在」时启动，所以 build 产物能临时跑，但下次守门 tick 前若退出就回到安装版。
 - **换被控端 exe 必须连 `qml/` 整目录一起换**（QML 运行期从 exe 旁读盘；安装目录 qml/ 是装机时快照，混版 ⇒ `UiRegistry is not a type` 之类，fail-loud 可在 agent-qt.log 看到）。
 
 ## 2 编译 / 自检
@@ -45,10 +46,16 @@
 - 云端 `/recordings/*` 静态托管用 `RECORDINGS_ROOT`（const TDZ ⇒ 定义上移）。
 - qml-patch 已并入共享岛 + version 计岛指纹；`CLOUD_ASSETS_DIR` 可覆盖。
 - 库：WebRTC(libdatachannel) + FFmpeg(LGPL 动态)；Qt 动态链接；OpenSSL3 取自 PG17。CIMS 废弃。
-- **内置模块层**（2026-10-17 `b851e67`，control）：`src/modules/`（modulehost + usbmodule）编译进 agent，
+- **内置模块层**（2026-10-17 `b851e67` + `92be4c6`，control）：`src/modules/`（modulehost + usbmodule + voicehubmodule）编译进 agent，
   与进程外插件 PluginHost 并列第二扩展通道；manifest 同口径；executeAction **前置内置优先**；
   ModuleAgentApi 10 个 std::function 在 main.cpp 注入；AgentPluginsPage 有「内置模块」分区
-  （快照 Q_PROPERTY(modules) + 信号接线）。门禁 `test-module-registry.mjs`（10 断言）。
+  （快照 Q_PROPERTY(modules) + 信号接线）。门禁 `test-module-registry.mjs`（10 断言，认
+  `registerModule(new X)` 与「先 new 后 registerModule(变量)」两种写法）。
+- **VoiceHub 联动**（`92be4c6`）：匿名只读 —— `GET {base}/api/music/broadcast` + SSE `GET {base}/api/music/websocket`
+  （**线上帧没有 `event:` 行，类型只在 JSON `type` 里** ⇒ 「event 行优先 + JSON type 兜底」；行尾 \n/\r\n 必须归一，
+  否则 `\r\n\r\n` 分不出帧；nextUp/listeners 双来源 data 对象/消息根）。SSE 主 + 30s 轮询兜底（`qBound` 下限 5s）+
+  锚点本地 tick + staleSec 自愈（下限 10s）+ 开播提醒（考试静默）。控制接口只留桩（x-api-key，密钥存放口径未定）。
+  岛 `vhRow`（shared IslandRoot）+ 设置页卡；探针 `_voicehub_probe.cpp` 32 断言 + `_voicehub_fake_server.mjs`（已白名单入库）。
 - ⚠️ **待点单**：① U4 的 `permOk("admin")` 恒真越权（teacher 可锁屏，quickGuard 只保了快捷行）；② **IslandRoot 引用 `image://svgicon/check-circle` 而资源叫 `circle-check.svg`（存量图标名错配，岛历史列表图标加载失败，日志 948 行起）**；③ viewerbackend 5 处 URL 派生未收敛；④ 站点 `/api/device/activate` 不回 classCode；⑤ `md3/Md3Btn.qml:11` 自定义 `enabled` 盖掉 Item.enabled ⇒ 祖先 enabled 传导失效（探针 note 留痕，共享组件不擅自改）。
 
 ## 5 状态（2026-10-17 01:30）
@@ -61,7 +68,8 @@
 - **island**：A 档（管理端跑共享 IslandRoot，IslandHost 几何真源未统一）+ C 档（qml-patch 并岛+MD5 门禁）完成；扩展组件 1–7 + 审批面板随 0.6.36 上线。
 - ⏸ 隔离验证 245 过/0 败 + HTTP 审批 17/17。挂起的都是真机类（考试模式内核闸门、#98 岛观感、terminal cd、file_push）。
 - 出包前须再 bump（0.6.37 已在本机，云端 0.6.36）。
-- **「模块化插件」三件**（2026-10-17 用户点单）：① U盘模块 ✅ 已交付并真机上线（`b851e67`，岛 Centered 询问+只开根目录，USB 探针 19/19、面板探针 29/29）；② **#329 VoiceHub 联动模块（进行中）**：Open API `x-api-key`，读 `/api/music/broadcast`+`/api/songs/public`（免鉴权），岛展示正在播放/歌词/下一首，管理端信息展示，控制接口留可配默认关的桩；③ **#330 灵动岛多界面**：展开态 1+3 多面切换 + 形态多样化。
+- **「模块化插件」三件**（2026-10-17 用户点单）：① U盘模块 ✅ 已交付并真机上线（`b851e67`，岛 Centered 询问+只开根目录，USB 探针 19/19、面板探针 29/29）；② **VoiceHub 联动模块 ✅ 已交付并真机上线（`92be4c6`，探针 32/32、面板 35/35，安装目录 exe+qml 已换，日志实证模块启用）**——只读展示先通（岛行「正在播放/进度/下一首/人数」+ 设置页配置卡），控制三件（点歌/歌词/广播下发）留桩默认关；③ **#330 灵动岛多界面**：展开态 1+3 多面切换 + 形态多样化（下一批）。
+- ⚠️ 生产实际路径＝`C:\Program Files\Stelarith`（守门每 10 分钟拉起安装版），详见 §1。
 
 ## 6 同步 / UI 模板
 - 指挥台回写真源 `docs/星集控-指挥台-唯一真源-2026-10-02.md` §一；收工即回写；`.workbuddy/memory/` 是私有记忆 ≠ 同步。
@@ -99,3 +107,8 @@
 - ⚠️ **探针宏值必须带冒号**（`STE_USB_PROBE_FAKE_REMOVABLE="X:"`——onDriveArrived 收到的 drive 是 `X:` 形态）。
 - ⚠️ **cl 链接步绝不带 /TP**（.lib 当 C++ 源码编 ⇒ Qt6Core.lib 一串 C2018）；MSYS/Git Bash 会把 `/EHsc`
   当 POSIX 路径转换 ⇒ cl 参数一律走 Python subprocess（list 形式）不过 shell。
+- ⚠️ **`qBound` 下限会钳掉探针的"压缩时间参数"**（VoiceHub：pollSec 下限 5s / staleSec 下限 10s）⇒
+  探针等待窗口必须按**下限值**设计，否则得到「poll 0 次」「永不 stale」的假红。**设计探针前先读 clamp**。
+- ⚠️ **假服务必须复刻真实载荷形状**：SSE `broadcast_state.data` 按文档挂 nextUp/listeners，轮询端点是平级
+  ⇒ 两种形状都要认；假服务只演一种就会漏另一种的解析 bug。另：线上 SSE **无 `event:` 行**（类型在 JSON 里）。
+- ⚠️ **门禁正则会误杀合法写法**（`registerModule(vh)` 带指针接线）⇒ 门禁要能演进，先补门禁再继续。

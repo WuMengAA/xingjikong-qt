@@ -179,11 +179,21 @@ t("模块订阅的事件名在 main.cpp 里真的有人投喂（没有死订阅�
 });
 
 t("每个模块 .cpp 都在 main.cpp 里 registerModule 了（没有编了不启用的模块）", () => {
-	const registered = [...mainSrc.matchAll(/registerModule\s*\(\s*new\s+(\w+)\s*\(/g)].map((x) => x[1]);
+	// 两种合法登记写法都要认：
+	//   ① mh->registerModule(new UsbModule());
+	//   ② auto *vh = new VoiceHubModule(); mh->registerModule(vh);
+	//      —— 需要拿指针去接线（注入岛/壳的 QML）时只能这么写，别把它判成漏登记。
+	const direct = [...mainSrc.matchAll(/registerModule\s*\(\s*new\s+(\w+)\s*\(/g)].map((x) => x[1]);
+	const vars = [...mainSrc.matchAll(/(?:auto\s*\*|(\w+)\s*\*)\s*(\w+)\s*=\s*new\s+(\w+)\s*\(/g)]
+		.map((x) => ({ v: x[2], cls: x[3] }));
+	const viaVar = vars
+		.filter((p) => new RegExp(`registerModule\\s*\\(\\s*${p.v}\\s*\\)`).test(mainSrc))
+		.map((p) => p.cls);
+	const registered = [...direct, ...viaVar];
 	for (const m of mods) {
 		const cls = m.file.charAt(0).toUpperCase() + m.file.slice(1); // usb → Usb
 		if (!registered.some((r) => r.toLowerCase() === cls.toLowerCase()))
-			throw new Error(`${m.file}: 没找到 registerModule(new ${cls}…)（已登记：${registered.join(", ") || "无"}）`);
+			throw new Error(`${m.file}: 没找到 registerModule(new ${cls}…) 或 registerModule(指针变量)（已登记：${registered.join(", ") || "无"}）`);
 	}
 });
 

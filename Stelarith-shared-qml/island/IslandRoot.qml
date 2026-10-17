@@ -110,6 +110,41 @@ Item {
     readonly property bool _mediaPresenting: bridgeRef ? bridgeRef.mediaPresenting : false
     readonly property bool mediaIsContent: root._mediaPresenting && root._title === root._mediaTitle
 
+    // ── VoiceHub 联动（#329，2026-10-17）────────────────────────
+    // 数据来自**内置 voicehub 模块**（main.cpp 在岛构造后
+    // setQmlObjectProperty("voicehubObj", 模块) 注入；viewer 侧没有这个模块
+    // ⇒ 属性保持 null）。与 P3 媒体栏的分工：那条画**本机 ffplay 的排期广播**，
+    // 这一行画 **VoiceHub 的远程权威广播**（音乐管理员在网页播的那条），
+    // 两个来源不同、可同时为真，各画各的、互不覆盖。
+    // ⚠️ 不能写成 readonly 直绑 voicehub —— 那样属性在模块注入前就定死成 null；
+    //    必须经中间 property var（setProperty 可写、绑定可重算）。
+    property var voicehubObj: null
+    readonly property var vhRef: root.voicehubObj
+    readonly property bool vhOn: root._expanded && root.vhRef !== null && root.vhRef.active
+        // 搜索/投稿页打开时让位（§七 一次只展开一件事；那两页锚 mediaRow.bottom
+        // 且高度预算 searchH/submitH 已按 vhH=0 收敛——vhOn 条件里必须排掉，
+        // 否则行与页面在同一块空间里重叠）。
+        && !root.searchOn && !root.submitOn
+    // 展开态高度预算 vhH 与下方 mediaH 同区块定义（行高 30/44 + 上边距 8）。
+    // 第二行（接下来 / 人数）有条件出现 ⇒ 预算跟着条件走，不写死。
+    readonly property bool vhLine2: root.vhRef !== null
+        && (root.vhRef.nextTitle !== "" || root.vhRef.listeners > 0)
+    // 进度文本：在播 "m:ss / m:ss"；暂停冻在 position；无时长只给已播。
+    function vhTimeText() {
+        if (!root.vhRef) return "";
+        const p = Math.floor(root.vhRef.positionSec), d = Math.floor(root.vhRef.durationSec);
+        const mm = s => Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
+        return d > 0 ? mm(p) + " / " + mm(d) : mm(p);
+    }
+    // 第二行文本：「接下来：xxx · N 人在听」，缺段自动省。
+    function vhSubText() {
+        if (!root.vhRef) return "";
+        const parts = [];
+        if (root.vhRef.nextTitle) parts.push("接下来：" + root.vhRef.nextTitle);
+        if (root.vhRef.listeners > 0) parts.push(root.vhRef.listeners + " 人在听");
+        return parts.join(" · ");
+    }
+
     // ── 组件7 播放四态（2026-10-15，用户点单）─────────────────────
     // 相位**由 C++ 单点判定**（口径见 island.h：时长/剩余只在 C++ 算），QML 只按串
     // 切文案/配色 —— 避免"两端各算一遍阈值"这种必然漂移。取值：
@@ -267,6 +302,9 @@ Item {
     // 但这一行还要画（讲"播完了"/"为什么没播"）⇒ 预算跟着 mediaIsContent 兜住。
     readonly property int mediaH: (root._expanded
                                    && (root._mediaActive || root.mediaIsContent)) ? 46 : 0
+    // VoiceHub 联动（#329）：远程广播行占的额外高度（展开态 + 有远程广播才给；
+    // 行高 30（单行）/ 44（带第二行）+ 上边距 8；vhOn/vhLine2 定义见上方 vhRef 区块）。
+    readonly property int vhH: root.vhOn ? (root.vhLine2 ? 52 : 38) : 0
     // 组件1（2026-10-15）：互动区 / 弹幕输入行占的额外高度（展开态 + 岛面是媒体才给）。
     // 与 historyPanel 的 topMargin 同一套公式（预算与锚点必须同步，见 2026-10-14 注释）。
     // 组件2：搜索页打开时两行让位（§七 一次只展开一件事）⇒ 条件加 !searchOn。
@@ -280,15 +318,15 @@ Item {
     // （§七 一次只展开一件事；歌名在 mediaRow 仍有）。
     // 探针实测收敛值 188：写死 160 曾溢出 59px 裁底部（2026-10-15 实测 379）。
     readonly property int searchH: root.searchPageOn
-        ? Math.max(100, 320 - (root.padH * 2 + root.headH + root.listH + root.mediaH + root.actH + 12))
+        ? Math.max(100, 320 - (root.padH * 2 + root.headH + root.listH + root.mediaH + root.vhH + root.actH + 12))
         : 0
     // 组件3（2026-10-15）：投稿页占的额外高度。自适应公式与 searchH 同款
     // （展开态硬顶 320，投稿页吃剩余空间：320 - padH*2 - headH(标题已让位)
-    // - listH(状态列表已让位) - mediaH - actH - 12 页面自身 topMargin）。
+    // - listH(状态列表已让位) - mediaH - vhH - actH - 12 页面自身 topMargin）。
     // 编辑态内容（compose 66 + 计数 ~16 + 按钮 28 + 间距 16）≈126 < 预算，
     // 反馈态为居中 Column 自适应，均低于 searchH 同款预算。
     readonly property int submitH: root.submitPageOn
-        ? Math.max(100, 320 - (root.padH * 2 + root.headH + root.listH + root.mediaH + root.actH + 12))
+        ? Math.max(100, 320 - (root.padH * 2 + root.headH + root.listH + root.mediaH + root.vhH + root.actH + 12))
         : 0
     readonly property int collapsedH: root.th.shapeCollapsed
 
@@ -401,7 +439,7 @@ Item {
                                : (root._expanded ? 640 : 320)
     implicitHeight: root._idle ? root.th.shapeIdle
                                : (root._expanded
-                                  ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.specH + root.mediaH + root.interactH + root.danmakuH + root.searchH + root.submitH + root.actH + root.padH)
+                                  ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.specH + root.mediaH + root.vhH + root.interactH + root.danmakuH + root.searchH + root.submitH + root.actH + root.padH)
                                   : (root._showActionsNow
                                      ? Math.max(root.collapsedH + root.actH + 10, 90)
                                      : root.collapsedH))
@@ -928,6 +966,84 @@ Item {
                 }
             }
 
+            // ── VoiceHub 联动（#329）：远程广播「正在播放」行（展开态）────
+            // 与 P3 mediaRow **同父级兄弟**（expandedCol 内），锚 mediaRow.bottom
+            // —— 跨父级锚会被 QML 静默丢弃（2026-10-14 mediaRow 踩坑固化：top 锚
+            // 失效整栏落 y=0）。mediaRow 不可见时其 height=0，锚链照常成立
+            // （锚链对不可见 item 依然起效，隐藏靠 height:0 清零）。
+            // 布局学 mediaRow：标题左起弹性、右侧绝对锚时间文本，两边无相互依赖
+            // （2026-10-14 的 Row 互依塌 0x0 教训）。第二行「接下来/人数」有条件
+            // 出现，vhH 预算跟着 vhLine2 走（见上方属性区）。
+            Item {
+                id: vhRow
+                visible: root.vhOn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: mediaRow.bottom
+                anchors.topMargin: visible ? 8 : 0
+                height: visible ? (root.vhLine2 ? 44 : 30) : 0
+
+                // radio 图标（资源库有 radio.svg；不用 ♪ 符号字形，教室机字体
+                // 不全会 tofu —— specRow/mediaRow 同款教训）。
+                SvgIcon {
+                    id: vhIcon
+                    name: "radio"
+                    tint: root.th.accent
+                    px: 12
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.topMargin: 9
+                }
+
+                Text {
+                    id: vhTitleTxt
+                    anchors.left: vhIcon.right
+                    anchors.leftMargin: 6
+                    anchors.right: vhTimeTxt.left
+                    anchors.rightMargin: 6
+                    anchors.top: parent.top
+                    height: 18
+                    verticalAlignment: Text.AlignVCenter
+                    text: {
+                        if (!root.vhRef) return "";
+                        const t = root.vhRef.title || "正在播放";
+                        return root.vhRef.artist ? t + " — " + root.vhRef.artist : t;
+                    }
+                    color: root.th.fg
+                    font.pixelSize: 12
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    id: vhTimeTxt
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 18
+                    verticalAlignment: Text.AlignVCenter
+                    text: root.vhTimeText()
+                    color: root.th.sub
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    id: vhSubTxt
+                    visible: root.vhLine2
+                    anchors.left: vhIcon.right
+                    anchors.leftMargin: 6
+                    anchors.right: parent.right
+                    anchors.rightMargin: 6
+                    anchors.top: vhTitleTxt.bottom
+                    anchors.topMargin: 2
+                    height: 14
+                    verticalAlignment: Text.AlignVCenter
+                    text: root.vhSubText()
+                    color: root.th.sub
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+            }
+
             // ── 组件1：互动区（点赞计数 + 好听/点歌，2026-10-15）────────
             // 点歌互动详规的被控端互动骨架：媒体占据岛面时，展开态在播放栏之下
             // 给互动入口。好听反馈组件4 已接线（单击点赞 + 飘心 600ms + 计数
@@ -944,7 +1060,10 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.rightMargin: root.padH + 40   // 与 actionRow 同款让位（鲸鱼 z:100 占右下）
-                anchors.top: mediaRow.bottom
+                // 2026-10-17（#329）：锚点从 mediaRow.bottom 改到 vhRow.bottom ——
+                // VoiceHub 行插在两者之间，预算公式（mediaH+vhH+interactH）与锚链
+                // 必须同序；vhRow 不可见时 height=0，锚链照常成立。
+                anchors.top: vhRow.bottom
                 anchors.topMargin: visible ? 12 : 0
                 height: visible ? 46 : 0
 
@@ -1964,8 +2083,9 @@ Item {
         // 2026-10-15 组件1 补 interactH + danmakuH、组件2 补 searchH、组件3 补
         // submitH：同一套公式（虽然媒体态下本面板整体不可见，公式仍保持同步，
         // 防将来条件变动时错位）。
+        // 2026-10-17 补 vhH：VoiceHub 远程广播行同款让位（#329）。
         // 现在与预算同一套公式：从内容区（标题+描述+状态列表+进度条+频谱+播放栏+互动区+弹幕行+搜索页+投稿页）之下开始。
-        anchors.topMargin: root.padH + root.headH + root.listH + root.ftH + root.specH + root.mediaH + root.interactH + root.danmakuH + root.searchH + root.submitH
+        anchors.topMargin: root.padH + root.headH + root.listH + root.ftH + root.specH + root.mediaH + root.vhH + root.interactH + root.danmakuH + root.searchH + root.submitH
         anchors.bottom: parent.bottom
         anchors.bottomMargin: root.padH
         z: 40
