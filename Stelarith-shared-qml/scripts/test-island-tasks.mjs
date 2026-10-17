@@ -127,7 +127,39 @@ check(/t\.state\s*==\s*2\s*\)\s*continue/.test(st), '已完成（done）的任�
 check(!/out\.append\(m\);\s*\n\s*return out;\s*\n\}/.test(st) || /for\s*\(\s*const auto &t/.test(st),
       'states 不再是"单元素硬编"');
 
-// ── 五、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
+// ── 五、显示仲裁：回落 + 1Hz 过期扫描 ──────────────────────────────────────
+console.log('── 五、显示仲裁（回落 / 扫描）──');
+check(/const IslandOverlay::Task \*IslandOverlay::nextDisplayTask/.test(C),
+      'nextDisplayTask 存在（排序：priority 降序、同优先取最新）');
+check(/void IslandOverlay::sweepExpiredTasks/.test(C), 'sweepExpiredTasks 存在');
+// 排序口径
+const nextSeg = C.slice(C.indexOf('IslandOverlay::nextDisplayTask'),
+                        C.indexOf('void IslandOverlay::sweepExpiredTasks'));
+check(/t\.priority\s*>\s*best->priority/.test(nextSeg), '排序：priority 高者优先');
+check(/t\.priority\s*==\s*best->priority\s*&&\s*t\.shownTs\s*>\s*best->shownTs/.test(nextSeg),
+      '排序：同 priority 取最新（shownTs）');
+check(/t\.state\s*==\s*2\s*\)\s*continue/.test(nextSeg), '排序跳过已完成任务');
+// 扫描：只标 done，不动显示（否则扫描器会和用户抢窗口）
+const sweepSeg = C.slice(C.indexOf('void IslandOverlay::sweepExpiredTasks'),
+                         C.indexOf('void IslandOverlay::archiveToHistory'));
+check(/t\.sticky\s*\)\s*continue/.test(sweepSeg), '扫描跳过 sticky 任务');
+check(/setInterval\(1000\)/.test(C), '扫描定时器 1Hz（单定时器扫表，不挂每任务定时器）');
+check(!/dismiss\(\)|enterIdle\(\)/.test(sweepSeg),
+      '扫描器不主动改显示（不调 dismiss/enterIdle）—— 避免与用户操作抢窗口');
+// 回落：只在 enterIdle 的收回路径上，且排除 notice（否则通知会自己回落成自己，永远关不掉）
+const idleSeg = C.slice(C.indexOf('void IslandOverlay::enterIdle'),
+                        C.indexOf('void IslandOverlay::setExpanded'));
+// "回落"标记写在注释里（会被剥掉）⇒ 查未剥注释的原文；
+// 同时用代码特征兜底：enterIdle 里出现了对任务表的遍历。
+const Craw = read(F.islandCpp);
+const idleRaw = Craw.slice(Craw.indexOf('void IslandOverlay::enterIdle'),
+                           Craw.indexOf('void IslandOverlay::setExpanded'));
+check(/T 档：回落/.test(idleRaw), 'enterIdle 接了回落分支（注释标记）');
+check(/for \(const auto &t : m_tasks\)/.test(idleSeg), 'enterIdle 回落分支确实遍历任务表');
+check(/t\.tag\s*==\s*QStringLiteral\("notice"\)\s*\)\s*continue/.test(idleSeg),
+      '回落排除 notice 任务（防"通知过期又把自己显示回来"）');
+
+// ── 六、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
 console.log('── 五、反向检查 ──');
 check(/QVector<IslandOverlay::Task>|\bQVector<Task>/.test(H), 'island.h 声明任务表容器');
 check(/const QVector<Task> &tasks\(\) const/.test(H), 'tasks() 只读访问器存在（桥与快照共用）');
