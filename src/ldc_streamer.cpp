@@ -177,6 +177,20 @@ void LdcStreamer::start(int captureMs)
         camMedia.addH264Codec(97);
         camMedia.addSSRC(43, "stelarith-cam", "camera", "camera");  // 2026-10-17：同修（SSRC 进 SDP）
         auto camTrk = pc->addTrack(camMedia);
+        // ⚠️ 2026-10-17（摄像头 H264 化）：camera 轨与屏幕轨同构——挂 H264RtpPacketizer +
+        //    RtcpSrReporter，ffmpeg 采集切 H264 帧 → sendH264Frame 走同一打包路径。
+        //    之前 camera 走「手动 JPEG-over-RTP」老路径（自己塞 12B RTP 头），接收端要
+        //    剥头解 JPEG；H264 化后与屏幕轨统一（depacketizer 重组，不再依赖 JPEG）。
+        //    用独立 SSRC(43)/payloadType(97) 与屏幕轨区分。
+        m_camRtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(
+            43, "stelarith-cam", 97, rtc::H264RtpPacketizer::ClockRate);
+        auto camSrReporter = std::make_shared<rtc::RtcpSrReporter>(
+            std::static_pointer_cast<rtc::RtpPacketizationConfig>(m_camRtpCfg));
+        auto camPacketizer = std::make_shared<rtc::H264RtpPacketizer>(
+            rtc::NalUnit::Separator::StartSequence,
+            std::static_pointer_cast<rtc::RtpPacketizationConfig>(m_camRtpCfg));
+        camPacketizer->addToChain(camSrReporter);
+        camTrk->setMediaHandler(camPacketizer);
         {
             QMutexLocker lock(&m_mu);
             // ⚠️ 2026-10-17：mTracks 是 weak_ptr，必须用成员 shared_ptr 持住 track，
@@ -293,6 +307,7 @@ void LdcStreamer::stop()
         m_pc.reset();
         m_trackHold.reset();      // 2026-10-17：释放 track/dc 唯一持有者（PC 已 close）
         m_camTrackHold.reset();
+        m_camRtpCfg.reset();      // 2026-10-17：camera 轨 rtp 打包配置随轨释放
         m_dcHold.reset();
         m_track = nullptr;
         m_camTrack = nullptr;
@@ -524,16 +539,40 @@ void LdcStreamer::startCamera(const QString &device, const QString &ffmpegBin)
                          if (m_camActive)
                              qWarning("[rtc-ldc] 摄像头采集进程退出（设备 %s）", qPrintable(m_camDevice));
                      });
-    // -f mjpeg → stdout 是连续 JPEG（按 FFD8…FFD9 切）；-r 10 控帧率，-q:v 7 控体积。
-    // 通道分着收（SeparateChannels）：stderr 里的设备错误要单独拿得到，便于回执人话原因。
-    m_camProc->start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
-                           QStringLiteral("error"), QStringLiteral("-f"),
-                           QStringLiteral("dshow"), QStringLiteral("-i"),
-                           QStringLiteral("video=%1").arg(m_camDevice),
-                           QStringLiteral("-f"), QStringLiteral("mjpeg"),
-                           QStringLiteral("-q:v"), QStringLiteral("7"),
-                           QStringLiteral("-r"), QStringLiteral("10"),
-                           QStringLiteral("pipe:1") });
+    // 2026-10-17（摄像头 H264 化）：与屏幕轨同一编码配方——dshow 采集 → libx264 →
+    // h264(Annex B) stdout（不再是 MJPEG）。接收端 H264RtpDepacketizer 重组，免剥 RTP 头。
+    // STE_CAM_SRC 可覆盖设备名外，测试还支持 STE_CAM_TEST_SRC=lavfi（无真实摄像头时用
+    // ffmpeg lavfi testsrc 模拟，链路验证用；生产不设该变量）。
+    const QByteArray testSrc = qgetenv("STE_CAM_TEST_SRC");
+    QStringList args;
+    if (testSrc == QLatin1String("lavfi")) {
+        args = {
+            QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"),
+            QStringLiteral("-f"), QStringLiteral("lavfi"),
+            QStringLiteral("-i"), QStringLiteral("testsrc2=size=320x240:rate=10"),
+            QStringLiteral("-c:v"), QStringLiteral("libx264"),
+            QStringLiteral("-preset"), QStringLiteral("ultrafast"),
+            QStringLiteral("-tune"), QStringLiteral("zerolatency"),
+            QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+            QStringLiteral("-x264-params"), QStringLiteral("keyint=30:min-keyint=30:scenecut=0"),
+            QStringLiteral("-f"), QStringLiteral("h264"),
+            QStringLiteral("pipe:1"),
+        };
+    } else {
+        args = {
+            QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"),
+            QStringLiteral("-f"), QStringLiteral("dshow"),
+            QStringLiteral("-i"), QStringLiteral("video=%1").arg(m_camDevice),
+            QStringLiteral("-c:v"), QStringLiteral("libx264"),
+            QStringLiteral("-preset"), QStringLiteral("ultrafast"),
+            QStringLiteral("-tune"), QStringLiteral("zerolatency"),
+            QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+            QStringLiteral("-x264-params"), QStringLiteral("keyint=30:min-keyint=30:scenecut=0"),
+            QStringLiteral("-f"), QStringLiteral("h264"),
+            QStringLiteral("pipe:1"),
+        };
+    }
+    m_camProc->start(ff, args);
     m_camActive = true;
     emit cameraStateChanged(true);
     qInfo("[rtc-ldc] 摄像头采集已开（device=%s）", qPrintable(m_camDevice));
@@ -580,26 +619,19 @@ void LdcStreamer::onCamStdout()
 {
     if (!m_camProc) return;
     m_camBuf += m_camProc->readAllStandardOutput();
-    // MJPEG 切帧：找 SOI(FFD8)…EOI(FFD9)。跨 readyRead 保留半帧。
+    // 2026-10-17（摄像头 H264 化）：不再按 MJPEG SOI/EOI 切，改用与屏幕轨相同的
+    // H264 Annex-B 帧切分（SPS/PPS/SEI 前缀 + VCL NAL = 一帧），跨 readyRead 保半帧。
     for (;;) {
-        const int soi = m_camBuf.indexOf(QByteArrayLiteral("\xFF\xD8"));
-        if (soi < 0) {
-            if (m_camBuf.size() > 1) m_camBuf = m_camBuf.right(1);   // 只留可能的首字节
-            break;
-        }
-        if (soi > 0) m_camBuf.remove(0, soi);
-        const int eoi = m_camBuf.indexOf(QByteArrayLiteral("\xFF\xD9"), 2);
-        if (eoi < 0) break;                       // 半帧，等下次 readyRead
-        const QByteArray jpeg = m_camBuf.left(eoi + 2);
-        m_camBuf.remove(0, eoi + 2);
-        sendCameraFrame(jpeg);
-        if (m_camBuf.size() > (4 << 20)) m_camBuf.clear();   // 脏数据护栏
+        QByteArray frame = takeNextH264Frame(m_camBuf);
+        if (frame.isEmpty()) break;
+        sendCameraFrame(frame);
+        if (m_camBuf.size() > (8 << 20)) m_camBuf.clear();   // 脏数据护栏
     }
 }
 
-void LdcStreamer::sendCameraFrame(const QByteArray &jpeg)
+void LdcStreamer::sendCameraFrame(const QByteArray &frame)
 {
-    if (!m_camActive || !m_connected.load() || jpeg.isEmpty()) return;
+    if (!m_camActive || !m_connected.load() || frame.isEmpty()) return;
     rtc::Track *track = nullptr;
     {
         QMutexLocker lock(&m_mu);
@@ -609,20 +641,17 @@ void LdcStreamer::sendCameraFrame(const QByteArray &jpeg)
     bool open = false;
     try { open = track->isOpen(); } catch (...) { open = false; }
     if (!open) return;
-
-    constexpr size_t kRtpHead = 12;
-    QByteArray pkt;
-    pkt.resize(int(kRtpHead) + jpeg.size());
-    auto *rtp = reinterpret_cast<rtc::RtpHeader *>(pkt.data());
-    rtp->preparePacket();
-    rtp->setPayloadType(97);
-    rtp->setMarker(true);
-    rtp->setSsrc(43);                              // 与屏幕轨(42)区分
-    rtp->setSeqNumber(uint16_t(m_camSeq));
-    rtp->setTimestamp(uint32_t(m_camSeq) * 9000);  // 90kHz：10fps → 每帧 1/10s
-    std::memcpy(pkt.data() + kRtpHead, jpeg.constData(), size_t(jpeg.size()));
+    // 2026-10-17（摄像头 H264 化）：track 已挂 H264RtpPacketizer（见 start()），
+    // 直接 send H264 帧即可（与 sendH264Frame 同构），timestamp 由 RtpPacketizationConfig
+    // 统一递增；不再手写 12B RTP 头 + JPEG payload（旧路径已删）。
+    if (m_camRtpCfg) {
+        auto *cfg = static_cast<rtc::RtpPacketizationConfig *>(m_camRtpCfg.get());
+        // 10fps → RTP timestamp 递增固定步长（90kHz 时钟：1/10s = 9000）
+        cfg->timestamp += uint32_t(90000LL * 100 / 1000);
+    }
     try {
-        track->send(reinterpret_cast<const std::byte *>(pkt.constData()), size_t(pkt.size()));
+        track->send(reinterpret_cast<const std::byte *>(frame.constData()),
+                    size_t(frame.size()));
         ++m_camSeq;
     } catch (const std::exception &e) {
         emit failed(QStringLiteral("camera track send: %1").arg(QString::fromLocal8Bit(e.what())));

@@ -109,6 +109,7 @@ private:
     int m_encW = 320, m_encH = 240;     // 编码尺寸（ffmpeg -s 固定；抓屏先 scale）
     // ── 摄像头第二轨（2026-10-12）──
     void *m_camTrack = nullptr;   // rtc::Track*（camera 轨；由 PC 持有）
+    std::shared_ptr<void> m_camRtpCfg;  // rtc::RtpPacketizationConfig*（camera 轨；2026-10-17 H264 化）
     QProcess *m_camProc = nullptr;  // ffmpeg -f mjpeg pipe（连续采集）
     bool m_camActive = false;
     int m_camSeq = 0;
