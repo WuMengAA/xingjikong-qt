@@ -228,8 +228,28 @@ check(/POLL_MS = 30_000/.test(BRIDGE_CPP_JS), '云端轮询间隔 30s');
 check(/STALE_MS = 95_000/.test(BRIDGE_CPP_JS), '过期阈值 95s（服务端 90s + 5s 余量）');
 check(/失败\*\*不动 snapshot|保留上一次/.test(BRIDGE_CPP_JS), '拉取失败保留上一次状态（有说明与实现）');
 
-// ── 九、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
-console.log('── 九、反向检查 ──');
+// ── 九、RTC 条件编译守卫（2026-10-18 · 用户裁决方案 A / 可逆摘除）──────────
+console.log('── 九、RTC 条件编译守卫 ──');
+const LDC_CPP = fs.readFileSync(path.join(ROOT, 'Stelarith-control-qt/src/ldc_streamer.cpp'), 'utf8');
+const CMAKE_TXT = fs.readFileSync(path.join(ROOT, 'Stelarith-control-qt/CMakeLists.txt'), 'utf8');
+// 守的是一条**真实发生过的故障**：CMake 的 if(EXISTS lib) 只决定"不链接库"，
+// 但 ldc_streamer.cpp 仍在源文件列表里且无 #if 保护 ⇒ 缺库时直接编译失败。
+// "看着有保护、实际没有"比不写更糟（让人以为缺库能降级）。
+check(/#if defined\(RTC_STATIC\)/.test(LDC_CPP), 'ldc_streamer.cpp 有 RTC_STATIC 守卫');
+check(/#else\s+\/\/ ── 无 libdatachannel/.test(LDC_CPP), '存在无库时的空实现分支');
+check(/#endif \/\/ RTC_STATIC/.test(LDC_CPP), '守卫有闭合');
+// 空实现必须"诚实"：不能假装成功（假成功会让管理端一直等 offer，更难查）
+const stubSeg = LDC_CPP.slice(LDC_CPP.indexOf('#else  // ── 无 libdatachannel'));
+check(/emit failed\(QStringLiteral\("rtc-unavailable"\)\)/.test(stubSeg),
+      '空实现的 start() 明确发 failed 信号（不假装成功）');
+check(/pcAlive\(\) const \{ return false; \}/.test(stubSeg), '空实现 pcAlive() 返回 false');
+check(/rtcDisabledWarn/.test(stubSeg), '空实现会打日志说明"本次构建不含 WebRTC"');
+// CMake：库缺失分支必须说明后果与还原方法，不能只说"会失败"
+check(/不含 WebRTC 推流/.test(CMAKE_TXT), 'CMake else 分支写明"不含 WebRTC 推流"');
+check(/放回 _probe\/ldc_libs\//.test(CMAKE_TXT), 'CMake else 分支写明还原方法');
+
+// ── 十、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
+console.log('── 十、反向检查 ──');
 check(/QVector<IslandOverlay::Task>|\bQVector<Task>/.test(H), 'island.h 声明任务表容器');
 check(/const QVector<Task> &tasks\(\) const/.test(H), 'tasks() 只读访问器存在（桥与快照共用）');
 // 快照里带任务表，供沙箱验证"每条状态源都进表"
