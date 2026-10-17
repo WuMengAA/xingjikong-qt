@@ -17,7 +17,7 @@ function sendTo(ws, type, payload, id = '') {
   return ws.send(wrapOutgoing(ws.__v1 === true, type, payload, id));
 }
 
-/** uid -> { uid, version, ws, connectedAt, lastSeen, framesIn, bytesIn, lastError, recentFrame } */
+/** uid -> { uid, version, ws, connectedAt, lastSeen, lastFrameAt, framesIn, bytesIn, lastError, recentFrame } */
 const devices = new Map();
 
 /**
@@ -270,12 +270,19 @@ export function markDisconnected(ws) {
   return null;
 }
 
+/** 帧到达：计数 + 记 lastFrameAt（**不刷 lastSeen**）。
+ *
+ * 存活判定只有一种真源：心跳。理由（2026-10-17 线上事故实证）：
+ * cloudflared 隧道退化时出现「文本帧（心跳/回执/指令）整段丢失、二进制帧（画面）通畅」，
+ * 若这里连 lastSeen 一起刷，设备会**永远显示在线**（18 分钟），
+ * 而它其实已收不到任何指令——比显示离线更糟（假绿）。故帧只更新诊断用的 lastFrameAt。
+ */
 export function addFrame(uid, bytes) {
   const d = devices.get(uid);
   if (!d) return null;
   d.framesIn++;
   d.bytesIn += bytes;
-  d.lastSeen = Date.now();
+  d.lastFrameAt = Date.now();
   if (!KEEP_LAST_FRAME) d.recentFrame = null;
   return d;
 }
@@ -300,7 +307,9 @@ export function touchHeartbeat(uid) {
 }
 
 /**
- * 清扫僵死设备：超过 HEARTBEAT_TIMEOUT_MS 既没心跳也没帧 → 判定离线并踢掉连接。
+ * 清扫僵死设备：超过 HEARTBEAT_TIMEOUT_MS 没心跳 → 判定离线并踢掉连接。
+ *（**只看心跳**，帧不算数——帧只更新 lastFrameAt 供诊断。2026-10-17 事故：
+ *  隧道退化时文本帧全丢但画面帧还在推，若帧也算存活依据，设备会永远"在线"却收不到任何指令，假绿。）
  * 不扫的后果：教室机掉电/断网但 TCP 没干净关闭时，面板会一直显示"在线"，
  * 老师点了指令才发现没反应——那比显示离线更糟（假绿）。
  * @returns {string[]} 本次被判定离线的 uid 列表
@@ -346,6 +355,9 @@ export function listDevices() {
       framesIn: d ? d.framesIn : 0,
       bytesIn: d ? d.bytesIn : 0,
       heartbeatsIn: d ? d.heartbeatsIn : 0,
+      // 2026-10-17：最后帧时刻（诊断用）。与 lastSeen 对照即可看出
+      // 「画面还在推但心跳断了」的隧道退化中间态——这是加它的意义。
+      lastFrameAt: d && d.lastFrameAt ? new Date(d.lastFrameAt).toISOString() : null,
       lastError: d ? d.lastError : null,
       // 管端门控要用：没上报过就是 null（老版本被控端），管端照旧全放开
       caps: d ? (d.caps ?? null) : null,
@@ -841,6 +853,10 @@ export function rtcRelayToAgent(uid, type, payload = {}) {
     pushEvent('warn', 'WebRTC 信令发不出去：设备不在线', { uid: key, type });
     return { ok: false, to: 0, detail: '设备不在线' };
   }
+  // 2026-10-17 诊断（H264 0 帧：answer 常到不了 agent）：打印设备 ws 状态 + 是否发出
+  try {
+    pushEvent('info', 'rtcRelayToAgent 发送', { uid: key, type, readyState: d.ws.readyState, sdpLen: String(payload.sdp || '').length });
+  } catch (_) {}
   try {
     sendTo(d.ws, type, { ...payload, uid: key, from: 'viewer' });
     return { ok: true, to: 1 };
@@ -878,11 +894,39 @@ export function ensureEventsFile() {
 let g_audioBroadcasting = false;
 /** 语音通话（duplex）的发起管理端 ws —— 学生上行音频只单播回它，不外泄（2026-10-09）。 */
 let g_audioTeacherWs = null;
+/** 语音会话累计（2026-10-18 · 方案 S1/缺陷 D1「日志降噪」）：
+ *  帧级**只累计、不写事件**，会话结束时一次性入账。
+ *  原来 broadcastAudioToAgents 每帧 pushEvent('info', '语音帧已推给被控端')，
+ *  20ms 一帧 = 50 条/秒 ≈ 3000 条/分钟，把事件表刷成噪音（用户点名的「语音广播60s」）。
+ *  同一裁决也适用于屏幕广播（10 帧/秒）——见 g_screenStat。 */
+const g_audioStat = { frames: 0, bytes: 0, startedAt: 0 };
+/** 学生上行（duplex）累计：同一会话里由学生 mic 回传的帧，随「语音对讲结束」一次性入账。 */
+const g_uplinkStat = { frames: 0, bytes: 0 };
 export function isAudioBroadcasting() { return g_audioBroadcasting; }
 export function setAudioBroadcasting(on, teacherWs = null) {
+  const was = g_audioBroadcasting;
   g_audioBroadcasting = on;
   g_audioTeacherWs = on ? teacherWs : null;
-  pushEvent('info', `语音对讲${on ? '开始' : '结束'}`);
+  if (on) {
+    g_audioStat.frames = 0;
+    g_audioStat.bytes = 0;
+    g_audioStat.startedAt = Date.now();
+    g_uplinkStat.frames = 0;
+    g_uplinkStat.bytes = 0;
+    pushEvent('info', '语音对讲开始');
+  } else if (was) {
+    const seconds = g_audioStat.startedAt
+      ? Math.round((Date.now() - g_audioStat.startedAt) / 1000) : 0;
+    pushEvent('info', '语音对讲结束', {
+      seconds,
+      frames: g_audioStat.frames,
+      kib: Math.round(g_audioStat.bytes / 1024),
+      uplinkFrames: g_uplinkStat.frames,
+      uplinkKib: Math.round(g_uplinkStat.bytes / 1024),
+    });
+  } else {
+    pushEvent('info', '语音对讲结束');   // 没开就收到 stop：保持原语义，不编统计
+  }
   // 通知所有在线被控端：老师开始/结束讲话（学生端"正在讲话"提示用）
   for (const d of devices.values()) {
     if (!d.ws || d.ws.readyState !== 1) continue;
@@ -918,7 +962,9 @@ export function broadcastAudioToAgents(buf, mime, seq) {
       pushEvent('error', '语音帧写给设备失败', { uid: d.uid, error: e.message });
     }
   }
-  if (hits > 0) pushEvent('info', '语音帧已推给被控端', { hits, bytes: buf.length, seq });
+  // 帧级**不写事件**（见 g_audioStat 的注释）：只累计，会话结束由 setAudioBroadcasting 入账。
+  g_audioStat.frames += 1;
+  g_audioStat.bytes += buf.length;
   return { hits, bytes: buf.length };
 }
 
@@ -936,7 +982,9 @@ export function sendAudioToTeacher(buf, seq, fromUid) {
   try {
     // 复用 v1 二进制帧格式；来源标记 student:<uid>:<seq>，管理端按 mime=audio/pcm 播放
     g_audioTeacherWs.send(makeFrame(`student:${fromUid}:${seq}`, seq, 'audio/pcm', buf));
-    pushEvent('info', '学生上行语音已单播回老师', { from: fromUid, bytes: buf.length, seq });
+    // 帧级不写事件（同 D1）：学生上行也是 20ms 一帧，逐帧 pushEvent 同样会刷屏。
+    g_uplinkStat.frames += 1;
+    g_uplinkStat.bytes += buf.length;
     return { hits: 1, bytes: buf.length };
   } catch (e) {
     pushEvent('error', '学生上行语音写给管理端失败', { from: fromUid, error: e.message });
@@ -951,10 +999,28 @@ export function sendAudioToTeacher(buf, seq, fromUid) {
 
 /** 当前是否有屏幕广播在播（管理端 broadcast.start/stop 控制）。 */
 let g_screenBroadcasting = false;
+/** 屏幕广播累计（同 D1：10 帧/秒逐帧写事件同样是噪音）。会话结束一次性入账。 */
+const g_screenStat = { frames: 0, bytes: 0, startedAt: 0 };
 export function isScreenBroadcasting() { return g_screenBroadcasting; }
 export function setScreenBroadcasting(on) {
+  const was = g_screenBroadcasting;
   g_screenBroadcasting = on;
-  pushEvent('info', `屏幕广播${on ? '开始' : '结束'}`);
+  if (on) {
+    g_screenStat.frames = 0;
+    g_screenStat.bytes = 0;
+    g_screenStat.startedAt = Date.now();
+    pushEvent('info', '屏幕广播开始');
+  } else if (was) {
+    const seconds = g_screenStat.startedAt
+      ? Math.round((Date.now() - g_screenStat.startedAt) / 1000) : 0;
+    pushEvent('info', '屏幕广播结束', {
+      seconds,
+      frames: g_screenStat.frames,
+      kib: Math.round(g_screenStat.bytes / 1024),
+    });
+  } else {
+    pushEvent('info', '屏幕广播结束');   // 没开就收到 stop：保持原语义
+  }
   // 通知所有在线被控端（学生端显示"正在接收老师屏幕"提示）
   for (const d of devices.values()) {
     if (!d.ws || d.ws.readyState !== 1) continue;
@@ -987,7 +1053,9 @@ export function broadcastScreenToAgents(buf, seq) {
       pushEvent('error', '广播帧写给设备失败', { uid: d.uid, error: e.message });
     }
   }
-  if (hits > 0) pushEvent('info', '广播帧已推给被控端', { hits, bytes: buf.length, seq });
+  // 帧级不写事件（见 g_screenStat 的注释）：只累计，会话结束由 setScreenBroadcasting 入账。
+  g_screenStat.frames += 1;
+  g_screenStat.bytes += buf.length;
   return { hits, bytes: buf.length };
 }
 

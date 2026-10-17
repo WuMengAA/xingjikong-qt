@@ -1145,6 +1145,43 @@ function onViewerAuthed(ws, who) {
   snd(ws, 'devices', { devices: visible, at: new Date().toISOString() });
 }
 
+/**
+ * 画面帧转发的日志聚合（2026-10-18 · 与「语音广播」同一条降噪裁决）。
+ *
+ * 被控端 5fps 连推画面，原来**逐帧** pushEvent ⇒ 实测 events.log 51138 行里
+ * 「帧已推给管理端」37810 条 +「帧推了但没人订阅」5966 条 = 85%，把真正有用的事件
+ * （设备上下线、指令、回执）全埋了。
+ * 现在：有订阅者时按 15s 窗口聚合成一条「画面帧推送中」；没人订阅时 60s 提示一次
+ * （那是"管理端没连/没选这台"的配置问题，不是每帧都需要喊）。
+ */
+const frameStat = new Map();   // uid -> { frames, bytes, lastAt, idle }
+function noteFrameRelay(uid, viewers, bytes) {
+  const now = Date.now();
+  const s = frameStat.get(uid) || { frames: 0, bytes: 0, lastAt: 0, idle: false };
+  s.frames += 1;
+  s.bytes += bytes;
+  if (viewers > 0) {
+    s.idle = false;
+    if (now - s.lastAt >= 15000) {
+      const windowSec = s.lastAt ? Math.round((now - s.lastAt) / 1000) : 0;
+      pushEvent('info', '画面帧推送中', {
+        uid, viewers, frames: s.frames,
+        kib: Math.round(s.bytes / 1024), windowSec,
+      });
+      s.lastAt = now;
+      s.frames = 0;
+      s.bytes = 0;
+    }
+  } else if (!s.idle || now - s.lastAt >= 60000) {
+    pushEvent('warn', '帧推了但没人订阅（管理端没连或没选这台）', { uid });
+    s.idle = true;
+    s.lastAt = now;
+    s.frames = 0;
+    s.bytes = 0;
+  }
+  frameStat.set(uid, s);
+}
+
 /** 平台级超管判定（perms.js 的 isPlatform 未导出，这里按同一口径复述一遍——
  *  口径必须与 perms.js 逐字一致：schoolId=null 且 roles 含 platform_admin）。 */
 function isPlatformIdent(ident) {
@@ -1639,8 +1676,7 @@ wss.on('connection', (ws) => {
       // 帧直接实时转发给订阅的管理端（broadcastFrame），画面实时无陈旧。
       // 推给订阅了这个 uid 的管理端（谁订阅推谁，不群发）
       const r = broadcastFrame(uid, f.payload, seq);
-      if (r.hits > 0) pushEvent('info', '帧已推给管理端', { uid, viewers: r.hits, bytes: r.bytes, seq });
-      else pushEvent('warn', '帧推了但没人订阅（管理端没连或没选这台）', { uid });
+      noteFrameRelay(uid, r.hits, r.bytes);
       return;
     }
 
