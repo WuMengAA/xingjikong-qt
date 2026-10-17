@@ -153,6 +153,13 @@ public:
     const QVector<Task> &tasks() const { return m_tasks; }
     // 登记/更新一条任务（同 tag 合并）。本步只记录，不影响显示。
     void upsertTask(const Task &t);
+    // 取"下一个该显示的任务"：priority 降序，同优先取最新（shownTs 大者）。
+    // 跳过已完成(done)与已过期的。没有则返回 nullptr。
+    // ⚠️ 本步只用于**回落**（前台空了接手下一个），不用作抢占（抢占是下一步）。
+    const Task *nextDisplayTask() const;
+    // 过期扫描：把到期且非 sticky 的任务标为 done。1Hz 调用，不挂每任务定时器。
+    void sweepExpiredTasks();
+    QTimer *m_taskSweep = nullptr;   // T 档：1Hz 任务过期扫描
 
     // ── 沙箱验证设施（2026-10-17 P0-0）：岛状态快照 / 立即归档 ──────────────────
     // 为什么需要：P0-0 的端到端断言要回答"插件推的这一条**这个进程的岛到底收没收到**"。

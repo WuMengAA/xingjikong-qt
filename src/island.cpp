@@ -190,6 +190,17 @@ IslandOverlay::IslandOverlay(QWidget *parent)
         if (m_expanded) setExpanded(false);
     });
 
+    // ── T 档：任务过期扫描（2026-10-18）───────────────────────────────────
+    // 1Hz 扫全表，把到期且非 sticky 的任务标 done。
+    // ⚠️ 单定时器扫表，而不是每个任务一个 QTimer —— 任务一多，定时器本身就是负担
+    //    （方案 §4.2 的教训：定时器数量比任务数量更容易失控）。
+    // ⚠️ 只扫表 + 同步桥，**不主动改显示**：显示切换由各自的 clear*/enterIdle 触发，
+    //    避免扫描器与用户操作抢窗口（"正在传的文件被扫描器收掉"是灾难）。
+    m_taskSweep = new QTimer(this);
+    m_taskSweep->setInterval(1000);
+    connect(m_taskSweep, &QTimer::timeout, this, [this]() { sweepExpiredTasks(); });
+    m_taskSweep->start();
+
     // A3（2026-10-11）：空闲态时钟。空闲胶囊右侧画 HH:mm，得有个心跳让分钟跳变时重绘。
     // 500ms 一跳（与 IslandClock 同口径），只在"空闲 + 可见"时 update()，其余情况直接返回，
     // 不给活动态/隐藏态添任何重绘负担。
@@ -785,6 +796,41 @@ void IslandOverlay::upsertTask(const Task &t)
         if (victim < 0) break;   // 全是 sticky/高优先 ⇒ 不再强删
         m_tasks.removeAt(victim);
     }
+}
+
+// ── T 档：前台仲裁（2026-10-18）────────────────────────────────────────────
+// 排序口径（与方案 §4.2 同）：priority 降序；同 priority 取最新（shownTs 大者）。
+// ⚠️ 本步**只用于回落**，不作抢占 ——
+//   抢占（高优先挤掉当前显示）会改变现状行为（通知顶掉对讲），回归风险大，留下一步。
+//   回落只在"反正要回空闲"时发生：不回空闲，而是接手下一个未完成任务 ⇒ 纯增值、无回归面。
+//   真实痛点：收文件时来一条通知 → 通知过期 → 现在直接回空闲，传输进度消失；
+//            有回落则自动接回"正在接收"。
+const IslandOverlay::Task *IslandOverlay::nextDisplayTask() const
+{
+    const Task *best = nullptr;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (const auto &t : m_tasks) {
+        if (t.state == 2) continue;                       // 已完成
+        if (!t.sticky && t.expireAtMs > 0 && now > t.expireAtMs) continue;   // 已过期
+        if (!best) { best = &t; continue; }
+        if (t.priority > best->priority) { best = &t; continue; }
+        if (t.priority == best->priority && t.shownTs > best->shownTs) best = &t;
+    }
+    return best;
+}
+
+// 过期扫描：到期且非 sticky ⇒ 标 done。由 1Hz 定时器统一扫表，
+// 不为每个任务挂定时器（60 台设备 × N 任务，定时器数量比任务数更容易失控）。
+void IslandOverlay::sweepExpiredTasks()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    bool changed = false;
+    for (auto &t : m_tasks) {
+        if (t.sticky) continue;
+        if (t.expireAtMs <= 0) continue;
+        if (now > t.expireAtMs && t.state != 2) { t.state = 2; changed = true; }
+    }
+    if (changed && m_bridge) m_bridge->sync();
 }
 
 void IslandOverlay::archiveToHistory()
@@ -1392,6 +1438,48 @@ void IslandOverlay::enterIdle()
     }
 
     if (m_idle && isVisible()) return;
+
+    // ── T 档：回落（2026-10-18）────────────────────────────────────────
+    // 前台要收回时，先看任务表里还有没有"未完成的常驻任务"（如正在接收/正在播放/对讲中）。
+    // 有 ⇒ 把它的内容重新显示到岛面，**不回空闲** —— 否则正在进行的进度条会随通知过期一起消失。
+    // 无 ⇒ 走原来的收回空闲路径，行为与以前完全一致。
+    // ⚠️ 只挑**非 notice** 的任务：通知的合并语义是"同 tag 顶掉"，它不该被自己回落成自己
+    //    （否则通知过期后会立刻把自己重新显示出来，变成"永远关不掉"）。
+    {
+        const Task *nt = nullptr;
+        const Task *best = nullptr;
+        for (const auto &t : m_tasks) {
+            if (t.state == 2 || t.tag == QStringLiteral("notice")) continue;
+            if (!t.sticky && t.expireAtMs > 0 && QDateTime::currentMSecsSinceEpoch() > t.expireAtMs) continue;
+            if (!best || t.priority > best->priority
+                || (t.priority == best->priority && t.shownTs > best->shownTs)) best = &t;
+        }
+        nt = best;
+        if (nt) {
+            // 用既有 showIsland 路径显示：几何/动画/淡入全都复用，不另造一套。
+            // durationMs=0（sticky 不自动收）+ 保持 m_contentActive，等待它自己被 clear* 收掉。
+            m_title = nt->title;
+            m_desc = nt->desc;
+            m_icon = nt->icon;
+            m_form = nt->form;
+            m_shownTs = nt->shownTs;
+            m_fromAdmin = nt->fromAdmin;
+            m_contentActive = true;
+            m_idle = false;
+            if (auto *eff = qobject_cast<QGraphicsOpacityEffect *>(m_fadeAnim->targetObject()))
+                m_fadeAnim->setStartValue(eff->opacity());
+            m_fadeAnim->setEndValue(1.0);
+            m_fadeAnim->stop();
+            m_fadeAnim->setDirection(QAbstractAnimation::Forward);
+            m_fadeAnim->start();
+            const QRect target = geometryForForm(m_form);
+            if (!isVisible()) { setGeometry(target); show(); raise(); }
+            else animateGeometry(target);
+            if (m_bridge) m_bridge->sync();
+            update();
+            return;
+        }
+    }
 
     const bool wasExpanded = m_expanded;
     // ── 历史归档：有内容的通知在收回空闲时进历史 ──
