@@ -283,6 +283,19 @@ IslandOverlay::IslandOverlay(QWidget *parent)
 IslandOverlay::~IslandOverlay()
 {
     if (g_island == this) g_island = nullptr;
+
+    // ── 2026-10-18 · 拆解顺序（这是崩溃点，别把它改回去）──────────────────────
+    // 现象：进程退出时偶发 0xC0000005，故障模块 Qt6Core.dll 偏移 0x38c0 ——
+    //       该地址正好是导出符号 QBindingStorage::status()（属性绑定的读取路径）。
+    // 机制：m_bridge 与 m_quick 都是本窗口的子对象，QObject 析构**按添加顺序**删子对象：
+    //       m_bridge 先建（先删）→ m_quick（QML 引擎）后删。引擎收尾时 QML 里还留着
+    //       setContextProperty("bridge", ...) 这个**裸指针**，只要还有绑定被读一次，
+    //       就落到已释放的 IslandBridge 上 → 读它的 bindingStorage → 访问冲突。
+    // 修法：显式先拆引擎、再拆桥（两者都已从父对象的子对象表里摘除，base 析构不会二次删）。
+    delete m_quick;
+    m_quick = nullptr;
+    delete m_bridge;
+    m_bridge = nullptr;
 }
 
 // 空闲半胶囊的位置：比活动态更贴顶（y=10）、更小（120×36），真正"收回顶部"。

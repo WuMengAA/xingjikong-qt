@@ -1953,6 +1953,10 @@ static void otaNoteSuccess()
     st.insert(QStringLiteral("lastVer"), QString::fromLatin1(kAppVersion));
     st.insert(QStringLiteral("lastAt"), (double)QDateTime::currentMSecsSinceEpoch());
     st.insert(QStringLiteral("nextAt"), (double)0);
+    // ⚠️ 2026-10-18：成功必须把上一次的错误**清掉**。
+    //   只写 lastResult=ok 而留着旧 lastError ⇒ 面板/排障时永远看到一条早已不成立的
+    //   「备份当前 exe 失败」，把"其实没事"误判成"OTA 坏了"（本轮实测踩到）。
+    st.remove(QStringLiteral("lastError"));
     otaSaveState(st);
 }
 
@@ -1967,7 +1971,20 @@ static QString otaBackupExe()
     const QString src = QCoreApplication::applicationFilePath();
     const QString dst = otaPrevPath();
     QDir().mkpath(QFileInfo(dst).absolutePath());
-    QFile::remove(dst);
+
+    // ⚠️ 2026-10-18：目标位置可能被上一版留着（或被杀软/别的实例占着句柄）。
+    //   原来这里无视 remove() 的返回值就往下走 ⇒ 后面的 copy 必然失败，日志却只有一句
+    //   "备份失败"，分不清是"删不掉"还是"拷不动"。现在删不掉就改名挪开，并分别记账。
+    if (QFile::exists(dst) && !QFile::remove(dst)) {
+        const QString aside = dst + QStringLiteral(".stale");
+        QFile::remove(aside);
+        if (!QFile::rename(dst, aside)) {
+            qWarning("[agent-qt] ⚠ 旧备份既删不掉也挪不开（%s）", qPrintable(dst));
+            return QString();
+        }
+        qWarning("[agent-qt] ⚠ 旧备份删不掉，已挪到 %s", qPrintable(aside));
+    }
+
     if (!QFile::copy(src, dst)) {
         qWarning("[agent-qt] ⚠ 备份当前 exe 失败（%s → %s）", qPrintable(src), qPrintable(dst));
         return QString();

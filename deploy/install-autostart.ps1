@@ -28,7 +28,9 @@ $Deploy = if ($Source) { $Source } else { $PSScriptRoot }
 
 if ($Uninstall) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    Write-Host "[ok] 已卸载计划任务 $TaskName"
+    # 2026-10-18：看门狗任务一并撤（否则卸载后它每 10 分钟去拉一个已删除的 exe）
+    Unregister-ScheduledTask -TaskName 'StelarithAgentGuard' -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Host "[ok] 已卸载计划任务 $TaskName / StelarithAgentGuard"
     exit 0
 }
 
@@ -69,6 +71,33 @@ Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Silent
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Settings $settings -Principal $principal | Out-Null
 Write-Host "[ok] 已创建计划任务 $TaskName（登录时启动，交互会话）"
+
+# 3) 看门狗计划任务：每 10 分钟巡检一次（2026-10-18 补）
+# ⚠️ 事故背景：这条任务以前只在个别机器上手工建过，装机脚本里**没有** ⇒ 干净装机没有兜底，
+#    agent 崩了就真的不起来（10-18 凌晨 00:54 崩掉后 35 分钟无人拉起）。
+#    任务只调 .bat 壳，判定逻辑在 stelarith-agent-guard.ps1（按完整路径识别生产实例 +
+#    僵死检测 + 清理同名异路径实例，因为单例互斥体是机器级的）。
+$GuardTask = 'StelarithAgentGuard'
+$guardBat = Join-Path $Dest 'stelarith-agent-guard.bat'
+$guardPs1 = Join-Path $Dest 'stelarith-agent-guard.ps1'
+if ((Test-Path $guardBat) -and (Test-Path $guardPs1)) {
+    try {
+        $gAction = New-ScheduledTaskAction -Execute $guardBat -WorkingDirectory $Dest
+        $gTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+            -RepetitionInterval (New-TimeSpan -Minutes 10)
+        $gSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+        Unregister-ScheduledTask -TaskName $GuardTask -Confirm:$false -ErrorAction SilentlyContinue
+        Register-ScheduledTask -TaskName $GuardTask -Action $gAction -Trigger $gTrigger `
+            -Settings $gSettings -Principal $principal | Out-Null
+        Write-Host "[ok] 已创建计划任务 $GuardTask（每 10 分钟巡检）"
+    } catch {
+        # 看门狗装不上不能拖垮装机本身 —— 但必须喊出来，别让它静默消失
+        Write-Host "[warn] 看门狗任务注册失败：$($_.Exception.Message)"
+    }
+} else {
+    Write-Host "[warn] 看门狗脚本缺失，跳过 $GuardTask（$guardBat）"
+}
 
 Write-Host ''
 Write-Host '下一步：编辑 C:\Program Files\Stelarith\agent.env，填 TEST1 的 STE_QT_WS_TOKEN / STE_QT_UID'

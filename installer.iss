@@ -122,6 +122,12 @@ Source: "deploy\install-autostart.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "deploy\agent.env.example"; DestDir: "{app}"; Flags: ignoreversion
 Source: "deploy\start-agent.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "deploy\msi-post-install.cmd"; DestDir: "{app}"; Flags: ignoreversion
+; ── 看门狗（2026-10-18 补：此前只在个别机器上手工放着，重装必丢）──────────────
+; 事故背景：旧看门狗按**进程名**判断 agent 在不在，构建目录里的同名进程会把生产 agent
+; 挡在门外（还占着机器级单例互斥体），于是"崩了却没人拉"。新版按**完整路径**判定，
+; 并能识别"进程活着但僵死"。两件必须成对带走：.bat 只是壳，逻辑在 .ps1 里。
+Source: "deploy\stelarith-agent-guard.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "deploy\stelarith-agent-guard.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
