@@ -14,10 +14,9 @@
 - ⚠️ **本机生产真源＝`C:\Program Files\Stelarith\`**，不是 build 产物：计划任务 `StelarithAgentGuard` 每 10 分钟检查进程名，
   没了就拉起安装版（`StelarithAgentQt` 登录自启同路径）。⇒ **换生产 = 换安装目录 exe + qml 整目录**。
 - ⚠️ **换 exe 必须连 `qml/` 一起换**（QML 运行期从 exe 旁读盘；混版 ⇒ `UiRegistry is not a type` 之类，fail-loud 在 agent-qt.log）。
-- **线上现状（2026-10-17 11:00）**：生产安装目录＝**0.6.41 + 形态多样化那笔 exe/QML**（并行线装机 0.6.41，
-  我随后换成含 Banner/Mini 的构建；备份 `stelarith-agent-qt.exe.bak-pre-form` + `_appqml-bak-pre-form/`）。
-  云端 ota.json 仍在 0.6.40/0.6.41 这条线上（同版本不会触发自更新）⇒ **要固化必须自己 bump+出包**，
-  否则并行线一发新版本（版本号高于 0.6.41）就会把这版覆盖回去。
+- **线上现状（2026-10-17 11:47）**：生产安装目录＝**0.6.44**（我出的包，发到 **stable**；本机同时手动换了 exe）。
+  `ota.json` agent=**0.6.44**（sha256 `e956ca57…`，32,690,728 B）、viewer 仍 0.6.37；`ota-gray.json` 停留在并行线的 0.6.43
+  ⇒ 灰度机不会降级。安装目录备份 `stelarith-agent-qt.exe.bak-pre-ota2` + `_appqml-bak-pre-ota2/`（早前还有 `.bak-pre-form`/`.bak-pre-vh`）。
 - ⚠️ **C 盘长期告急**（120G 用满，剩余 10–850MB 徘徊）：**打安装包 / 整树 cp 会失败**（本次备份被卡断）。
   安装目录只保留应用自有 QML 小备份 `_appqml-bak-pre-*`（island/shell/components），**别再整树 cp**。
 - 443/wss：`control.245959623.xyz/ws/agent`(被控)、`/ws/viewer`(管理)；cloudflared 回源本机 8788。
@@ -27,10 +26,10 @@
   `ota.json.url` 同时是装机卡链接 ⇒ **只挂全量件**。
 - ⚠️ **「OTA 不生效」是三层叠加**（2026-10-17 取证，`docs/OTA不生效-加减归档-2026-10-17.md`）：
   ①**端侧不查**：最新版本只随 WS `registered` 回执下发一次，长连设备永远看不到新版 ⇒ 已加 `otaSelfCheck()` 周期复查（`95a0d43`）；
-  ②**stable 不发布**：`ota.json` 自 10-16 23:17 停在 **0.6.37**，0.6.38~0.6.43 全在 `ota-gray.json` ⇒ 非灰度设备
-  `hasUpdate:false`，改代码也救不了 —— **必须发 stable**（待用户裁决，Danger 0）；
+  ②**stable 不发布**：`ota.json` 自 10-16 23:17 起停在 **0.6.37**，0.6.38~0.6.43 全在 `ota-gray.json` ⇒ 非灰度设备
+  `hasUpdate:false`，改代码也救不了 ⇒ **2026-10-17 已按「先 bump 再发」发 0.6.44 到 stable**（用户选 B，不要直接发 0.6.43）；
   ③**端侧不自装**：`mandatory:false` 只弹提示、无人值守就永远不升 ⇒ 已改「非考试 + 桌面空闲≥10min」自动装（`603abe7`）。
-  查现状：`curl 127.0.0.1:8788/api/public/ota?product=agent&channel=stable|gray&current=0.6.43`。
+  查现状：`curl 127.0.0.1:8788/api/public/ota?product=agent&channel=stable|gray&current=0.6.44`。
 - ⚠️ **同一工作树有并行工作线**（2026-10-17）：他线提交 `03bafbc`（H264 空转修复 + bump **0.6.41**）并已**装机到生产**
   （10:32 安装）；此前 `4c228e5` 还发过 gray 0.6.40。他线另有 `src/ldc_streamer.cpp` 在途。**提交前先 `git log`**，
   版本号/发布可能与对方抢；装机后要核对"装进去的包是否含我这边改动"（比字节，不看版本号）。
@@ -89,9 +88,10 @@
 4. 站点 `/api/device/activate` 不回 classCode。
 5. `md3/Md3Btn.qml:11` 自定义 `enabled` 盖掉 `Item.enabled` ⇒ 祖先 enabled 传导失效（共享组件不擅自改）。
 6. 管理端下发 `kind=banner|mini` 的入口（viewer 未改，解析已在 main.cpp 就位）。
-7. ⛔ **stable 清单停在 0.6.37（10-16 23:17），0.6.38~0.6.43 全在 gray** ⇒ 非灰度教室机永远升不上去。
-   两条路：A 直接 `publish-release.mjs publish --product agent --version 0.6.43 --file assets/pkg/stelarith-agent-setup-0.6.43.exe`
-   （包已在、立刻生效，但会推全体设备自动升级）；B 先 bump 0.6.44 重打包再发（干净，占 C 盘 ~100MB+，与并行线抢版本号）。
+7. ⚠️ **stable 发布必须"先 bump 再发"**（用户 2026-10-17 裁决，不要图省事直接发旧包号）：`bump-version.mjs bump` → 重编 →
+   `build-agent-installer.sh`（**Inno Setup 6**，ISCC 在 `%LOCALAPPDATA%\Programs\Inno Setup 6\`；`installer.iss` 的 [Files] 直接取
+   `build\` 的 exe/dll/qml/resources，deploy 只供 2 个 dll + 脚本）→ `publish-release.mjs publish --product agent --version X --file … --base-url`。
+   ⚠️ `bump` 会同时改 viewer 的 2 处（两端同一条版本线）⇒ 要在 viewer 仓单独提交版本号，否则漂移检查会 FATAL。
 
 ## 6 踩坑实证（最贵，按"还会再踩"排序）
 - ⚠️⚠️ **截图/几何取证必须声明 DPI 感知**：未 `SetProcessDpiAwareness(2)` 时 `GetWindowRect`/`PrintWindow` 返回**虚拟化坐标**
