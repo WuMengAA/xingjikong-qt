@@ -391,10 +391,14 @@ void PluginHost::handleNotifyAt(Conn *c, const QJsonObject &args, QJsonObject &r
     if (m_api.notify) m_api.notify(args);
     ++m_gateStats.allowed;
     r.insert(QStringLiteral("ok"), true);
+    // T 档基线（2026-10-17）：notify 也回岛状态串 —— 插件据此断言"kind=island 的通知真的上岛了"。
+    if (m_api.islandSnapshot) {
+        const QString snap = m_api.islandSnapshot();
+        if (!snap.isEmpty()) r.insert(QStringLiteral("islandSnapshot"), snap);
+    }
     // ⚠️ 如实记账：这里只回答"令牌桶放行了"，**不代表岛已显示** ——
-    //    notifyFromParams 还会过考试门控/本地通知开关，且它的返回值被 api.notify
-    //    （void）吞掉了。要拿到真实结果需要改 PluginAgentApi::notify 的签名
-    //    （对外 SDK 契约，留到 P 档协议 v2 一起做，见方案 §5.2）。
+    //    notifyFromParams 还会过考试门控/本地通知开关，它的返回值被 api.notify（void）吞掉，
+    //    真实结果只能从回包的 islandSnapshot 读。要拿到显式结果需改 SDK 签名（留 P 档协议 v2）。
 }
 
 QJsonObject PluginHost::islandGateStats() const

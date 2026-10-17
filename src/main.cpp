@@ -4325,6 +4325,49 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
+    // ── dev_act：仅开发用的动作触发器（2026-10-17 T 档验证设施）──────────────
+    // 为什么需要：T 档要验"多种进行中状态在岛上并存"，而岛的状态源分散在
+    //   通知 / 文件传输 / 媒体会话 / 对讲频谱 / 展开收起 等模块里，**没有一条统一的入口**；
+    //   用云端指令触发要连真云端、用插件口又碰不到媒体与频谱。这里给沙箱一条内建口令。
+    // ⚠️ 唯一的护栏：**必须 STE_QT_UID 以 `ste-sbx-` 开头**（沙箱实例专用命名前缀），
+    //   生产实例即便被下发 dev_act 也只会回 failed，不会执行。这是"默认关闭、显式开启"，
+    //   而不是"有口令就能用"——口令本身可能泄到管理端脚本里。
+    if (action == QStringLiteral("dev_act")) {
+        if (!qEnvironmentVariable("STE_QT_UID").startsWith(QLatin1String("ste-sbx-"))) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("dev_act 仅在沙箱实例（STE_QT_UID=ste-sbx-*）可用");
+            return out;
+        }
+        const QString kind = params.value(QStringLiteral("kind")).toString();
+        IslandOverlay *isl = IslandOverlay::instance();
+        if (kind == QStringLiteral("ft")) {
+            isl->setFileTransfer(params.value(QStringLiteral("name")).toString(),
+                                 params.value(QStringLiteral("bytes")).toVariant().toLongLong(),
+                                 params.value(QStringLiteral("total")).toVariant().toLongLong());
+        } else if (kind == QStringLiteral("ft_clear")) {
+            isl->clearFileTransfer();
+        } else if (kind == QStringLiteral("media")) {
+            isl->setMediaSession(params.value(QStringLiteral("title")).toString(),
+                                 params.value(QStringLiteral("totalMs")).toVariant().toLongLong(),
+                                 params.value(QStringLiteral("next")).toString(), QString());
+        } else if (kind == QStringLiteral("media_clear")) {
+            isl->clearMediaSession();
+        } else if (kind == QStringLiteral("spectrum")) {
+            // 16 位 16kHz 静默帧 → 只走"置位/展开"路径，不需要真的 MIC。
+            isl->feedSpectrum(QByteArray(320 * 2, '\0'), 16000, 16);
+        } else if (kind == QStringLiteral("spectrum_off")) {
+            isl->setSpectrumActive(false);
+        } else if (kind == QStringLiteral("expand")) {
+            isl->setExpanded(params.value(QStringLiteral("on")).toBool(true));
+        } else {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("dev_act 未知 kind：%1").arg(kind);
+            return out;
+        }
+        out.result = QStringLiteral("done");
+        return out;
+    }
+
     if (action == QStringLiteral("lock")) {
         // user32 真实导出名就是 LockWorkStation（无 Native 后缀，那个名字不存在）
         if (LockWorkStation()) {

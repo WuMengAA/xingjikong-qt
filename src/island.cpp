@@ -416,6 +416,17 @@ QString IslandOverlay::historySnapshotJson() const
     o.insert(QStringLiteral("noticeTs"), QJsonValue(double(m_shownTs)));
     o.insert(QStringLiteral("titleLen"), int(m_title.size()));
     o.insert(QStringLiteral("descLen"),  int(m_desc.size()));
+    // ── T 档基线（2026-10-17）：状态串。**只读、不渲染** ——
+    //    探针据此断言"旧调用行为零变化"，而不必截屏（岛窗与生产实例重叠，截图无法归因）。
+    o.insert(QStringLiteral("idle"),     m_idle);
+    o.insert(QStringLiteral("expanded"), m_expanded);
+    o.insert(QStringLiteral("interactive"), m_interactive);
+    o.insert(QStringLiteral("form"),     int(m_form));
+    o.insert(QStringLiteral("contentActive"), m_contentActive);
+    o.insert(QStringLiteral("ftActive"), m_ftActive);
+    o.insert(QStringLiteral("mediaPresenting"), m_mediaPresenting);
+    o.insert(QStringLiteral("actions"),  QJsonArray::fromStringList(m_actions));
+    if (m_bridge) o.insert(QStringLiteral("states"), QJsonArray::fromVariantList(m_bridge->states()));
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
