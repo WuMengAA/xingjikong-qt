@@ -1,121 +1,117 @@
 # Stelarith-xingjikong-qt · 项目笔记（速查）
-> 详细过程见 `.workbuddy/memory/YYYY-MM-DD.md`（日记，append-only）与根 `docs/*.md`（归档）。
-> 本文件只留**仍会影响下一步动作**的事实。整理于 2026-10-16 深夜（19.5K → 压缩）。
+> 过程细节见 `.workbuddy/memory/YYYY-MM-DD.md`（append-only）与根 `docs/*.md`（归档）。
+> 本文件只留**仍会影响下一步动作**的事实。压缩于 2026-10-17（19.5K → ~7K）。
 
 ## 0 铁律
 - 总纲=skill `stelarith-project-overview`；裁决序：**生产事故 > 用户点单 > 已就绪未接线 > 战略**。
 - 重要修复同轮闭环：属实 bug 直接修；重启/发布/出包同轮做；收尾逐条对账。
-- **只改三工程** `{cloud-ws,control-qt,viewer-qt}`；`D:\Stelarith\` 下同名三份是 **bare 远端**（remote 名 `outer`，**只 push 不手改**；push 前 `--dry-run` 证伪 remote 指向源仓自身的空转）。
+- **只改三工程** `{cloud-ws,control-qt,viewer-qt}`；`D:\Stelarith\` 下同名三份是 **bare 远端**（remote `outer`，只 push 不手改）。
 - **顺带发现 ≠ 点名重点**：只报清单、等点单；不许在烂地基上叠补丁。
-- 取证避让：本机不跑被控端/不动桌面；**云端重启让修复生效不算避让**。「复制」只 cp 不 mv；定时任务只推大目标。
-- **红线可越**（2026-10-16 用户授权）：停生产/换生产 exe 在验证需要时可以做，但必须**先备份（`.bak-<名>`）+ 汇报**。
+- 取证避让：不跑被控端/不动桌面；「复制」只 cp 不 mv。
+- **红线可越**（用户授权）：停生产/换生产 exe 在验证需要时可做，但**先备份 + 汇报**。
 
-## 1 部署 / 发版
-- 443/wss：`control.245959623.xyz/ws/agent`(被控)、`/ws/viewer`(管理)；cloudflared 回源本机 8788。令牌 `CLOUD_WS_TOKEN`(设备)/`CLOUD_VIEWER_TOKEN`(管理)/`CLOUD_VIEWER_SECRET`(设备票)。本地验证一律 `127.0.0.1:8788`。
-- 版本真源＝云端 `ota.json`（UTF-8 无 BOM；**带 BOM ⇒ latest:null**）。`bump-version.mjs` 改 4 副本，**出包前先 bump**。发布 `publish-release.mjs publish --product agent|viewer --version X --file <包>`；验证 `curl 127.0.0.1:8788/api/public/ota?product=X[&current=旧]`。
-- ⚠️ `ota.json` 不入库（线上文件即真源）；`ota.json.url` 同时是装机卡链接 ⇒ **只挂全量件**。
-- **线上（2026-10-16 深夜）：agent/viewer 均 0.6.36；本机生产 agent 已手动换成含 QML 面板的 0.6.37 build（未走 OTA，备份 `.bak-pre-u5a3`）**。⚠️ kAppVersion 已是 0.6.37。
-- ⚠️ **本机生产真源＝`C:\Program Files\Stelarith\`（安装版）**，不是 build 产物：计划任务 `StelarithAgentGuard` 每 10 分钟检查进程名，没了就把安装版拉起来（`StelarithAgentQt` 登录自启同路径）。**换生产=换安装目录 exe+qml 整目录**（备份 `.bak-pre-<名>`）。2026-10-17 已换成含模块层的 0.6.38 构建（备份 `.bak-pre-vh`）。守门只在「进程名不存在」时启动，所以 build 产物能临时跑，但下次守门 tick 前若退出就回到安装版。
-- **换被控端 exe 必须连 `qml/` 整目录一起换**（QML 运行期从 exe 旁读盘；安装目录 qml/ 是装机时快照，混版 ⇒ `UiRegistry is not a type` 之类，fail-loud 可在 agent-qt.log 看到）。
+## 1 部署 / 发版（最容易错）
+- ⚠️ **本机生产真源＝`C:\Program Files\Stelarith\`**，不是 build 产物：计划任务 `StelarithAgentGuard` 每 10 分钟检查进程名，
+  没了就拉起安装版（`StelarithAgentQt` 登录自启同路径）。⇒ **换生产 = 换安装目录 exe + qml 整目录**。
+- ⚠️ **换 exe 必须连 `qml/` 一起换**（QML 运行期从 exe 旁读盘；混版 ⇒ `UiRegistry is not a type` 之类，fail-loud 在 agent-qt.log）。
+- **线上现状（2026-10-17 11:00）**：生产安装目录＝**0.6.41 + 形态多样化那笔 exe/QML**（并行线装机 0.6.41，
+  我随后换成含 Banner/Mini 的构建；备份 `stelarith-agent-qt.exe.bak-pre-form` + `_appqml-bak-pre-form/`）。
+  云端 ota.json 仍在 0.6.40/0.6.41 这条线上（同版本不会触发自更新）⇒ **要固化必须自己 bump+出包**，
+  否则并行线一发新版本（版本号高于 0.6.41）就会把这版覆盖回去。
+- ⚠️ **C 盘长期告急**（120G 用满，剩余 10–850MB 徘徊）：**打安装包 / 整树 cp 会失败**（本次备份被卡断）。
+  安装目录只保留应用自有 QML 小备份 `_appqml-bak-pre-*`（island/shell/components），**别再整树 cp**。
+- 443/wss：`control.245959623.xyz/ws/agent`(被控)、`/ws/viewer`(管理)；cloudflared 回源本机 8788。
+  令牌 `CLOUD_WS_TOKEN`/`CLOUD_VIEWER_TOKEN`/`CLOUD_VIEWER_SECRET`。本地验证一律 `127.0.0.1:8788`。
+- 版本真源＝云端 `ota.json`（**UTF-8 无 BOM，带 BOM ⇒ latest:null**；不入库）。`bump-version.mjs` 改 4 副本，**出包前先 bump**。
+  发布 `publish-release.mjs publish --product agent|viewer --version X --file <包>`；验证 `curl 127.0.0.1:8788/api/public/ota?product=X[&current=旧]`。
+  `ota.json.url` 同时是装机卡链接 ⇒ **只挂全量件**。
+- ⚠️ **同一工作树有并行工作线**（2026-10-17）：他线提交 `03bafbc`（H264 空转修复 + bump **0.6.41**）并已**装机到生产**
+  （10:32 安装）；此前 `4c228e5` 还发过 gray 0.6.40。他线另有 `src/ldc_streamer.cpp` 在途。**提交前先 `git log`**，
+  版本号/发布可能与对方抢；装机后要核对"装进去的包是否含我这边改动"（比字节，不看版本号）。
 
 ## 2 编译 / 自检
-- Qt **6.12.0** `D:/QTqwq/6.12.0/msvc2022_64`（qml.exe/qmllint.exe/cmake 同级）；被控端入口 `control-qt/scripts/build-agent.sh`（Git Bash 直连 cmake/ninja 自喂 MSVC/SDK+RC/MT）；`_build_viewer.py` 默认 -j4。
-- ⚠️ MSVC C1060 ⇒ 串行 `-j1`。改 CMakeLists 源列后 ninja 不一定重跑 configure ⇒ 手动 `cmake -S . -B build`（**必须带脚本同款 -D**：build/CMakeCache 的 `CMAKE_PREFIX_PATH` 曾被污染成 `D:/Qt/6.8.1`，裸 reninja 即炸，而 build.ninja 里还是旧 6.12 值所以平时能编）。
-- ⚠️ `file(GLOB)` 不自动重查 ⇒ 改 resources/ 文件名后必须重跑 configure。
-- 离屏自检：`STE_ALLOW_MULTI=1 ... -platform offscreen`；offscreen 无 CJK 字体 ⇒ 探针要 `QFontDatabase::addApplicationFont(msyh.ttc)`；Windows Qt 日志走 OutputDebugString ⇒ 判定看**退出码**（10=过/20=败/30=兜底超时），看文字加 `QT_ASSUME_STDERR_HAS_CONSOLE=1`。
-- **QML 页面探针必须针对产物树跑**（`qml/island/`、共享 ui 只在 build/qml 下；源树没有）⇒ 跑前 cp 同步产物。
-- **AUTOMOC 三连坑（2026-10-16 全实测，header-only QObject 必读）**：
-  ① 被源文件 include 的头会被**单独编译成一个 TU** ⇒ 头里不能引用 main.cpp 的任何符号（C2065）⇒ 用「快照+信号」模式：头只持纯内存成员，真实读写放 main.cpp 的 wire/fill（fill 用 friend 直接改成员，**不能 static**——friend 声明是 external linkage）；
-  ② 头里不能 `#include "xxx.moc"`（C1083；AUTOMOC 走独立 moc_<name>.cpp 路线）；
-  ③ 头必须**显式列入 add_executable**（否则 moc 产物不生成 ⇒ LNK2001 metaObject）。
-  另：include 自家头**绝不能放进匿名 namespace**（Qt 头被拽进域内 ⇒ QVariant/QtPrivate C2872 fatal C1003）；Qt 6.12 `QQuickWidget::ResizeMode` 只有 `SizeViewToRootObject/SizeRootObjectToView`（无 ToQML）。
-  ④ **moc 对 .cpp 输入生成的 TU 不含原文件**（只认头文件输入）⇒ QObject 探针/夹具类必须拆头（`_agent_ui_probe_fakeui.h` 实证）。
+- Qt **6.12.0** `D:/QTqwq/6.12.0/msvc2022_64`；被控端入口 `control-qt/scripts/build-agent.sh`；`_build_viewer.py` 默认 -j4。
+- ⚠️ MSVC C1060 ⇒ `-j1`。改 CMakeLists 源列后手动 `cmake -S . -B build`（**必须带脚本同款 -D**，CMakeCache 的
+  `CMAKE_PREFIX_PATH` 曾被污染成 `D:/Qt/6.8.1`）。`file(GLOB)` 不自动重查 ⇒ 改 resources 文件名后必须重跑 configure。
+- 离屏自检：`STE_ALLOW_MULTI=1 ... -platform offscreen`；offscreen 无 CJK 字体 ⇒ 加 `msyh.ttc`；
+  Windows Qt 日志走 OutputDebugString ⇒ 判定看**退出码**（10=过/20=败/30=兜底超时），看文字加 `QT_ASSUME_STDERR_HAS_CONSOLE=1`。
+- ⚠️ **探针的 QML 暂存来自 `build/qml`**（不是 shared-qml）⇒ 改共享岛后先
+  `cp shared-qml/island/*.qml build/qml/island/` 再跑，否则测的是旧文件（症状"改了没反应"）。
+- **AUTOMOC 四连坑**：① 被 include 的头会被单独编译成 TU ⇒ 头里不能引用 main.cpp 符号（用「快照+信号」，fill 用 friend 不能 static）；
+  ② 头里不能 `#include "xxx.moc"`；③ 含 Q_OBJECT 的头**必须显式列入 add_executable**（否则 LNK2001）；
+  ④ **moc 对 .cpp 输入生成的 TU 不含原文件** ⇒ QObject 探针/夹具类必须拆头。
+  另：include 自家头**绝不能进匿名 namespace**（Qt 头被拽进域内 ⇒ C2872/C1003）。
 
-## 3 仓库 / UI / NSIS
+## 3 仓库 / UI / 探针
 - github `WuMengAA/xingjikong-qt` 四分支；curl 到 github 恒 000，push 用 `git -c credential.helper=`。
-- 根仓库即 meta（三子工程 gitlink，无 .gitmodules）：子仓提交后 `git add <子目录>` 推进指针；根仓库无 remote。
-- QML：字号 12/13/14/16(+20)；**锚只锚 parent**；不用 Qt Button/TextField ⇒ Btn/InputField；令牌实例 id 用 `tok` 不用 `md3`（子组件属性同名 ⇒ `md3: md3` 自引用绑定环）。
-- 符号字形（▶♪、emoji）教室机 tofu ⇒ 图标用 `SvgIcon` 或单字汉字。
-- NSIS：`.nsi` UTF-8 带 BOM；非 Qt 运行时显式 File。提交路径限定（**永不 `-A`**）。
-- **「真 viewer 壳」探针范式**：复用全部 obj 只换 main.cpp.obj + `@rsp` 链接；必备补 `logf`、自己装 messageHandler、`build/_interact_run/` 备齐 Qt dll、抄足 DEFINES+INCLUDES+**FLAGS**。`build.ninja` 的 exe 行含 `|` 依赖段，抓 obj 先截断。
-- **假上下文探针**：属性/函数**必须照真实签名写**（bulkList 教训：声明成数组，页里当函数调 ⇒ TypeError 假象污染判断）。
+- 根仓库即 meta（三子工程 gitlink，无 .gitmodules）：子仓提交后 `git add <子目录>` 推进指针；根仓无 remote。
+- QML 纪律：字号 12/13/14/16(+20)；**锚只锚 parent**；不用 Qt Button/TextField（被控端无 QtQuick Controls）；
+  令牌实例 id 用 `tok` 不用 `md3`（子组件同名 ⇒ 自引用绑定环）；`Flickable` 必须显式 `contentWidth: width`。
+- 符号字形（▶♪ emoji）教室机 tofu ⇒ 用 `SvgIcon` 或单字汉字。
+- NSIS：`.nsi` UTF-8 带 BOM；提交路径限定（**永不 `-A`**）。
+- 探针脚本：`scripts/_*.py`、`_*.mjs` 不入库（白名单 `!scripts/_build_agent.py`、`!_voicehub_fake_server.mjs`）；
+  `_*.qml/_*.cpp` 入库。Bash cwd 不跨命令保持。
+- 固化成测试的门禁（`Stelarith-shared-qml/scripts/`）：`test-ui-contract`(32断) / `test-action-manifest`(23) /
+  `test-island-metrics`(11) / `test-manifest-scope`(15) / `test-module-registry`(10) / `test-agent-qml-deps`(12) / `diff-island-tree`。
 
-## 4 已修 / 绑定 / 库
-- #87 语音时长限；#90 关机重发；#94 暗色通知；#95 终端关不掉；#88 考试模式。
-- `ViewerBackend::cloudUrl()` 是 **WebSocket 地址**，管理面 `/api/*` 走 `httpBaseUrl()`；viewerbackend.cpp 另有 5 处同款派生**未收敛（待单独一笔）**。
-- 云端 `/recordings/*` 静态托管用 `RECORDINGS_ROOT`（const TDZ ⇒ 定义上移）。
-- qml-patch 已并入共享岛 + version 计岛指纹；`CLOUD_ASSETS_DIR` 可覆盖。
-- 库：WebRTC(libdatachannel) + FFmpeg(LGPL 动态)；Qt 动态链接；OpenSSL3 取自 PG17。CIMS 废弃。
-- **内置模块层**（2026-10-17 `b851e67` + `92be4c6`，control）：`src/modules/`（modulehost + usbmodule + voicehubmodule）编译进 agent，
-  与进程外插件 PluginHost 并列第二扩展通道；manifest 同口径；executeAction **前置内置优先**；
-  ModuleAgentApi 10 个 std::function 在 main.cpp 注入；AgentPluginsPage 有「内置模块」分区
-  （快照 Q_PROPERTY(modules) + 信号接线）。门禁 `test-module-registry.mjs`（10 断言，认
-  `registerModule(new X)` 与「先 new 后 registerModule(变量)」两种写法）。
-- **VoiceHub 联动**（`92be4c6`）：匿名只读 —— `GET {base}/api/music/broadcast` + SSE `GET {base}/api/music/websocket`
-  （**线上帧没有 `event:` 行，类型只在 JSON `type` 里** ⇒ 「event 行优先 + JSON type 兜底」；行尾 \n/\r\n 必须归一，
-  否则 `\r\n\r\n` 分不出帧；nextUp/listeners 双来源 data 对象/消息根）。SSE 主 + 30s 轮询兜底（`qBound` 下限 5s）+
-  锚点本地 tick + staleSec 自愈（下限 10s）+ 开播提醒（考试静默）。控制接口只留桩（x-api-key，密钥存放口径未定）。
-  岛 `vhRow`（shared IslandRoot）+ 设置页卡；探针 `_voicehub_probe.cpp` 32 断言 + `_voicehub_fake_server.mjs`（已白名单入库）。
-- ⚠️ **待点单**：① U4 的 `permOk("admin")` 恒真越权（teacher 可锁屏，quickGuard 只保了快捷行）；② **IslandRoot 引用 `image://svgicon/check-circle` 而资源叫 `circle-check.svg`（存量图标名错配，岛历史列表图标加载失败，日志 948 行起）**；③ viewerbackend 5 处 URL 派生未收敛；④ 站点 `/api/device/activate` 不回 classCode；⑤ `md3/Md3Btn.qml:11` 自定义 `enabled` 盖掉 Item.enabled ⇒ 祖先 enabled 传导失效（探针 note 留痕，共享组件不擅自改）。
+## 4 已交付（按批次，均可从 git log 找回）
+- U 系列 U1–U4：共享 ui 基座（Md3 + md3/12 件）、契约 `UiContract.js`+`UiRegistry`+`UiPanelHost`、14 面板声明化、44 动作单一真源。
+- D 档：双绘常量统一 + 漂移门禁；IslandRoot 2207→2148（抽 IslandIdleFace/IslandActionRow）。
+- U5：`ui/UiPageHost.qml`；viewer 三页抽两页（Main.qml 现 1914）；被控端 QML 控制面板 5 页全部就位（`2b30a7a`/`a8b843e`），真机 0 QML ERROR。
+- 岛：A 档（管理端跑共享 IslandRoot）+ C 档（qml-patch 并岛 + MD5 门禁）；扩展组件 1–7 + 审批面板随 0.6.36 上线。
+- **内置模块层**（`b851e67`）：`src/modules/`（modulehost/usbmodule/voicehubmodule）编译进 agent，与进程外 PluginHost 并列第二条扩展通道；
+  manifest 同口径；`executeAction` **前置内置优先**；`ModuleAgentApi` 10 个 std::function 在 main.cpp 注入；
+  AgentPluginsPage「内置模块」分区（快照 Q_PROPERTY + 信号）。门禁认 `registerModule(new X)` 与「先 new 后 registerModule(变量)」。
+- **U盘模块**（`b851e67`）：WM_DEVICECHANGE + 岛 Centered 询问；只开根目录、绝不自动运行；考试静默。探针 19/19。
+- **VoiceHub 联动**（`92be4c6`）：匿名只读 `GET {base}/api/music/broadcast` + SSE `{base}/api/music/websocket`。
+  线上资料见下「坑」。SSE 主 + 30s 轮询兜底（`qBound` 下限 5s）+ 锚点本地 tick + staleSec 自愈（下限 10s）+ 开播提醒（考试静默）。
+  控制三件（点歌/歌词/广播下发）**留桩默认关**（x-api-key 存放口径未定）。探针 32/32；岛 `vhRow` + 设置页卡。
+- **灵动岛多界面**（`f12f79b` + 根仓）：展开态 `face`（0 概/1 媒/2 史/3 态）+ 面可用性 + `faceNow`（失效回 0）+ `facesOn` + `facePanelOn`；
+  右上竖排面签（22×16 单字）；非概览面满盖面板三套版式。**概览面零改动**；动作按钮/搜索/投稿打开时不开面。
+  探针 `--face 1/2/3` 全绿、`--expand` 仍 320、errors=0。
+- **形态多样化**（`3a82ec5` + 根仓）：五档外框 `Capsule/Centered/Fullscreen/Banner/Mini`。
+  **Banner** 顶部通栏（可用宽−48，≤1280；高 72/60；单行 elide —— 解决"胶囊上限 640 ⇒ 长文案折行涨高压课件"）；
+  **Mini** 右下角角标（112 方牌 / 无描述 96 正圆，贴 availableGeometry 右下 24；点一下升格成胶囊展开，默认穿透）。
+  `showWithActions` 有按钮时强制降级 Centered；`paintCompactForm()` 是 QML 缺失时的手绘退路。
+  验证开关 `STE_QT_ISLAND_DEMO_FORM=banner|mini|mini-nodesc`（启动 2.5s 弹、12s 收、打几何+可用区+dpr）。
+  门禁 `test-island-forms.mjs`（13 断言，三方一致性；已负向证伪）。真机三档几何与公式逐条吻合。
 
-## 5 状态（2026-10-17 01:30）
-- **U 系列（「插件化思维，统一界面结构」）**：U1–U4 完成（共享 ui 基座 Md3+md3/12 件、契约 UiContract.js+UiRegistry+UiPanelHost、14 面板声明化 Main 3858→3237、44 动作单一真源 ActionDefs.js）；**D 档完成**（双绘常量统一+`test-island-metrics.mjs` 11 断言门禁；IslandRoot 2207→2148 抽出 IslandIdleFace/IslandActionRow 2/12 块 + `diff-island-tree.mjs` 基线比对器）。
-- **U5（两端同 shell，用户裁决 A）· A-1/A-2/A-3 第一批全部完成**：
-  - **A-1** 共享 `ui/UiPageHost.qml`(182，页无 open/close、全预建、ctx 转发 panelHost) + SamplePage + 页探针 28 断言。
-  - **A-2** viewer 三页抽两页：`pages/SettingsPage.qml`(575，Main −542) + `pages/ControlPage.qml`(814，Main −781 ⇒ **Main.qml 现 1914 行**)。概览页未抽（362 行/root. 8 处）。**StackLayout 仍直接管三子项，UiPageHost 未接管**。
-  - **A-3 第一批**（control `2b30a7a`）：被控端 QML 控制面板——`src/agent_ui.h`(AgentUi+AgentShell) + `qml/shell/`(AgentShell 壳+AgentPages.js 声明+AgentSettingsPage 设置页=openInfoDialog 真实迁移) + 托盘「控制面板…」+ AUTOOPEN 验证开关。**真机已上线**（生产 exe 已换 + qml 全量同步，备份 `.bak-pre-u5a3` 在）。
-  - **A-3 第二批（`a8b843e`，5 页全部就位）**：用户截图抓到**设置页全白**（Flickable 未设 `contentWidth` ⇒ contentItem 宽度塌陷 0 ⇒ **新纪律：Flickable 内容必须显式 `contentWidth: width`**）；随后自检/插件市场/记录/播放时段 4 页全部迁完（判据/文案逐字保留），多行编辑妥协用 QtQuick.Controls TextArea（md3/ 无多行输入件，待补 Md3TextArea）。真机 0 QML ERROR。
-- **island**：A 档（管理端跑共享 IslandRoot，IslandHost 几何真源未统一）+ C 档（qml-patch 并岛+MD5 门禁）完成；扩展组件 1–7 + 审批面板随 0.6.36 上线。
-- ⏸ 隔离验证 245 过/0 败 + HTTP 审批 17/17。挂起的都是真机类（考试模式内核闸门、#98 岛观感、terminal cd、file_push）。
-- 出包前须再 bump（0.6.37 已在本机，云端 0.6.36）。
-- **「模块化插件」三件**（2026-10-17 用户点单）：① U盘模块 ✅ 已交付并真机上线（`b851e67`，岛 Centered 询问+只开根目录，USB 探针 19/19、面板探针 29/29）；② **VoiceHub 联动模块 ✅ 已交付并真机上线（`92be4c6`，探针 32/32、面板 35/35）**——只读展示先通（岛行「正在播放/进度/下一首/人数」+ 设置页配置卡），控制三件（点歌/歌词/广播下发）留桩默认关；③ **灵动岛多界面 ✅（1+3，`f12f79b` + 根仓）**：展开态多面切换（概/媒/史/态 面签 + 满盖面板三套版式）、概览面零改动；探针 `--face 1/2/3` 全绿；**形态多样化只做了"面版式 + 尺寸自适应"，新外框形态未做**。
-- ⚠️ 生产实际路径＝`C:\Program Files\Stelarith`（守门每 10 分钟拉起安装版），详见 §1。
-- ⚠️ **同一工作树有并行工作线**（2026-10-17）：他线提交 `4c228e5`（0.6.40 版本 bump）并发布 gray 渠道 0.6.40 ⇒ 本机起 agent 就触发 self_update。本批上线时 OTA 因 **C 盘满**（备份 exe 失败）被自我拒绝。**提交前先 `git log` 看清有没有别人的新提交**；版本号/发布动作可能与对方抢。
-- ⚠️ **C 盘（系统盘）长期告急**（120G 用满、剩余 10–35MB）：打安装包/整树备份都会失败；安装目录只保留应用自有 QML 小备份（`_appqml-bak-pre-*`），别再整树 cp。
+## 5 待点单（只报清单，等用户点头）
+1. `permOk("admin")` 恒真越权（teacher 可锁屏；quickGuard 只保了快捷行）。
+2. **IslandRoot 引用 `image://svgicon/check-circle` 但资源叫 `circle-check.svg`**（存量图标名错配，岛历史列表图标加载失败，日志持续刷）。
+3. viewerbackend 5 处 URL 派生未收敛（`cloudUrl()` 是 WS，管理面走 `httpBaseUrl()`）。
+4. 站点 `/api/device/activate` 不回 classCode。
+5. `md3/Md3Btn.qml:11` 自定义 `enabled` 盖掉 `Item.enabled` ⇒ 祖先 enabled 传导失效（共享组件不擅自改）。
+6. 管理端下发 `kind=banner|mini` 的入口（viewer 未改，解析已在 main.cpp 就位）。
+7. 打包 0.6.42 走 OTA：C 盘剩 2.5G，打包+备份约需 100MB+，且与并行线抢版本号 ⇒ 需用户裁决。
 
-## 6 同步 / UI 模板
-- 指挥台回写真源 `docs/星集控-指挥台-唯一真源-2026-10-02.md` §一；收工即回写；`.workbuddy/memory/` 是私有记忆 ≠ 同步。
-- **Material 3 = 全项目唯一视觉模板**，令牌真源 `Stelarith-shared-qml/ui/Md3.qml`；组件库 `md3/` 12 件（Md3Btn/Card/SwitchRow/NavBar/…）。
-- HTML 展示页放 `docs/<中文名>.html`；资源目录纯 ASCII；探针截图源 `D:/Stelarith/_probe/shots/` 只 cp 不 mv；台账不另立 md。
-- 探针脚本：viewer `.gitignore:34` `scripts/_*.py` 不入库、`_*.qml/_*.cpp` 入库（control 同款：`_*.py/_*.mjs` 不入库）。Bash cwd 不跨命令保持，每次显式 cd。
-- 固化成测试的成例：`test-ui-contract.mjs`(32断) / `test-action-manifest.mjs`(23断+fixture) / `test-island-metrics.mjs`(11断) / `diff-island-tree.mjs`（剥 QML 匿名类名序号、时钟与动画相位分别忽略、--rename 显式声明预期改名；**不许放大 --tol 糊**）。
-
-## 7 踩坑实证（最贵）
-- ⚠️⚠️ **删组件判据必须是「类型名」不是「路径」**（U3 抓到 A 档活体回归：`SvgIcon {` 靠目录导入解析）。
-- ⚠️ **qmllint 给假安全感**（不查目录导入类型缺失、0 Error 也能加载失败）——唯一可靠出口是**运行时探针**；抽完 QML 块的纪律：**awk 括号平衡 → 加载探针 → 最后才 qmllint**。
-- ⚠️ **QML 隐式作用域是迁移地雷**：裸标识符（th/isPhone）搬文件后链断且无声；抽前系统扫根对象成员，不只看 `root.` 前缀。`property var X: Y` 的 RHS 替换防自引用（`theme: theme` 环）。
-- ⚠️ **跨父级锚被静默丢弃**；`anchors.centerIn: parent` 依赖 parent 几何；锚链对不可见 item 依然起效（隐藏须 height:0 清零）。
-- ⚠️ 往共享目录加新扩展名文件必须查两端收集方式（桌面 copy_directory 照单收、Android 显式 GLOB）。
-- ⚠️ 同一动作多入口的**门控口径必须逐字保留**（三种门控并存是 U4 发现的安全现状）；排序键按面分开（order/quickOrder/palOrder）；合并注册表 ⇒ id 全局唯一。
-- ⚠️ 探针演示态编号 ≠ QML 状态机编号须映射；`setProperty` 同步但锚链重算等事件循环（+100ms）；动画/注入要写的属性不能锚；`Repeater` delegate 的 objectName 不在 QObject 树（走 childItems() 递归）；QML 祖先链 enabled 传导（禁用控件的子孙收不到事件）。
-- ⚠️ QML 匿名类名（`_QML_21`）同代码不同跑次也会变 ⇒ 基线比对先剥序号；探针参数「看着该生效」先验它真生效（--actions 实测没注入动作）。
-- ⚠️ 测量方法自身的错会污染判断：划范围看缩进层级+闭合标记（粗量把页外算进依赖）；`uniq -c -f1` 在"行号:匹配"上不生效。
-- ⚠️ **门禁正则剥注释再匹配**（`/kMinContentW/` 会命中说明该缺口的注释 ⇒ 假红）。
-- ⚠️⚠️ **截图/几何取证必须声明 DPI 感知**（2026-10-16 实测，最贵的坑）：未 `SetProcessDpiAwareness(2)` 时
-  `GetWindowRect`/`PrintWindow` 返回**虚拟化（逻辑）坐标**；本机屏幕物理 2560×1440(150%)、窗口物理 1342×1016，
-  却只抓到左上 895×677 ⇒ **右侧一列 + 底部一条永远在截图外**，被误判成"渲染器不画/界面少东西"。
-  判据：用彩条标尺（每段 80 逻辑在截图里若量到 120px 即缩放 1.5）。`_probe/_*.py` 三个脚本已加 DPI 声明。
-- ⚠️ **普通 `Item` 的 `height` 不跟随 `implicitHeight`**（只有 Image/Text 那类才有此默认绑定）
-  ⇒ `Md3NavBar{implicitHeight:80}` 不写 `height` 就落成 0、整条导航不可见（真机实证）。
-- ⚠️ **契约默认值是"对一半人正确"的陷阱**：`UiContract.js:60` 的 `scope` 默认 `["viewer"]`
-  ⇒ 被控端声明漏写 scope 就被全过滤（页+导航一起消失，零错误零日志）。agent 端声明**必须显式写**，
-  门禁 `test-manifest-scope.mjs` 盯着。
-- ⚠️ **被控端部署不含 QtQuick Controls**（exe 旁无 `Qt6QuickControls2.dll`）⇒ 被控端 qml/ 下**只能用
-  QtQuick 基础类型**（`ScrollBar`/`TextArea` 等一律加载失败，症状是 `entry 解析失败`）；
-  门禁 `test-agent-qml-deps.mjs`（import 白名单 + 40 类型黑名单）。viewer 侧有该模块，故两端不同。
-- ⚠️ **Windows 原生事件投递语义（2026-10-17 实测）**：`PostThreadMessageW` 投的 WM_DEVICECHANGE
-  **到不了** QAbstractNativeEventFilter（同法投 WM_APP 能到）；**SendMessage 到 Qt 顶层窗口能到**
-  （真实 DBT 广播本就是 SendMessage 到各顶层窗口 ⇒ Qt 转给过滤器）⇒ 合成消息探针必须走隐藏顶层窗口。
-- ⚠️ **探针宏值必须带冒号**（`STE_USB_PROBE_FAKE_REMOVABLE="X:"`——onDriveArrived 收到的 drive 是 `X:` 形态）。
-- ⚠️ **cl 链接步绝不带 /TP**（.lib 当 C++ 源码编 ⇒ Qt6Core.lib 一串 C2018）；MSYS/Git Bash 会把 `/EHsc`
-  当 POSIX 路径转换 ⇒ cl 参数一律走 Python subprocess（list 形式）不过 shell。
-- ⚠️ **`qBound` 下限会钳掉探针的"压缩时间参数"**（VoiceHub：pollSec 下限 5s / staleSec 下限 10s）⇒
-  探针等待窗口必须按**下限值**设计，否则得到「poll 0 次」「永不 stale」的假红。**设计探针前先读 clamp**。
-- ⚠️ **假服务必须复刻真实载荷形状**：SSE `broadcast_state.data` 按文档挂 nextUp/listeners，轮询端点是平级
-  ⇒ 两种形状都要认；假服务只演一种就会漏另一种的解析 bug。另：线上 SSE **无 `event:` 行**（类型在 JSON 里）。
-- ⚠️ **门禁正则会误杀合法写法**（`registerModule(vh)` 带指针接线）⇒ 门禁要能演进，先补门禁再继续。
-- ⚠️ **探针的 QML 暂存来自 `build/qml`**（不是 shared-qml）⇒ 改共享岛 QML 后必须先
-  `cp shared-qml/island/*.qml build/qml/island/` 再跑探针，否则测的是旧文件（症状："改了没反应"）。
-- ⚠️ **z 只在同一父级内比较**：根级历史面板（z40）会盖住 expandedCol 内的面面板（z60）——
-  跨父级"我 z 更高"不成立；修法是关掉下层 `visible`，不是加 z。
-- ⚠️ **setProperty 后 QML 绑定异步重算**：同帧读派生属性得到 `<invalid>`（探针假红），注入要留 ≥500ms。
+## 6 踩坑实证（最贵，按"还会再踩"排序）
+- ⚠️⚠️ **截图/几何取证必须声明 DPI 感知**：未 `SetProcessDpiAwareness(2)` 时 `GetWindowRect`/`PrintWindow` 返回**虚拟化坐标**
+  ⇒ 右侧一列 + 底部一条永远在截图外，被误判成"没画"。判据：彩条标尺（80 逻辑量到 120px ⇒ 缩放 1.5）。
+- ⚠️⚠️ **qmllint 给假安全感**（不查目录导入类型缺失，0 Error 也能加载失败）——唯一可靠出口是**运行时探针**。
+  抽 QML 块的纪律：awk 括号平衡 → 加载探针 → 最后才 qmllint。
+- ⚠️ **删组件判据必须是「类型名」不是「路径」**（`SvgIcon {` 靠目录导入解析）。
+- ⚠️ **QML 隐式作用域是迁移地雷**：裸标识符（th/isPhone）搬文件后链断且无声；`property var X: Y` 的 RHS 替换防自引用（`theme: theme` 环）。
+- ⚠️ **z 只在同一父级内比较**：根级历史面板(z40) 会盖住 expandedCol 内的面面板(z60) ⇒ 修法是关下层 `visible`，不是加 z。
+- ⚠️ **setProperty 后 QML 绑定异步重算**：同帧读派生属性得到 `<invalid>`（探针假红）⇒ 注入留 ≥500ms。
+- ⚠️ **跨父级锚被静默丢弃**；锚链对不可见 item 依然起效（隐藏须 `height: 0` 清零）。
+- ⚠️ **普通 `Item` 的 height 不跟 implicitHeight**（只有 Image/Text 那类默认绑定）⇒ `Md3NavBar{implicitHeight:80}` 不写 height 就落 0。
+- ⚠️ **契约默认值是"对一半人正确"的陷阱**：`UiContract.js` 的 `scope` 默认 `["viewer"]` ⇒ 被控端声明漏写就全被过滤（零错误零日志）。
+- ⚠️ **被控端部署不含 QtQuick Controls**（exe 旁无 `Qt6QuickControls2.dll`）⇒ 被控端 qml/ 只能用 QtQuick 基础类型
+  （ScrollBar/TextArea 一律加载失败，症状 `entry 解析失败`）；viewer 侧有，两端不同。
+- ⚠️ **`qBound` 下限会钳掉探针的"压缩时间参数"**（pollSec 5s / staleSec 10s）⇒ 探针等待窗口按**下限值**设计。设计探针前先读 clamp。
+- ⚠️ **假服务必须复刻真实载荷形状**：SSE `broadcast_state.data` 挂 nextUp/listeners，轮询端点平级 ⇒ 两种形状都要认；
+  线上 SSE **无 `event:` 行**（类型只在 JSON `type`），行尾 `\n`/`\r\n` 必须归一否则分帧失败。
+- ⚠️ **门禁正则会误杀合法写法 / 会命中注释**⇒ 匹配前先剥注释；门禁要能演进。
+- ⚠️ **Windows 原生事件投递语义**：`PostThreadMessageW` 投的 WM_DEVICECHANGE **到不了** QAbstractNativeEventFilter；
+  **SendMessage 到 Qt 顶层窗口能到** ⇒ 合成消息探针必须走隐藏顶层窗口。探针宏值带冒号（`"X:"`）。
+- ⚠️ **cl 链接步绝不带 /TP**；MSYS/Git Bash 会把 `/EHsc` 当路径转换 ⇒ cl 参数一律走 Python subprocess（list 形式）。
+- ⚠️ **探针链的是 agent 的 `island.cpp.obj`**（`_island_qml_probe.py` 只编探针自身）⇒ 改 enum/头文件后
+  **必须先重编 agent**，否则旧 obj 把新枚举值落到 `else` 分支（实测 `Banner(3)` 变 Fullscreen：752×752 且 form 仍 capsule）。
+  判据：几何恰好等于"全屏尺寸"而形态串是 capsule ⇒ 先怀疑 obj 混版，别怀疑公式。
+- ⚠️ **嵌套 lambda 捕获 `main` 的局部 `app` ⇒ C2326**（外层 lambda 没捕获，内层再捕获也拿不到）⇒ 定时器接收者用 `qApp`。
+- ⚠️ **`availableGeometry()` 的 x/y 偏移会让"反推可用区"算错**（本机任务栏在**左**，ag=(48,0,1659,960)）⇒
+  几何核对必须**把 ag 本身打进日志**，不要靠窗口位置反推（本轮因此一度以为几何公式错了）。
+- ⚠️ 探针自身也会骗人：QML 匿名类名（`_QML_21`）每次变（基线先剥序号）；`Repeater` delegate 的 objectName 不在 QObject 树；
+  参数"看着该生效"先验它真生效（--actions 实测没注入）；假上下文属性**必须照真实签名**写。
+- ⚠️ 测量方法自身的错会污染判断：划范围看缩进层级+闭合标记；`uniq -c -f1` 在"行号:匹配"上不生效。

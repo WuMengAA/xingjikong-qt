@@ -72,6 +72,24 @@ Item {
     readonly property bool   _interactive:bridgeRef ? bridgeRef.interactive : false
     readonly property string _severity:   bridgeRef ? bridgeRef.severity    : ""
     readonly property string _title:      bridgeRef ? bridgeRef.title       : ""
+
+    // ── 形态（2026-10-17 · #330 形态多样化）──────────────────────
+    // "capsule" | "centered" | "fullscreen" | "banner" | "mini"（对齐 C++ IslandOverlay::Form）
+    // ⚠️ 必须点访问（bridge.form），不能 bridge["form"] —— 理由见上面 _idle 那段长注释：
+    //    QQml 的绑定依赖是静态分析的，动态索引取到的值在组件创建那一刻就锁死。
+    readonly property string _formKind: bridgeRef ? (bridgeRef.form || "capsule").toLowerCase()
+                                                  : "capsule"
+    // 紧凑外框（Banner 通栏 / Mini 角标）：与下方"胶囊那一套内容"**互斥**。
+    // 两口子同时画会互相压：胶囊那套假定 56/320 高、左右留 14，塞进 72px 的通栏里
+    // 会立刻溢出到窗外（表现为"文字被裁一半"）。
+    readonly property bool _compactForm: root._formKind === "banner" || root._formKind === "mini"
+    // Mini 无描述时收成正圆（C++ geometryForForm 同口径：96 见方 + radius=half）。
+    // ⚠️ 判据是 desc 是否为空，与 C++ 的 m_desc.isEmpty() 一一对应 —— 两边不同步
+    //    就会出现"窗口是圆的、底色是方牌"这种一眼假。
+    readonly property bool _miniOrb: root._formKind === "mini"
+                                     && (bridgeRef ? (bridgeRef.desc === "") : true)
+    readonly property string _icon:       bridgeRef ? bridgeRef.icon        : ""
+    readonly property string _desc:       bridgeRef ? bridgeRef.desc        : ""
     readonly property var    _states:     (bridgeRef && bridgeRef.states)  ? bridgeRef.states  : []
     readonly property var    _actions:    (bridgeRef && bridgeRef.actions) ? bridgeRef.actions : []
     readonly property var    _history:    (bridgeRef && bridgeRef.history) ? bridgeRef.history : []
@@ -554,6 +572,10 @@ Item {
     WhaleMascot {
         id: whale
         theme: root.th
+        // #330 形态多样化：紧凑外框里不画鲸鱼 ——
+        //   角标只有 96/112px，鲸鱼 28px 会直接盖住标题；
+        //   通栏里鲸鱼在右下角，会压住右侧那段描述文字。
+        visible: !root._compactForm
         // 空闲态鲸鱼正常大小（28px），底层扩大了能放下
         px: root._idle ? 28 : (root._expanded ? 36 : 28)
         bridgeRef: root.bridgeRef
@@ -573,7 +595,18 @@ Item {
     Rectangle {
         id: shell
         anchors.fill: parent
-        radius: root._idle ? height / 2 : (root._expanded ? 18 : height / 2)
+        // 形状（#330 形态多样化后：五档外框各自一个圆角口径）
+        //   空闲半胶囊   → 正圆（height/2）
+        //   Mini 正圆档  → 正圆（无描述时收成角标，与 C++ geometryForForm 同口径）
+        //   Mini 方牌档  → 28（比胶囊的 18 更"卡片"，但比卡片小）
+        //   Banner 通栏  → 20（与 Centered 卡片同族，横幅不该比卡片更"圆"）
+        //   胶囊收起/展开 → height/2 / 18（原样不动）
+        radius: root._idle ? height / 2
+                            : (root._formKind === "mini"
+                               ? (root._miniOrb ? height / 2 : 28)
+                               : (root._formKind === "banner"
+                                  ? 20
+                                  : (root._expanded ? 18 : height / 2)))
         color: root._idle ? root.th.idleBg : root.th.bg
         border.width: root._idle ? 0 : 1
         border.color: root.th.light ? "#E2E2E2" : "#333333"
@@ -605,11 +638,38 @@ Item {
     }
 
     // ══════════════════════════════════════════════════════════
+    // 紧凑外框（#330 形态多样化 · 2026-10-17）
+    // 两个面都 `anchors.fill: parent`：窗口几何已由 C++ 按形态算死，
+    // 面只负责排版（不参与尺寸推导）。互斥由 form 串判定。
+    // ⚠️ 必须显式传 th/icon/title/desc —— 隐式作用域不跟着搬进独立文件。
+    // ══════════════════════════════════════════════════════════
+    IslandBannerFace {
+        id: bannerFace
+        anchors.fill: parent
+        th: root.th
+        icon: root._icon
+        title: root._title
+        desc: root._desc
+        visible: root._formKind === "banner"
+    }
+
+    IslandMiniFace {
+        id: miniFace
+        anchors.fill: parent
+        th: root.th
+        icon: root._icon
+        title: root._title
+        desc: root._desc
+        visible: root._formKind === "mini"
+    }
+
+    // ══════════════════════════════════════════════════════════
     // 活动态 收起 / 展开
     // ══════════════════════════════════════════════════════════
     Item {
         anchors.fill: parent
-        visible: !root._idle
+        // #330：紧凑外框（Banner/Mini）有自己的面，胶囊那套内容整体让位
+        visible: !root._idle && !root._compactForm
         opacity: root._idle ? 0 : 1
         Behavior on opacity { NumberAnimation { duration: 160 } }
 
