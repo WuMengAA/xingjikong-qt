@@ -40,6 +40,10 @@ class IslandBridge : public QObject
     // QML 用 Text { textFormat: RichText } 直接吃，避免 QML 侧解析 markdown 脆弱。
     Q_PROPERTY(QString descHtml READ descHtml NOTIFY changed)
     Q_PROPERTY(QString icon     READ icon     NOTIFY changed)
+    // 岛上正在显示的那条通知的**发生时刻**，格式 HH:mm（跨天才补 M/d）。
+    // 2026-10-17「通知写上时间」：以前只有历史列表有时间，看当前这条还得去翻历史。
+    // 空串 = 没有内容 / 媒体等不该带时间的态，QML 侧 visible 绑 noticeTime !== ""。
+    Q_PROPERTY(QString noticeTime READ noticeTime NOTIFY changed)
     // ── 形态 ────────────────────────────────────────────────
     // "capsule" | "centered" | "fullscreen" | "banner" | "mini"（对齐 IslandOverlay::Form）
     Q_PROPERTY(QString form     READ form     NOTIFY changed)
@@ -151,6 +155,8 @@ public:
 
     // 历史通知
     QVariantList history() const;
+    // 当前这条通知的时间文本（HH:mm）；见 Q_PROPERTY noticeTime 上的说明。
+    QString noticeTime() const;
     int    historyUnreadCount() const;
     QString historyCategoryFilter() const { return m_histCategory; }
     void    setHistoryCategoryFilter(const QString &c);

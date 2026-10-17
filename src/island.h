@@ -94,6 +94,27 @@ public:
                     bool fromAdmin = false);
     Form form() const { return m_form; }
 
+    // ── 通知「发生时刻」与时间文本（2026-10-17 「通知写上时间」）──────────────
+    // 岛的**本体**现在也显示时间（以前只有历史列表有）—— 老师看到一条通知时
+    // 不该还需要展开历史才能知道它是几点来的。
+    // ⚠️ 顺手修掉一个真 bug：archiveToHistory() 原来拿"归档那一刻"当 ts，
+    //    而归档发生在被下一条顶掉 / 收回空闲时，不是通知出现时
+    //    （10:00 弹出、10:30 被顶掉 ⇒ 历史记 10:30；23:59 弹出、00:03 顶掉
+    //     还会被分到第二天的「今天」组）。现改为 showIsland 落点 m_shownTs。
+    qint64 noticeTs() const { return m_shownTs; }
+
+    // 时间文本格式化（唯一口径；归档与 bridge 组装共用这三个函数，别各写一套）
+    //   timeStr  = HH:mm —— 概览面历史面板有日期分组，行内再带日期是冗余；
+    //   timeFull = 今天 HH:mm / 昨天 HH:mm / M/d HH:mm —— 历史面(face 2)是平铺
+    //              列表、没有分组标题兜日期，必须自带；
+    //   notice   = HH:mm（跨天时才补 M/d）—— 岛上正在显示的那条。
+    static QString historyTimeOf(qint64 ts);
+    static QString historyTimeFullOf(qint64 ts);
+    static QString noticeTimeOf(qint64 ts);
+    // 日期分组标题（今天 / 昨天 / M月d日）—— **按当前日期现算**，绝不持久化死值
+    // （上一轮把分组写进 JSON，导致"昨天存的今天"隔天打开仍显示「今天」）。
+    static QString historyDateGroupOf(qint64 ts);
+
     // ── 带交互按钮的通知（2026-10-09 · 把「确认」并入灵动岛本体）───────────────
     // actions 非空 ⇒ 本岛接管鼠标（不穿透）、**不自动收起**，等用户点中某一枚；
     // 点击后回调 onAction(该按钮文案)，随后收回空闲态。form 建议用 Centered/Fullscreen
@@ -290,6 +311,9 @@ private:
     };
     QVector<HistoryItem> m_history;
     static constexpr int kMaxHistory = 50;   // 最多保留 50 条，超出按 FIFO 清旧
+    // 当前这条通知**出现**的 Unix 秒（0=无通知）。见 public 区 noticeTs() 的说明：
+    // 历史 ts 用它，而不是"归档那一刻"。
+    qint64 m_shownTs = 0;
     static constexpr int kSpectrumBands = 16;   // §6.3 语音频谱带数（QML 按 bands 长度渲染）
     // 2026-10-13（用户「每条消息保存时间为一周，一周后清除历史」）：超过 7 天的历史
     // 在加载/归档时剔除（loadHistory 与 archiveToHistory 都过一遍 pruneHistory）。
@@ -307,8 +331,7 @@ private:
                                      const QString &icon, bool fromAdmin);
     // 级别由文案推断（失败→error，完成→success，提醒→warning，其余 info）。
     static QString historyLevelOf(const QString &title, const QString &desc);
-    // 日期分组标题（今天 / 昨天 / M月d日），按 ts 现算。
-    static QString historyDateGroupOf(qint64 ts);
+    // （historyDateGroupOf / historyTime* 已上移到 public 区：bridge 组装时要用）
     // 未读条数（QML 角标用）
     int historyUnreadCount() const;
     // 把某条按 id 标已读（找不到静默忽略）；返回是否真的变了

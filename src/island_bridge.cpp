@@ -208,8 +208,12 @@ QVariantList IslandBridge::history() const
         m.insert(QStringLiteral("desc"), h.desc);
         m.insert(QStringLiteral("icon"), h.icon);
         m.insert(QStringLiteral("ts"), h.ts);
-        m.insert(QStringLiteral("timeStr"), h.timeStr);
-        m.insert(QStringLiteral("dateGroup"), h.dateGroup);   // 2026-10-17：ListView section 用
+        // ⚠️ 2026-10-17：时间文本**在这里现算**，不用 JSON 里存的值。
+        //    存死值隔天就错（昨天归档时算的「今天」今天是错的、"23:50" 也永远
+        //    补不上日期前缀），而 list 只有 50 条、每次 changed 重算一次开销可忽略。
+        m.insert(QStringLiteral("timeStr"), IslandOverlay::historyTimeOf(h.ts));
+        m.insert(QStringLiteral("timeFull"), IslandOverlay::historyTimeFullOf(h.ts));
+        m.insert(QStringLiteral("dateGroup"), IslandOverlay::historyDateGroupOf(h.ts));   // ListView section 用
         m.insert(QStringLiteral("category"), h.category);     // 指令/告警/消息/系统
         m.insert(QStringLiteral("level"), h.level);           // info/success/warning/error
         m.insert(QStringLiteral("read"), h.read);             // 未读点
@@ -217,6 +221,14 @@ QVariantList IslandBridge::history() const
         out.append(m);
     }
     return out;
+}
+
+// 岛上**正在显示**的那条通知的时间（2026-10-17）。空串 = 没有通知 / 媒体等无时间内容。
+// QML 直接绑 bridge.noticeTime，不再自己算 —— 两端口径统一在 C++。
+QString IslandBridge::noticeTime() const
+{
+    if (!m_host) return QString();
+    return IslandOverlay::noticeTimeOf(m_host->noticeTs());
 }
 
 int IslandBridge::historyUnreadCount() const

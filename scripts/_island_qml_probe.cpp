@@ -51,6 +51,7 @@
 #include <QTextStream>
 #include <QMouseEvent>
 #include <QTimer>
+#include <QThread>   // --hold：让第一条通知真正停留 N 秒（取证"ts=出现时刻"）
 #include <QJsonDocument>   // 组件6：--report 把 CloudReporter 收到的 payload 序列化留证
 #include <QJsonObject>
 #include <cmath>   // §6.3 频谱探针：std::sin
@@ -377,6 +378,10 @@ int main(int argc, char *argv[])
     //    走 showIsland(..., Form::X) 才验证得到"窗口几何 + QML 版式"整条链。
     //    取值：banner（长文案通栏）/ mini（有描述 方牌）/ mini-nodesc（无描述 正圆）。
     QString formArg;
+    // 2026-10-17：--hold <sec> 让通知**多停留**若干秒再截图/退出。
+    // 用途：分辨历史 ts 取的是"通知出现时刻"还是"归档时刻"——
+    //   停留 N 秒后归档，若 ts 仍是出现时刻，则 ts 比分文件写入时刻早约 N 秒。
+    int holdSec = 0;
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
@@ -413,6 +418,8 @@ int main(int argc, char *argv[])
             formArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--out") && i + 1 < argc)
             outPath = QString::fromLocal8Bit(argv[++i]);
+        if (a == QLatin1String("--hold") && i + 1 < argc)
+            holdSec = QString::fromLocal8Bit(argv[++i]).toInt();
     }
 
     IslandOverlay *isl = IslandOverlay::instance();
@@ -457,6 +464,11 @@ int main(int argc, char *argv[])
             isl->showIsland(QStringLiteral("正在接收 课件.pdf"),
                             QStringLiteral("42%"), QStringLiteral("download"), 0, f);
         }
+        // 2026-10-17 取证：--hold N 在这里**先停 N 秒**再弹第二条 —— 生产里最常见的
+        // "带按钮的通知顶掉普通通知"。若历史 ts 取的是归档时刻，它会等于第二条弹出的
+        // 时刻；取的是出现时刻，则比归档早约 N 秒。这一停就是为了把两者拉开。
+        if (actions && holdSec > 0) QThread::sleep(static_cast<unsigned long>(holdSec));
+
         // 守卫回归（--form banner --actions）：紧凑形态放不下按钮 ⇒
         // showWithActions 必须**降级 Centered**（断言看 dump 的 _formKind）。
         if (actions) {
@@ -585,7 +597,7 @@ int main(int argc, char *argv[])
     // 采样：等 QML 起来 + 几何动画走完（380ms）再抓
     // 组件3：本段只做「注入 + 合成点击」；dump/tree/截图提为 captureAndSave
     // （点击后可能还要等 400ms 提交 Timer 落 2/3 态 ⇒ 两段式 singleShot）。
-    QTimer::singleShot(2500, [isl, outPath, search, searchPhase, submit, sphase, clickName, warm, draftOverride, likefly, mediaPhaseArg, faceArg]() {
+    QTimer::singleShot(2500 + holdSec * 1000, [isl, outPath, search, searchPhase, submit, sphase, clickName, warm, draftOverride, likefly, mediaPhaseArg, faceArg]() {
         QQuickWidget *q = findQuick(isl);
         if (!q) { qApp->quit(); return; }
 

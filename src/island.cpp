@@ -585,6 +585,40 @@ QString IslandOverlay::historyDateGroupOf(qint64 ts)
                : dt.toString(QStringLiteral("yyyy年M月d日"));
 }
 
+// ── 时间文本（2026-10-17 「通知写上时间」）──────────────────────────────
+// 三个函数都**按 ts 现算**，绝不把结果持久化当显示源：
+// 上一轮把 timeStr/dateGroup 固化进 JSON，隔天打开就全是错的
+// （昨天存的「今天」今天还写「今天」，昨天存的无日期 "23:50" 也永远补不上日期）。
+QString IslandOverlay::historyTimeOf(qint64 ts)
+{
+    if (ts <= 0) return QString();
+    return QDateTime::fromSecsSinceEpoch(ts).toString(QStringLiteral("HH:mm"));
+}
+
+QString IslandOverlay::historyTimeFullOf(qint64 ts)
+{
+    if (ts <= 0) return QString();
+    const QDateTime dt = QDateTime::fromSecsSinceEpoch(ts);
+    const QDate today = QDate::currentDate();
+    const QString hm = dt.toString(QStringLiteral("HH:mm"));
+    if (dt.date() == today)               return hm;   // 今天只说几点几分
+    if (dt.date() == today.addDays(-1))   return QStringLiteral("昨天 ") + hm;
+    return dt.date().year() == today.year()
+               ? dt.toString(QStringLiteral("M/d ")) + hm
+               : dt.toString(QStringLiteral("yyyy/M/d ")) + hm;
+}
+
+QString IslandOverlay::noticeTimeOf(qint64 ts)
+{
+    // 岛上那条：平时只给 HH:mm（形态最多 320px 宽，塞日期会更挤）；
+    // 跨天基本不会发生（通知生命周期是秒级），但真跨了就补上日期，别显示错时间。
+    if (ts <= 0) return QString();
+    const QDateTime dt = QDateTime::fromSecsSinceEpoch(ts);
+    const QString hm = dt.toString(QStringLiteral("HH:mm"));
+    if (dt.date() == QDate::currentDate()) return hm;
+    return dt.toString(QStringLiteral("M/d ")) + hm;
+}
+
 int IslandOverlay::historyUnreadCount() const
 {
     int n = 0;
@@ -666,24 +700,20 @@ void IslandOverlay::archiveToHistory()
     h.title = m_title;
     h.desc = m_desc;
     h.icon = m_icon;
-    h.ts = QDateTime::currentSecsSinceEpoch();
+    // ⚠️ 2026-10-17：ts 取**通知出现时刻**（m_shownTs），不是现在（归档时刻）。
+    //    归档发生在"被下一条顶掉 / 收回空闲"，两者能差出整条通知的停留时间，
+    //    跨零点时还会把通知分到错误的日期组。m_shownTs=0 只会出现在异常路径
+    //    （比如未经 showIsland 直接设了 m_title），此时退回当前时刻兜底。
+    h.ts = m_shownTs > 0 ? m_shownTs : QDateTime::currentSecsSinceEpoch();
     h.fromAdmin = m_fromAdmin;   // 2026-10-13：管理端通知打标（历史排序置顶用）
     h.id = nextHistoryId(h.ts);
     h.category = category;
     h.level = historyLevelOf(m_title, m_desc);
+    // dateGroup / timeStr 仍然写一份进 JSON（便于排查与旧版兼容），但**显示不用它**：
+    // bridge 组装时会按 ts 现算，否则跨天后"昨天存的今天"永远改不回来。
     h.dateGroup = historyDateGroupOf(h.ts);
+    h.timeStr = historyTimeOf(h.ts);   // 行内只留 HH:mm，日期交给分组标题
     h.read = false;              // 新归档默认未读（未读点 + 未读计数）
-
-    // 格式化时间串
-    const QDateTime dt = QDateTime::fromSecsSinceEpoch(h.ts);
-    const QDateTime today = QDateTime::currentDateTime();
-    if (dt.date() == today.date()) {
-        h.timeStr = dt.toString(QStringLiteral("HH:mm"));
-    } else if (dt.date().addDays(1) == today.date()) {
-        h.timeStr = QStringLiteral("昨天 ") + dt.toString(QStringLiteral("HH:mm"));
-    } else {
-        h.timeStr = dt.toString(QStringLiteral("M/d HH:mm"));
-    }
 
     m_history.append(h);
     while (m_history.size() > kMaxHistory)
@@ -708,6 +738,9 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     m_title = title;
     m_desc = desc;
     m_icon = icon;
+    // 2026-10-17：记录**这条内容出现的时刻**。历史归档的 ts 取它，岛本体显示的
+    // 时间也取它 —— 两处必须同一个源，否则"岛上写 14:05、历史写 14:31"。
+    m_shownTs = QDateTime::currentSecsSinceEpoch();
     m_fromAdmin = fromAdmin;   // 2026-10-13：跟着这条内容走，归档时写进 HistoryItem
     m_durationMs = durationMs;
     m_form = form;
