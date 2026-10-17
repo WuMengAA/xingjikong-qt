@@ -200,8 +200,36 @@ const advSeg = C.slice(C.indexOf('void IslandOverlay::advanceMediaElapsed'),
 check(/t\.tag == QStringLiteral\("media"\)\s*\)\s*\{\s*t\.progress = p/.test(advSeg),
       '播放推进时同步更新 media 任务进度（不只登记时设一次）');
 
-// ── 七、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
-console.log('── 七、反向检查 ──');
+// ── 八、VoiceHub 广播任务（2026-10-18）────────────────────────────────────
+console.log('── 八、VoiceHub 广播链路 ──');
+const MAIN_CPP = strip(read('Stelarith-control-qt/src/main.cpp'));
+const BRIDGE_H = strip(read('Stelarith-control-qt/src/island.h'));
+const BRIDGE_CPP_JS = fs.readFileSync(path.join(ROOT, 'Stelarith-cloud-ws/src/voicehub-bridge.js'), 'utf8');
+// 被控端：消息分支 + 岛侧接口
+check(/voicehub_nowplaying/.test(MAIN_CPP), 'main.cpp 处理 voicehub_nowplaying 消息');
+check(/setBroadcastTask/.test(MAIN_CPP) && /clearBroadcastTask/.test(MAIN_CPP),
+      '状态非 playing 时撤任务、playing 时设任务（两分支都在）');
+check(/struct BroadcastInfo/.test(BRIDGE_H), 'island.h 有 BroadcastInfo');
+check(/broadcastProgress\(\)/.test(BRIDGE_H), 'island.h 暴露 broadcastProgress（外推集中一处）');
+// ⚠️ 广播进度必须**现算**：云端 30s 才给一次 position，照搬会让进度条在两次快照间静止
+check(/t\.tag == QStringLiteral\("broadcast"\)/.test(B) && /broadcastProgress\(\)/.test(B),
+      '桥对 broadcast 任务现算进度（不照搬 30s 一次的 position）');
+// ⚠️ 岛侧外推必须用本地时钟锚点
+const bcSeg = C.slice(C.indexOf('void IslandOverlay::setBroadcastTask'),
+                      C.indexOf('void IslandOverlay::archiveToHistory'));
+check(/m_bcAnchorAtMs\s*=\s*QDateTime::currentMSecsSinceEpoch\(\)/.test(bcSeg),
+      '广播进度锚点用本地时钟');
+check(/m_bcAnchorPos \+ double\(el\) \/ 1000\.0/.test(bcSeg),
+      '进度 = 锚点位置 + 本地流逝秒数');
+check(/tag\.isEmpty|QStringLiteral\("broadcast"\)/.test(bcSeg), '广播任务用 tag=broadcast');
+// 云端侧：只读 + 关键口径
+check(!/method:\s*'POST'|method:\s*"POST"/.test(BRIDGE_CPP_JS), '云端桥只发 GET（绝不写 VoiceHub）');
+check(/POLL_MS = 30_000/.test(BRIDGE_CPP_JS), '云端轮询间隔 30s');
+check(/STALE_MS = 95_000/.test(BRIDGE_CPP_JS), '过期阈值 95s（服务端 90s + 5s 余量）');
+check(/失败\*\*不动 snapshot|保留上一次/.test(BRIDGE_CPP_JS), '拉取失败保留上一次状态（有说明与实现）');
+
+// ── 九、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
+console.log('── 九、反向检查 ──');
 check(/QVector<IslandOverlay::Task>|\bQVector<Task>/.test(H), 'island.h 声明任务表容器');
 check(/const QVector<Task> &tasks\(\) const/.test(H), 'tasks() 只读访问器存在（桥与快照共用）');
 // 快照里带任务表，供沙箱验证"每条状态源都进表"
