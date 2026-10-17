@@ -164,6 +164,9 @@ import {
 import { loadRepairs, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
 // 权限消费层（2026-10-15 · 契约《多校多身份-scope契约草案》§4.3：云端是唯一权限入口）
 import { identityFromAuth, canAccess, filterDevices } from './perms.js';
+// CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
+import { onDeviceOnline as cimsOnDeviceOnline, startCimsScheduler, syncDevice as cimsSyncDevice,
+  syncAll as cimsSyncAll, cimsStatus } from './cims.js';
 import { expireTerminalHistory } from './store.js';
 
 /**
@@ -423,7 +426,8 @@ const server = http.createServer((req, res) => {
   // ⚠️ 用 startsWith 而不是精确相等：/api/admin/provision 下面还挂着 /status 子路由，
   //    精确相等会把 status 漏在鉴权外面（2026-10-05 实测就是这么漏的，已修）。
   const isAdminApi = u.pathname === '/api/admin/config' || u.pathname === '/api/admin/ota' ||
-    u.pathname.startsWith('/api/admin/provision');
+    u.pathname.startsWith('/api/admin/provision') ||
+    u.pathname.startsWith('/api/admin/cims');
   const isManageApi =
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
@@ -971,6 +975,40 @@ const server = http.createServer((req, res) => {
     return undefined;
   }
 
+  // ── CIMS 课表供给管理端（2026-10-17）────────────────────────────────────
+  // GET  /api/admin/cims/status          配置（脱敏）+ 各设备缓存/最近同步结果
+  // POST /api/admin/cims/pull   {uid?}   只拉取刷缓存，不下发
+  // POST /api/admin/cims/apply  {uid?}   拉取并立即下发（无视"有无变化"）；不带 uid = 全部在线设备
+  // ⚠️ 管理 API 不受 CIMS_ENABLED 门控——持令牌的人显式点的动作就是意图；
+  //    CIMS_ENABLED 只管自动路径（设备上线钩子 + 周期同步）。
+  if (req.method === 'GET' && u.pathname === '/api/admin/cims/status') {
+    return send(200, { ok: true, cims: cimsStatus() });
+  }
+
+  if (req.method === 'POST' && (u.pathname === '/api/admin/cims/pull' || u.pathname === '/api/admin/cims/apply')) {
+    const wantApply = u.pathname.endsWith('/apply');
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', async () => {
+      let payload;
+      try { payload = JSON.parse(body || '{}'); }
+      catch (e) { return send(400, { ok: false, error: 'JSON 解析失败: ' + e.message }); }
+      const uid = payload.uid ? String(payload.uid).trim() : '';
+      pushEvent('info', `管理面板触发 CIMS 课表${wantApply ? '下发' : '拉取'}`, { uid: uid || '(全部在线)' });
+      try {
+        if (uid) {
+          const r = await cimsSyncDevice(uid, { apply: wantApply, force: wantApply });
+          return send(r.ok ? 200 : 502, { ok: r.ok, result: r });
+        }
+        const r = await cimsSyncAll({ apply: wantApply, force: wantApply });
+        return send(200, { ok: true, result: r });
+      } catch (e) {
+        return send(500, { ok: false, error: e.message });
+      }
+    });
+    return undefined;
+  }
+
   // GET /api/admin/provision?uid=class_xxx_2028_08  → 一枚这台机器专属的装机 bat
   // 面板点"下载装机包"就走这里；教室机双击 bat 即完成装机（流程见 provision.js 头注释）。
   if (req.method === 'GET' && u.pathname === '/api/admin/provision') {
@@ -1435,6 +1473,9 @@ setInterval(() => {
   }
 }, INTERACT_SWEEP_INTERVAL_MS);
 
+// CIMS 课表周期同步（2026-10-17）：CIMS_ENABLED=true 且 CIMS_PULL_INTERVAL_SEC>0 才启。
+startCimsScheduler();
+
 wss.on('connection', (ws) => {
   let registered = false;
   let uid = null;
@@ -1570,6 +1611,9 @@ wss.on('connection', (ws) => {
       });
       // 重连补发：这台机器掉线期间"已下发未回执"的指令，按原顺序重发给它（内部无待补发则不动作）。
       replayPending(ws, uid);
+      // CIMS 课表上线同步（2026-10-17）：后台拉取，按配置决定是否立即下发。
+      // ⚠️ 不 await：注册路径上多一次 CIMS 往返会把握手拖慢；模块内部自带异常兜底。
+      cimsOnDeviceOnline(uid);
       return;
     }
 
