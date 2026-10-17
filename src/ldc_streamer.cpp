@@ -35,6 +35,10 @@ LdcStreamer &LdcStreamer::instance()
 
 LdcStreamer::LdcStreamer(QObject *parent) : QObject(parent)
 {
+    // 2026-10-17：ICE/DTLS 排障开关（STE_LDC_LOG=1 开 libdatachannel Debug 日志，
+    // 真机看候选类型/打洞状态；平时不开免得刷爆日志）
+    if (qgetenv("STE_LDC_LOG") == "1")
+        rtc::InitLogger(rtc::LogLevel::Debug);
     m_screen = QGuiApplication::primaryScreen();
     connect(&m_capture, &QTimer::timeout, this, &LdcStreamer::captureAndSend);
 }
