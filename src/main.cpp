@@ -6683,6 +6683,42 @@ void handleControlText(const QString &text)
         return;
     }
 
+    // ── 2026-10-18 · VoiceHub「正在播放」状态（云端集中轮询后下发）──────────
+    // 链路：voicehub.245959623.xyz → 云端（30s 轮询 + 进度外推）→ 本机 → 灵动岛。
+    // 为什么不由本机直连 VoiceHub：60 台教室机各连一次 = 60 条外网长连接，断网就全瞎。
+    //
+    // ⚠️ position 是**云端响应那一刻**的值；岛每秒重绘时由 IslandOverlay 用本地时钟继续外推。
+    //    绝不为进度去问云端 —— 那是 30s 一次的事。
+    // ⚠️ 本消息**只读**：不触发指令回执，也不改任何播放状态。
+    // ⚠️ 消息类型名故意用 voicehub_nowplaying 而不是 voicehub_broadcast ——
+    //    后者**已经是** executeAction 里的一个**动作名**（kThirdPartyCaps：未装插件时的
+    //    "去插件市场装 VoiceHub"提示）。两者虽在不同函数、不直接冲突，但同名会让
+    //    后来人以为"这条消息会触发那个动作"，是命名陷阱，避开。
+    if (type == QStringLiteral("voicehub_nowplaying")) {
+        const QString vstatus = pay.value(QStringLiteral("status")).toString();
+        const QJsonObject b = pay.value(QStringLiteral("broadcast")).toObject();
+        if (IslandOverlay *isl = IslandOverlay::instance()) {
+            if (vstatus != QLatin1String("playing") || b.isEmpty()) {
+                // idle / stale / unknown 一律撤掉广播任务（不显示"可能还在播"）
+                isl->clearBroadcastTask();
+            } else {
+                IslandOverlay::BroadcastInfo info;
+                info.title = b.value(QStringLiteral("title")).toString();
+                info.artist = b.value(QStringLiteral("artist")).toString();
+                info.duration = b.value(QStringLiteral("duration")).toDouble();
+                info.position = b.value(QStringLiteral("position")).toDouble();
+                info.isPlaying = b.value(QStringLiteral("isPlaying")).toBool();
+                info.publisherName = b.value(QStringLiteral("publisherName")).toString();
+                info.listenerCount = b.value(QStringLiteral("listenerCount")).toInt();
+                const QJsonObject nu = b.value(QStringLiteral("nextUp")).toObject();
+                info.hasNextUp = !nu.isEmpty();
+                info.nextUpTitle = nu.value(QStringLiteral("title")).toString();
+                isl->setBroadcastTask(info);
+            }
+        }
+        return;
+    }
+
     if (type == QStringLiteral("instruction")) {
         g_instructionSeq++;
         g_lastInstrId = id;

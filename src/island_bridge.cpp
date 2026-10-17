@@ -148,6 +148,13 @@ QVariantList IslandBridge::states() const
         m.insert(QStringLiteral("t"), t.title);
         m.insert(QStringLiteral("d"), t.desc);
         m.insert(QStringLiteral("p"), t.progress);        // -1 = 无进度条；0..1 = 进度
+        // ⚠️ 广播的进度要**现算**：云端 30s 才给一次 position，若照搬 t.progress，
+        //    两次快照之间进度条是静止的（看着像卡住）。这里的 broadcastProgress()
+        //    用「锚点 + 本地时钟」外推，QML 每次重绘拿到的是新值。
+        if (t.tag == QStringLiteral("broadcast")) {
+            const double bp = m_host->broadcastProgress();
+            if (bp >= 0) m.insert(QStringLiteral("p"), bp);
+        }
         // ── 新增字段（T 档）──
         m.insert(QStringLiteral("id"), t.id);
         m.insert(QStringLiteral("tag"), t.tag);

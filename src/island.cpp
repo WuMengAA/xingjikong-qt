@@ -846,6 +846,60 @@ void IslandOverlay::sweepExpiredTasks()
     if (changed && m_bridge) m_bridge->sync();
 }
 
+// ── VoiceHub 广播状态（2026-10-18）──────────────────────────────────────────
+// 为什么在岛上用本地时钟外推：云端 30s 才给一次 position，若照搬，进度条会在
+// 两次快照之间静止（看着像卡住）。记锚点 + 本地累加才走得动。
+void IslandOverlay::setBroadcastTask(const BroadcastInfo &info)
+{
+    m_bcInfo = info;
+    m_bcAnchorPos = qMax(0.0, info.position);
+    m_bcAnchorAtMs = QDateTime::currentMSecsSinceEpoch();
+
+    // 组装任务文案（岛的一行只有两栏：标题 / 描述，所以信息要压得住）
+    QString title = info.artist.isEmpty()
+        ? info.title
+        : QStringLiteral("%1 - %2").arg(info.title, info.artist);
+    if (title.isEmpty()) title = QStringLiteral("校园广播");
+
+    QStringList bits;
+    if (!info.isPlaying) bits << QStringLiteral("已暂停");
+    if (info.listenerCount > 0) bits << QStringLiteral("%1 人在听").arg(info.listenerCount);
+    if (info.hasNextUp && !info.nextUpTitle.isEmpty())
+        bits << QStringLiteral("接下来：%1").arg(info.nextUpTitle);
+    const QString desc = bits.join(QStringLiteral(" · "));
+
+    Task t(QStringLiteral("broadcast"), QStringLiteral("broadcast"),
+           QStringLiteral("admin"), title, QStringLiteral("radio"), 6, true, -1.0);
+    t.desc = desc;
+    t.state = info.isPlaying ? 0 : 1;      // 1 = paused（岛上有"已暂停"标）
+    upsertTask(t);
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
+void IslandOverlay::clearBroadcastTask()
+{
+    bool removed = false;
+    for (int i = m_tasks.size() - 1; i >= 0; --i) {
+        if (m_tasks.at(i).tag == QStringLiteral("broadcast")) { m_tasks.removeAt(i); removed = true; }
+    }
+    m_bcInfo = BroadcastInfo();
+    m_bcAnchorPos = 0;
+    m_bcAnchorAtMs = 0;
+    if (removed && m_bridge) m_bridge->sync();
+    if (removed) update();
+}
+
+// 广播任务的实时进度（0..1；duration 未知返回 -1）。
+// 桥在组装 states 时调它，避免把"外推逻辑"塞进桥里（桥只做搬运）。
+double IslandOverlay::broadcastProgress() const
+{
+    if (!m_bcInfo.isPlaying || m_bcInfo.duration <= 0) return -1.0;
+    const qint64 el = QDateTime::currentMSecsSinceEpoch() - m_bcAnchorAtMs;
+    const double pos = m_bcAnchorPos + double(el) / 1000.0;
+    return qBound(0.0, pos / m_bcInfo.duration, 1.0);
+}
+
 void IslandOverlay::archiveToHistory()
 {
     // 有标题才归档（空内容/空闲态不该进历史）

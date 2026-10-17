@@ -153,6 +153,29 @@ public:
     const QVector<Task> &tasks() const { return m_tasks; }
     // 登记/更新一条任务（同 tag 合并）。本步只记录，不影响显示。
     void upsertTask(const Task &t);
+
+    // ── VoiceHub 广播状态（2026-10-18）────────────────────────────────────
+    // 校园点歌/广播站的「正在播放」。数据由云端集中轮询 VoiceHub 后经 WS 下发
+    // （不由本机直连：60 台机器各连一次 = 60 条外网长连接）。
+    // ⚠️ 岛上的进度用**本地时钟外推**：云端只在 30s 快照里给 position，
+    //    若照搬不动，两次快照之间进度条是死的（看着像卡住）。
+    struct BroadcastInfo {
+        QString title;
+        QString artist;
+        double  duration = 0;      // 秒；0 = 未知（不画进度条）
+        double  position = 0;      // 秒；**云端响应那一刻**的值，之后本地累加
+        bool    isPlaying = false; // false = 暂停（保留标记、进度冻结）
+        QString publisherName;     // 仅展示，绝不做任何鉴权判断
+        int     listenerCount = 0;
+        bool    hasNextUp = false;
+        QString nextUpTitle;
+    };
+    // 设置/更新广播任务（tag="broadcast"）；广播结束调 clearBroadcastTask()。
+    void setBroadcastTask(const BroadcastInfo &info);
+    void clearBroadcastTask();
+    // 广播的实时进度（0..1，duration 未知返回 -1）—— 桥组装 states 时调，
+    // 这样"本地外推"只存在一处，桥只负责搬运。
+    double broadcastProgress() const;
     // 取"下一个该显示的任务"：priority 降序，同优先取最新（shownTs 大者）。
     // 跳过已完成(done)与已过期的。没有则返回 nullptr。
     // ⚠️ 本步只用于**回落**（前台空了接手下一个），不用作抢占（抢占是下一步）。
@@ -428,6 +451,10 @@ private:
     QString m_icon;
     // T 档：任务表（本步只承载，未参与仲裁）
     QVector<Task> m_tasks;
+    // VoiceHub 广播进度锚点（云端给 position 的时刻 + 本地时钟，用于外推）
+    BroadcastInfo m_bcInfo;
+    double m_bcAnchorPos = 0;
+    qint64 m_bcAnchorAtMs = 0;
     bool m_fromAdmin = false;   // 2026-10-13：当前这条是否来自管理端（归档时写进 HistoryItem）
     int m_durationMs = 5000;
     bool m_expanded = false;
