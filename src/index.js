@@ -1862,7 +1862,7 @@ server.listen(PORT, HOST, () => {
         for (const d of listDevices()) {
           if (!d || !d.ws) continue;
           // 用 wrapOutgoing 自动按对端版本选格式（与 snd 同口径），失败只吞单台。
-          try { d.ws.send(wrapOutgoing(d.ws.__v1 === true, 'voicehub_broadcast', payload)); } catch { /* 单台失败不影响其他 */ }
+          try { d.ws.send(wrapOutgoing(d.ws.__v1 === true, 'voicehub_nowplaying', payload)); } catch { /* 单台失败不影响其他 */ }
         }
         if (state.status === 'playing') {
           pushEvent('info', 'VoiceHub 广播状态已更新', {
