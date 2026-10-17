@@ -35,6 +35,11 @@ const ADMIN_HTML = join(__dirname, 'admin.html');
 /** 管理台「用网站账号登录」的回跳 server（127.0.0.1 临时端口）。没配全站点就一直是 null。 */
 let adminOAuth = null;
 
+/** 2026-10-18 · VoiceHub「正在播放」桥实例（只读；启动失败为 null）。 */
+let voiceHubBridge = null;
+/** 上一次下发的状态签名：只在"有/没有内容"真正变化时才推，避免每 30s 空推刷设备。 */
+let voiceHubLastSig = '';
+
 /**
  * HTTP 头只允许 latin1。文件名里出现中文/控制字符时，Node 会抛 ERR_INVALID_CHAR
  * 并**终止整个进程**（2026-10-05 实测：一次下载请求就把云端打挂，教室机全体掉线，
@@ -114,6 +119,10 @@ import { initInteract, interactReady, sweepInteract,
   listSongRequests, listBlessings, feedbackSummary,
   handleSongRequest, handleBlessing } from './interact.js';
 import { latestFor, cmpVersion } from './ota.js';
+// 2026-10-18 · VoiceHub「正在播放」桥：云端集中轮询一次、缓存在内存、经既有 WS 下发。
+// 为什么在云端而不是被控端：60 台教室机各连 VoiceHub = 60 条外网长连接，且教室断网就全瞎。
+// 只读（绝不下发写指令），数据源是公开接口 /api/music/broadcast。
+import { createVoiceHubBridge } from './voicehub-bridge.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 import { timingSafeEqual } from 'node:crypto';
 
@@ -351,6 +360,27 @@ const server = http.createServer((req, res) => {
   // 而 /api/ota/latest 归管理面鉴权。这里只回"已经公开"的信息（版本号、公开下载 URL、
   // 大小、sha256、说明），**不含任何令牌**，暴露了也没有额外风险。
   // 与 ota.json 同源 → 发版时只改一处，官网自动跟着变，不需要两处各写一套。
+  // ── 2026-10-18 · VoiceHub 广播状态（公开只读诊断）──────────────────────
+  // 为什么公开：内容就是"谁在播什么"，教室大屏本来就公开显示，不含任何令牌或个人信息
+  // （publisherName 是显示名，契约明确"不要写进任何对外日志"，这里只透传不落日志）。
+  // 用途：① 运维确认云端到底有没有拉到状态；② 被控端首屏对齐（比等下一次 WS 推送快）。
+  if (req.method === 'GET' && u.pathname === '/api/public/voicehub') {
+    const d = voiceHubBridge ? voiceHubBridge.diagnostics() : null;
+    const body = JSON.stringify({
+      ok: !!voiceHubBridge,
+      // 未启用（启动失败/未配置）时如实回 null，不假装"没有广播"
+      ...(d ? { pollMs: d.pollMs, staleMs: d.staleMs, lastOkAgoMs: d.lastOkAgoMs, lastError: d.lastError } : {}),
+      state: d ? d.state : { status: 'disabled', broadcast: null },
+    });
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': Buffer.byteLength(body),
+      // 状态本身 30s 才更新一次，缓存 5s 足够，且避免被 CDN 长期囤。
+      'cache-control': 'public, max-age=5',
+    });
+    return res.end(body);
+  }
+
   if (req.method === 'GET' && u.pathname === '/api/public/ota') {
     // ⚠️ 2026-10-14 测试通道抓到的缺口：本端点此前走通用 send()，**不带 cache-control**
     //    ⇒ 公网 CDN/代理按启发式缓存，发布新版本后官网下载中心可能几分钟不刷新。
@@ -1811,6 +1841,43 @@ server.listen(PORT, HOST, () => {
   // 回跳服务要等 listen 完成才知道真端口（listen(0) 是让系统分配），所以在回调里建。
   const srv = createAdminOAuthServer((m) => console.log(m));
   if (srv) adminOAuth = { server: srv };
+  // 2026-10-18 · VoiceHub「正在播放」桥启动（只读）。
+  // 推给**所有在线被控端**：岛据此显示 talking/broadcast 那条任务。
+  // ⚠️ 失败不阻塞启动：VoiceHub 挂了不该把整个云端带下去。
+  try {
+    voiceHubBridge = createVoiceHubBridge({
+      log: (m) => console.log(m),
+      onUpdate: (state) => {
+        // 只在"有内容或无内容"发生变化时才下发，避免每 30s 空推一次把设备刷一遍。
+        const sig = state.status === 'playing'
+          ? `playing:${state.broadcast?.songId ?? ''}:${state.broadcast?.isPlaying ? 1 : 0}`
+          : state.status;
+        if (sig === voiceHubLastSig) return;
+        voiceHubLastSig = sig;
+        const payload = {
+          status: state.status,                    // playing | idle | stale | unknown
+          broadcast: state.broadcast,              // null 或 {title,artist,position,duration,progress,nextUp,...}
+          serverTime: Date.now(),
+        };
+        for (const d of listDevices()) {
+          if (!d || !d.ws) continue;
+          // 用 wrapOutgoing 自动按对端版本选格式（与 snd 同口径），失败只吞单台。
+          try { d.ws.send(wrapOutgoing(d.ws.__v1 === true, 'voicehub_broadcast', payload)); } catch { /* 单台失败不影响其他 */ }
+        }
+        if (state.status === 'playing') {
+          pushEvent('info', 'VoiceHub 广播状态已更新', {
+            title: state.broadcast?.title || '', artist: state.broadcast?.artist || '',
+          });
+        }
+      },
+    });
+    // ⚠️ start() 返回布尔（是否真的启动了），**不是** bridge 本身 ——
+    //    曾经写成 createVoiceHubBridge({...}).start() 赋给 voiceHubBridge ⇒ 存进去的是 true，
+    //    于是 /api/public/voicehub 调 diagnostics() 时 TypeError（实测抓到并修）。
+    voiceHubBridge.start();
+  } catch (e) {
+    console.error(`[cloud] WARN VoiceHub 桥启动失败（不影响其他功能）: ${e.message}`);
+  }
 });
 
 server.on('error', (e) => {
