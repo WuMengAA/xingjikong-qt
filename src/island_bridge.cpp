@@ -117,24 +117,39 @@ QVariantList IslandBridge::actions() const
 
 QVariantList IslandBridge::states() const
 {
-    // 被控端当前是「一条内容」模型：showIsland 新内容顶掉旧内容，没有并行多状态。
-    // 为了 QML 侧 StateList 能直接用，这里把单条内容包成一个元素的列表。
+    // ── T 档（2026-10-18）：从「单条内容」改为输出**任务表** ──
+    // 原来这里把 m_title/m_desc 包成一个元素的列表（见下方 git 历史里的旧注释），
+    //    因为当时岛确实是"新内容顶掉旧内容"的模型。
+    // 现在 IslandOverlay 有了 m_tasks（通知/文件/媒体/对讲各自一个 tag 的任务），
+    //    所以这里直接输出全表 —— 界面终于能同时看到"收文件中 + 播放中 + 新通知"。
     //
-    // ⚠️ 不在这里凭空造「N 项」：管理端那套聚合是 7 类状态源（指令/文件/告警…）同时在线，
-    //    被控端没有那个数据源。硬编一个假多状态 = 界面在骗人。
-    //    真要多状态，得先让 showIsland 支持并存（另一个立项），不是在这里补。
+    // ⚠️ 保持与旧契约同形：每项仍是 {k,t,d,p}（QML 的 StateList 不用改就能吃），
+    //    新增 id/tag/state/priority 等字段供后续内联动作与排序用（QML 不读也不受影响）。
+    // ⚠️ 不凭空造项：表里有什么就给什么，没有就空列表（空闲态）。
     QVariantList out;
     if (!m_host) return out;
-    if (m_host->m_idle) return out;                       // 空闲态没有状态行
-    if (m_host->m_title.isEmpty()) return out;            // 没内容就不给列表
 
-    QVariantMap m;
-    // k：图标名当类别标识，QML 的 iconNameFor() 据此选图标
-    m.insert(QStringLiteral("k"), m_host->m_icon);
-    m.insert(QStringLiteral("t"), m_host->m_title);
-    m.insert(QStringLiteral("d"), m_host->m_desc);
-    m.insert(QStringLiteral("p"), -1);                    // -1 = 无进度条
-    out.append(m);
+    const QVector<IslandOverlay::Task> &tasks = m_host->tasks();
+    // 空闲态：任务表里若还有 sticky 的常驻项（如对讲中），仍应显示 —— 岛收回但状态还在。
+    // 原来"idle ⇒ 直接返回空"会把常驻状态一并吞掉，这里改成按表内容决定。
+    for (const auto &t : tasks) {
+        // 已完成（state=done）的不进状态列表：任务表保留它是为了回填/审计，
+        // 界面不该再显示"已结束的文件传输"。
+        if (t.state == 2) continue;
+        QVariantMap m;
+        // k：图标名当类别标识，QML 的 iconNameFor() 据此选图标
+        m.insert(QStringLiteral("k"), t.icon);
+        m.insert(QStringLiteral("t"), t.title);
+        m.insert(QStringLiteral("d"), t.desc);
+        m.insert(QStringLiteral("p"), t.progress);        // -1 = 无进度条；0..1 = 进度
+        // ── 新增字段（T 档）──
+        m.insert(QStringLiteral("id"), t.id);
+        m.insert(QStringLiteral("tag"), t.tag);
+        m.insert(QStringLiteral("state"), t.state);       // 0=running 1=paused 3=failed
+        m.insert(QStringLiteral("priority"), t.priority); // 后续排序/抢占用
+        m.insert(QStringLiteral("sticky"), t.sticky);
+        out.append(m);
+    }
     return out;
 }
 

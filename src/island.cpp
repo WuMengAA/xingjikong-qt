@@ -425,6 +425,23 @@ QString IslandOverlay::historySnapshotJson() const
     o.insert(QStringLiteral("contentActive"), m_contentActive);
     o.insert(QStringLiteral("ftActive"), m_ftActive);
     o.insert(QStringLiteral("mediaPresenting"), m_mediaPresenting);
+    // T 档：任务表（验证"每条状态源都确实进表"的核心证据）
+    QJsonArray tarr;
+    for (const auto &t : m_tasks) {
+        QJsonObject to;
+        to.insert(QStringLiteral("id"), t.id);
+        to.insert(QStringLiteral("tag"), t.tag);
+        to.insert(QStringLiteral("kind"), t.kind);
+        to.insert(QStringLiteral("source"), t.source);
+        to.insert(QStringLiteral("title"), t.title);
+        to.insert(QStringLiteral("priority"), t.priority);
+        to.insert(QStringLiteral("sticky"), t.sticky);
+        to.insert(QStringLiteral("progress"), t.progress);
+        to.insert(QStringLiteral("state"), t.state);
+        to.insert(QStringLiteral("form"), int(t.form));
+        tarr.append(to);
+    }
+    o.insert(QStringLiteral("tasks"), tarr);
     o.insert(QStringLiteral("actions"),  QJsonArray::fromStringList(m_actions));
     if (m_bridge) o.insert(QStringLiteral("states"), QJsonArray::fromVariantList(m_bridge->states()));
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
@@ -722,6 +739,54 @@ QString IslandOverlay::nextHistoryId(qint64 ts) const
     return id;
 }
 
+// ── T 档：任务登记（2026-10-17）────────────────────────────────────────────
+// 本步只做两件事：同 tag 合并、上限保护。**不参与显示仲裁**（那是下一步）。
+// 为什么先只登记：岛的显示路径（几何/动画/历史归档）已经很复杂，一次性换模型风险高；
+// 先把数据接进来，用快照验证"每条状态源都确实进表了"，再逐步接仲裁。
+void IslandOverlay::upsertTask(const Task &t)
+{
+    if (t.tag.isEmpty()) return;   // 无 tag 的任务无法合并，拒绝登记（防脏数据）
+    // 同 tag 合并：只更新内容，**保留原 id 与 shownTs**（"同一件事"的延续）
+    for (auto &e : m_tasks) {
+        if (e.tag == t.tag) {
+            e.title = t.title;
+            e.desc = t.desc;
+            e.icon = t.icon;
+            e.priority = t.priority;
+            e.form = t.form;
+            e.severity = t.severity;
+            e.sticky = t.sticky;
+            e.expireAtMs = t.expireAtMs;
+            e.progress = t.progress;
+            e.actions = t.actions;
+            e.state = t.state;
+            e.fromAdmin = t.fromAdmin;
+            return;
+        }
+    }
+    // 新任务：补 id 与发生时刻
+    Task n = t;
+    if (n.id.isEmpty()) n.id = nextHistoryId(n.shownTs > 0 ? n.shownTs : QDateTime::currentSecsSinceEpoch());
+    if (n.shownTs <= 0) n.shownTs = QDateTime::currentSecsSinceEpoch();
+    if (n.kind.isEmpty()) n.kind = n.tag;
+    if (n.source.isEmpty()) n.source = QStringLiteral("self");
+    m_tasks.append(n);
+    // 上限保护：任务表不是无限账本。溢出时丢"优先级最低且最旧"的；sticky 与高优先不丢。
+    // ⚠️ 上限 8 与方案 §4.2 同值；当前每条 tag 唯一 ⇒ 实际不会触发，留作后续多状态接入的护栏。
+    while (m_tasks.size() > 8) {
+        int victim = -1;
+        for (int i = 0; i < m_tasks.size(); ++i) {
+            const auto &c = m_tasks.at(i);
+            if (c.sticky || c.priority >= 9) continue;
+            if (victim < 0 || c.priority < m_tasks.at(victim).priority
+                || (c.priority == m_tasks.at(victim).priority && c.shownTs < m_tasks.at(victim).shownTs))
+                victim = i;
+        }
+        if (victim < 0) break;   // 全是 sticky/高优先 ⇒ 不再强删
+        m_tasks.removeAt(victim);
+    }
+}
+
 void IslandOverlay::archiveToHistory()
 {
     // 有标题才归档（空内容/空闲态不该进历史）
@@ -788,6 +853,21 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
                                      : QDateTime::currentSecsSinceEpoch();
     m_noticeHintMs = 0;
     m_fromAdmin = fromAdmin;   // 2026-10-13：跟着这条内容走，归档时写进 HistoryItem
+    // ── T 档：把这条内容登记成任务（本步**只记录**，不影响上面的任何显示逻辑）──
+    //    tag 用 "notice"：兼容层的核心 —— 下一条通知按同 tag 合并（顶掉），
+    //    行为与"原来直接顶掉"完全一致，所以 14 处调用点的外部表现不变。
+        // ⚠️ C++17 不支持指派初始化器（实测 C7555），这里显式赋值。
+        Task nt(QStringLiteral("notice"), QStringLiteral("notice"),
+                fromAdmin ? QStringLiteral("admin") : QStringLiteral("self"),
+                title, icon, 5, (durationMs <= 0), -1.0);
+        nt.desc = desc;
+        nt.form = form;
+        nt.severity = m_severity;
+        nt.expireAtMs = (durationMs > 0)
+            ? QDateTime::currentMSecsSinceEpoch() + durationMs : 0;
+        nt.fromAdmin = fromAdmin;
+        nt.shownTs = m_shownTs;
+        upsertTask(nt);
     m_durationMs = durationMs;
     m_form = form;
     // 普通 showIsland 一律无按钮：清掉上一条确认态残留的按钮/回调。
@@ -901,6 +981,15 @@ void IslandOverlay::setFileTransfer(const QString &name, qint64 bytes, qint64 to
     m_ftName = name;
     m_ftBytes = bytes;
     m_ftTotal = total;
+    // ── T 档：文件传输登记成任务（本步只记录）──
+    //    tag="file"：与通知分开 —— 通知按 "notice" 合并，文件按 "file" 合并，
+    //    两者不再互相顶掉（这正是 T 档要解决的并行问题的数据基础）。
+    Task ft(QStringLiteral("file"), QStringLiteral("file"), QStringLiteral("admin"),
+            QStringLiteral("正在接收 ") + name, QStringLiteral("download"), 4, true,
+            (total > 0) ? double(bytes) / double(total) : -1.0);
+    ft.desc = (total > 0) ? QStringLiteral("%1%").arg(int(bytes * 100 / total))
+                          : QStringLiteral("0%");
+    upsertTask(ft);
     if (first) {
         // 常驻传输卡：duration 0 = 不自动收起；展开以容纳进度条。
         showIsland(QStringLiteral("正在接收 ") + name, QStringLiteral("0%"),
@@ -918,6 +1007,9 @@ void IslandOverlay::clearFileTransfer()
     m_ftName.clear();
     m_ftBytes = 0;
     m_ftTotal = 0;
+    // T 档：传输结束 ⇒ 任务标记完成（本步只记录，不改变界面回收行为）
+    for (auto &t : m_tasks)
+        if (t.tag == QStringLiteral("file")) { t.state = 2; t.sticky = false; t.progress = 1.0; }
     if (m_bridge) m_bridge->sync();
     update();
 }
@@ -934,6 +1026,14 @@ void IslandOverlay::feedSpectrum(const QByteArray &pcm, int sampleRate, int bits
     // 第一次来帧：置位并通知 QML 显示频谱区。
     if (!m_spectrumOn) {
         m_spectrumOn = true;
+        // T 档：对讲中登记成常驻任务（高频状态，不进历史）。
+        // ⚠️ 与 setSpectrumActive(true) 同语义 —— 对讲有两条进来的路：
+        //   ① 云端 audio.start → setSpectrumActive(true)
+        //   ② 本地采到 PCM 帧 → feedSpectrum 首次来帧
+        //   两条都要登记，否则走 ② 的路（含 dev_act spectrum 沙箱路径）任务表会漏 voice。
+        upsertTask(Task(QStringLiteral("voice"), QStringLiteral("voice"),
+                        QStringLiteral("admin"), QStringLiteral("对讲中"),
+                        QStringLiteral("mic"), 8, true, -1.0));
         if (m_bridge) m_bridge->syncSpectrum();
     }
     // 频谱画在**展开态**里：保证岛是展开的。
@@ -985,6 +1085,14 @@ void IslandOverlay::setSpectrumActive(bool on)
     if (!on) {
         m_spectrumBands.fill(0.f, kSpectrumBands);
         m_spectrumLastMs = 0;
+        // T 档：对讲结束 ⇒ 语音任务标记完成（本步只记录）
+        for (auto &t : m_tasks)
+            if (t.tag == QStringLiteral("voice")) { t.state = 2; t.sticky = false; }
+    } else {
+        // T 档：对讲中登记成常驻任务（高频状态，不进历史）
+        upsertTask(Task(QStringLiteral("voice"), QStringLiteral("voice"),
+                        QStringLiteral("admin"), QStringLiteral("对讲中"),
+                        QStringLiteral("mic"), 8, true, -1.0));
     }
     if (m_bridge) m_bridge->syncSpectrum();
     update();
@@ -1010,6 +1118,13 @@ void IslandOverlay::setMediaSession(const QString &title, qint64 totalMs,
     setInteractive(true);
     showIsland(title, QString(), QStringLiteral("music"), 0, Form::Capsule);
     m_mediaPresenting = true;   // ⚠️ 必须在 showIsland 之后（见上）
+    // ── T 档：媒体登记成任务（本步只记录）──
+    //    tag="media"：与通知/文件分开，三者不再互相顶掉。
+    //    ⚠️ 媒体上岛时也走了 showIsland ⇒ 会先登记一条 tag="notice"；
+    //       这里再按 "media" 登记，两条共存——这正是"并行"要的数据结构。
+    upsertTask(Task(QStringLiteral("media"), QStringLiteral("media"), QStringLiteral("admin"),
+                    title, QStringLiteral("music"), 3, true,
+                    (totalMs > 0) ? 0.0 : -1.0));
     // 组件7：广播开始 —— 2.5s 内岛显示"即将播放"，到点自动转 playing。
     m_mediaPhase = QStringLiteral("starting");
     armMediaPhaseTimer(2500);
@@ -1036,6 +1151,9 @@ void IslandOverlay::clearMediaSession()
     m_mediaNextTitle.clear();
     m_mediaNextCover.clear();
     m_mediaPresenting = false;
+    // T 档：播放结束 ⇒ 媒体任务标记完成（本步只记录）
+    for (auto &t : m_tasks)
+        if (t.tag == QStringLiteral("media")) { t.state = 2; t.sticky = false; }
     // 组件7：相位归零 + 停相位定时器（"播完"的 2.5s 延时也在这里被取消）。
     m_mediaPhase.clear();
     if (m_mediaPhaseTimer) m_mediaPhaseTimer->stop();

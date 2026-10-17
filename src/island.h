@@ -109,6 +109,51 @@ public:
     //     还会被分到第二天的「今天」组）。现改为 showIsland 落点 m_shownTs。
     qint64 noticeTs() const { return m_shownTs; }
 
+    // ── T 档：任务（Task）—— 岛的唯一数据单位（2026-10-17）────────────────────
+    // 为什么引入：岛原来是"一条内容"模型 —— 新通知顶掉旧的，`states` 只喂 1 行
+    //   （island_bridge.cpp:118-138 的注释原话）。于是"边收文件、边放歌、又来一条通知"
+    //   这种并行进度根本表达不了，只能互相顶掉。
+    // 设计原则：**任何要显示的东西都实例化为一个 Task**；岛只做两件事——
+    //   仲裁出前台任务、渲染前台 + 任务列表。
+    //
+    // ⚠️ 本步只是**引入数据结构并承载既有状态源**（通知/文件/媒体/频谱），
+    //   不改任何既有 API 的显示行为；抢占/回落/过期扫描是后续步骤，届时再接。
+    //   现有 14 处 islandShow 调用仍走原路径，行为零变化。
+    struct Task {
+        QString id;             // 稳定标识（更新/完成/动作回传用）
+        QString tag;            // 同类去重键（"notice"/"file"/"media"/"voice"/"spectrum"）
+        QString kind;           // 语义类别（notice/alert/exam/voice/file/media/spectrum）
+        QString source;         // 来源：self / admin / plugin:<id> / peer:<device>
+        QString title;
+        QString desc;
+        QString icon;
+        int     priority = 5;   // 1..10，抢占依据（本步仅记录，未参与仲裁）
+        Form    form = Form::Capsule;
+        QString severity;       // 仅 Fullscreen 生效
+        bool    sticky = false; // 不自动过期（等动作 / 等完成）
+        qint64  expireAtMs = 0; // 到期时刻（ms；sticky 时忽略）
+        double  progress = -1;  // -1 = 无进度条
+        QStringList actions;    // 按钮（本步仅记录，未接内联动作）
+        int     state = 0;      // 0=running 1=paused 2=done 3=failed
+        bool    fromAdmin = false;
+        qint64  shownTs = 0;    // 发生时刻（秒）
+
+        // 便捷构造：本工程是 C++17，不支持指派初始化器（.field=）——
+        // 实测用 .tag=... 会报 C7555/C7560。这里按位置给出最常用的那些字段，
+        // 其余保持默认；调用处写成 Task(tag, kind, source, title, icon, priority, sticky, progress)。
+        Task(const QString &tg = QString(), const QString &kd = QString(),
+             const QString &src = QString(), const QString &ti = QString(),
+             const QString &ic = QString(), int pr = 5, bool st = false,
+             double pg = -1)
+            : tag(tg), kind(kd), source(src), title(ti), icon(ic),
+              priority(pr), sticky(st), progress(pg) {}
+    };
+
+    // 任务表（本步只承载，尚未参与显示仲裁；供桥与快照读取）
+    const QVector<Task> &tasks() const { return m_tasks; }
+    // 登记/更新一条任务（同 tag 合并）。本步只记录，不影响显示。
+    void upsertTask(const Task &t);
+
     // ── 沙箱验证设施（2026-10-17 P0-0）：岛状态快照 / 立即归档 ──────────────────
     // 为什么需要：P0-0 的端到端断言要回答"插件推的这一条**这个进程的岛到底收没收到**"。
     //   · 截图不行：岛是独立置顶窗，同机并存的生产实例也开着 26789 插件口，截到的可能是它；
@@ -374,6 +419,8 @@ private:
     QString m_title;
     QString m_desc;
     QString m_icon;
+    // T 档：任务表（本步只承载，未参与仲裁）
+    QVector<Task> m_tasks;
     bool m_fromAdmin = false;   // 2026-10-13：当前这条是否来自管理端（归档时写进 HistoryItem）
     int m_durationMs = 5000;
     bool m_expanded = false;
