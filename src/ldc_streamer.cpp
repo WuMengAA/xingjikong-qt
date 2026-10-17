@@ -221,6 +221,20 @@ void LdcStreamer::captureAndSend()
 {
     if (!m_active || !m_connected.load() || !m_pc) return;
     if (!m_ffmpeg || m_ffmpeg->state() != QProcess::Running) return;   // 编码器没起来就等
+    // ⚠️ 2026-10-17 修（真机「图片/语音/文件传输异常缓慢 + 语音断续」根因）：
+    //    H264 未连通（track 未 open）时**绝不能**持续抓屏写 ffmpeg —— 那会让 libx264
+    //    每 200ms 空转编码一帧，白白占满 agent CPU（实测 46s+ 且不停涨），把同一台
+    //    机器上的 WS 帧推、语音播放、文件写入全部拖慢。track 没开就整帧跳过，
+    //    H264 通路一建立（track open）自然开始编码推流。
+    rtc::Track *track = nullptr;
+    {
+        QMutexLocker lock(&m_mu);
+        track = static_cast<rtc::Track *>(m_track);
+    }
+    if (!track) return;
+    bool open = false;
+    try { open = track->isOpen(); } catch (...) { open = false; }
+    if (!open) return;
 
     QPixmap pm = m_screen ? m_screen->grabWindow(0) : QPixmap();
     if (pm.isNull()) return;
