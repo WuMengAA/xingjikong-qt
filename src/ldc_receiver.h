@@ -57,6 +57,14 @@ private:
     void feedDecoder(const QByteArray &h264);  // onFrame 重组帧 → ffmpeg stdin
     void onDecStdout();                     // 读 bgr24 → 满一帧 → QImage → frameReady
 
+    // ── 摄像头轨 H264 解码（2026-10-17 · 摄像头 H264 化）──
+    // 独立 ffmpeg 子进程：不能与屏幕轨共用 stdin（两路 H264 交错写入会花屏）。
+    // 输出统一缩放到 320x240（与 screen 同尺寸管线，scale 滤镜保证任意输入尺寸可用）。
+    void startCamDecoder();
+    void stopCamDecoder();
+    void feedCamDecoder(const QByteArray &h264);
+    void onCamDecStdout();                  // 读 bgr24 → 一帧 → cameraFrameReady
+
     // libdatachannel 对象 shared_ptr 语义：裸 new 后无持有者会立即析构（0xC0000005）
     std::shared_ptr<void> m_pc;   // rtc::PeerConnection*
     QMutex m_mu;                  // 保护 m_track/m_pc（onTrack 回调线程 vs 主线程）
@@ -76,4 +84,7 @@ private:
     int m_decW = 320, m_decH = 240;    // 解码输出尺寸（与被控端编码固定 320x240 一致）
     MfxH264Decoder m_mfDec;            // 备选：MF 兜底（老师机没 ffmpeg 时）
     bool m_useMf = false;              // true = 走 MF 兜底通道
+    // ── 摄像头轨 H264 解码（2026-10-17）──
+    QProcess *m_camFfmpegDec = nullptr;   // camera 独立解码子进程（与屏幕轨分开）
+    QByteArray m_camDecBuf;               // camera bgr24 输出缓冲
 };

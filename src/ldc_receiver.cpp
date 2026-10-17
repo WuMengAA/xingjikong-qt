@@ -117,7 +117,9 @@ void LdcReceiver::createPc(const QByteArray &payload)
         //     （makeAnswer 里挂 H264RtpDepacketizer + onFrame，沙箱实证）。
         //     onTrack 回调收到的是 reciprocate 的 remote track —— 只记录指针，不挂 handler
         //     （挂在它上面收不到重组帧，0 帧；2026-10-17 ws_answer_h264.cpp 实证）。
-        //   · "camera"（老路径）：被控端至今发手动 JPEG-over-RTP —— viewer 剥 12B RTP 头解 JPEG。
+        //   · "camera"（2026-10-17 摄像头 H264 化）：agent 现在发 H264，接收同 screen ——
+        //     数据走 makeAnswer 里 addTrack 的本端轨（camTrk 挂 H264RtpDepacketizer）。
+        //     onTrack 只记录指针（用于能力判断），不再剥 12B RTP 头解 JPEG（旧路径删除）。
         pc->onTrack([this](std::shared_ptr<rtc::Track> track) {
             const bool isCam = (track->mid() == "camera");
             {
@@ -125,18 +127,8 @@ void LdcReceiver::createPc(const QByteArray &payload)
                 if (isCam) m_camTrack = track.get();
                 else       m_track = track.get();
             }
-            if (isCam) {
-                track->onMessage([this](rtc::binary data) {
-                    const auto *raw = reinterpret_cast<const unsigned char *>(data.data());
-                    const size_t n = data.size();
-                    if (n < 12) return;   // RTP 固定头至少 12B
-                    QImage img;
-                    if (img.loadFromData(reinterpret_cast<const uchar *>(raw + 12), int(n - 12), "JPEG"))
-                        emit cameraFrameReady(img);
-                }, nullptr);
-            }
-            // screen：不挂 handler —— 接收在 makeAnswer 里 addTrack 的本端轨上（见上注释）
-            Q_UNUSED(this);   // 保持 lambda 捕获一致性
+            Q_UNUSED(isCam);   // 旧 JPEG 接收路径已删（2026-10-17），接收在本端轨
+            Q_UNUSED(this);
         });
 
         // ── ⚠️ 顺序关键（2026-10-17 沙箱实证复现）：注册顺序必须「先注册回调，再 setRemoteDescription」。──
@@ -175,7 +167,18 @@ void LdcReceiver::createPc(const QByteArray &payload)
                 });
                 rtc::Description::Video camMedia("camera", rtc::Description::Direction::RecvOnly);
                 camMedia.addH264Codec(97);
-                m_camTrackHold = pc->addTrack(camMedia);  // 同坑：也持住 camera 轨
+                auto camTrk = pc->addTrack(camMedia);  // 同坑：也持住 camera 轨
+                m_camTrackHold = camTrk;
+                // ⚠️ 2026-10-17（摄像头 H264 化）：camera 轨与 screen 同构——挂
+                //    H264RtpDepacketizer（agent 现在发 H264，不再手动 JPEG-over-RTP）。
+                //    onTrack 回调里的旧「剥 12B RTP 头解 JPEG」路径删除（见下方 onTrack
+                //    注释）；数据接收统一走 addTrack 本端轨。
+                camTrk->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(rtc::NalUnit::Separator::StartSequence));
+                startCamDecoder();
+                camTrk->onFrame([this](rtc::binary frame, rtc::FrameInfo) {
+                    const QByteArray h(reinterpret_cast<const char *>(frame.data()), int(frame.size()));
+                    feedCamDecoder(h);
+                });
                 pc->setLocalDescription();   // 此时才生成 answer
                 qDebug() << "[receiver] HaveRemoteOffer → addTrack(本端轨挂 depacketizer) + setLocalDescription（answer）";
             } catch (const std::exception &e) {
@@ -198,6 +201,7 @@ void LdcReceiver::createPc(const QByteArray &payload)
 void LdcReceiver::stop()
 {
     stopDecoder();
+    stopCamDecoder();   // 2026-10-17：摄像头独立解码子进程一并清理
     if (!m_pc) return;
     m_connected.store(false);
     rtc::PeerConnection *pc = nullptr;
@@ -298,5 +302,75 @@ void LdcReceiver::onDecStdout()
         const QImage img(reinterpret_cast<const uchar *>(frame.constData()), m_decW, m_decH,
                          m_decW * 3, QImage::Format_BGR888);
         emit frameReady(img.copy());
+    }
+}
+
+// ── 摄像头轨 H264 解码（2026-10-17 · 摄像头 H264 化）─────────────────
+// 独立 ffmpeg 子进程：与屏幕轨分路（两路 H264 交错写同一 stdin 会花屏）。
+// 输出统一缩放到 320x240（scale 滤镜）：真机 dshow 源尺寸不定，scale 保证与
+// 屏幕轨同管线尺寸（m_decW/decH）。ffmpeg 定位同屏幕轨（安装目录 > STE_VIEWER_FFMPEG > PATH）。
+void LdcReceiver::startCamDecoder()
+{
+    if (m_camFfmpegDec) return;
+    m_camDecBuf.clear();
+    QString bin = QCoreApplication::applicationDirPath() + QStringLiteral("/ffmpeg.exe");
+    if (!QFileInfo::exists(bin)) {
+        bin = qEnvironmentVariable("STE_VIEWER_FFMPEG");
+        if (bin.isEmpty()) bin = QStringLiteral("ffmpeg");
+    }
+    m_camFfmpegDec = new QProcess(this);
+    m_camFfmpegDec->setProcessChannelMode(QProcess::SeparateChannels);
+    const QStringList args = {
+        QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"),
+        QStringLiteral("-f"), QStringLiteral("h264"), QStringLiteral("-i"), QStringLiteral("pipe:0"),
+        QStringLiteral("-vf"), QStringLiteral("scale=%1:%2").arg(m_decW).arg(m_decH),
+        QStringLiteral("-f"), QStringLiteral("rawvideo"),
+        QStringLiteral("-pix_fmt"), QStringLiteral("bgr24"),
+        QStringLiteral("-s"), QStringLiteral("%1x%2").arg(m_decW).arg(m_decH),
+        QStringLiteral("-r"), QStringLiteral("10"),
+        QStringLiteral("pipe:1"),
+    };
+    connect(m_camFfmpegDec, &QProcess::readyReadStandardOutput, this, &LdcReceiver::onCamDecStdout);
+    m_camFfmpegDec->start(bin, args);
+    if (!m_camFfmpegDec->waitForStarted(5000)) {
+        qWarning("[receiver] camera ffmpeg 解码器不可用（%s）→ 摄像头轨无 H264 画面", qPrintable(bin));
+        m_camFfmpegDec->deleteLater();
+        m_camFfmpegDec = nullptr;
+        return;
+    }
+    qDebug() << "[receiver] camera ffmpeg H264 解码器已启动:" << bin;
+}
+
+void LdcReceiver::stopCamDecoder()
+{
+    if (m_camFfmpegDec) {
+        QProcess *p = m_camFfmpegDec;
+        m_camFfmpegDec = nullptr;
+        m_camDecBuf.clear();
+        try {
+            if (p->state() == QProcess::Running) { p->closeWriteChannel(); p->terminate(); }
+            if (!p->waitForFinished(1500)) p->kill();
+        } catch (...) {}
+        p->deleteLater();
+    }
+}
+
+void LdcReceiver::feedCamDecoder(const QByteArray &h264)
+{
+    if (m_camFfmpegDec && m_camFfmpegDec->state() == QProcess::Running)
+        m_camFfmpegDec->write(h264);
+}
+
+void LdcReceiver::onCamDecStdout()
+{
+    if (!m_camFfmpegDec) { m_camDecBuf.clear(); return; }
+    m_camDecBuf += m_camFfmpegDec->readAllStandardOutput();
+    const int frameBytes = m_decW * m_decH * 3;   // bgr24
+    while (m_camDecBuf.size() >= frameBytes) {
+        const QByteArray frame = m_camDecBuf.left(frameBytes);
+        m_camDecBuf.remove(0, frameBytes);
+        const QImage img(reinterpret_cast<const uchar *>(frame.constData()), m_decW, m_decH,
+                         m_decW * 3, QImage::Format_BGR888);
+        emit cameraFrameReady(img.copy());
     }
 }
