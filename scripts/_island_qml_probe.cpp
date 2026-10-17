@@ -173,6 +173,13 @@ static void captureAndSave(IslandOverlay *isl, QQuickWidget *q, const QString &o
         dumpProp("searchOn");          // 组件2：搜索页打开（2026-10-15）
         dumpProp("searchPhase");       // 组件2：五态 0/1/2/3/4
         dumpProp("searchQuery");       // 组件2：搜索关键词
+        dumpProp("face");              // #330：多界面 —— 选中的面号
+        dumpProp("mediaFaceOn");       // #330：媒体面可用性
+        dumpProp("histFaceOn");        // #330：历史面可用性
+        dumpProp("faceModel");         // #330：面清单
+        dumpProp("faceNow");           // #330：有效面（失效自动回 0）
+        dumpProp("facePanelOn");       // #330：面面板是否可见
+        dumpProp("facesOn");           // #330：切换器是否可见（≥2 面才开）
         dumpProp("searchQuotaUsed");   // 组件2：已点歌数
         dumpProp("searchQuotaFull");   // 组件2：配额满判据
         dumpProp("submitOn");          // 组件3：投稿页打开（2026-10-15）
@@ -358,6 +365,10 @@ int main(int argc, char *argv[])
     // 组件7（2026-10-15）：播放四态 —— 直接指定相位，隐含 --media。
     //   starting / playing / ending / ended / blocked（空 = 走 --media 默认 playing）。
     QString mediaPhaseArg;
+    // #330（2026-10-17）：多界面的面号 0=概览 1=媒体 2=历史 3=状态。
+    // 面只在展开态存在 ⇒ 隐含 --expand；1 隐含 --media（媒体面要有媒体）；
+    // 2 会自动铺 3 条历史（见下方 show 段）。
+    int faceArg = 0;
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
@@ -384,6 +395,11 @@ int main(int argc, char *argv[])
         if (a == QLatin1String("--draft") && i + 1 < argc)
             draftOverride = QString::fromLocal8Bit(argv[++i]);    // 组件5：草稿覆写
         if (a == QLatin1String("--report"))    report = true;     // 组件6：上报链路留证
+        if (a == QLatin1String("--face") && i + 1 < argc) {   // #330 多界面
+            faceArg = QString::fromLocal8Bit(argv[++i]).toInt();
+            expand = true;
+            if (faceArg == 1) media = true;                     // 媒体面要有媒体
+        }
         if (a == QLatin1String("--out") && i + 1 < argc)
             outPath = QString::fromLocal8Bit(argv[++i]);
     }
@@ -463,6 +479,19 @@ int main(int argc, char *argv[])
         if (expand) isl->setExpanded(true);
     }
 
+    // #330：面 2（历史）要有历史条目 —— 连发 3 条（每条顶掉上一条 ⇒ 归档进历史），
+    // 最后回到主通知，确保 _history 里有 3 条可渲染。
+    if (faceArg == 2) {
+        for (int i = 1; i <= 3; ++i)
+            isl->showIsland(QStringLiteral("历史消息 %1").arg(i),
+                            QStringLiteral("多界面探针 · 第 %1 条").arg(i),
+                            QStringLiteral("bell"), 1200);
+        isl->showIsland(QStringLiteral("老师正在讲话"),
+                        QStringLiteral("请保持安静，认真听讲，有问题举手"),
+                        QStringLiteral("bell"), 30000);
+        isl->setExpanded(true);
+    }
+
     // 组件5：--warm 预热 30s 冷却 —— 走真实发送链路（IslandOverlay::
     // sendBlessing → DanmakuWidget 单例），冷却计时从此刻起算。配 --submit
     // 演示「投稿钮禁用 + 计数行倒计时」；此时点投稿钮应被 hitDisabledControl
@@ -486,10 +515,22 @@ int main(int argc, char *argv[])
         });
     }
 
+    // #330：多界面的面号注入**必须早于采样**且留出一拍 —— setProperty 之后
+    // QML 绑定是**异步重算**的，同帧读 faceNow/facesOn 会拿到未就绪值
+    //（2026-10-17 实测：同帧 dump 出 <invalid>，提前 500ms 注入后稳定）。
+    if (faceArg > 0) {
+        QTimer::singleShot(2000, [isl, faceArg]() {
+            if (QQuickWidget *q2 = findQuick(isl)) {
+                if (QQuickItem *ri2 = q2->rootObject())
+                    ri2->setProperty("face", faceArg);
+            }
+        });
+    }
+
     // 采样：等 QML 起来 + 几何动画走完（380ms）再抓
     // 组件3：本段只做「注入 + 合成点击」；dump/tree/截图提为 captureAndSave
     // （点击后可能还要等 400ms 提交 Timer 落 2/3 态 ⇒ 两段式 singleShot）。
-    QTimer::singleShot(2500, [isl, outPath, search, searchPhase, submit, sphase, clickName, warm, draftOverride, likefly, mediaPhaseArg]() {
+    QTimer::singleShot(2500, [isl, outPath, search, searchPhase, submit, sphase, clickName, warm, draftOverride, likefly, mediaPhaseArg, faceArg]() {
         QQuickWidget *q = findQuick(isl);
         if (!q) { qApp->quit(); return; }
 
