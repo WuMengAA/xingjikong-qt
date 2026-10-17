@@ -20,6 +20,11 @@ Item {
 
     property var ctx
     readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+    // VoiceHub 联动模块（#329）：main.cpp 注入的 voicehub 上下文属性。
+    // ⚠️ typeof 守卫不能省 —— 探针/极端环境（模块没注册）里它是未定义标识符，
+    //    裸引用直接 ReferenceError（island 侧 bridgeRef 同款纪律）。
+    readonly property var vh: (typeof voicehub !== "undefined" && voicehub !== null)
+        ? voicehub : null
 
     // ── 局部组件：信息行（label 左、value 右；同 viewer 设置页卡片的心智）──
     component InfoRow: Item {
@@ -257,6 +262,86 @@ Item {
                         text: "浅色主题"
                         checked: agentUi.lightMode
                         onToggled: function (v) { agentUi.lightMode = v }
+                    }
+                }
+            }
+
+            // ── 卡：VoiceHub 联动（#329 · 2026-10-17）─────────────
+            // 只读展示 VoiceHub 服务端的权威广播状态：灵动岛展开态一行
+            // 「正在播放 / 进度 / 下一首 / 人数」+ 开播提醒一次。
+            // 数据面 = 内置 voicehub 模块（main.cpp 注入的 voicehub 上下文属性；
+            // 模块停用只停它的客户端，对象与配置属性仍在，本卡照常可配）。
+            // ⚠️ 经 page.vh 访问（typeof 守卫版）：模块没注册时显示「模块未加载」，
+            //    不是 ReferenceError。
+            M.Md3Card {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                md3: page.tok
+                variant: "filled"
+
+                Column {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    spacing: 2
+
+                    Text {
+                        text: "VoiceHub 联动"
+                        font.pixelSize: 14
+                        font.weight: Font.Medium
+                        color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                        bottomPadding: 6
+                    }
+                    InfoRow {
+                        label: "连接状态"
+                        value: {
+                            if (!page.vh) return "模块未加载";
+                            if (page.vh.active)
+                                return "正在播放：" + (page.vh.title || "（未知曲目）");
+                            return page.vh.statusText;
+                        }
+                    }
+                    InfoRow {
+                        visible: page.vh && page.vh.active
+                        label: "下一首"
+                        value: (page.vh && page.vh.nextTitle) || "（无）"
+                    }
+                    // 服务地址：改完即重连（模块内部 stopClient+startClient）
+                    M.Md3TextField {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        md3: page.tok
+                        placeholder: "服务地址（默认官方站）"
+                        text: page.vh ? page.vh.baseUrl : ""
+                        onEditingFinished: if (page.vh) page.vh.baseUrl = text
+                    }
+                    M.Md3SwitchRow {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        md3: page.tok
+                        text: "开播提醒"
+                        supporting: "有新广播时灵动岛弹一次（考试模式静默）"
+                        checked: page.vh ? page.vh.autoNotify : false
+                        onToggled: function (v) { if (page.vh) page.vh.autoNotify = v }
+                    }
+                    M.Md3SwitchRow {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        md3: page.tok
+                        text: "控制接口（点歌 / 歌词 / 广播）"
+                        supporting: "留桩：接线后生效，当前只读展示不受影响"
+                        checked: page.vh ? page.vh.controlEnabled : false
+                        onToggled: function (v) { if (page.vh) page.vh.controlEnabled = v }
+                    }
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.topMargin: 6
+                        text: "控制接口需要 VoiceHub Open API 密钥（x-api-key，songs:request 权限）。" +
+                              "密钥存放与审计口径未定之前不接线 —— 开关只是预留。"
+                        font.pixelSize: 11
+                        color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
+                        wrapMode: Text.WordWrap
                     }
                 }
             }

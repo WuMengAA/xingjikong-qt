@@ -111,6 +111,9 @@ add_executable(stelarith-agent-qt
   src/modules/modulehost.h
   src/modules/usbmodule.cpp
   src/modules/usbmodule.h
+  # ── VoiceHub 联动（2026-10-17）：只读展示 VoiceHub 权威广播状态 ──
+  src/modules/voicehubmodule.cpp
+  src/modules/voicehubmodule.h
   src/schedule/profile.h
   # ── 远程终端（2026-10-06 加：REPL 命令行，需确认 + 单会话）──
   src/terminal_console.cpp

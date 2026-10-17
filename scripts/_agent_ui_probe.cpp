@@ -247,6 +247,18 @@ int main(int argc, char *argv[])
         check(hasText(QStringLiteral("U 盘插入时在灵动岛弹窗询问是否打开（只开文件夹、绝不自动运行）；考试模式可自动静默。")),
               QStringLiteral("模块描述文案上屏"));
 
+        // ── 二·补：设置页的「VoiceHub 联动」卡（#329）──
+        // 探针里没有 voicehub 上下文属性（模块只在 agent 主进程注册）⇒ 卡片必须走
+        // typeof 守卫显示「模块未加载」，且**不许**报 ReferenceError（见 §六 realErrors）。
+        check(hasText(QStringLiteral("VoiceHub 联动")), QStringLiteral("设置页有「VoiceHub 联动」卡"));
+        check(hasText(QStringLiteral("连接状态")), QStringLiteral("卡里有「连接状态」行"));
+        check(hasText(QStringLiteral("模块未加载")),
+              QStringLiteral("无 voicehub 属性时守卫生效=「模块未加载」（不是 ReferenceError）"));
+        check(hasText(QStringLiteral("开播提醒")), QStringLiteral("有「开播提醒」开关"));
+        check(hasText(QStringLiteral("控制接口（点歌 / 歌词 / 广播）")),
+              QStringLiteral("有「控制接口」开关（留桩）"));
+        check(hasText(QStringLiteral("服务地址（默认官方站）")), QStringLiteral("有「服务地址」输入框"));
+
         // ── 三、插件市场区 ──
         check(hasText(QStringLiteral("示例回显插件  v1.0.0")), QStringLiteral("插件卡标题=名称+版本"));
         check(hasText(QStringLiteral("● 运行中")), QStringLiteral("插件状态串=● 运行中"));

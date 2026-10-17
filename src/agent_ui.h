@@ -32,6 +32,7 @@
 #include <QQuickWidget>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QPointer>
 #include <QUrl>
 #include <QCoreApplication>
 #include <QGuiApplication>
@@ -212,10 +213,26 @@ public:
         w->setWindowState((w->windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
     }
 
+    /** VoiceHub 联动模块（2026-10-17 #329）注入：设置页直接引用 `voicehub`
+     *  上下文属性（与 agentUi 同一口径）。AgentShell 是**懒创建**（托盘点开才
+     *  ensure），正常路径下本调用一定早于第一个 ensure；竞态兜底见 if 分支
+     *  （窗口已存在时直接给它的 engine 补设 context property）。 */
+    static void setVoicehub(QObject *m)
+    {
+        s_voicehub = m;
+        if (s_live)
+            s_live->engine()->rootContext()->setContextProperty(QStringLiteral("voicehub"), m);
+    }
+
 private:
+    // s_live：已创建实例（本类全局最多一个；ensure 的局部 s_inst 管创建，这里管补设）。
+    inline static QPointer<QObject> s_voicehub;
+    inline static AgentShell *s_live = nullptr;
+
     explicit AgentShell(QWidget *parent = nullptr)
         : QQuickWidget(parent), m_ui(this)
     {
+        s_live = this;
         setWindowTitle(QStringLiteral("星集控 · 被控端"));
         // 尺寸/位置**跟着可用屏幕走**——真机实证（2026-10-16）：固定 880×640 在
         // 1244×701 的桌面上、窗口 y 还被放到 130 ⇒ 一打开底部（含底导航）就落到屏幕外，
@@ -235,6 +252,10 @@ private:
         //    （没有 SizeRootObjectToQML —— 首编即抓）；与岛同款用 ToView。
         setResizeMode(QQuickWidget::SizeRootObjectToView);
         engine()->rootContext()->setContextProperty(QStringLiteral("agentUi"), &m_ui);
+        // VoiceHub 联动模块（#329）：main.cpp 在注册模块后调 setVoicehub；懒创建保证
+        // 正常路径下这里一定拿得到（竞态兜底在 setVoicehub 的 if 分支）。
+        if (s_voicehub)
+            engine()->rootContext()->setContextProperty(QStringLiteral("voicehub"), s_voicehub);
         // 数据接线在 main.cpp（agentUiWire 定义处能访问全部 static 符号）。
         agentUiWire(&m_ui);
         // 与岛同模式：QML 相对 exe 目录（CMake POST_BUILD 拷到 build/qml/）。

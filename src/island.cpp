@@ -43,6 +43,7 @@
 #include <QProcess>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickItem>      // setQmlObjectProperty：rootObject() 返回 QQuickItem*，转 QObject* 需要完整定义
 #include <QQuickWidget>
 #include <QScreen>
 #include <QStyleHints>
@@ -1040,6 +1041,20 @@ void IslandOverlay::animateGeometry(const QRect &target)
     m_geoAnim->setStartValue(geometry());
     m_geoAnim->setEndValue(target);
     m_geoAnim->start();
+}
+
+void IslandOverlay::setQmlObjectProperty(const QString &name, QObject *obj)
+{
+    // 设计说明见 island.h。根对象拿不到（QML 没加载）就静默——手绘兜底不需要它。
+    if (!m_quick) return;
+    QObject *root = m_quick->rootObject();
+    if (!root) {
+        qWarning("[island] setQmlObjectProperty(%ls) 被忽略：QML 根对象未就绪",
+                 qUtf16Printable(name));
+        return;
+    }
+    root->setProperty(name.toUtf8().constData(),
+                      QVariant::fromValue<QObject *>(obj));
 }
 
 void IslandOverlay::dismiss()

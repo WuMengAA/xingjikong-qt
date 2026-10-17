@@ -106,6 +106,7 @@
 #include "plugin/pluginhost.h"   // P2：插件宿主（进程外插件 ABI）
 #include "modules/modulehost.h"  // 2026-10-16：内置模块层（编译进 agent 的官方模块，与进程外插件共用门控）
 #include "modules/usbmodule.h"
+#include "modules/voicehubmodule.h"  // 2026-10-17：VoiceHub 联动（只读展示权威广播状态）
 #include <QMessageBox>         // P2：插件市场对话框
 #include <QListWidget>         // P2：插件市场列表
 #include <QUrlQuery>
@@ -7606,7 +7607,17 @@ int main(int argc, char *argv[])
         mh->setAgentApi(mapi);
 
         mh->registerModule(new UsbModule());
+        // VoiceHub 联动（2026-10-17）：模块自己持有 QNAM/SSE/轮询全套客户端，
+        // QML 侧只读它的 Q_PROPERTY 快照。两个展示面各挂各的：
+        //   · 灵动岛（IslandOverlay 的 QQuickWidget）—— setQmlObjectProperty 走
+        //     rootObject()->setProperty，模块后注册也能被既有绑定拾取（vhRef null 守卫）；
+        //   · 控制面板（AgentShell 的 QQuickWidget）—— 构造早于任何 ensure() 调用，
+        //     走 context property（设置页 AgentSettingsPage 直接引用 voicehub）。
+        auto *vh = new VoiceHubModule();
+        mh->registerModule(vh);
         mh->startEnabled();
+        IslandOverlay::instance()->setQmlObjectProperty(QStringLiteral("voicehubObj"), vh);
+        AgentShell::setVoicehub(vh);
     }
 
     const int rc = app.exec();

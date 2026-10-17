@@ -122,6 +122,17 @@ public:
     // 立即隐藏（不再等自动收起）。空闲态开启时改为"收回成半胶囊"而非彻底消失。
     void dismiss();
 
+    // ── 内置模块的 QML 注入（2026-10-17 · VoiceHub 联动 #329）────────────
+    // 把模块状态对象设到岛 QML **根对象属性**（IslandRoot 的 voicehubObj）。
+    // 为什么走 rootObject()->setProperty 而不是 context property：模块在
+    // main.cpp 里是岛构造**之后**才注册的，context property 后补不一定被既有
+    // 绑定拾取；根对象属性是 QML 一等公民，setProperty 即时触发依赖它的绑定
+    // 重算（IslandRoot 侧 `property var voicehubObj: null` + vhRef null 守卫，
+    // 模块被停用时 QML 自动回到「无联动」渲染）。
+    // rootObject 为 null（QML 没加载成功、手绘兜底中）时静默失败——被控端不能
+    // 因为一个外观文件缺失就起不来（同 setSource 处的容错口径）。
+    void setQmlObjectProperty(const QString &name, QObject *obj);
+
     // ── 文件传输进度（2026-10-11 · #198 接收进度条）──
     // file_push 接收期间把进度推到岛：name 文件名 / bytes 已收 / total 总字节（<=0 未知）。
     // 首次调用弹出常驻传输卡（不自动收起），之后只更新进度；
