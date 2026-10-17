@@ -12,6 +12,23 @@
 #include <vector>
 
 // libdatachannel（仅本 .cpp 引入，头文件保持零依赖）
+// ── 2026-10-18 · RTC 条件编译守卫（用户裁决：方案 A / 可逆摘除）──────────────
+// 背景：libdatachannel 的静态库与源码在本机**已彻底不存在**
+//   （_probe/ldc_libs 空、_probe/libdatachannel-master 不存在、
+//    D:\Stelarith\libdatachannel 空目录、全盘无 datachannel*.lib / rtc.hpp）。
+//   CMake 原先的 if(EXISTS ...) 只是「不链接库」，但本文件仍在编译 ⇒ 找不到
+//   rtc/rtc.hpp 直接编不过（那是"看起来有保护、实际没有"的假保护）。
+//
+// 做法：整份实现用 RTC_STATIC 包起来；库不在时由文件末尾的 #else 分支给出
+//   **接口完全一致的空实现** ⇒ main.cpp 一行都不用改（16 处调用照常编译）。
+//   库回来时：把 .lib 放回 _probe/ldc_libs/ 重新 configure 即可（CMake 会自动定义
+//   RTC_STATIC），本文件**无需再改**。
+//
+// ⚠️ 空实现期间 WebRTC 推流不可用，画面监控走既有的 JPEG 帧路径（那是独立的，
+//    见 makeFrameBytes；生产日志一直在推）。这不是降级谎言：rtcStart() 里
+//    useLdc 分支会因 pcAlive()==false 走不到推流，而 JPEG 帧不受影响。
+#if defined(RTC_STATIC)
+
 #include "rtc/rtc.hpp"
 
 // ── 抓屏 → JPEG（被控端截图同款路径，QScreen::grabWindow）──────────────
@@ -681,3 +698,43 @@ void LdcStreamer::sendCameraFrame(const QByteArray &frame)
         emit failed(QStringLiteral("camera track send: %1").arg(QString::fromLocal8Bit(e.what())));
     }
 }
+
+#else  // ── 无 libdatachannel：接口一致的空实现（2026-10-18）────────────────────
+// 目的：让 main.cpp 的 16 处调用**零改动**编译通过，同时把"没有 WebRTC"这件事
+//       变成显式的、可观测的状态，而不是编译失败或运行期诡异。
+// 原则：
+//   · active()/connected()/pcAlive()/cameraActive() 一律 false ⇒ 上层走 JPEG 兜底；
+//   · start()/startCamera() 明确发 failed(...) 信号并打日志，**不假装成功**
+//     （假成功会让管理端一直等 offer，反而更难查）；
+//   · 其它方法空转，不抛异常、不崩。
+#include <QDebug>
+
+LdcStreamer &LdcStreamer::instance()
+{
+    static LdcStreamer s;   // 不做任何 RTC 初始化
+    return s;
+}
+
+LdcStreamer::LdcStreamer(QObject *parent) : QObject(parent) {}
+
+static void rtcDisabledWarn(const char *what)
+{
+    qWarning("[rtc-ldc] %s：本次构建未链接 libdatachannel（RTC_STATIC 未定义），"
+             "WebRTC 推流不可用；画面监控走 JPEG 帧路径。"
+             "要恢复：把 datachannel.lib 等放回 _probe/ldc_libs/ 后重新 configure。", what);
+}
+
+void LdcStreamer::start(int) { rtcDisabledWarn("start"); emit failed(QStringLiteral("rtc-unavailable")); }
+void LdcStreamer::renegotiate() { /* 无 PC 可协商 */ }
+void LdcStreamer::stop() { /* 无状态可清 */ }
+bool LdcStreamer::pcAlive() const { return false; }
+void LdcStreamer::startCamera(const QString &, const QString &)
+{
+    rtcDisabledWarn("startCamera");
+    emit failed(QStringLiteral("rtc-unavailable"));
+}
+void LdcStreamer::stopCamera() {}
+void LdcStreamer::onSignal(const QString &, const QByteArray &) { /* 无 PC，信令丢弃 */ }
+void LdcStreamer::captureAndSend() {}
+
+#endif // RTC_STATIC

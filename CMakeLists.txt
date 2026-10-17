@@ -158,6 +158,9 @@ add_executable(stelarith-agent-qt
   # ── WebRTC 推流（2026-10-09：libdatachannel 换 other webrtc，探针全绿）──
   src/ldc_streamer.cpp
   src/ldc_streamer.h
+  # ── 远控隧道（2026-10-18 · RFB over WS）：agent 第二条 WS + 本地 VNC 纯字节桥 ──
+  src/tunnel_agent.cpp
+  src/tunnel_agent.h
   # ── 系统主音量（2026-10-11 Core Audio/WASAPI，独立编译单元隔离 SDK 头）──
   src/system_volume.cpp
   src/system_volume.h
@@ -195,7 +198,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
   target_compile_definitions(stelarith-agent-qt PRIVATE RTC_STATIC)
   message(STATUS "[agent] libdatachannel 已链入（RTC_STATIC）")
 else()
-  message(WARNING "[agent] _probe/ldc_libs/datachannel.lib 缺失——ldc_streamer 编译会失败，请先重建 libdatachannel")
+  # ── 2026-10-18 · 库缺失时的**真保护**（用户裁决：方案 A / 可逆摘除）──────────
+  # 原先这里只打一条 WARNING，但 ldc_streamer.cpp 仍在源文件列表里、也没有任何
+  # #if 保护 ⇒「不链接库」并不等于「不编译它」，结果是找不到 rtc/rtc.hpp 直接编不过。
+  # 这种"看着有保护、实际没有"的分支比不写更糟：会让人以为缺库能正常降级。
+  #
+  # 现在：不定义 RTC_STATIC ⇒ ldc_streamer.cpp 走文件末尾的 #else 空实现分支，
+  #      对外接口保持一致 ⇒ main.cpp 零改动。WebRTC 推流不可用，画面走 JPEG 帧路径
+  #      （JPEG 是独立路径，见 makeFrameBytes，不受影响）。
+  # 还原：把 datachannel.lib / srtp2.lib / juice.lib / usrsctp.lib 放回 _probe/ldc_libs/
+  #      （外加 _probe/libdatachannel-master/include），重新 configure 即自动回到
+  #      RTC_STATIC 分支，**源码一个字都不用改**。
+  message(WARNING
+    "[agent] libdatachannel 缺失（_probe/ldc_libs/datachannel.lib 不存在）"
+    " ⇒ 本次构建不含 WebRTC 推流：ldc_streamer 编译为空实现，画面监控走 JPEG 帧。"
+    " 需要推流时把库放回 _probe/ldc_libs/ 并重新 configure。")
 endif()
 
 # GUI 子系统：常驻托盘程序不该挂着控制台黑窗（日志已落盘到 agent-qt.log，不靠 stdout）
