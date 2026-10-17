@@ -77,7 +77,18 @@ void LdcStreamer::start(int captureMs)
 
     try {
         rtc::Configuration cfg;
-        // 信令经云端中继；ICE 用 host/中继候选（与现有 rtc-* 消息协议同构）
+        // 信令经云端中继；ICE 打洞必须配 STUN —— 真机教室网络 NAT 后，只有 host
+        // candidate（局域网 192.168.x）跨网打不通 → PeerConnection Failed → H264 一直
+        // 走 WS 轮询兜底（2026-10-17 真机日志「RTC 失败：PeerConnection Failed」实证）。
+        // 选腾讯 STUN（国内网络可达；Google STUN 可能被墙）。可 STE_LDC_STUN 覆盖。
+        {
+            const QByteArray envStun = qgetenv("STE_LDC_STUN");
+            const QByteArray stun = envStun.isEmpty()
+                ? QByteArray("stun:stun.miwifi.com:3478")   // 本机实测可达（腾讯/Google STUN UDP 被墙）
+                : envStun;
+            rtc::IceServer srv(stun.constData());
+            cfg.iceServers.push_back(srv);
+        }
         auto pc = std::make_shared<rtc::PeerConnection>(cfg);
 
         // 本地候选回传给管理端（由上层转发到云端 → 管理端）
