@@ -1660,6 +1660,8 @@ static void applyClassBinding(const QString &rawCode, const QString &wsUrl, cons
 QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;
 bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
 bool g_updateMandatory = false;     // 2026-10-06：云端 ota.json 的 mandatory（true=强制自动升级）
+// 2026-10-17：已主动提示过的版本（周期性复查会反复读到同一版本，只提示一次）
+static QString g_otaPromptedVer;
 qint64 g_lastOnlineAt = 0;          // 最近一次连上云端（强制升级回滚判定用：从没连通就不许误判成"新版本坏了"）
 QAction *g_actUpdate = nullptr;     // 托盘里"发现新版本…"那一条（无更新时隐藏）
 
@@ -1763,9 +1765,15 @@ void applyUpdateInfo(const QJsonObject &pay)
                   qPrintable(g_latestVer), kAppVersion,
                   canUpgrade ? "" : "（⚠ 清单缺 url/sha256，先别升，让管理员补 ota.json）");
         }
+        // 2026-10-17：同一个版本**只主动提示一次**（周期性复查每 30 分钟会再来一遍；
+        // 每次都弹岛/弹托盘就成了骚扰）。强制升级那条路不受影响 —— maybeAutoUpdate
+        // 自带 ota-state 退避与 ota-pause 刹车，该重试还会重试。
+        const bool firstPrompt = (g_otaPromptedVer != g_latestVer);
+        if (firstPrompt) g_otaPromptedVer = g_latestVer;
+
         // P0-3（2026-10-14）：托盘气泡容易错过 ⇒ 同时经灵动岛主动推送（带 changelog + 操作按钮）。
         // 非强制更新不打扰太久：20s 后自动收起；点了「立即更新」复用既有 self_update 链路。
-        if (g_tray && IslandOverlay::instance()) {
+        if (firstPrompt && g_tray && IslandOverlay::instance()) {
             const QString desc = g_updateNotes.isEmpty()
                 ? QStringLiteral("当前 v%1，点「立即更新」即可静默升级。")
                       .arg(QString::fromLatin1(kAppVersion))
@@ -1784,13 +1792,13 @@ void applyUpdateInfo(const QJsonObject &pay)
                     }
                 }, 20000, false);
         }
-        if (g_actUpdate) {
+        if (firstPrompt && g_actUpdate) {
             g_actUpdate->setVisible(true);
             g_actUpdate->setText(g_updateMandatory
                                      ? QStringLiteral("将自动升级到 v%1（云端强制）").arg(g_latestVer)
                                      : QStringLiteral("发现新版本 v%1（点此查看）").arg(g_latestVer));
         }
-        if (g_tray) {
+        if (firstPrompt && g_tray) {
             g_tray->showMessage(
                 QStringLiteral("星集控 · 被控端"),
                 g_updateMandatory
@@ -1806,6 +1814,7 @@ void applyUpdateInfo(const QJsonObject &pay)
               qPrintable(g_latestVer), kAppVersion);
     }
 }
+
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 强制自动升级（2026-10-06）
@@ -3518,6 +3527,95 @@ static qint64 g_otaGot = 0;
 static bool g_otaBusy = false;
 // 见前面 otaIsBusy 的说明：强制升级的触发判定在文件更前面，只能靠这个函数看到这个标志。
 static bool otaIsBusy() { return g_otaBusy; }
+
+// ── 周期性 OTA 复查（2026-10-17 · 修「云端发了版，设备不升级」）────────────
+// 病灶：云端把最新版本**只随 registered 回执下发一次**（cloud-ws index.js 的 register 分支），
+// 而 applyUpdateInfo() 也只在那里被调用。教室机是"一年不重启"的受管终端 ⇒ 云端发了新版本，
+// 它永远不知道（日志里一直是"已是最新"），除非碰巧断线重连。这就是"OTA 不生效"。
+//
+// 补法：自己按 HTTP 轮询公开清单 GET {http基址}/api/public/ota?product=agent
+//       &channel=<渠道>&current=<本机版本>，把结果**翻译成与注册回执同形**的 payload
+//       交给 applyUpdateInfo —— 版本比较、托盘/岛提示、强制升级判定全部复用同一条路径。
+// ⚠️ 绝不在这里另写一套版本比较：云端 ota.js 的注释已经点明，"两端各写一遍比较"
+//    正是 0.6.23 之前"正式版被判成已是最新"那个静默 bug 的来源。
+// 参数：STE_QT_OTA_CHECK_SEC 调间隔（默认 1800s，钳 [60, 86400]）；
+//       STE_QT_OTA_DISABLE=1 与自更新共用同一把应急刹车。
+static void otaSelfCheck()
+{
+    if (qEnvironmentVariable("STE_QT_OTA_DISABLE") == QLatin1String("1")) return;
+    if (otaIsBusy()) return;                    // 正在下载/安装，别插队
+    const QString wsUrl = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
+    if (wsUrl.isEmpty()) return;                // 没配云端地址：无从查起（注册回执那条路也走不通）
+
+    // ws(s)://host[:port]/ws/agent → http(s)://host[:port]（与 uploadRecordingAsync 同款推导）
+    QString base = wsUrl;
+    base.replace(QLatin1String("wss://"), QLatin1String("https://"))
+        .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = base.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0) base.truncate(wsIdx);
+
+    QUrl u(base + QStringLiteral("/api/public/ota"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("product"), QStringLiteral("agent"));
+    q.addQueryItem(QStringLiteral("channel"), g_channel);
+    q.addQueryItem(QStringLiteral("current"), QString::fromLatin1(kAppVersion));
+    u.setQuery(q);
+
+    auto *nam = new QNetworkAccessManager(qApp);
+    QNetworkRequest req(u);
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setHeader(QNetworkRequest::UserAgentHeader,
+                  QStringLiteral("StelarithAgentQt/%1").arg(kAppVersion));
+
+    QNetworkReply *r = nam->get(req);
+    QObject::connect(r, &QNetworkReply::finished, r, [r, nam, base] {
+        const QByteArray body = r->readAll();
+        const QNetworkReply::NetworkError err = r->error();
+        const QString errStr = r->errorString();
+        r->deleteLater();
+        nam->deleteLater();
+        if (err != QNetworkReply::NoError) {
+            // 复查失败**不打扰师生**（网络抖动很常见），但要留痕 —— 否则"静默失败"没法诊断
+            qInfo("[agent-qt] OTA 复查失败（%s）：%s", qPrintable(base), qPrintable(errStr));
+            return;
+        }
+        const QJsonObject o = QJsonDocument::fromJson(body).object();
+        const QJsonObject latest = o.value(QStringLiteral("latest")).toObject();
+        if (latest.isEmpty()) {
+            qInfo("[agent-qt] OTA 复查：云端未发布该渠道版本（channel=%s）", qPrintable(g_channel));
+            return;
+        }
+        // 键名逐字对齐 applyUpdateInfo 的读法（latestVersion/updateUrl/updateSha256/…）
+        QJsonObject pay;
+        pay.insert(QStringLiteral("latestVersion"), latest.value(QStringLiteral("version")));
+        pay.insert(QStringLiteral("updateUrl"), latest.value(QStringLiteral("url")));
+        pay.insert(QStringLiteral("updateSha256"), latest.value(QStringLiteral("sha256")));
+        pay.insert(QStringLiteral("updateNotes"), latest.value(QStringLiteral("notes")));
+        pay.insert(QStringLiteral("updateMandatory"), latest.value(QStringLiteral("mandatory")));
+        applyUpdateInfo(pay);
+    });
+}
+
+// 起定时器：默认 30 分钟一次，首次 3 分钟后（注册回执里那次已算一次检查，不必立刻重来）。
+// STE_QT_OTA_CHECK_FIRST_SEC 可把首次提前（验证用；生产默认 180s，别在启动高峰抢带宽）。
+static void otaStartPeriodicCheck()
+{
+    int sec = qEnvironmentVariableIntValue("STE_QT_OTA_CHECK_SEC");
+    if (sec <= 0) sec = 1800;
+    sec = qBound(60, sec, 24 * 3600);
+    int firstSec = qEnvironmentVariableIntValue("STE_QT_OTA_CHECK_FIRST_SEC");
+    if (firstSec <= 0) firstSec = 180;
+    firstSec = qBound(5, firstSec, 24 * 3600);
+    auto *t = new QTimer(qApp);
+    t->setInterval(sec * 1000);
+    QObject::connect(t, &QTimer::timeout, qApp, [] { otaSelfCheck(); });
+    t->start();
+    QTimer::singleShot(firstSec * 1000, qApp, [] { otaSelfCheck(); });
+    qInfo("[agent-qt] OTA 周期复查已启动：每 %d 秒一次、首次 %d 秒后（channel=%s；"
+          "STE_QT_OTA_CHECK_SEC / STE_QT_OTA_CHECK_FIRST_SEC 可调）",
+          sec, firstSec, qPrintable(g_channel));
+}
+
 
 // 统一回执出口（被控端→云端）。断链时不静默：如实记一条，避免"以为回了其实没回"。
 static void sendActionReceipt(const QString &id, const QString &action, const QString &result,
@@ -7320,6 +7418,11 @@ int main(int argc, char *argv[])
     } else {
         qWarning().noquote() << QStringLiteral("[agent-qt] WARN 系统托盘不可用（Session0？）—— 进程照跑，但没有可见入口");
     }
+
+    // 2026-10-17：OTA 周期复查（不再只依赖 registered 回执那一次）。
+    // ⚠️ 必须放在托盘分支**之外**：无托盘的 Session0/服务化环境照样要能查更新
+    //    （放在里面时离屏实测根本没启动 —— 托盘不可用就整段跳过）。
+    otaStartPeriodicCheck();
 
     // ── 通知体系接线（2026-10-09 · DeepSeek Harness）─────────────────────
     // 循环提醒：展示由 notifyFromParams 的 loop 分支走灵动岛（含确认按钮，
