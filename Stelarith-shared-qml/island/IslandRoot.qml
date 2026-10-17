@@ -83,6 +83,13 @@ Item {
     // 两口子同时画会互相压：胶囊那套假定 56/320 高、左右留 14，塞进 72px 的通栏里
     // 会立刻溢出到窗外（表现为"文字被裁一半"）。
     readonly property bool _compactForm: root._formKind === "banner" || root._formKind === "mini"
+    // 大卡片外框（Centered / Fullscreen · 2026-10-17 补）：
+    //   这两档此前**没有任何 QML 版式**，落进胶囊分支 ⇒ 520×200 的窗口套
+    //   `height/2=100` 的圆角 + 320 宽排版，表现为"一张被拉圆的黑卡、按钮被裁"。
+    //   现在它们各有自己的面（IslandCardFace / IslandFullscreenFace），
+    //   与胶囊那套内容互斥（同上：两套版式同时画会互相压）。
+    readonly property bool _bigForm: root._formKind === "centered"
+                                     || root._formKind === "fullscreen"
     // Mini 无描述时收成正圆（C++ geometryForForm 同口径：96 见方 + radius=half）。
     // ⚠️ 判据是 desc 是否为空，与 C++ 的 m_desc.isEmpty() 一一对应 —— 两边不同步
     //    就会出现"窗口是圆的、底色是方牌"这种一眼假。
@@ -575,7 +582,11 @@ Item {
         // #330 形态多样化：紧凑外框里不画鲸鱼 ——
         //   角标只有 96/112px，鲸鱼 28px 会直接盖住标题；
         //   通栏里鲸鱼在右下角，会压住右侧那段描述文字。
-        visible: !root._compactForm
+        // #330：紧凑外框不画；2026-10-17：居中卡片也不画 —— 卡片内容居中，
+        // 右下角挂一只鲸鱼会在 520×200 里显得"贴了张贴纸"。全屏保留（大屏右下角合适）。
+        // 大卡片档（Centered/Fullscreen）也不画：全屏会冒一颗标题气泡（鲸鱼对新通知
+        // 自动 speak），与正文重复；520×200 的卡片右下角挂吉祥物也像贴纸。
+        visible: !root._compactForm && !root._bigForm
         // 空闲态鲸鱼正常大小（28px），底层扩大了能放下
         px: root._idle ? 28 : (root._expanded ? 36 : 28)
         bridgeRef: root.bridgeRef
@@ -592,34 +603,59 @@ Item {
     }
 
     // ── 底 ──────────────────────────────────────────────────
-    Rectangle {
+    // 2026-10-17：矩形 → **G2 圆角容器**（IslandSurface）。
+    //   `Rectangle.radius` 画的是圆弧：曲率在"角 → 直边"的接缝处从 1/r 突跳到 0，
+    //   大圆角/大面积上能看出一道折。G2（squircle）让曲率连续过渡，角是"长出来的"。
+    //   实现见 IslandSurface.qml（Canvas 超椭圆；QtQuick.Shapes 在被控端不可用）。
+    IslandSurface {
         id: shell
         anchors.fill: parent
-        // 形状（#330 形态多样化后：五档外框各自一个圆角口径）
+        // 圆角六档（#330 形态多样化 + 2026-10-17 补 Centered/Fullscreen 两档）
         //   空闲半胶囊   → 正圆（height/2）
         //   Mini 正圆档  → 正圆（无描述时收成角标，与 C++ geometryForForm 同口径）
         //   Mini 方牌档  → 28（比胶囊的 18 更"卡片"，但比卡片小）
         //   Banner 通栏  → 20（与 Centered 卡片同族，横幅不该比卡片更"圆"）
+        //   Centered     → 24（520×200 的卡片，24 ≈ 12% 短边，iOS 卡片的手感）
+        //   Fullscreen   → 28（铺满屏的大面板，再大就"像被啃掉角"）
         //   胶囊收起/展开 → height/2 / 18（原样不动）
         radius: root._idle ? height / 2
                             : (root._formKind === "mini"
                                ? (root._miniOrb ? height / 2 : 28)
                                : (root._formKind === "banner"
                                   ? 20
-                                  : (root._expanded ? 18 : height / 2)))
-        color: root._idle ? root.th.idleBg : root.th.bg
-        border.width: root._idle ? 0 : 1
-        border.color: root.th.light ? "#E2E2E2" : "#333333"
+                                  : (root._formKind === "centered"
+                                     ? 24
+                                     : (root._formKind === "fullscreen"
+                                        ? 28
+                                        : (root._expanded ? 18 : height / 2)))))
+        // 底色：全屏档按 severity 换底（与 C++ paintBigForm 的 full 分支同口径 ——
+        //   urgent 红 / inform 琥珀 / remind 绿，alpha 210/205 也是手绘版的值）。
+        //   "双绘 parity" 铁律：改这里必须同步 island.cpp，否则 QML 挂掉退回手绘时
+        //   同一条通知会换一个颜色，老师会以为发了两条。
+        //   Centered 卡片**不**随 severity 换底（只靠顶部细条 + 图标色）；手绘版同样只有 full 换底。
+        fillColor: {
+            if (root._idle) return root.th.idleBg
+            if (root._formKind === "fullscreen" && root._severity !== "")
+                return root.th.severityColor(root._severity)
+            return root.th.bg
+        }
+        strokeWidth: root._idle ? 0 : 1
+        strokeColor: root.th.light ? "#E2E2E2" : "#333333"
 
         Behavior on radius { NumberAnimation { duration: root.th.durShape } }
-        Behavior on color  { ColorAnimation  { duration: 200 } }
 
         // 严重度：只做顶部细条。
+        // ⚠️ 左右必须内缩到 radius 之外：细条是**直角**，铺满宽度时会在圆角段
+        //    切出一条直线（观感是"角上贴了个方片"）。内缩后整条落在直边上。
         Rectangle {
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
+            anchors.leftMargin: shell.radius
+            anchors.rightMargin: shell.radius
+            anchors.topMargin: 1
             height: root._severity === "" ? 0 : 3
+            radius: height / 2
             visible: root._severity !== ""
             color: root.th.severityColor(root._severity)
         }
@@ -664,12 +700,44 @@ Item {
     }
 
     // ══════════════════════════════════════════════════════════
+    // 大卡片外框（2026-10-17 补 · Centered / Fullscreen）
+    // 之前这两档没有版式，落进胶囊分支 ⇒ 圆角/排版/按钮全部错位
+    //（用户反馈"很多通知样式不符合审美"的根因）。现在各给一套面，
+    // 与胶囊内容互斥；配色仍以主题令牌为准，不再由 QPainter 自己算。
+    // ══════════════════════════════════════════════════════════
+    IslandCardFace {
+        id: cardFace
+        anchors.fill: parent
+        th: root.th
+        icon: root._icon
+        title: root._title
+        desc: root._desc
+        severity: root._severity
+        actions: root._actions
+        bridgeRef: root.bridgeRef
+        visible: root._formKind === "centered"
+    }
+
+    IslandFullscreenFace {
+        id: fullFace
+        anchors.fill: parent
+        th: root.th
+        icon: root._icon
+        title: root._title
+        desc: root._desc
+        severity: root._severity
+        actions: root._actions
+        bridgeRef: root.bridgeRef
+        visible: root._formKind === "fullscreen"
+    }
+
+    // ══════════════════════════════════════════════════════════
     // 活动态 收起 / 展开
     // ══════════════════════════════════════════════════════════
     Item {
         anchors.fill: parent
         // #330：紧凑外框（Banner/Mini）有自己的面，胶囊那套内容整体让位
-        visible: !root._idle && !root._compactForm
+        visible: !root._idle && !root._compactForm && !root._bigForm
         opacity: root._idle ? 0 : 1
         Behavior on opacity { NumberAnimation { duration: 160 } }
 
@@ -2459,7 +2527,9 @@ Item {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 8
         th: root.th
-        showActions: root._showActionsNow
+        // 大卡片（Centered/Fullscreen）由自己的面画按钮 ⇒ 根级动作行让位，
+        // 否则同一组按钮会在卡片里 + 窗口底部各画一份。
+        showActions: root._showActionsNow && !root._bigForm
         actions: root._actions
         bridgeRef: root.bridgeRef
     }

@@ -78,8 +78,16 @@
   **Banner** 顶部通栏（可用宽−48，≤1280；高 72/60；单行 elide —— 解决"胶囊上限 640 ⇒ 长文案折行涨高压课件"）；
   **Mini** 右下角角标（112 方牌 / 无描述 96 正圆，贴 availableGeometry 右下 24；点一下升格成胶囊展开，默认穿透）。
   `showWithActions` 有按钮时强制降级 Centered；`paintCompactForm()` 是 QML 缺失时的手绘退路。
-  验证开关 `STE_QT_ISLAND_DEMO_FORM=banner|mini|mini-nodesc`（启动 2.5s 弹、12s 收、打几何+可用区+dpr）。
-  门禁 `test-island-forms.mjs`（13 断言，三方一致性；已负向证伪）。真机三档几何与公式逐条吻合。
+  验证开关 `STE_QT_ISLAND_DEMO_FORM=banner|mini|mini-nodesc|centered|fullscreen`（启动 2.5s 弹、12s 收、打几何+可用区+dpr）。
+  门禁 `test-island-forms.mjs`（21 断言，三方一致性；已负向证伪）。真机三档几何与公式逐条吻合。
+- **G2 圆角 + 大卡片版式**（2026-10-17，根仓 `docs/灵动岛G2圆角与大卡片版式-加减归档-2026-10-17.md`）：
+  ①`centered`/`fullscreen` **此前在 QML 里没有版式**（落进胶囊分支 ⇒ 520×200 套 `height/2=100` 圆角 + 320 宽排版，
+  按钮被裁）—— 用户说的"通知样式不符合审美"就是这个；补了 `IslandCardFace.qml` / `IslandFullscreenFace.qml`；
+  ②外壳 `Rectangle` → **`IslandSurface.qml`（Canvas 超椭圆，n=5 的 G2 圆角）**，圆角六档
+  （idle/胶囊 half、mini-orb half、mini 28、banner 20、centered 24、fullscreen 28）；
+  ③C++ 兜底同步：`steG2Path()` 替换 4 处 `addRoundedRect`（双绘 parity：superness 5.0 / 每角 10 段必须与 QML 一致）；
+  ④Centered/Fullscreen 几何改用 **availableGeometry**（原来按整屏：卡片偏心 24px、全屏压住左侧任务栏 24px）。
+  让位：胶囊内容/根级动作行/鲸鱼在大卡片下全部隐藏（否则叠字叠按钮）。
 
 ## 5 待点单（只报清单，等用户点头）
 1. `permOk("admin")` 恒真越权（teacher 可锁屏；quickGuard 只保了快捷行）。
@@ -120,6 +128,15 @@
 - ⚠️ **嵌套 lambda 捕获 `main` 的局部 `app` ⇒ C2326**（外层 lambda 没捕获，内层再捕获也拿不到）⇒ 定时器接收者用 `qApp`。
 - ⚠️ **`availableGeometry()` 的 x/y 偏移会让"反推可用区"算错**（本机任务栏在**左**，ag=(48,0,1659,960)）⇒
   几何核对必须**把 ag 本身打进日志**，不要靠窗口位置反推（本轮因此一度以为几何公式错了）。
+- ⚠️ **被控端也没有 `QtQuick.Shapes`**：部署树 `qml/QtQuick/Shapes/` 只有 `DesignHelpers`、
+  没有 `qmlshapesplugin.dll`，exe 旁也没有 `Qt6QuickShapes.dll`（与 Controls 同一类"有 QML 没 C++ 后端"）。
+  ⇒ 画自定义路径（G2 圆角等）只能用 **`Canvas`**（QtQuick 基础类型）。
+- ⚠️ **Canvas 手写超椭圆角的判据**：曲线起点必须等于前一段 `lineTo` 的落点。
+  2026-10-17 把左下/左上的 sin/cos 写反 ⇒ 路径自交 ⇒ 非零填充规则把左侧挖空，
+  截图表现为"左上/左下露白三角"。逐角核对 t=0 与 t=π/2 的落点即可定位。
+- ⚠️ **`Rectangle.radius` 是圆弧，不是 G2**：曲率在"角 → 直边"接缝从 1/r 突跳到 0。
+  要大圆角观感就得走路径（超椭圆 n≈5）。`radius = height/2` 那一档（胶囊/正圆）两者几乎一致，
+  收益只在 20~28px 的卡片档。
 - ⚠️ 探针自身也会骗人：QML 匿名类名（`_QML_21`）每次变（基线先剥序号）；`Repeater` delegate 的 objectName 不在 QObject 树；
   参数"看着该生效"先验它真生效（--actions 实测没注入）；假上下文属性**必须照真实签名**写。
 - ⚠️ 测量方法自身的错会污染判断：划范围看缩进层级+闭合标记；`uniq -c -f1` 在"行号:匹配"上不生效。

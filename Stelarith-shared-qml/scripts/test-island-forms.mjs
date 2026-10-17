@@ -33,6 +33,9 @@ const MAIN_CPP = path.join(REPO, "Stelarith-control-qt", "src", "main.cpp");
 const ROOT_QML = path.join(ROOT, "island", "IslandRoot.qml");
 const BANNER_QML = path.join(ROOT, "island", "IslandBannerFace.qml");
 const MINI_QML = path.join(ROOT, "island", "IslandMiniFace.qml");
+const CARD_QML = path.join(ROOT, "island", "IslandCardFace.qml");
+const FULL_QML = path.join(ROOT, "island", "IslandFullscreenFace.qml");
+const SURFACE_QML = path.join(ROOT, "island", "IslandSurface.qml");
 
 let pass = 0;
 const fails = [];
@@ -112,8 +115,8 @@ t("island_bridge::form() 为每档 Form 给出对应字符串（Capsule 允许�
 });
 
 // ── 三、QML：形态串有判定、面组件有实例化、且互斥 ──────────────────
-t("IslandRoot 对 banner/mini 都有 `_formKind ===` 判定", () => {
-	for (const s of ["banner", "mini"]) {
+t("IslandRoot 对 banner/mini/centered/fullscreen 都有 `_formKind ===` 判定", () => {
+	for (const s of ["banner", "mini", "centered", "fullscreen"]) {
 		ok(
 			new RegExp(`_formKind\\s*===\\s*"${s}"`).test(rootQml),
 			`IslandRoot.qml 没有 \`_formKind === "${s}"\` 判定 —— 该形态会被当胶囊排版`
@@ -246,6 +249,57 @@ t("线上 kind → Form 映射覆盖 banner/mini（管理端可下发这两档�
 		/IslandOverlay::Form\s+f\s*=\s*IslandOverlay::Form::Centered/.test(mainSrc),
 		"kind 分流的默认值不是 Centered —— 未知 kind 会落错形态"
 	);
+});
+
+// ── 五、大卡片两档（2026-10-17 补：此前 centered/fullscreen 在 QML 里没有版式，
+//      落进胶囊分支 ⇒ 圆角/排版/按钮全错。这组断言防止它再被"顺手"删掉）──────
+t("_bigForm 覆盖 centered 与 fullscreen（大卡片统一判据）", () => {
+	const m = rootQml.match(/readonly\s+property\s+bool\s+_bigForm\s*:\s*([\s\S]{0,200}?)\n\s*readonly\s+property/);
+	ok(m, "IslandRoot.qml 里找不到 _bigForm 定义");
+	for (const s of ["centered", "fullscreen"])
+		ok(m[1].includes('"' + s + '"'), '_bigForm 没包含 "' + s + '"');
+});
+
+t("胶囊内容与根级动作行在大卡片形态下必须让位（否则叠字/叠按钮）", () => {
+	// ⚠️ 必须锁定**内容容器那一行**（visible: !root._idle && !root._compactForm && !root._bigForm）：
+	//    只写"某处存在 !_bigForm"会被鲸鱼那行满足 ⇒ 内容容器漏改也 PASS（本门禁首版的漏洞）。
+	ok(/visible:\s*!root\._idle\s*&&\s*!root\._compactForm\s*&&\s*!root\._bigForm/.test(rootQml),
+		"胶囊内容容器没有 && !root._bigForm —— 520x200 的卡片里会叠一份胶囊排版");
+	ok(/showActions:\s*root\._showActionsNow\s*&&\s*!root\._bigForm/.test(rootQml),
+		"根级动作行没在大卡片下让位 —— 同一组按钮会画两份（卡片内 + 窗口底部）");
+});
+
+t("两个大卡片面都存在、被实例化、visible 绑到对应形态串", () => {
+	for (const [file, id, str] of [
+		[CARD_QML, "IslandCardFace", "centered"],
+		[FULL_QML, "IslandFullscreenFace", "fullscreen"],
+	]) {
+		let src = "";
+		try { src = stripComments(read(file)); } catch { ok(false, "缺面组件：" + path.basename(file)); continue; }
+		const inst = new RegExp(id + "\\s*\\{[\\s\\S]{0,900}?visible:\\s*root\\._formKind\\s*===\\s*\"" + str + "\"");
+		ok(inst.test(rootQml), "IslandRoot.qml 没实例化 " + id + " 或没把 visible 绑到 \"" + str + "\"");
+		ok(/fireAction/.test(src), path.basename(file) + " 没接 bridgeRef.fireAction —— 按钮点了没反应");
+	}
+});
+
+t("外壳用 G2 圆角容器（IslandSurface），不是 Rectangle.radius", () => {
+	const m = rootQml.match(/IslandSurface\s*\{\s*\n\s*id:\s*shell/);
+	ok(m, "外壳不是 IslandSurface —— Rectangle.radius 画的是圆弧（曲率在角/直边接缝突跳）");
+	ok(!/Rectangle\s*\{\s*\n\s*id:\s*shell/.test(rootQml), "外壳又退回 Rectangle 了");
+});
+
+t("G2 容器不依赖 QtQuick.Shapes（被控端缺 Qt6QuickShapes.dll）", () => {
+	const src = stripComments(read(SURFACE_QML));
+	ok(!/import\s+QtQuick\.Shapes/.test(src), "IslandSurface 引入了 QtQuick.Shapes —— 教室机上没有 Qt6QuickShapes.dll");
+	ok(/Canvas\s*\{/.test(src), "IslandSurface 不用 Canvas 画路径，那它画不出 G2");
+	ok(/superness/.test(src), "IslandSurface 没有超椭圆指数参数（G2 的曲率连续靠它）");
+});
+
+t("外壳圆角覆盖全部五档（缺一档就落回 height/2 的大圆弧）", () => {
+	const m = rootQml.match(/id:\s*shell[\s\S]{0,1400}?radius:\s*([\s\S]*?)\n\s*(?:fillColor)/);
+	ok(m, "找不到 shell.radius 的表达式");
+	for (const s of ["mini", "banner", "centered", "fullscreen"])
+		ok(m[1].includes('"' + s + '"'), "shell.radius 没有 \"" + s + "\" 档 —— 该形态会套到胶囊的 height/2");
 });
 
 console.log(`\n════ ${pass} 通过 / ${fails.length} 失败 ════`);
