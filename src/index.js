@@ -138,6 +138,8 @@ import { createVoiceHubBridge } from './voicehub-bridge.js';
 // 点歌由云端代发（端上只能"请求"，不能"直接点"）。
 import { createSongKeyStore } from './class-songkey.js';
 import { initSongKeyStore, readSongKeys, writeSongKeys } from './class-songkey-db.js';
+// 2026-10-18 · 点歌代发：端上只能"请求"，写入由云端用该班 Key 发往 VoiceHub。
+import { requestSongViaVoiceHub } from './song-request-proxy.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 import { timingSafeEqual } from 'node:crypto';
 
@@ -483,7 +485,10 @@ const server = http.createServer((req, res) => {
     u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
     u.pathname === '/api/ota/latest' || u.pathname.startsWith('/api/repairs') ||
     u.pathname === '/api/recordings' || u.pathname === '/api/qml-patch' ||
-    u.pathname === '/api/qml-patch/download' || u.pathname.startsWith('/api/interact') || isAdminApi;
+    u.pathname === '/api/qml-patch/download' || u.pathname.startsWith('/api/interact') ||
+    // 2026-10-18 · 点歌请求：教室端发起，但**必须鉴权**——
+    // 教室身份由班级代表，不允许公网匿名 POST 刷爆 VoiceHub 的点歌配额。
+    u.pathname === '/api/songs/request' || isAdminApi;
   if (isManageApi) {
     const auth = req.headers.authorization || '';
     const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -543,6 +548,63 @@ const server = http.createServer((req, res) => {
       return undefined;
     }
     return send(404, { ok: false, error: '未知的 songkeys 子路由' });
+  }
+
+  // ── 2026-10-18 · 点歌请求（被控端 → 云端代发 → VoiceHub）──────────────
+  // 用户拍板 A1：每台被控端绑定到班级，点歌跟随班级账号同步。
+  // 端上只发"我要点这首歌"，**不持有 Key**；真正写 VoiceHub 的是本端点，
+  // 用该设备所属班级的 Key。
+  //
+  // 鉴权：走管理面同一套（Bearer 令牌/票据）—— 因为教室里"谁在点"由班级身份代表，
+  //   不能让公网匿名 POST 就能刷爆 VoiceHub 的点歌配额。
+  // 归属：uid → classCode（registry 的 classIndex 已有）；查不到班级 ⇒ 拒绝，
+  //   而不是"随便挑一个班的 Key"（那会点错班）。
+  if (req.method === 'POST' && u.pathname === '/api/songs/request') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', async () => {
+      let p;
+      try { p = JSON.parse(body || '{}'); }
+      catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+
+      const uid = String(p.uid || '').trim();
+      if (!uid) return send(400, { ok: false, error: '缺少 uid（哪台设备点的歌）' });
+
+      // 设备必须在已知设备表里，否则无法确定班级
+      const dev = getDevice(uid);
+      if (!dev) return send(404, { ok: false, error: `未知设备 ${uid}` });
+      const classCode = dev.classCode || getDeviceClassCode(uid);
+      if (!classCode) {
+        return send(409, { ok: false, error: '该设备尚未绑定班级，无法点歌（请先在管理端完成分班）' });
+      }
+
+      if (!songKeyStore || !songKeyStore.enabled) {
+        return send(503, { ok: false, error: '班级点歌凭据功能未启用（云端未配置 STE_SONGKEY_SECRET）' });
+      }
+      const apiKey = songKeyStore.getKey(classCode);
+      if (!apiKey) {
+        return send(409, { ok: false, error: `该班级（${classCode}）尚未配置 VoiceHub 点歌凭据` });
+      }
+
+      const r = await requestSongViaVoiceHub({
+        apiKey,
+        title: p.title,
+        artist: p.artist,
+        cover: p.cover,
+        extra: p.extra,
+      });
+      if (!r.ok) {
+        pushEvent('warn', '点歌请求被上游拒绝', { uid, classCode, code: r.code || 0, error: r.error });
+        // 上游 4xx 原样透传语义（配额/黑名单/参数），5xx/超时归 502
+        return send(r.code && r.code >= 400 && r.code < 500 ? r.code : 502,
+                    { ok: false, error: r.error, code: r.code || 0 });
+      }
+      pushEvent('info', '点歌请求已提交 VoiceHub', {
+        uid, classCode, title: String(p.title || '').slice(0, 60),
+      });
+      return send(200, { ok: true, upstream: r.data });
+    });
+    return undefined;
   }
   }
 

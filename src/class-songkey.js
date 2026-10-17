@@ -85,12 +85,19 @@ export function createSongKeyStore(opts = {}) {
   return {
     get enabled() { return enabled; },
 
-    /** 为某个班级设置 VoiceHub Key。返回 { ok, tail } —— **绝不返回明文**。 */
+    /**
+     * 为某个班级设置 VoiceHub Key。返回 { ok, tail } —— **绝不返回明文**。
+     *
+     * ⚠️ 参数叫 className 是历史命名，但**值必须传稳定的 classId**（不是中文班名）。
+     *    理由：站点 `device_bindings` 里班级有两列 —— `class_id`（稳定）与 `class_name`（可改）。
+     *    拿可改的班名当键 ⇒ 一改班名凭据就断链，而且断得静默（查不到 = 当作没配）。
+     *    这里保留旧参数名只为不破坏已有调用；语义已改为"班级标识"。
+     */
     setKey(className, plainKey) {
       if (!enabled) return { ok: false, error: 'disabled', message: '未配置 STE_SONGKEY_SECRET，功能未启用' };
       const cls = String(className || '').trim();
       const k = String(plainKey || '').trim();
-      if (!cls) return { ok: false, error: 'bad_class', message: '班级名不能为空' };
+      if (!cls) return { ok: false, error: 'bad_class', message: '班级标识不能为空' };
       // VoiceHub 的 Key 形如 vhub_xxxxxxxx…（见 apiKeyUtils.generateApiKey）。
       // 这里只做形态提示，不做强校验（上游格式可能演进），但必须非空且不太短。
       if (k.length < 16) return { ok: false, error: 'bad_key', message: 'Key 太短，疑似粘贴不完整' };
