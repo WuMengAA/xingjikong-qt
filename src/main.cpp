@@ -4260,6 +4260,32 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             if (!ok) out.error = QStringLiteral("SendInput 键盘注入失败，错误码 %1").arg((int)GetLastError());
             return out;
         }
+        // 2026-10-17 远控/键鼠补齐：独立按键事件（keydown/keyup）。
+        //   · 参数 vk = Windows 虚拟键码（十进制），action = down | up
+        //   · 组合键（Ctrl+C 之类 / Ctrl+Alt+Del）由管理端依次发多个 key down 再逐个 key up，
+        //     agent 这里只负责单键注入 —— 与鼠标 down/up 语义对齐。
+        //   · 不做 VkKeyScan 转换（管理端直接给 vk），保证方向键/F1-F12/修饰键都能下发。
+        if (kind == QStringLiteral("key")) {
+            const int vk = params.value(QStringLiteral("vk")).toInt();
+            const QString ka = params.value(QStringLiteral("action")).toString();
+            if (vk <= 0 || vk > 255) {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("vk 无效：%1").arg(vk);
+                return out;
+            }
+            INPUT ki = {};
+            ki.type = INPUT_KEYBOARD;
+            ki.ki.wVk = (WORD)vk;
+            if (ka == QStringLiteral("up")) ki.ki.dwFlags = KEYEVENTF_KEYUP;
+            // down 无额外标志；extended 键（如方向键）需 KEYEVENTF_EXTENDEDKEY，见下
+            if (vk >= VK_LEFT && vk <= VK_DOWN) ki.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+            if (SendInput(1, &ki, sizeof(ki)) == 1) out.result = QStringLiteral("done");
+            else {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("SendInput 按键失败，错误码 %1").arg((int)GetLastError());
+            }
+            return out;
+        }
         out.result = QStringLiteral("failed");
         out.error = QStringLiteral("未知 input 子类型：%1").arg(kind);
         return out;
