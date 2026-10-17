@@ -97,6 +97,17 @@ Item {
                                      && (bridgeRef ? (bridgeRef.desc === "") : true)
     readonly property string _icon:       bridgeRef ? bridgeRef.icon        : ""
     readonly property string _desc:       bridgeRef ? bridgeRef.desc        : ""
+    // ── 通知时间（2026-10-17 · 用户「通知写上时间」）──────────────────
+    // 以前只有历史列表带时间，正在看的这条不带 —— 老师看到一条通知时不该
+    // 还得展开历史才知道它几点来。文本由 C++ 统一格式化（noticeTimeOf）。
+    // ⚠️ `bridgeRef.noticeTime` 这种点访问才会被 QQml 静态识别成依赖；写成
+    //    bridgeRef["noticeTime"] 会在组件创建那一刻锁死（上面 _idle 长注释同款坑）。
+    //   viewer 侧桥没有这个属性 ⇒ undefined ⇒ "" ⇒ 整块时间不显示，退化成旧样子。
+    readonly property string _noticeTime: (bridgeRef && bridgeRef.noticeTime) ? bridgeRef.noticeTime : ""
+    // 媒体占据岛面时标题行被播放条挤用，且"媒体不是通知" ⇒ 不显示通知时间。
+    readonly property bool   _showNoticeTime: root._noticeTime !== ""
+                                               && !root._mediaPresenting
+                                               && root._title !== ""
     readonly property var    _states:     (bridgeRef && bridgeRef.states)  ? bridgeRef.states  : []
     readonly property var    _actions:    (bridgeRef && bridgeRef.actions) ? bridgeRef.actions : []
     readonly property var    _history:    (bridgeRef && bridgeRef.history) ? bridgeRef.history : []
@@ -696,6 +707,7 @@ Item {
         icon: root._icon
         title: root._title
         desc: root._desc
+        time: root._showNoticeTime ? root._noticeTime : ""
         visible: root._formKind === "banner"
     }
 
@@ -725,6 +737,7 @@ Item {
         severity: root._severity
         actions: root._actions
         bridgeRef: root.bridgeRef
+        time: root._showNoticeTime ? root._noticeTime : ""
         visible: root._formKind === "centered"
     }
 
@@ -738,6 +751,7 @@ Item {
         severity: root._severity
         actions: root._actions
         bridgeRef: root.bridgeRef
+        time: root._showNoticeTime ? root._noticeTime : ""
         visible: root._formKind === "fullscreen"
     }
 
@@ -773,8 +787,10 @@ Item {
                 id: csTitle
                 anchors.left: csIcon.right
                 anchors.leftMargin: 12
-                anchors.right: parent.right
-                anchors.rightMargin: 42
+                // 2026-10-17「通知写上时间」：右上角让出时间的位置（时间本身贴鲸鱼左缘）。
+                // 媒体态不显示时间 ⇒ 回落到原来的 42（给鲸鱼让位）。
+                anchors.right: root._showNoticeTime ? csTime.left : parent.right
+                anchors.rightMargin: root._showNoticeTime ? 6 : 42
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: root.mediaIsContent ? -8 : 0
                 // 组件1：岛面是媒体时字号降到 13（长曲名不截断）。
@@ -786,6 +802,20 @@ Item {
                 font.pixelSize: root.mediaIsContent ? 13 : root.th.fsTitle
                 font.weight: Font.Bold
                 elide: Text.ElideRight
+            }
+
+            // 通知时间：与标题同一基线，贴鲸鱼左缘（右侧 42 是鲸鱼的领地）。
+            // 用 10px + sub 色：它是"辅助信息"，不能和标题抢视线。
+            Text {
+                id: csTime
+                visible: root._showNoticeTime
+                anchors.right: parent.right
+                anchors.rightMargin: 46
+                anchors.verticalCenter: csTitle.verticalCenter
+                text: root._noticeTime
+                color: root.th.sub
+                // 2026-10-17：10px 在 332 胶囊里和鲸鱼糊成一片（实测截图），回到 11
+                font.pixelSize: 11
             }
 
             Text {
@@ -895,8 +925,9 @@ Item {
                 visible: !root.searchPageOn && !root.submitPageOn
                 height: (root.searchPageOn || root.submitPageOn) ? 0 : implicitHeight
                 anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.rightMargin: 48
+                // 2026-10-17：右上角给时间让位（展开态看详情时更需要知道几点来的）
+                anchors.right: root._showNoticeTime ? exTime.left : parent.right
+                anchors.rightMargin: root._showNoticeTime ? 8 : 48
                 anchors.top: parent.top
                 anchors.topMargin: 2
                 text: bridgeRef ? bridgeRef.title : ""
@@ -910,6 +941,20 @@ Item {
                 wrapMode: Text.WrapAnywhere
                 maximumLineCount: root.facesOn ? 1 : 3
                 elide: Text.ElideRight
+            }
+
+            // 展开态通知时间：贴标题**首行**基线（不是整个多行标题块的垂直中心，
+            // 否则标题折成 3 行时时间会漂到中间，看着像副标题）。
+            Text {
+                id: exTime
+                visible: root._showNoticeTime
+                anchors.right: parent.right
+                anchors.rightMargin: 48
+                anchors.top: exTitle.top
+                anchors.topMargin: 3
+                text: root._noticeTime
+                color: root.th.sub
+                font.pixelSize: 11
             }
 
             // 描述：Markdown 分行（**粗** / # 标题 / - 列表 / \n）
@@ -2452,7 +2497,9 @@ Item {
                                     anchors.rightMargin: 8
                                     anchors.top: parent.top
                                     anchors.topMargin: 5
-                                    text: parent.entry.timeStr || ""
+                                    // face 2 是平铺列表，**没有分组标题兜日期** ⇒ 用 timeFull
+                                    // （今天只给 HH:mm，昨天/更早带前缀）；概览面有分组，用 timeStr。
+                                    text: parent.entry.timeFull || parent.entry.timeStr || ""
                                     color: root.th.sub
                                     font.pixelSize: 10
                                 }

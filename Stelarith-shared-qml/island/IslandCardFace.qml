@@ -29,6 +29,9 @@ Item {
     property string severity: ""
     property var    actions: []
     property var    bridgeRef: null
+    // 2026-10-17「通知写上时间」：发生时刻（HH:mm）。放**卡片右上角**，
+    // 不塞进居中的 Column —— 塞进去会让整块内容往下坠，且图标+标题本来就居中。
+    property string time: ""
 
     readonly property color tintColor: {
         if (cardFace.severity === "urgent") return cardFace.th ? cardFace.th.severityUrgent : "#B3261E"
@@ -113,5 +116,18 @@ Item {
                 }
             }
         }
+    }
+
+    // 发生时刻（右上角）：12px 次色。只在有内容时出现（媒体态由 root 侧给空串）。
+    Text {
+        id: cTime
+        visible: cardFace.time !== ""
+        anchors.right: parent.right
+        anchors.rightMargin: 24
+        anchors.top: parent.top
+        anchors.topMargin: 18
+        text: cardFace.time
+        color: cardFace.th ? cardFace.th.sub : "#C8C8C8"
+        font.pixelSize: 12
     }
 }

@@ -21,6 +21,9 @@ Item {
     property string severity: ""
     property var    actions: []
     property var    bridgeRef: null
+    // 2026-10-17「通知写上时间」：发生时刻。全屏是公告板，时间放**右上角**、
+    // 字号跟描述同级 —— 最后一排看不清的字等于没写，不做 10px 小字。
+    property string time: ""
 
     // 全屏是强提示：文字用**纯白/纯黑**而不是主题 fg（红/绿底上主题色会发灰）
     readonly property color onColor: fullFace.th && fullFace.th.light ? "#0A0A0A" : "#FFFFFF"
@@ -105,5 +108,18 @@ Item {
                 }
             }
         }
+    }
+
+    // 发生时刻（右上角）：公告板语义 ⇒ 与描述同字号（fsTitleSm），不缩成小字。
+    Text {
+        id: fTime
+        visible: fullFace.time !== ""
+        anchors.right: parent.right
+        anchors.rightMargin: 40
+        anchors.top: parent.top
+        anchors.topMargin: 32
+        text: fullFace.time
+        color: fullFace.onSub
+        font.pixelSize: fullFace.th ? fullFace.th.fsTitleSm : 18
     }
 }

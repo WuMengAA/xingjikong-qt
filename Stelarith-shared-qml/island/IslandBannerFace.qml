@@ -26,7 +26,11 @@ Item {
     property string icon: ""
     property string title: ""
     property string desc: ""
+    // 2026-10-17「通知写上时间」：通栏右侧挂发生时刻（HH:mm）。
+    // 空串 = 不显示（媒体态 / viewer 侧桥没这个属性）。
+    property string time: ""
     readonly property bool hasDesc: bannerFace.desc !== ""
+    readonly property bool hasTime: bannerFace.time !== ""
 
     // 左右留白 / 图标块宽度：**常量**。
     // ⚠️ 千万别在 Text.width 的绑定里引用它自己的 x —— x 由锚点驱动，
@@ -60,6 +64,14 @@ Item {
         text: bannerFace.title
     }
 
+    // 时间块的自然宽。⚠️ 同样不能读 bTime.implicitWidth（门禁 test-island-forms 会拦，
+    // 且带 elide 的 Text 其 implicitWidth 跟 width 走 ⇒ width 绑定成环）。
+    TextMetrics {
+        id: tmTime
+        font: bTime.font
+        text: bannerFace.time
+    }
+
     Text {
         id: bTitle
         anchors.left: bIcon.visible ? bIcon.right : parent.left
@@ -69,7 +81,10 @@ Item {
         // 无描述 ⇒ 吃满剩余宽。elide 兜住长标题（不折行）。
         width: {
             const avail = Math.max(0, bannerFace.width - bannerFace.padL
-                                      - bannerFace.iconBlock - bannerFace.padR)
+                                      - bannerFace.iconBlock - bannerFace.padR
+                                      // 有时间的横幅：先扣掉时间块（含 12px 间距），
+                                      // 否则标题/描述按满宽算，末尾会被时间压掉
+                                      - (bannerFace.hasTime ? tmTime.advanceWidth + 12 : 0))
             if (!bannerFace.hasDesc) return avail
             return Math.min(Math.max(0, tmTitle.advanceWidth), avail * 0.4)
         }
@@ -86,8 +101,9 @@ Item {
         id: bDesc
         anchors.left: bTitle.visible ? bTitle.right : (bIcon.visible ? bIcon.right : parent.left)
         anchors.leftMargin: 12
-        anchors.right: parent.right
-        anchors.rightMargin: 20
+        // 有时间的横幅：描述右边让出时间的宽度（时间贴最右缘）。
+        anchors.right: bannerFace.hasTime ? bTime.left : parent.right
+        anchors.rightMargin: bannerFace.hasTime ? 12 : 20
         anchors.verticalCenter: parent.verticalCenter
         text: bannerFace.desc
         color: bannerFace.th ? bannerFace.th.sub : "#C8C8C8"
@@ -95,5 +111,17 @@ Item {
         elide: Text.ElideRight
         maximumLineCount: 1
         visible: text !== ""
+    }
+
+    // 发生时刻：横幅里放在最右端，13px 次色（和描述同层，不抢标题）
+    Text {
+        id: bTime
+        visible: bannerFace.hasTime
+        anchors.right: parent.right
+        anchors.rightMargin: bannerFace.padR
+        anchors.verticalCenter: parent.verticalCenter
+        text: bannerFace.time
+        color: bannerFace.th ? bannerFace.th.sub : "#C8C8C8"
+        font.pixelSize: 12
     }
 }
