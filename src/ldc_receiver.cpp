@@ -64,7 +64,18 @@ void LdcReceiver::onSignal(const QString &type, const QByteArray &payload)
 void LdcReceiver::createPc(const QByteArray &payload)
 {
     try {
-        auto pc = std::make_shared<rtc::PeerConnection>(rtc::Configuration{});
+        // ⚠️ ICE 打洞必须配 STUN：教室机（被控端）与老师机（viewer）跨网，只有 host
+        // candidate 打不通 → PeerConnection Failed（2026-10-17 真机日志实证）。
+        // 与 agent 侧同一 STUN（腾讯，国内可达），可 STE_LDC_STUN 覆盖。
+        rtc::Configuration cfg;
+        {
+            const QByteArray envStun = qgetenv("STE_LDC_STUN");
+            const QByteArray stun = envStun.isEmpty()
+                ? QByteArray("stun:stun.miwifi.com:3478")   // 本机实测可达（腾讯/Google STUN UDP 被墙）
+                : envStun;
+            cfg.iceServers.push_back(rtc::IceServer(stun.constData()));
+        }
+        auto pc = std::make_shared<rtc::PeerConnection>(cfg);
         m_pc = pc;
         qInfo() << "[viewer-rtc] 收流 PeerConnection 已建，等待协商";
 

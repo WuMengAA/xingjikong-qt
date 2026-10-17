@@ -149,6 +149,17 @@ void AudioCapture::stopCapture()
     if (waveIn) {
         waveInStop(waveIn);
         waveInReset(waveIn);
+        // ⚠️ 2026-10-17（真机语音断续实证）：waveInReset 是异步的，立即 unprepare 会报
+        //   「Cannot perform this operation while media data is still playing」→ 头没释放
+        //   → 快速开关麦（按住讲话松开再按）时资源冲突，采集断续。等缓冲真正空闲再释放。
+        for (int i = 0; i < 50; ++i) {
+            if (!(hdrForUnprepare.dwFlags & WHDR_DONE)) {
+                // 缓冲仍在驱动线程手里（INQUEUE 或播放中），稍等
+                Sleep(10);
+            } else {
+                break;
+            }
+        }
         if (hdrForUnprepare.lpData) {
             if (const MMRESULT r = waveInUnprepareHeader(waveIn, &hdrForUnprepare, sizeof(WAVEHDR));
                 r != MMSYSERR_NOERROR)
