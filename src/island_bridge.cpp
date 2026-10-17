@@ -136,6 +136,12 @@ QVariantList IslandBridge::states() const
         // 已完成（state=done）的不进状态列表：任务表保留它是为了回填/审计，
         // 界面不该再显示"已结束的文件传输"。
         if (t.state == 2) continue;
+        // ⚠️ 文件传输**故意排除**：展开态有专门的 ftRow 进度卡（IslandRoot.qml），
+        //    带百分比 + 已收/总字节 +「接收中」标，比这里一行干巴巴的进度条信息更全。
+        //    两边都渲染 ⇒ 同一件事显示两遍，且 ftH(46px) 与 StateList 行高被**重复计入**
+        //    几何预算（IslandRoot 的 fxH 求和）⇒ 传输中岛凭空被撑高、布局错位。
+        //    ⇒ 单一真源：ft 进度只由 ftRow 画，StateList 不重复。
+        if (t.tag == QStringLiteral("file")) continue;
         QVariantMap m;
         // k：图标名当类别标识，QML 的 iconNameFor() 据此选图标
         m.insert(QStringLiteral("k"), t.icon);

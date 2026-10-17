@@ -1239,6 +1239,15 @@ void IslandOverlay::advanceMediaElapsed(int ms)
         if (remain <= qMax<qint64>(15000, m_mediaTotalMs / 10))
             m_mediaPhase = QStringLiteral("ending");
     }
+    // ── T 档：把播放进度同步进任务（2026-10-18 修自带 bug）──
+    // 之前只在 setMediaSession 里把 progress 设成 0，之后**再没更新过** ⇒
+    // 状态列表里那条"正在播放"的进度条永远是空的（比不画还糟：看着像卡住了）。
+    // ffplay 无进度回调，进度用墙上钟估算（与 m_mediaElapsedMs 同源）。
+    if (m_mediaTotalMs > 0) {
+        const double p = qBound(0.0, double(m_mediaElapsedMs) / double(m_mediaTotalMs), 1.0);
+        for (auto &t : m_tasks)
+            if (t.tag == QStringLiteral("media")) { t.progress = p; break; }
+    }
     if (m_bridge) m_bridge->sync();
     update();
 }
