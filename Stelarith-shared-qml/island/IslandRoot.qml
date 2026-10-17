@@ -145,6 +145,77 @@ Item {
         return parts.join(" · ");
     }
 
+    // ── 多界面（#330，2026-10-17 · 用户点单「灵动岛多界面」1+3）──────────
+    // 展开态从"一屏堆叠"升级为**多面切换**（概览/媒体/历史/状态）：
+    //   · 面只作用展开态；收起/空闲、搜索/投稿页、有动作按钮时**不开面**
+    //     （§七 一次只展开一件事——动作按钮要能点，不能被面板盖住）。
+    //   · 概览面 = 现有布局，零改动（面面板只在 face≠0 时满盖内容区）。
+    //   · 面的可用性：媒体面要有本机媒体或 VoiceHub 广播；历史面要有历史；
+    //     状态面恒在；概览面恒在 ⇒ 至少 2 面才显示切换器。
+    //   · faceNow 是**有效面**：选中的面失效（媒体停了/历史清了）自动回概览，
+    //     不倒扣 face 本身（用户切换意图保留）。
+    property int face: 0
+    readonly property bool mediaFaceOn: root._mediaActive || root.mediaIsContent
+        || (root.vhRef !== null && root.vhRef.active)
+    readonly property bool histFaceOn: root._history.length > 0
+    readonly property var faceModel: {
+        var fs = [{ id: 0, label: "概" }];
+        if (root.mediaFaceOn) fs.push({ id: 1, label: "媒" });
+        if (root.histFaceOn)  fs.push({ id: 2, label: "史" });
+        fs.push({ id: 3, label: "态" });
+        return fs;
+    }
+    readonly property bool facesOn: root._expanded && !root._showActionsNow
+        && !root.searchPageOn && !root.submitPageOn && root.faceModel.length >= 2
+    readonly property int faceNow: {
+        if (root.face === 1 && !root.mediaFaceOn) return 0;
+        if (root.face === 2 && !root.histFaceOn) return 0;
+        return root.face;
+    }
+    readonly property bool facePanelOn: root.facesOn && root.faceNow !== 0
+    // 媒体面的数据源：本机 ffplay 优先，其次 VoiceHub 远程广播。
+    readonly property bool faceUseLocal: root._mediaActive || root.mediaIsContent
+    readonly property string faceTitle: root.faceUseLocal ? root._mediaTitle
+                                       : (root.vhRef ? root.vhRef.title : "")
+    readonly property string faceArtist: root.faceUseLocal ? ""
+                                       : (root.vhRef ? root.vhRef.artist : "")
+    readonly property real facePos: root.faceUseLocal
+        ? (root._mediaElapsedMs / 1000.0) : (root.vhRef ? root.vhRef.positionSec : 0)
+    readonly property real faceDur: root.faceUseLocal
+        ? (root._mediaTotalMs / 1000.0) : (root.vhRef ? root.vhRef.durationSec : 0)
+    readonly property string faceNext: root.faceUseLocal ? root._mediaNextTitle
+                                       : (root.vhRef ? root.vhRef.nextTitle : "")
+    function faceTimeText() {
+        const mm = s => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60); };
+        return root.faceDur > 0 ? mm(root.facePos) + " / " + mm(root.faceDur) : mm(root.facePos);
+    }
+    // 状态面的行（岛桥只暴露展示态字段 —— 这里只用桥与模块**已给**的数据，
+    // 不新造数据源；版本/连接态在控制面板里看）。
+    readonly property var faceStatusRows: {
+        const formKey = bridgeRef ? (bridgeRef.form || "Capsule") : "Capsule";
+        const formName = formKey === "Centered" ? "居中卡片"
+                        : (formKey === "Fullscreen" ? "全屏浮层" : "顶部胶囊");
+        const rows = [
+            { k: "当前形态", v: formName },
+            { k: "媒体", v: root.facePhaseText() },
+            { k: "VoiceHub", v: root.vhRef === null ? "模块未注入"
+                                     : (root.vhRef.active ? "在播：" + root.vhRef.title
+                                                          : root.vhRef.statusText) },
+            { k: "历史通知", v: root._history.length + " 条" }
+        ];
+        return rows;
+    }
+    function facePhaseText() {
+        switch (root._mediaPhase) {
+        case "starting": return "即将播放";
+        case "playing":  return "播放中";
+        case "ending":   return "快结束";
+        case "ended":    return "已播完";
+        case "blocked":  return "被播放时段拦";
+        default:         return "无";
+        }
+    }
+
     // ── 组件7 播放四态（2026-10-15，用户点单）─────────────────────
     // 相位**由 C++ 单点判定**（口径见 island.h：时长/剩余只在 C++ 算），QML 只按串
     // 切文案/配色 —— 避免"两端各算一遍阈值"这种必然漂移。取值：
@@ -287,7 +358,8 @@ Item {
     // 2026-10-13：语音对讲中（频谱态）不显示历史面板 —— 频谱区与历史区都在展开态，
     // 同屏会挤，且对讲本身就是临时的。收起频谱后历史照常出来。
     readonly property int histH: (root._expanded && root._history.length > 0 && !root._showActionsNow
-                                  && !root._spectrumActive && !root.mediaIsContent)
+                                  && !root._spectrumActive && !root.mediaIsContent
+                                  && !root.facePanelOn)   // #330：面面板打开时不占位
         ? Math.min(root.histVisibleMax, root._history.length) * 48 + 32
         : 0
     readonly property int actH:  (root._actions.length > 0) ? 34 : 0
@@ -691,12 +763,14 @@ Item {
                 anchors.topMargin: 2
                 text: bridgeRef ? bridgeRef.title : ""
                 color: root.th.fg
-                font.pixelSize: root.exTitlePx
+                // #330：多界面开面时标题**压到 20px 单行** —— 面面板要吃内容区，
+                // 128px 的自适应大字标题会把面板挤成一条缝（2026-10-17 截图实证）。
+                font.pixelSize: root.facesOn ? Math.min(root.exTitlePx, 20) : root.exTitlePx
                 font.weight: Font.Bold
                 minimumPixelSize: root.th.fsTitleXs
                 fontSizeMode: Text.Fit
                 wrapMode: Text.WrapAnywhere
-                maximumLineCount: 3
+                maximumLineCount: root.facesOn ? 1 : 3
                 elide: Text.ElideRight
             }
 
@@ -2032,9 +2106,285 @@ Item {
                     onTriggered: root.submitPhase = 2
                 }
             }
+            // ── 多界面切换器（#330）：展开态右上竖排面签 ──────────────
+            // 位置吃标题右缘的 48px 让位带（exTitle.rightMargin: 48），不压标题；
+            // 每个面签 22×16 单字（概/媒/史/态）—— 教室机 emoji/符号会 tofu，
+            // 面签用汉字是既有纪律（底导航图标同款）。点击切面，当前面高亮。
+            Column {
+                id: faceTabs
+                visible: root.facesOn
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: 2
+                spacing: 4
+
+                Repeater {
+                    model: root.faceModel
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: 22
+                        height: 16
+                        radius: 5
+                        color: root.faceNow === modelData.id
+                               ? root.th.accent
+                               : (root.th.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.10))
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.pixelSize: 10
+                            color: root.faceNow === modelData.id
+                                   ? (root.th.light ? "#FFFFFF" : "#101014")
+                                   : root.th.sub
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: root.face = modelData.id
+                        }
+                    }
+                }
+            }
+
+            // ── 多界面面板（#330）：非概览面满盖内容区 ────────────────
+            // 与 expandedCol 内的行**同父级**（跨父级锚会被 QML 静默丢弃，见
+            // mediaRow 的 2026-10-14 注释）。盖住堆叠内容与历史面板（z 60 > 40），
+            // 低于鲸鱼（z 100）。面板自带不透明底：面切换是"换一屏"，不是叠加。
+            Item {
+                id: facePanel
+                visible: root.facePanelOn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: root.headH
+                anchors.bottom: parent.bottom
+                z: 60
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 12
+                    color: root.th.bg
+                    border.width: 1
+                    border.color: root.th.light ? "#E2E2E2" : "#333333"
+                }
+
+                // ── 面 1：媒体（本机播放优先，其次 VoiceHub 远程广播）──
+                Item {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    visible: root.faceNow === 1
+
+                    SvgIcon {
+                        id: faceMediaIcon
+                        name: "music"
+                        tint: root.th.accent
+                        px: 18
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                    }
+                    // 来源标签：让人一眼分清"本机在播"和"VoiceHub 远程广播"
+                    Text {
+                        anchors.left: faceMediaIcon.right
+                        anchors.leftMargin: 6
+                        anchors.verticalCenter: faceMediaIcon.verticalCenter
+                        text: root.faceUseLocal ? "本机播放" : "VoiceHub"
+                        color: root.th.sub
+                        font.pixelSize: 10
+                    }
+                    Text {
+                        id: faceMediaTitle
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: faceMediaIcon.bottom
+                        anchors.topMargin: 6
+                        text: root.faceTitle || "正在播放"
+                        color: root.th.fg
+                        font.pixelSize: 19
+                        font.weight: Font.Bold
+                        elide: Text.ElideRight
+                        maximumLineCount: 2
+                        wrapMode: Text.WrapAnywhere
+                    }
+                    Text {
+                        id: faceMediaArtist
+                        visible: root.faceArtist !== ""
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: faceMediaTitle.bottom
+                        anchors.topMargin: 2
+                        text: root.faceArtist
+                        color: root.th.sub
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                    }
+                    // 进度条（本地外推值；轨道 4px + 填充按 position/duration）
+                    Rectangle {
+                        id: faceBar
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: faceTime.top
+                        anchors.bottomMargin: 4
+                        height: 4
+                        radius: 2
+                        color: root.th.light ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(1, 1, 1, 0.14)
+                        Rectangle {
+                            width: root.faceDur > 0
+                                   ? Math.max(0, Math.min(1, root.facePos / root.faceDur)) * parent.width
+                                   : 0
+                            height: parent.height
+                            radius: 2
+                            color: root.th.accent
+                        }
+                    }
+                    Text {
+                        id: faceTime
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: faceNextTxt.visible ? faceNextTxt.top : parent.bottom
+                        anchors.bottomMargin: faceNextTxt.visible ? 2 : 0
+                        text: root.faceTimeText()
+                        color: root.th.sub
+                        font.pixelSize: 11
+                    }
+                    Text {
+                        id: faceNextTxt
+                        visible: root.faceNext !== ""
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.rightMargin: 44   // 让位鲸鱼（右下 36px + 余量）
+                        anchors.bottom: parent.bottom
+                        text: "接下来：" + root.faceNext
+                        color: root.th.sub
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                    }
+                }
+
+                // ── 面 2：历史（最多 4 条 + 余量提示）──────────────────
+                // 行版式照搬概览面历史面板（48px 固定行高 + 三行文字 + clip），
+                // 只是把"可滚动"换成"限量展示"——面板高度有限，多了给余量提示。
+                Item {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    visible: root.faceNow === 2
+                    clip: true
+
+                    Column {
+                        id: faceHistCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.rightMargin: 40   // 让位鲸鱼（右下 36px）
+                        anchors.top: parent.top
+                        spacing: 4
+
+                        Repeater {
+                            model: Math.min(4, root._history.length)
+                            delegate: Item {
+                                required property int index
+                                width: faceHistCol.width
+                                height: 48
+                                readonly property var entry: root._history[index] || ({})
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 8
+                                    color: root.th.light ? Qt.rgba(0, 0, 0, 0.04) : Qt.rgba(1, 1, 1, 0.05)
+                                }
+                                SvgIcon {
+                                    id: fhIcon
+                                    name: parent.entry.icon || "bell"
+                                    tint: root.th.sub
+                                    px: 14
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 8
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 6
+                                }
+                                Text {
+                                    id: fhTime
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 8
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 5
+                                    text: parent.entry.timeStr || ""
+                                    color: root.th.sub
+                                    font.pixelSize: 10
+                                }
+                                Text {
+                                    id: fhTitle
+                                    anchors.left: fhIcon.right
+                                    anchors.leftMargin: 6
+                                    anchors.right: fhTime.left
+                                    anchors.rightMargin: 6
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 4
+                                    text: parent.entry.title || ""
+                                    color: root.th.fg
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    anchors.left: fhTitle.left
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 8
+                                    anchors.top: fhTitle.bottom
+                                    anchors.topMargin: 1
+                                    text: parent.entry.desc || ""
+                                    color: root.th.sub
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                        Text {
+                            visible: root._history.length > 4
+                            text: "还有 " + (root._history.length - 4) + " 条（回概览面看完整列表）"
+                            color: root.th.sub
+                            font.pixelSize: 10
+                        }
+                    }
+                }
+
+                // ── 面 3：状态（桥/模块已给的展示态，不新造数据源）──────
+                Item {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    visible: root.faceNow === 3
+
+                    Column {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 8
+                        Repeater {
+                            model: root.faceStatusRows
+                            delegate: Item {
+                                required property var modelData
+                                width: parent.width
+                                height: 22
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.k
+                                    color: root.th.sub
+                                    font.pixelSize: 12
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 90
+                                    horizontalAlignment: Text.AlignRight
+                                    text: modelData.v
+                                    color: root.th.fg
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-
     // ══════════════════════════════════════════════════════════
     // 动作按钮 —— 已抽为 island/IslandActionRow.qml（D 档拆分·第二块）
     // ══════════════════════════════════════════════════════════
@@ -2070,6 +2420,10 @@ Item {
         visible: root._expanded && root._history.length > 0 && !root._showActionsNow
                  && !root._spectrumActive   // 2026-10-13：对讲频谱态不显示历史（见 histH 注释）
                  && !root.mediaIsContent    // 2026-10-15 组件1：媒体占据岛面时让位互动区/弹幕行
+                 // #330：多界面的面面板打开时整个让位 —— z 只在**同一父级**内比较，
+                 // 本面板是根级、面面板在 expandedCol 里 ⇒ 不隐藏就会盖在面面板上
+                 // （2026-10-17 截图实证：面 2 的历史行与旧历史面板交错重叠）。
+                 && !root.facePanelOn
         anchors.left: parent.left
         anchors.leftMargin: root.padH
         anchors.right: parent.right
