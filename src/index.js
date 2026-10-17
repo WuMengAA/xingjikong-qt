@@ -40,6 +40,15 @@ let voiceHubBridge = null;
 /** 上一次下发的状态签名：只在"有/没有内容"真正变化时才推，避免每 30s 空推刷设备。 */
 let voiceHubLastSig = '';
 
+/** 2026-10-18 · 班级点歌凭据（加密库；未配 STE_SONGKEY_SECRET 时为功能禁用态）。 */
+let songKeyStore = null;
+initSongKeyStore((m) => console.log(m));
+songKeyStore = createSongKeyStore({
+  read: readSongKeys,
+  write: writeSongKeys,
+  log: (m) => console.log(m),
+});
+
 /**
  * HTTP 头只允许 latin1。文件名里出现中文/控制字符时，Node 会抛 ERR_INVALID_CHAR
  * 并**终止整个进程**（2026-10-05 实测：一次下载请求就把云端打挂，教室机全体掉线，
@@ -124,6 +133,11 @@ import { latestFor, cmpVersion } from './ota.js';
 // 为什么在云端而不是被控端：60 台教室机各连 VoiceHub = 60 条外网长连接，且教室断网就全瞎。
 // 只读（绝不下发写指令），数据源是公开接口 /api/music/broadcast。
 import { createVoiceHubBridge } from './voicehub-bridge.js';
+// 2026-10-18 · 班级点歌凭据（用户拍板：每台被控端绑定到**班级**，VoiceHub Key 按班级各持一个）。
+// 云端集中托管 + AES-256-GCM 加密落库；**Key 明文绝不下发被控端**，
+// 点歌由云端代发（端上只能"请求"，不能"直接点"）。
+import { createSongKeyStore } from './class-songkey.js';
+import { initSongKeyStore, readSongKeys, writeSongKeys } from './class-songkey-db.js';
 import { parseIncoming, parseFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 import { timingSafeEqual } from 'node:crypto';
 
@@ -459,7 +473,10 @@ const server = http.createServer((req, res) => {
   //    精确相等会把 status 漏在鉴权外面（2026-10-05 实测就是这么漏的，已修）。
   const isAdminApi = u.pathname === '/api/admin/config' || u.pathname === '/api/admin/ota' ||
     u.pathname.startsWith('/api/admin/provision') ||
-    u.pathname.startsWith('/api/admin/cims');
+    u.pathname.startsWith('/api/admin/cims') ||
+    // 2026-10-18 · 班级点歌凭据：能写 Key 等于能冒用该班身份点歌，必须走管理面鉴权。
+    // ⚠️ 用 startsWith 覆盖全部子路由（同上方 provision 的教训：精确相等会漏掉子路由）。
+    u.pathname.startsWith('/api/admin/songkeys');
   const isManageApi =
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
@@ -485,6 +502,48 @@ const server = http.createServer((req, res) => {
     if (isTicket) req.__ticketUid = tver.uid;
     // 2026-10-15（权限契约）：鉴权结果挂到 req，REST 的「返回设备 / 下发指令」路径按 scopes 过滤
     req.__auth = isStatic ? { ok: true, mode: 'token', uid: null } : tver;
+
+  // ── 2026-10-18 · 班级点歌凭据管理（管理面鉴权，见上 isAdminApi）──────────
+  // GET  /api/admin/songkeys            → 清单（**只有 tail，无明文**）
+  // POST /api/admin/songkeys            → { className, apiKey } 设置某班的 VoiceHub Key
+  // POST /api/admin/songkeys/remove     → { className } 删除
+  // ⚠️ 任何响应都**不回明文**；Key 只存在于云端加密库与"代发点歌"的内存里。
+  // ⚠️ 本 handler 不是 async：请求体必须在 'end' 回调里取（与 /api/repairs 同款）。
+  if (u.pathname.startsWith('/api/admin/songkeys')) {
+    const sub = u.pathname.slice('/api/admin/songkeys'.length).replace(/^\/+/, '');
+    if (req.method === 'GET' && sub === '') {
+      return send(200, {
+        ok: true,
+        enabled: !!songKeyStore && songKeyStore.enabled,
+        keys: songKeyStore ? songKeyStore.list() : [],
+        // 没配 STE_SONGKEY_SECRET 时明确说"未启用"，而不是给空清单让人以为没配过
+        ...(songKeyStore && songKeyStore.enabled ? {} : { hint: '未配置 STE_SONGKEY_SECRET（需 ≥16 字符），该功能未启用' }),
+      });
+    }
+    if (req.method === 'POST' && (sub === '' || sub === 'remove')) {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+      req.on('end', () => {
+        let p;
+        try { p = JSON.parse(body || '{}'); }
+        catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+        if (!songKeyStore) return send(503, { ok: false, error: '凭据库未初始化' });
+        const cls = String(p.className || '').trim();
+        if (sub === 'remove') {
+          if (!songKeyStore.remove(cls)) return send(404, { ok: false, error: '该班级没有配置凭据' });
+          pushEvent('info', '班级点歌凭据已删除', { className: cls });
+          return send(200, { ok: true });
+        }
+        const r = songKeyStore.setKey(cls, p.apiKey);
+        if (!r.ok) return send(400, { ok: false, error: r.message || r.error });
+        // 事件里只记 tail，**绝不记 Key 明文**
+        pushEvent('info', '班级点歌凭据已更新', { className: cls, tail: r.tail });
+        return send(200, { ok: true, tail: r.tail });
+      });
+      return undefined;
+    }
+    return send(404, { ok: false, error: '未知的 songkeys 子路由' });
+  }
   }
 
   if (req.method === 'GET' && u.pathname === '/api/devices') {
