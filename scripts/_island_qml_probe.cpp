@@ -408,7 +408,8 @@ int main(int argc, char *argv[])
             expand = true;
             if (faceArg == 1) media = true;                     // 媒体面要有媒体
         }
-        if (a == QLatin1String("--form") && i + 1 < argc)   // #330 形态多样化
+        // #330 形态多样化 + 2026-10-17 补 centered/fullscreen（大卡片两档此前无 QML 版式）
+        if (a == QLatin1String("--form") && i + 1 < argc)
             formArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--out") && i + 1 < argc)
             outPath = QString::fromLocal8Bit(argv[++i]);
@@ -426,10 +427,25 @@ int main(int argc, char *argv[])
         //   mini        有描述 ⇒ 112 方牌（radius 28）
         //   mini-nodesc 无描述 ⇒ 96 正圆（C++ 的 m_desc.isEmpty() 与 QML 的
         //               root._miniOrb 必须同口径，否则"窗口圆、底色方"一眼假）
-        const IslandOverlay::Form f = (formArg == QLatin1String("banner"))
-                                          ? IslandOverlay::Form::Banner
-                                          : IslandOverlay::Form::Mini;
-        if (formArg == QLatin1String("banner")) {
+        IslandOverlay::Form f = IslandOverlay::Form::Mini;
+        if (formArg == QLatin1String("banner"))          f = IslandOverlay::Form::Banner;
+        else if (formArg == QLatin1String("centered"))    f = IslandOverlay::Form::Centered;
+        else if (formArg == QLatin1String("fullscreen"))  f = IslandOverlay::Form::Fullscreen;
+
+        // 2026-10-17 补：centered / fullscreen 这两档此前在 QML 里**没有版式**
+        //（落进胶囊分支 ⇒ 圆角/排版全错），本轮补了 IslandCardFace /
+        // IslandFullscreenFace，探针要能把它们单独拉起来看。
+        if (formArg == QLatin1String("centered")) {
+            isl->showIsland(QStringLiteral("课件已下发"),
+                            QStringLiteral("数学·第三章 二次函数.pdf · 3.2 MB"),
+                            QStringLiteral("download"), 0, f);
+            isl->setSeverity(QStringLiteral("inform"));
+        } else if (formArg == QLatin1String("fullscreen")) {
+            isl->showIsland(QStringLiteral("考试即将开始"),
+                            QStringLiteral("请把与考试无关的物品放到讲台前，桌面只留笔和草稿纸"),
+                            QStringLiteral("bell"), 0, f);
+            isl->setSeverity(QStringLiteral("urgent"));
+        } else if (formArg == QLatin1String("banner")) {
             isl->showIsland(
                 QStringLiteral("全校广播：今天下午 3 点开始消防演练，请各班按指定路线撤离到操场集合，班主任带队"),
                 QStringLiteral("学生处 · 全程保持安静，到操场后按班级列队"),

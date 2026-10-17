@@ -7430,7 +7430,7 @@ int main(int argc, char *argv[])
             });
         }
 
-        // ── #330 形态验证开关（2026-10-17）：STE_QT_ISLAND_DEMO_FORM=banner|mini|mini-nodesc
+        // ── #330 形态验证开关（2026-10-17）：STE_QT_ISLAND_DEMO_FORM=banner|mini|mini-nodesc|centered|fullscreen
         //    → 启动 2.5s 后弹一次该形态，12s 自动收回，并把**落定后**的几何打进日志。
         //    为什么需要它：离屏探针的屏幕是 800×800 且**没有任务栏**，Banner 的
         //    "宽 = 可用宽 − 48" 与 Mini 的"躲开底部任务栏"这两件事只有真机能验。
@@ -7440,10 +7440,26 @@ int main(int argc, char *argv[])
             if (!demoForm.isEmpty()) {
                 QTimer::singleShot(2500, &app, [demoForm] {
                     IslandOverlay *demoIsl = IslandOverlay::instance();
-                    const IslandOverlay::Form f = (demoForm == QStringLiteral("banner"))
-                                                      ? IslandOverlay::Form::Banner
-                                                      : IslandOverlay::Form::Mini;
-                    if (demoForm == QStringLiteral("banner")) {
+                    IslandOverlay::Form f = IslandOverlay::Form::Mini;
+                    if (demoForm == QStringLiteral("banner"))          f = IslandOverlay::Form::Banner;
+                    else if (demoForm == QStringLiteral("centered"))    f = IslandOverlay::Form::Centered;
+                    else if (demoForm == QStringLiteral("fullscreen"))  f = IslandOverlay::Form::Fullscreen;
+
+                    // 2026-10-17：centered / fullscreen 两档此前在 QML 里没有版式
+                    //（落进胶囊分支 ⇒ 圆角/排版全错），补了面之后要能在真机上单独拉起来看。
+                    // centered 用 inform（琥珀顶条 + 琥珀图标），fullscreen 用 urgent（红底）——
+                    // 正好覆盖两条 severity 路径。
+                    if (demoForm == QStringLiteral("centered")) {
+                        demoIsl->showIsland(QStringLiteral("课件已下发"),
+                                            QStringLiteral("数学·第三章 二次函数.pdf · 3.2 MB"),
+                                            QStringLiteral("download"), 12000, f);
+                        demoIsl->setSeverity(QStringLiteral("inform"));
+                    } else if (demoForm == QStringLiteral("fullscreen")) {
+                        demoIsl->showIsland(QStringLiteral("考试即将开始"),
+                                            QStringLiteral("请把与考试无关的物品放到讲台前，桌面只留笔和草稿纸"),
+                                            QStringLiteral("bell"), 12000, f);
+                        demoIsl->setSeverity(QStringLiteral("urgent"));
+                    } else if (demoForm == QStringLiteral("banner")) {
                         demoIsl->showIsland(
                             QStringLiteral("全校广播：今天下午 3 点开始消防演练，请各班按指定路线撤离到操场集合"),
                             QStringLiteral("学生处 · 全程保持安静，到操场后按班级列队"),

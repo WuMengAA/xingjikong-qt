@@ -312,7 +312,9 @@ QRect IslandOverlay::geometryForForm(Form f) const
 {
     QScreen *screen = QGuiApplication::primaryScreen();
     if (!screen) return QRect(0, 0, 200, int(Collapsed));
-    const QRect sg = screen->geometry();
+    // 2026-10-17：本函数**不再用整屏 geometry** —— 五档全部按 availableGeometry 算。
+    //   理由：任务栏在某一侧时，"按整屏居中"会偏心、"按整屏铺满"会压住任务栏。
+    //   （Capsule 走 geometryForContent，它自己处理贴顶 24，与本函数无关。）
 
     if (f == Form::Capsule)
         return geometryForContent(m_expanded ? int(Expanded) : int(Collapsed));
@@ -340,17 +342,25 @@ QRect IslandOverlay::geometryForForm(Form f) const
 
     if (f == Form::Centered) {
         // 屏幕正中的卡片：宽不超过屏宽 40%，高度 200（够放图标+标题+两行描述）
-        const int w = qMin(sg.width() * 2 / 5, 520);
+        // 2026-10-17：改用 **availableGeometry** 居中 —— 任务栏在左/上时，
+        // 按 geometry 算出来的"正中"会偏向任务栏那一侧（本机任务栏在左 48px，
+        // 实测卡片中心比视觉中心偏左 24px，肉眼能看出"没摆正"）。
+        const QRect ag = screen->availableGeometry();
+        const int w = qMin(ag.width() * 2 / 5, 520);
         // 有按钮行时加高，给底部按钮留位（否则描述会和按钮叠在一起）
         const int h = m_actions.isEmpty() ? 200 : 250;
-        return QRect(sg.x() + (sg.width() - w) / 2,
-                     sg.y() + (sg.height() - h) / 2, w, h);
+        return QRect(ag.x() + (ag.width() - w) / 2,
+                     ag.y() + (ag.height() - h) / 2, w, h);
     }
 
     // Fullscreen：铺满主屏，四周留 24px —— ClassIsland 那种"贴边但留一口气"的观感。
     // 留边而不是真全屏，是为了让它明显是"浮层"而不是"桌面换了"，学生不会误以为死机。
+    // 2026-10-17：同样改用 availableGeometry。原来按 geometry 算 ⇒ 在任务栏那侧
+    // 会**压住任务栏**（本机实测 1659x912@(24,24)，左侧 24px 盖在任务栏上），
+    // 老师想点任务栏得先关掉通知 —— "留一口气"就白留了。
+    const QRect agf = screen->availableGeometry();
     const int m = 24;
-    return QRect(sg.x() + m, sg.y() + m, sg.width() - 2 * m, sg.height() - 2 * m);
+    return QRect(agf.x() + m, agf.y() + m, agf.width() - 2 * m, agf.height() - 2 * m);
 }
 
 void IslandOverlay::onFadeFinished()
@@ -1228,6 +1238,60 @@ void IslandOverlay::openInShell()
 // ⚠️ 与胶囊绘制**完全分开**：胶囊那套逻辑是按 56/168px 高、顶部居中的假设写的
 //    （图标在左、标题描述横排），硬塞进全屏会把文字挤到左上角一小块。
 //    这里单独写一条"居中大字"的路径，两边互不干扰。
+/* G2 圆角路径（曲率连续）—— 与 QML 的 `IslandSurface.qml` **同口径**。
+ *
+ * 为什么要有它：`QPainterPath::addRoundedRect` 画的是**圆弧**，曲率在"角 → 直边"
+ * 的接缝处从 1/r 突跳到 0。大圆角/大面积上能看出一道折 —— 这正是用户说的
+ * "通知样式不符合审美"（不是圆角大小，是曲率不连续）。
+ *
+ * 形状：中间直边 + 四角**超椭圆**（|x/a|^n + |y/b|^n = 1 的四分之一段），
+ *       n=5 时观感接近 iOS squircle；n=2 退化成椭圆，n→∞ 变直角。
+ *
+ * ⚠️ 双绘 parity 铁律：superness（5.0）与每角段数（10）必须与 QML 那份保持一致，
+ *    否则 QML 加载失败退回手绘时，同一条通知的角会突然"变形"。
+ * ⚠️ 这是**兜底路径**（paintEvent 在 QML Ready 时直接 return），但它必须与新观感同步 ——
+ *    教室机上 QML 坏掉时，老师看到的就是这一套。 */
+static QPainterPath steG2Path(const QRectF &r, qreal radius, qreal superness = 5.0)
+{
+    QPainterPath path;
+    const qreal rad = qBound<qreal>(0.0, radius, qMin(r.width(), r.height()) / 2.0);
+    if (rad < 0.75) {                     // 太小就别绕圈，直角即可
+        path.addRect(r);
+        return path;
+    }
+    const qreal k = 2.0 / qMax<qreal>(2.0, superness);
+    const qreal x0 = r.left(), y0 = r.top(), x1 = r.right(), y1 = r.bottom();
+    const int N = 10;                     // 每角段数（与 QML 一致）
+    const qreal hp = M_PI / 2.0;
+
+    path.moveTo(x1 - rad, y0);
+    for (int i = 1; i <= N; ++i) {        // 右上角
+        const qreal t = hp * i / N;
+        path.lineTo(x1 - rad + rad * std::pow(std::sin(t), k),
+                    y0 + rad - rad * std::pow(std::cos(t), k));
+    }
+    path.lineTo(x1, y1 - rad);
+    for (int i = 1; i <= N; ++i) {        // 右下角
+        const qreal t = hp * i / N;
+        path.lineTo(x1 - rad + rad * std::pow(std::cos(t), k),
+                    y1 - rad + rad * std::pow(std::sin(t), k));
+    }
+    path.lineTo(x0 + rad, y1);
+    for (int i = 1; i <= N; ++i) {        // 左下角（x 用 sin、y 用 cos：起点要接住底边）
+        const qreal t = hp * i / N;
+        path.lineTo(x0 + rad - rad * std::pow(std::sin(t), k),
+                    y1 - rad + rad * std::pow(std::cos(t), k));
+    }
+    path.lineTo(x0, y0 + rad);
+    for (int i = 1; i <= N; ++i) {        // 左上角
+        const qreal t = hp * i / N;
+        path.lineTo(x0 + rad - rad * std::pow(std::cos(t), k),
+                    y0 + rad - rad * std::pow(std::sin(t), k));
+    }
+    path.closeSubpath();
+    return path;
+}
+
 void IslandOverlay::paintBigForm()
 {
     const bool full = (m_form == Form::Fullscreen);
@@ -1249,8 +1313,8 @@ void IslandOverlay::paintBigForm()
     const QColor fg = m_light ? QColor(10, 10, 10) : QColor(250, 250, 250);
     const QColor sub = m_light ? QColor(90, 90, 90) : QColor(168, 168, 178);
 
-    QPainterPath path;
-    path.addRoundedRect(rect().adjusted(1, 1, -1, -1), full ? 20 : 16, full ? 20 : 16);
+    // 2026-10-17：G2 圆角（与 QML IslandSurface 同口径），原来是 addRoundedRect 的圆弧
+    const QPainterPath path = steG2Path(QRectF(rect()).adjusted(1, 1, -1, -1), full ? 20 : 16);
     p.fillPath(path, bg);
     p.setPen(m_light ? QColor(210, 210, 210, 180) : QColor(70, 70, 70, 180));
     p.drawPath(path);
@@ -1336,8 +1400,7 @@ void IslandOverlay::paintCompactForm()
 
     // 角标无描述 ⇒ 正圆（radius = 半边）；有描述 ⇒ 28 圆角方牌；横幅 ⇒ 20 通栏
     const qreal radius = banner ? 20.0 : (m_desc.isEmpty() ? rect().height() / 2.0 : 28.0);
-    QPainterPath path;
-    path.addRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), radius, radius);
+    const QPainterPath path = steG2Path(QRectF(rect()).adjusted(1, 1, -1, -1), radius);
     p.fillPath(path, bg);
     p.setPen(m_light ? QColor(210, 210, 210, 180) : QColor(70, 70, 70, 180));
     p.drawPath(path);
@@ -1458,9 +1521,8 @@ void IslandOverlay::paintEvent(QPaintEvent *)
     // ── 空闲态：半胶囊 + 横杠箭头 ──
     if (m_idle) {
         // 画得比活动态更淡（也被理解为"半"胶囊）：退到背景里，别抢课件的注意力。
-        QPainterPath ip;
-        ip.addRoundedRect(rect().adjusted(1, 1, -1, -1), rect().height() / 2.0,
-                          rect().height() / 2.0);
+        const QPainterPath ip = steG2Path(QRectF(rect()).adjusted(1, 1, -1, -1),
+                                         rect().height() / 2.0);
         p.fillPath(ip, m_light ? QColor(250, 250, 250, 150)
                                : QColor(20, 20, 20, 140));
         p.setPen(m_light ? QColor(200, 200, 200, 160) : QColor(58, 58, 58, 160));
@@ -1505,8 +1567,7 @@ void IslandOverlay::paintEvent(QPaintEvent *)
     }
 
     // 圆角半透明底（深浅两套），沿用 NotifyWindow 思路：paintEvent 画，不走 QSS。
-    QPainterPath path;
-    path.addRoundedRect(rect().adjusted(1, 1, -1, -1), 24, 24);
+    const QPainterPath path = steG2Path(QRectF(rect()).adjusted(1, 1, -1, -1), 24);
     p.fillPath(path, m_light ? QColor(250, 250, 250, 235)
                             : QColor(20, 20, 20, 225));
     p.setPen(m_light ? QColor(200, 200, 200) : QColor(58, 58, 58));
