@@ -100,6 +100,13 @@ Item {
     readonly property var    _states:     (bridgeRef && bridgeRef.states)  ? bridgeRef.states  : []
     readonly property var    _actions:    (bridgeRef && bridgeRef.actions) ? bridgeRef.actions : []
     readonly property var    _history:    (bridgeRef && bridgeRef.history) ? bridgeRef.history : []
+    // ── 历史记录与逻辑（2026-10-17 · 用户点单）────────────────────────
+    // 未读条数：桥侧算好（C++ 遍历，别在 QML 里 filter —— history 每次 changed 都重算）
+    readonly property int    _unread:     (bridgeRef && bridgeRef.historyUnreadCount) ? bridgeRef.historyUnreadCount : 0
+    // 筛选行是否展开。**默认收起**：历史面板高度预算很紧（展开态要钉住 320），
+    // 加一行 30px 会挤掉一条历史，所以做成"用户主动要才占高"。
+    property bool histFilterOn: false
+    readonly property var    _histCats: ["全部", "指令", "告警", "消息", "系统"]
 
     // ── 文件传输进度（#198，桥 fileTransfer* 属性）──────────
     // ⚠️ 同样是点访问绑定（不是 bridge["x"]），靠 bridge.changed() 一把全 NOTIFY 重读。
@@ -385,7 +392,10 @@ Item {
     readonly property int histH: (root._expanded && root._history.length > 0 && !root._showActionsNow
                                   && !root._spectrumActive && !root.mediaIsContent
                                   && !root.facePanelOn)   // #330：面面板打开时不占位
+        // 2026-10-17：筛选行展开时多占 30px（用户主动开的，接受高度变化；
+        // 收起时预算与旧版完全一致，不回归「历史显示不全」）。
         ? Math.min(root.histVisibleMax, root._history.length) * 48 + 32
+          + (root.histFilterOn ? 30 : 0)
         : 0
     readonly property int actH:  (root._actions.length > 0) ? 34 : 0
     // 文件传输进度条占的额外高度（展开态 + 传输中才给）
@@ -2415,6 +2425,17 @@ Item {
                                     radius: 8
                                     color: root.th.light ? Qt.rgba(0, 0, 0, 0.04) : Qt.rgba(1, 1, 1, 0.05)
                                 }
+                                // 未读小蓝点（2026-10-17）：与概览面历史面板同口径
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 3
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 5
+                                    height: 5
+                                    radius: 2.5
+                                    visible: parent.entry.read !== true
+                                    color: root.th.accent
+                                }
                                 SvgIcon {
                                     id: fhIcon
                                     name: parent.entry.icon || "bell"
@@ -2446,7 +2467,8 @@ Item {
                                     text: parent.entry.title || ""
                                     color: root.th.fg
                                     font.pixelSize: 12
-                                    font.weight: Font.Medium
+                                    // 未读加粗（同概览面）
+                                    font.weight: (parent.entry.read !== true) ? Font.DemiBold : Font.Medium
                                     elide: Text.ElideRight
                                 }
                                 Text {
@@ -2606,41 +2628,77 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: 68
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "(" + root._history.length + ")"
-                    color: root.th.sub
+                    // 2026-10-17：有未读时显示"· N 未读"，比光给总数有用
+                    text: root._unread > 0
+                          ? ("(" + root._history.length + ") · " + root._unread + " 未读")
+                          : ("(" + root._history.length + ")")
+                    color: root._unread > 0 ? root.th.accent : root.th.sub
                     font.pixelSize: 11
                 }
 
-                // 清空按钮（按钮形态）
-                Rectangle {
+                // 工具按钮组：筛选 / 已读 / 清空（右起，自右向左排）
+                Row {
                     anchors.right: parent.right
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    width: clearTxt.implicitWidth + 16
-                    height: 20
-                    radius: height / 2
-                    color: clearMa.pressed
-                        ? (root.th.light ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(1, 1, 1, 0.15))
-                        : (clearMa.containsMouse
-                           ? (root.th.light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.10))
-                           : Qt.rgba(0, 0, 0, 0))
+                    spacing: 5
 
-                    Text {
-                        id: clearTxt
-                        anchors.centerIn: parent
-                        text: "清空"
-                        color: root.th.sub
-                        font.pixelSize: 10
-                    }
+                    Repeater {
+                        // 顺序即显示顺序（左→右）。"已读" 无未读时整颗隐藏。
+                        model: [
+                            { t: "筛选", act: "filter" },
+                            { t: "已读", act: "read"   },
+                            { t: "清空", act: "clear"  }
+                        ]
+                        delegate: Rectangle {
+                            width: btnTxt.implicitWidth + 14
+                            height: 20
+                            radius: height / 2
+                            visible: modelData.act !== "read" || root._unread > 0
+                            // 筛选按钮选中态给底色，一眼看出筛子开着
+                            color: (modelData.act === "filter" && root.histFilterOn)
+                                   ? (root.th.light ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(1, 1, 1, 0.16))
+                                   : (btnMa.pressed
+                                      ? (root.th.light ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(1, 1, 1, 0.15))
+                                      : (btnMa.containsMouse
+                                         ? (root.th.light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.10))
+                                         : Qt.rgba(0, 0, 0, 0)))
 
-                    MouseArea {
-                        id: clearMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (root.bridgeRef && root.bridgeRef.clearHistory)
-                                root.bridgeRef.clearHistory()
+                            Text {
+                                id: btnTxt
+                                anchors.centerIn: parent
+                                text: modelData.t
+                                color: (modelData.act === "filter" && root.histFilterOn)
+                                       ? root.th.fg : root.th.sub
+                                font.pixelSize: 10
+                            }
+
+                            MouseArea {
+                                id: btnMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (!root.bridgeRef) return
+                                    if (modelData.act === "filter") {
+                                        root.histFilterOn = !root.histFilterOn
+                                        // 收起筛选行时把筛子一并清空 —— 否则用户看不到筛子，
+                                        // 列表却还是被过滤的，会以为"历史丢了"。
+                                        if (!root.histFilterOn) {
+                                            if (root.bridgeRef.setHistoryCategoryFilter)
+                                                root.bridgeRef.setHistoryCategoryFilter("")
+                                            if (root.bridgeRef.setHistoryKeyword)
+                                                root.bridgeRef.setHistoryKeyword("")
+                                        }
+                                    } else if (modelData.act === "read") {
+                                        if (root.bridgeRef.markAllHistoryRead)
+                                            root.bridgeRef.markAllHistoryRead()
+                                    } else {
+                                        if (root.bridgeRef.clearHistory)
+                                            root.bridgeRef.clearHistory()
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2655,17 +2713,147 @@ Item {
                 }
             }
 
+            // ── 筛选行（2026-10-17，默认收起）──────────────────────
+            // 左：搜索框（TextInput，被控端没有 QtQuick Controls，不能用 TextField）
+            // 右：分类 chip（全部/指令/告警/消息/系统）
+            Item {
+                id: histFilterRow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: histHeader.bottom
+                height: root.histFilterOn ? 30 : 0   // 收起时**占用归零**（锚链对不可见 item 仍起效）
+                visible: root.histFilterOn
+                clip: true
+
+                // 搜索框
+                // ⚠️ 宽度是算过的：面板宽 304（展开态 332 − 两侧 padH），
+                //    搜索框 92 + 左右 margin 16 = 108，剩 196；
+                //    5 个 chip × (2 字 20 + padding 10) = 150，加 4 段 spacing 16 = 166 < 196，
+                //    不会把最后那个"系统"挤出裁剪区（第一版 118 宽 + padding 14 会溢出 20px）。
+                Rectangle {
+                    id: histSearchBox
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 92
+                    height: 22
+                    radius: 11
+                    color: root.th.light ? Qt.rgba(0, 0, 0, 0.05) : Qt.rgba(1, 1, 1, 0.07)
+                    border.width: 1
+                    border.color: histInput.activeFocus
+                                  ? root.th.accent
+                                  : (root.th.light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.10))
+
+                    TextInput {
+                        id: histInput
+                        anchors.left: parent.left
+                        anchors.leftMargin: 9
+                        anchors.right: parent.right
+                        anchors.rightMargin: 9
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: root.th.fg
+                        font.pixelSize: 11
+                        selectByMouse: true
+                        clip: true
+                        // 输入即筛（C++ 侧过滤，见 island_bridge.h historyKeyword 注释）
+                        onTextChanged: {
+                            if (root.bridgeRef && root.bridgeRef.setHistoryKeyword)
+                                root.bridgeRef.setHistoryKeyword(text)
+                        }
+                        Text {
+                            // placeholder：不用 anchors.fill（会和 verticalCenter 冲突告警），
+                            // 改成与输入框同左同右、垂直居中即可。
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: histInput.text.length === 0 && !histInput.activeFocus
+                            text: "搜索内容"
+                            color: root.th.sub
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                // 分类 chip 行
+                Row {
+                    anchors.left: histSearchBox.right
+                    anchors.leftMargin: 8
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+
+                    Repeater {
+                        model: root._histCats
+                        delegate: Rectangle {
+                            width: catTxt.implicitWidth + 10
+                            height: 20
+                            radius: height / 2
+                            // ⚠️ 属性名不能叫 `on` —— QML 关键字（on<Signal> 语法），
+                            //    用了就是整文件解析失败（岛直接透明）。
+                            readonly property bool selOn: {
+                                const f = root.bridgeRef ? root.bridgeRef.historyCategoryFilter : ""
+                                return (modelData === "全部") ? (f === "" || f === "全部")
+                                                              : (f === modelData)
+                            }
+                            color: selOn
+                                   ? (root.th.light ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(1, 1, 1, 0.18))
+                                   : (catMa.containsMouse
+                                      ? (root.th.light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.10))
+                                      : Qt.rgba(0, 0, 0, 0))
+
+                            Text {
+                                id: catTxt
+                                anchors.centerIn: parent
+                                text: modelData
+                                color: parent.selOn ? root.th.fg : root.th.sub
+                                font.pixelSize: 10
+                            }
+
+                            MouseArea {
+                                id: catMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (root.bridgeRef && root.bridgeRef.setHistoryCategoryFilter)
+                                        root.bridgeRef.setHistoryCategoryFilter(modelData === "全部" ? "" : modelData)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── 列表区 ──────────────────────────────
             ListView {
                 id: historyList
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.top: histHeader.bottom
+                anchors.top: histFilterRow.bottom
                 anchors.bottom: parent.bottom
                 anchors.margins: 2
                 clip: true
                 model: root._history
                 spacing: 2
+
+                // 2026-10-17：按"今天/昨天/M月d日"分段（分组串在 C++ 归档时就算好，
+                // 不让 QML 现算日期 —— 见 island.h HistoryItem 注释）。
+                section.property: "dateGroup"
+                section.delegate: Item {
+                    width: historyList.width
+                    height: 18
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: section
+                        color: root.th.sub
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                }
 
                 delegate: Item {
                     width: historyList.width
@@ -2681,6 +2869,18 @@ Item {
                             ? (root.th.light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.10))
                             : (root.th.light ? Qt.rgba(0, 0, 0, 0.02) : Qt.rgba(1, 1, 1, 0.04))
                         Behavior on color { ColorAnimation { duration: 80 } }
+                    }
+
+                    // 未读小蓝点（设计稿 §4.3：未读项左侧有标记）
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 3
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 5
+                        height: 5
+                        radius: 2.5
+                        visible: modelData.read !== true
+                        color: root.th.accent
                     }
 
                     SvgIcon {
@@ -2705,13 +2905,14 @@ Item {
                         color: root.th.fg
                         // 2026-10-12「字太小」：标题 12→13
                         font.pixelSize: 13
-                        font.weight: Font.Medium
+                        // 未读加粗、已读常规 —— 不用额外图标也能一眼分出
+                        font.weight: (modelData.read !== true) ? Font.DemiBold : Font.Medium
                         elide: Text.ElideRight
                     }
 
                     Text {
                         anchors.left: hTitle.left
-                        anchors.right: parent.right
+                        anchors.right: hCat.left
                         anchors.rightMargin: 6
                         anchors.top: hTitle.bottom
                         text: modelData.desc || ""
@@ -2721,6 +2922,20 @@ Item {
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
                         elide: Text.ElideRight
+                    }
+
+                    // 分类标签（2026-10-17）：只在描述行右侧，占位很小
+                    Text {
+                        id: hCat
+                        anchors.right: hTime.right
+                        anchors.top: hTitle.bottom
+                        anchors.topMargin: 2
+                        text: modelData.category || ""
+                        color: (modelData.level === "error") ? "#e5484d"
+                               : (modelData.level === "warning") ? "#f5a623"
+                               : root.th.sub
+                        font.pixelSize: 10
+                        opacity: 0.85
                     }
 
                     Text {
@@ -2741,7 +2956,13 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            if (root.bridgeRef && root.bridgeRef.showHistoryItem)
+                            // 2026-10-17：改按 **id** 打开。原来的 index 是"当前显示序"，
+                            // 加了筛选后同一 index 指向的条目会变（筛掉几条就整体前移），
+                            // 用 id 才不会"点第 2 条开第 4 条"。旧接口保留兼容。
+                            if (!root.bridgeRef) return
+                            if (root.bridgeRef.showHistoryById && modelData.id)
+                                root.bridgeRef.showHistoryById(modelData.id)
+                            else if (root.bridgeRef.showHistoryItem)
                                 root.bridgeRef.showHistoryItem(index)
                         }
                     }
