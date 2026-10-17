@@ -6414,6 +6414,10 @@ void handleControlText(const QString &text)
     const bool isV1 = o.contains(QStringLiteral("v"));
     const QJsonObject pay = isV1 ? o.value(QStringLiteral("payload")).toObject() : o;
     const QString type = o.value(QStringLiteral("type")).toString();
+    // 2026-10-17 诊断（H264 0 帧：answer 到不了 agent）：所有消息 type 入口日志，
+    // 确认 rtc-answer/rtc-ice 到底进没进本机 WS（6508/6518 分支在 6698 日志点之前 return）
+    if (type.startsWith(QLatin1String("rtc-")))
+        qWarning("[agent-qt] 入口收到 rtc 消息 type=%s len=%d", qPrintable(type), text.size());
     // id 在 v1 里是信封顶层的字符串，旧格式里是顶层的数字；回执要原样带回，云端靠它配对
     const QString id = isV1 ? o.value(QStringLiteral("id")).toString()
                             : QString::number((qint64)o.value(QStringLiteral("id")).toDouble());
@@ -6508,6 +6512,9 @@ void handleControlText(const QString &text)
     if (type == QStringLiteral("rtc-answer")) {
         // 2026-10-09 ldc 路：answer 喂 libdatachannel（非 ldc 路走旧 rtcFeedSignal）
         if (qgetenv("STE_USE_LDC_RTC") != "0") {
+            qWarning("[rtc] 分发 rtc-answer 给 ldc（sdp=%d 字节，uid=%s）",
+                     pay.value(QStringLiteral("sdp")).toString().size(),
+                     qPrintable(pay.value(QStringLiteral("uid")).toString()));
             LdcStreamer::instance().onSignal(QStringLiteral("answer"),
                                              pay.value(QStringLiteral("sdp")).toString().toUtf8());
         } else {

@@ -85,8 +85,15 @@ private:
     // libdatachannel 对象是 shared_ptr 语义（enable_shared_from_this），
     // 必须用 shared_ptr 持有，裸 new 后无持有者会立即析构（0xC0000005）
     std::shared_ptr<void> m_pc;   // rtc::PeerConnection*
+    // ⚠️ 2026-10-17（H264 0 帧根因）：libdatachannel 的 mTracks 存 **weak_ptr**，
+    //    addTrack() 返回的 shared_ptr 是 track 的唯一持有者 —— start() 里局部变量
+    //    析构 → track 销毁 → 触发 "negotiation needed to remove track" renegotiation
+    //    → 协商破坏 → 0 帧。必须用成员 shared_ptr 持住 track 生命周期。
+    std::shared_ptr<void> m_trackHold;    // rtc::Track*（screen 轨唯一持有者）
+    std::shared_ptr<void> m_camTrackHold; // rtc::Track*（camera 轨唯一持有者）
+    std::shared_ptr<void> m_dcHold;       // rtc::DataChannel*（唯一持有者）
     QMutex m_mu;                  // 保护 m_track/m_dc/m_pc（回调线程 vs 主线程）
-    void *m_track = nullptr;      // rtc::Track*（screen 轨；由 PC 持有生命周期）
+    void *m_track = nullptr;      // rtc::Track*（screen 轨，指向 m_trackHold 同对象）
     void *m_dc = nullptr;         // rtc::DataChannel*（同上）
     bool m_offerSent = false;     // 首个 offer 已发出（只发一次）
     QTimer m_capture;

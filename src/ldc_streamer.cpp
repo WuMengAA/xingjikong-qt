@@ -47,10 +47,14 @@ LdcStreamer::LdcStreamer(QObject *parent) : QObject(parent)
 void LdcStreamer::onSignal(const QString &type, const QByteArray &payload)
 {
     auto *pc = static_cast<rtc::PeerConnection *>(m_pc.get());
+    qWarning("[rtc-ldc] onSignal type=%s pc=%p m_pcNull=%d", qPrintable(type), (void*)pc, (int)(m_pc == nullptr));
     if (!pc) return;
     if (type == QLatin1String("answer")) {
+        // 2026-10-17 诊断：确认 agent 到底收没收到 answer（H264 0 帧根因链）
+        qInfo("[rtc-ldc] 收到 answer（%d 字节）→ setRemoteDescription", payload.size());
         try {
             pc->setRemoteDescription(rtc::Description(payload.constData(), "answer"));
+            qInfo("[rtc-ldc] setRemoteDescription(answer) 成功，signalingState=%d", int(pc->signalingState()));
         } catch (const std::exception &e) {
             emit failed(QStringLiteral("setRemoteDescription(answer): %1").arg(QString::fromLocal8Bit(e.what())));
         }
@@ -118,6 +122,20 @@ void LdcStreamer::start(int captureMs)
             }
         });
         pc->onStateChange([this](rtc::PeerConnection::State st) {
+            // 2026-10-17 取证补强（#171）：原来只在 Failed 时打日志 ⇒ "究竟连没连上"
+            // 在日志里是空白，只能靠"帧还在走 WS"反推。状态机每个跃迁都记一行，
+            // 下次真机排障一眼可判（Connected 出现 = RTC 真通了，不用猜）。
+            // ⚠️ 不用数组下标映射：State 的底层值是 C API 的 RTC_* 宏，不保证连续 0..5。
+            const char *stName = "?";
+            switch (st) {
+            case rtc::PeerConnection::State::New:          stName = "New"; break;
+            case rtc::PeerConnection::State::Connecting:   stName = "Connecting"; break;
+            case rtc::PeerConnection::State::Connected:    stName = "Connected"; break;
+            case rtc::PeerConnection::State::Disconnected: stName = "Disconnected"; break;
+            case rtc::PeerConnection::State::Failed:       stName = "Failed"; break;
+            case rtc::PeerConnection::State::Closed:       stName = "Closed"; break;
+            }
+            qInfo("[rtc-ldc] PeerConnection 状态 → %s", stName);
             const bool conn = st == rtc::PeerConnection::State::Connected;
             if (conn != m_connected.load()) {
                 m_connected.store(conn);
@@ -128,27 +146,47 @@ void LdcStreamer::start(int captureMs)
         });
 
         // 视频 track：SendOnly H264（与现有 SDP 媒体线同构）
+        // ⚠️ 2026-10-17 修（H264 0 帧**最终根因**）：Description::Media 必须 addSSRC！
+        //    与官方 examples/streamer/addVideo 对齐：addH264Codec + addSSRC 是一对，
+        //    缺 addSSRC → offer SDP 的 media 没有 "a=ssrc:42" → answer/接收端
+        //    updateTrackSsrcCache 无法建立 mTracksBySsrc[42] 映射 → forwardMedia 收到
+        //    SSRC=42 的 RTP 时 find 失败 → 帧静默丢弃 → 发送端 isOpen=1 推得欢、
+        //    接收端 onFrame 永远 0 帧。沙箱 ws_answer_h264 全程 onFrame=0 实锤。
         rtc::Description::Video media("screen", rtc::Description::Direction::SendOnly);
         media.addH264Codec(96);
+        media.addSSRC(42, "stelarith", "screen", "screen");   // 必须：SSRC 进 SDP
         auto trk = pc->addTrack(media);
         // H264RtpPacketizer（2026-10-16）：track->send(H264 帧) 自动打成 RTP
         // （分片/seq/marker 全自动）；timestamp 在 sendH264Frame 每帧递增。
         m_rtpCfg = std::make_shared<rtc::RtpPacketizationConfig>(
             42, "stelarith", 96, rtc::H264RtpPacketizer::ClockRate);
-        trk->setMediaHandler(std::make_shared<rtc::H264RtpPacketizer>(
+        // 2026-10-17：补 RtcpSrReporter（官方 addVideo 同款）——回流 SR（Sender Report），
+        // 接收端的 RtcpReceivingSession 靠它做 RTP/时钟同步与往返延迟；没有 SR 时
+        // 接收端重排序/丢包判定理论仍可工作，但与官方链路的完整性有差距，一并补齐。
+        auto srReporter = std::make_shared<rtc::RtcpSrReporter>(
+            std::static_pointer_cast<rtc::RtpPacketizationConfig>(m_rtpCfg));
+        auto packetizer = std::make_shared<rtc::H264RtpPacketizer>(
             rtc::NalUnit::Separator::StartSequence,
-            std::static_pointer_cast<rtc::RtpPacketizationConfig>(m_rtpCfg)));
+            std::static_pointer_cast<rtc::RtpPacketizationConfig>(m_rtpCfg));
+        packetizer->addToChain(srReporter);
+        trk->setMediaHandler(packetizer);
         // 摄像头 track（"camera"）：与屏幕同一 PC，随首个 offer 一起协商（不额外 renegotiate）。
         // ⚠️ 只建轨、不推帧——摄像头帧要等管理端按需 startCamera() 才发（隐私红线：不看不采）。
         //    用不同 payload type（97）避免与屏幕轨的 96 在 SDP 里撞车。
         rtc::Description::Video camMedia("camera", rtc::Description::Direction::SendOnly);
         camMedia.addH264Codec(97);
+        camMedia.addSSRC(43, "stelarith-cam", "camera", "camera");  // 2026-10-17：同修（SSRC 进 SDP）
         auto camTrk = pc->addTrack(camMedia);
         {
             QMutexLocker lock(&m_mu);
+            // ⚠️ 2026-10-17：mTracks 是 weak_ptr，必须用成员 shared_ptr 持住 track，
+            //    否则局部 trk 析构 → track 销毁 → remove renegotiation（见 h 注释）。
+            m_trackHold = trk;
+            m_camTrackHold = camTrk;
+            m_dcHold = pc->createDataChannel("rtc");
             m_track = trk.get();
             m_camTrack = camTrk.get();
-            m_dc = pc->createDataChannel("rtc").get();
+            m_dc = static_cast<rtc::DataChannel *>(m_dcHold.get());
             m_pc = pc;
         }
         // offer 发起方：下一轮事件循环再 setLocalDescription —— 让 negotiationNeeded
@@ -173,8 +211,19 @@ void LdcStreamer::start(int captureMs)
     }
 
     if (m_active) {
+        qWarning("[rtc-ldc] 诊断：if(m_active) 进入，m_captureMs=%d，start m_capture+ffmpeg", m_captureMs);
         m_capture.start(qMax(50, m_captureMs));
         startFfmpeg();        // 2026-10-16：起 ffmpeg libx264 编码器（屏幕 → H264）
+        // 2026-10-17 诊断：QTimer 疑似不触发，主动连推 10 帧验证 ffmpeg→track 链路
+        for (int i = 0; i < 10; ++i) {
+            QTimer::singleShot(300 + i * 100, this, [this]() {
+                qWarning("[rtc-ldc] 诊断：主动 captureAndSend #");
+                captureAndSend();
+            });
+        }
+        qWarning("[rtc-ldc] 诊断：10 次 singleShot 已注册");
+    } else {
+        qWarning("[rtc-ldc] 诊断：if(m_active) 未进入（m_active=%d）", (int)m_active);
     }
 }
 
@@ -188,9 +237,33 @@ void LdcStreamer::renegotiate()
     QTimer::singleShot(0, this, [this]() {
         auto *p = static_cast<rtc::PeerConnection *>(m_pc.get());
         if (!p) { qWarning("[rtc-ldc] renegotiate：PC 在单次回调前已销毁"); return; }
+        // ── 2026-10-17 修 #171（新订阅者拿不到 offer）─────────────────────
+        // 这是**两层**坑，只修表面那层没用，两层都得治：
+        //
+        // ① 原代码调的是无参 setLocalDescription()，形参默认 Description::Type::Unspec。
+        //    库内部会按 signaling state 猜类型（peerconnection.cpp:99），Stable 时猜
+        //    Offer → 所以**第一个**订阅者能拿到 offer，这是 bug 一直没被发现的原因。
+        //
+        // ② 真正致命的是 signaling state：第一次 offer 发出去后没收到 answer 时，
+        //    state 停在 HaveLocalOffer。此时再 setLocalDescription(Offer)，库走进
+        //    peerconnection.cpp:132 的 default 分支：
+        //        "Unexpected local description in signaling state X, ignoring"
+        //    只打一条 WARNING 就 return —— 不抛异常、不建 offer、不回调。
+        //    生产日志实证：两次「已在推流，重新协商」之后，一条 kind=offer 都没有。
+        //
+        // 所以：**先把悬着的 offer 回滚到 Stable，再显式要一个 Offer**。
+        // 回滚会重置本次协商（对已经连上的订阅者等于重新协商，属预期行为）；
+        // 若 state 本来就是 Stable（首个 answer 已回），跳过回滚直接生成新 offer。
         try {
-            p->setLocalDescription();   // 同一条 SDP 媒体线重新协商 → 新 offer
-            qInfo("[rtc-ldc] renegotiate：重新 setLocalDescription（新订阅者拿 offer）");
+            const auto sig = p->signalingState();
+            if (sig == rtc::PeerConnection::SignalingState::HaveLocalOffer
+                || sig == rtc::PeerConnection::SignalingState::HaveLocalPranswer) {
+                p->setLocalDescription(rtc::Description::Type::Rollback);
+                qInfo("[rtc-ldc] renegotiate：signaling state=%d → 先 Rollback 回 Stable",
+                      int(sig));
+            }
+            p->setLocalDescription(rtc::Description::Type::Offer);
+            qInfo("[rtc-ldc] renegotiate：已请求重新生成 offer（显式 Type::Offer，等回调）");
         } catch (const std::exception &e) {
             qWarning("[rtc-ldc] FAIL renegotiate: %s", e.what());
             emit failed(QStringLiteral("renegotiate: %1").arg(QString::fromLocal8Bit(e.what())));
@@ -218,6 +291,9 @@ void LdcStreamer::stop()
         // 引用计数自然归零才安全析构（PC 由 m_pc 持有，重置即释放所有权）。
         try { pc->close(); } catch (...) {}
         m_pc.reset();
+        m_trackHold.reset();      // 2026-10-17：释放 track/dc 唯一持有者（PC 已 close）
+        m_camTrackHold.reset();
+        m_dcHold.reset();
         m_track = nullptr;
         m_camTrack = nullptr;
         m_dc = nullptr;
@@ -234,6 +310,15 @@ void LdcStreamer::stop()
 // ffmpeg 复用被控端已有依赖（camera 也在用），libx264 软件编码跨机最稳（不挑 GPU）。
 void LdcStreamer::captureAndSend()
 {
+    // 2026-10-17 诊断（STE_LDC_LOG=1）：无条件前 5 次打，定位 0 帧被哪层拦
+    if (qgetenv("STE_LDC_LOG") == "1") {
+        static long s_capLog = 0;
+        if (++s_capLog <= 5)
+            qWarning("[rtc-ldc] 诊断：captureAndSend 入口 m_active=%d m_connected=%d m_pc=%d m_ffmpeg=%d/%d",
+                     (int)m_active, (int)m_connected.load(), (int)(m_pc != nullptr),
+                     (int)(m_ffmpeg != nullptr),
+                     (int)(m_ffmpeg ? m_ffmpeg->state() : -1));
+    }
     if (!m_active || !m_connected.load() || !m_pc) return;
     if (!m_ffmpeg || m_ffmpeg->state() != QProcess::Running) return;   // 编码器没起来就等
     // ⚠️ 2026-10-17 修（真机「图片/语音/文件传输异常缓慢 + 语音断续」根因）：
@@ -249,7 +334,15 @@ void LdcStreamer::captureAndSend()
     if (!track) return;
     bool open = false;
     try { open = track->isOpen(); } catch (...) { open = false; }
-    if (!open) return;
+    if (!open) {
+        // 2026-10-17 诊断（STE_LDC_LOG=1 时每 100 tick 打一次，防刷屏）：
+        // RTC 全通但 0 帧 → 查 sendonly 本端轨的 isOpen 是不是恒 false
+        static int s_idleLog = 0;
+        if (qgetenv("STE_LDC_LOG") == "1" && (++s_idleLog % 100 == 1))
+            qWarning("[rtc-ldc] 诊断：track isOpen=false（m_connected=%d），H264 未推流",
+                     m_connected.load());
+        return;
+    }
 
     QPixmap pm = m_screen ? m_screen->grabWindow(0) : QPixmap();
     if (pm.isNull()) return;
@@ -375,6 +468,13 @@ void LdcStreamer::sendH264Frame(const QByteArray &frame)
     if (!track) return;
     bool open = false;
     try { open = track->isOpen(); } catch (...) { open = false; }
+    // 2026-10-17 诊断（STE_LDC_LOG=1）：sendH264Frame 被调 + isOpen 状态
+    if (qgetenv("STE_LDC_LOG") == "1") {
+        static long s_diag = 0;
+        if (++s_diag <= 10 || s_diag % 50 == 0)
+            qWarning("[rtc-ldc] 诊断：sendH264Frame 被调 #%ld，frame=%lldB，isOpen=%d",
+                     s_diag, (long long)frame.size(), (int)open);
+    }
     if (!open) return;
     // 更新 RTP timestamp（90kHz）：按实际帧间隔递增，接收端才能按帧重组
     if (m_rtpCfg) {
