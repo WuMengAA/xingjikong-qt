@@ -24,6 +24,12 @@
 // ⚠️ 本文件的**公开接口一个字符都没改**（12 个方法 + 1 个信号），
 //    所以 main.cpp 的 5 处调用点 + notifyFromParams 全都零改动。
 //    这是本次改造最重要的风险控制点 —— 任何需要改 main.cpp 的方案都视为越界。
+// ── 2026-10-17 更正：上面那条纪律是**当时的**约束，不再是全时段铁律。
+//    此后公开接口有以下**纯增量**变化（只加不改，老调用点零改动）：
+//      · 2026-10-15：setQmlObjectProperty（模块联动）、setMediaSession 等 P3/组件接口
+//      · 2026-10-17 P0-0：setNoticeTimeForNext（插件通知的发生时刻，一次性注入）
+//    仍然成立的纪律：**既有签名不许改**、**行为不许悄悄变**；
+//    新增接口一律「不调用即零影响」。
 
 #ifndef STELARITH_ISLAND_H
 #define STELARITH_ISLAND_H
@@ -102,6 +108,25 @@ public:
     //    （10:00 弹出、10:30 被顶掉 ⇒ 历史记 10:30；23:59 弹出、00:03 顶掉
     //     还会被分到第二天的「今天」组）。现改为 showIsland 落点 m_shownTs。
     qint64 noticeTs() const { return m_shownTs; }
+
+    // ── 沙箱验证设施（2026-10-17 P0-0）：岛状态快照 / 立即归档 ──────────────────
+    // 为什么需要：P0-0 的端到端断言要回答"插件推的这一条**这个进程的岛到底收没收到**"。
+    //   · 截图不行：岛是独立置顶窗，同机并存的生产实例也开着 26789 插件口，截到的可能是它；
+    //   · 历史文件不够：只在"被顶掉/收回空闲"时才写盘 —— 长文案通知（本批主要测的长标题）
+    //     在 idleEnabled=false 下根本走不到归档路径，文件可以一直不更新（本轮实测如此）。
+    //   historySnapshotJson()：走**桥的 history() 同一套组装**导出历史快照（JSON 文本，只读）；
+    //   archiveNow()         ：立刻把当前内容归档（archiveToHistory 同一套分类/去重，会写盘）。
+    // 两者都**不改变任何默认行为**：没人调用 = 与改动前完全一致。
+    QString historySnapshotJson() const;
+    void archiveNow();
+
+
+    // P0-0（2026-10-17）：给**下一条** showIsland 指定"发生时刻"（毫秒，Unix epoch）。
+    // 存在的理由：插件推的通知在它调用的那一刻就该有时间戳；由 agent 处理那一刻兜底
+    // 会让忙时（帧解码/OTA 下载同时进行）的通知时间晚几百毫秒，跨整分钟就显示错。
+    // ⚠️ 一次性：showIsland 消费后清零；**不调用**则行为与以前完全一致（走 currentSecsSinceEpoch）。
+    // ⚠️ 只设正数；<=0 视为"清除"，不会让下一条通知变成 1970 年。
+    void setNoticeTimeForNext(qint64 atMs) { m_noticeHintMs = atMs > 0 ? atMs : 0; }
 
     // 时间文本格式化（唯一口径；归档与 bridge 组装共用这三个函数，别各写一套）
     //   timeStr  = HH:mm —— 概览面历史面板有日期分组，行内再带日期是冗余；
@@ -314,6 +339,9 @@ private:
     // 当前这条通知**出现**的 Unix 秒（0=无通知）。见 public 区 noticeTs() 的说明：
     // 历史 ts 用它，而不是"归档那一刻"。
     qint64 m_shownTs = 0;
+    // P0-0（2026-10-17）：「下一条通知的发生时刻」一次性注入位（毫秒，0=无）。
+    // 插件边界用它把"插件调用那一刻"带进来；showIsland 消费后立刻清零。
+    qint64 m_noticeHintMs = 0;
     static constexpr int kSpectrumBands = 16;   // §6.3 语音频谱带数（QML 按 bands 长度渲染）
     // 2026-10-13（用户「每条消息保存时间为一周，一周后清除历史」）：超过 7 天的历史
     // 在加载/归档时剔除（loadHistory 与 archiveToHistory 都过一遍 pruneHistory）。

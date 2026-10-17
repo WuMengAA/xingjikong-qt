@@ -74,6 +74,8 @@ class AgentUi : public QObject
     Q_PROPERTY(bool noiseEnabled    READ noiseEnabled    WRITE setNoiseEnabled    NOTIFY infoChanged)
     Q_PROPERTY(bool islandIdle      READ islandIdle      WRITE setIslandIdle      NOTIFY infoChanged)
     Q_PROPERTY(bool lightMode       READ lightMode       WRITE setLightMode       NOTIFY infoChanged)
+    // P0-0（2026-10-17）：允许第三方（插件）向灵动岛推送。默认 true（见 main.cpp AgentSettings 注释）。
+    Q_PROPERTY(bool pluginIslandPush READ pluginIslandPush WRITE setPluginIslandPush NOTIFY infoChanged)
     Q_PROPERTY(bool autostart       READ autostart       WRITE setAutostart       NOTIFY infoChanged)
     Q_PROPERTY(bool desktopShortcut READ desktopShortcut WRITE setDesktopShortcut NOTIFY infoChanged)
 
@@ -101,6 +103,7 @@ public:
     bool noiseEnabled() const { return m_noiseEnabled; }
     bool islandIdle() const { return m_islandIdle; }
     bool lightMode() const { return m_lightMode; }
+    bool pluginIslandPush() const { return m_pluginIslandPush; }
     bool autostart() const { return m_autostart; }
     bool desktopShortcut() const { return m_desktopShortcut; }
     QVariantList selfCheckItems() const { return m_selfCheckItems; }
@@ -118,6 +121,7 @@ public:
     void setNoiseEnabled(bool v)    { if (m_noiseEnabled == v) return;    m_noiseEnabled = v;    emit infoChanged(); emit switchChanged(QStringLiteral("noiseEnabled"), v); }
     void setIslandIdle(bool v)      { if (m_islandIdle == v) return;      m_islandIdle = v;      emit infoChanged(); emit switchChanged(QStringLiteral("islandIdle"), v); }
     void setLightMode(bool v)       { if (m_lightMode == v) return;       m_lightMode = v;       emit infoChanged(); emit switchChanged(QStringLiteral("lightMode"), v); }
+    void setPluginIslandPush(bool v) { if (m_pluginIslandPush == v) return; m_pluginIslandPush = v; emit infoChanged(); emit switchChanged(QStringLiteral("pluginIslandPush"), v); }
     void setAutostart(bool v)       { if (m_autostart == v) return;       m_autostart = v;       emit infoChanged(); emit switchChanged(QStringLiteral("autostart"), v); }
     void setDesktopShortcut(bool v) { if (m_desktopShortcut == v) return; m_desktopShortcut = v; emit infoChanged(); emit switchChanged(QStringLiteral("desktopShortcut"), v); }
     void setPlayScheduleEnabled(bool v) { if (m_playScheduleEnabled == v) return; m_playScheduleEnabled = v; emit infoChanged(); emit switchChanged(QStringLiteral("playScheduleEnabled"), v); }
@@ -179,6 +183,7 @@ private:
     bool m_hasNewer = false, m_canUpgrade = false, m_otaPaused = false;
     bool m_notifyEnabled = true, m_voiceEnabled = true, m_noiseEnabled = true;
     bool m_islandIdle = true, m_lightMode = false, m_autostart = false, m_desktopShortcut = false;
+    bool m_pluginIslandPush = true;   // P0-0：与 main.cpp AgentSettings::pluginIslandPush() 默认同值
     // ── A-3 第二批 ──
     QVariantList m_selfCheckItems, m_plugins, m_modules;
     QString m_noiseLogText, m_studyLogText, m_playWindowsText, m_playStateText;

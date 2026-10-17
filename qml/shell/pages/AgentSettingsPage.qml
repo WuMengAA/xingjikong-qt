@@ -255,6 +255,19 @@ Item {
                         checked: agentUi.islandIdle
                         onToggled: function (v) { agentUi.islandIdle = v }
                     }
+                    // P0-0（2026-10-17 · 灵动岛第三方推岛治理）：
+                    // 插件经本地 WS 调 island_show / notify 时，先问这个开关。
+                    // 关掉 = 插件推的提示一律不显示（静默丢弃 + 计数，插件侧收到 dropped）。
+                    // ⚠️ 只管**插件**；管理端下发的通知、本机课表/对讲/文件提示不受影响。
+                    M.Md3SwitchRow {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        md3: page.tok
+                        text: "允许第三方推送灵动岛"
+                        supporting: "插件推的通知带 [插件名] 前缀；限 5 条/秒、标题 120 字"
+                        checked: agentUi.pluginIslandPush
+                        onToggled: function (v) { agentUi.pluginIslandPush = v }
+                    }
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right

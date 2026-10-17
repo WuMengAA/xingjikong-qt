@@ -409,6 +409,16 @@ namespace AgentSettings {
     static bool lightMode()     { return QSettings().value(QStringLiteral("ui/lightMode"), false).toBool(); }
     static void setLightMode(bool v) { QSettings().setValue(QStringLiteral("ui/lightMode"), v); }
 
+    // ── P0-0（2026-10-17 · 灵动岛第三方推岛治理）─────────────────────────────
+    // 「允许第三方（插件）向灵动岛推送」。默认**开**：与既有能力保持一致 ——
+    // 插件通道上线以来 island_show 一直是放行的，默认关会让已装插件一夜之间"静默失效"，
+    // 那属于行为回归而不是治理。治理靠的是 pluginhost 里的长度/频率/来源/紧急档四道约束，
+    // 这个开关是老师侧的"一键掐断"，不是默认态。
+    // 键名 feature/pluginIslandPush；**键名是门禁契约**（shared-qml/scripts/test-plugin-island-gate.mjs
+    // 会核对 key/默认值/接线三处一致）。
+    static bool pluginIslandPush() { return QSettings().value(QStringLiteral("feature/pluginIslandPush"), true).toBool(); }
+    static void setPluginIslandPush(bool v) { QSettings().setValue(QStringLiteral("feature/pluginIslandPush"), v); }
+
     // ── P3 播放时段管理：允许的播放时段窗口（本地时 "HH:MM-HH:MM"）──
     // 默认关闭 = 随时可播（不限制）；开启后只有落在窗口内才允许 media_session_start。
     static bool playScheduleEnabled() { return QSettings().value(QStringLiteral("play/scheduleEnabled"), false).toBool(); }
@@ -3356,6 +3366,17 @@ static void islandShow(const QString &title, const QString &desc = QString(),
     // 交互态（可点）清掉旧的 openPath，免得下一条提示点一下去翻上一份文件。
     isl->setInteractive(interactive);
     isl->showIsland(title, desc, icon, ms, form, fromAdmin);
+}
+
+// 同上的「带发生时刻」版本（P0-0 · 2026-10-17 插件边界）：插件推的通知在它**调用那一刻**
+// 就该有 ts，而不是 agent 处理那一刻（忙时可能差几百毫秒，跨整分钟就会让历史显示错 1 分钟）。
+// ⚠️ 复用 IslandOverlay 的「下一条通知发生时刻」一次性注入位（m_noticeHintMs，setNoticeTimeForNext）：
+//    showIsland 会读它并清零——所以必须紧贴着每次 showIsland 设置，不能提前设。
+static void islandShowAt(const QString &title, const QString &desc, const QString &icon,
+                         int ms, IslandOverlay::Form form, bool fromAdmin, qint64 noticeAtMs)
+{
+    IslandOverlay::instance()->setNoticeTimeForNext(noticeAtMs);
+    islandShow(title, desc, icon, ms, false, QString(), form, fromAdmin);
 }
 
 // 托盘气泡兜底：灵动岛是贴桌面顶层的胶囊，被控端缩进托盘 / 教室投影投在别处 /
@@ -6977,6 +6998,7 @@ void agentUiFill(AgentUi *ui)
     ui->m_noiseEnabled    = AgentSettings::noiseEnabled();
     ui->m_islandIdle      = AgentSettings::islandIdle();
     ui->m_lightMode       = AgentSettings::lightMode();
+    ui->m_pluginIslandPush = AgentSettings::pluginIslandPush();   // P0-0：第三方推岛开关
     ui->m_autostart       = agentAutostartEnabled();
     ui->m_desktopShortcut = agentDesktopShortcutExists();
 
@@ -7020,6 +7042,11 @@ void agentUiWire(AgentUi *ui)
         } else if (key == QLatin1String("lightMode")) {
             AgentSettings::setLightMode(v);
             if (IslandOverlay::instance()) IslandOverlay::instance()->setLightMode(v);
+        } else if (key == QLatin1String("pluginIslandPush")) {
+            // P0-0：只落 QSettings —— pluginhost 每次推岛都现问 AgentSettings（没有缓存），
+            // 所以下一次插件推岛即生效，不需要在这里通知宿主。
+            AgentSettings::setPluginIslandPush(v);
+            qInfo("[agent-shell] 第三方推岛开关 → %s", v ? "开" : "关");
         } else if (key == QLatin1String("autostart")) {
             if (!agentSetAutostart(v))
                 qWarning("[agent-shell] 开机自启没改成（多半 UAC 被拒）—— 界面将回弹真实状态");
@@ -7787,6 +7814,20 @@ int main(int argc, char *argv[])
                    (IslandOverlay::Form)form, fromAdmin);
     };
     api.notify = [](const QJsonObject &params) { notifyFromParams(params); };
+    // P0-0（2026-10-17）：插件推的通知用「插件调用那一刻」当发生时刻（见 islandShowAt）。
+    // 传进来的 title 已带「[插件名] 」前缀、长度与频率已由 PluginHost::handleIslandShow 治理过；
+    // fromAdmin 恒 false —— 插件不是管理端，历史排序不能被它污染。
+    api.islandShowAt = [](const QString &title, const QString &desc, const QString &icon,
+                          int form, bool fromAdmin, int durationMs, qint64 noticeAtMs) {
+        // form 越界（插件给 7、-1 之类）一律回落胶囊，别让 std::function 里出现非法枚举值。
+        const auto f = (form >= int(IslandOverlay::Form::Capsule) && form <= int(IslandOverlay::Form::Mini))
+            ? static_cast<IslandOverlay::Form>(form) : IslandOverlay::Form::Capsule;
+        islandShowAt(title, desc, icon, durationMs, f, fromAdmin, noticeAtMs);
+    };
+    // 第三方推岛开关（设置页）：pluginhost 每次推岛前问一次，关掉即静默丢弃并计数。
+    api.senderPriorityLimit = []() { return AgentSettings::pluginIslandPush(); };
+    // 沙箱验证：插件回包里带岛的状态快照（只读）。同机并存生产实例时，截图分不清是哪个进程的岛。
+    api.islandSnapshot = []() { return IslandOverlay::instance()->historySnapshotJson(); };
     api.settingsGet = [](const QString &key) -> QJsonValue {
         if (key == QStringLiteral("noiseEnabled"))   return AgentSettings::noiseEnabled();
         if (key == QStringLiteral("voiceEnabled"))   return AgentSettings::voiceEnabled();

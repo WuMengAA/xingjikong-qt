@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QSettings>
 #include <QCoreApplication>
+#include <QDateTime>          // P0-0：令牌桶按墙钟补充 + 通知发生时刻
 #include <QJsonValue>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -136,6 +137,17 @@ void PluginHost::onTextMessage(const QString &msg) {
     if (!ws) return;
     Conn *c = m_conns.value(ws, nullptr);
     if (!c) return;
+    // ── P0-0 ①：单条报文上限 ──
+    // 为什么在解析前就拒：先 fromJson 再检查长度，等于让一条超大 JSON 先吃满内存。
+    // UTF-8 字节数比 QString::size() 更贴近真实占用（中文 3 字节/字）。
+    if (msg.toUtf8().size() > PluginIslandGate::kMaxMessageBytes) {
+        ++m_gateStats.deniedSize;
+        qWarning("[plugin] 拒绝超长报文：%lld B > %d B（插件 %s，累计 %d 次）",
+                 (long long)msg.toUtf8().size(), PluginIslandGate::kMaxMessageBytes,
+                 qPrintable(c->manifest.id.isEmpty() ? QStringLiteral("<未握手>") : c->manifest.id),
+                 m_gateStats.deniedSize);
+        return;   // 静默丢弃，不回错（避免错误回包本身成为放大器）
+    }
     const QJsonObject j = QJsonDocument::fromJson(msg.toUtf8()).object();
     const QString type = j.value(QStringLiteral("type")).toString();
     if (type == QStringLiteral("hello")) handleHello(c, j);
@@ -207,18 +219,10 @@ void PluginHost::handleApi(Conn *c, const QJsonObject &j) {
     };
     if (call == QStringLiteral("island_show")) {
         if (!need(QStringLiteral("island")) && !need(QStringLiteral("notify"))) deny(QStringLiteral("island"));
-        else {
-            if (m_api.islandShow)
-                m_api.islandShow(args.value(QStringLiteral("title")).toString(),
-                                 args.value(QStringLiteral("desc")).toString(),
-                                 args.value(QStringLiteral("icon")).toString(),
-                                 args.value(QStringLiteral("form")).toInt(1), false,
-                                 args.value(QStringLiteral("durationMs")).toInt(5000));
-            r.insert(QStringLiteral("ok"), true);
-        }
+        else handleIslandShow(c, args, r);
     } else if (call == QStringLiteral("notify")) {
         if (!need(QStringLiteral("notify")) && !need(QStringLiteral("island"))) deny(QStringLiteral("notify"));
-        else { if (m_api.notify) m_api.notify(args); r.insert(QStringLiteral("ok"), true); }
+        else handleNotifyAt(c, args, r);
     } else if (call == QStringLiteral("settings_get")) {
         if (!need(QStringLiteral("settings"))) deny(QStringLiteral("settings"));
         else {
@@ -256,6 +260,159 @@ void PluginHost::handleApi(Conn *c, const QJsonObject &j) {
         r.insert(QStringLiteral("error"), QStringLiteral("未知 api：%1").arg(call));
     }
     if (c->sock) c->sock->sendTextMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// P0-0 第三方推岛治理（2026-10-17）—— 见 pluginhost.h 头部说明与
+// docs/灵动岛-升级方案-2026-10-17.md §4.5。**只在插件边界生效**；agent 自身
+// 的 islandShow / notifyFromParams 调用路径一行未动。
+// ════════════════════════════════════════════════════════════════════════════
+
+// 第三方推岛开关：缺省开（见 pluginhost.h 的 fail-open 说明）。
+bool PluginHost::islandGateOpen()
+{
+    return m_api.senderPriorityLimit ? m_api.senderPriorityLimit() : true;
+}
+
+// 令牌桶：按墙钟补充（不挂定时器——几十个"每 200ms 减一"的定时器比账本本身更贵）。
+// 首次调用把 tokensAtMs 置为此刻，不补发历史时间。
+bool PluginHost::takeToken(Conn *c)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (c->tokensAtMs == 0) c->tokensAtMs = now;
+    const qint64 dt = now - c->tokensAtMs;
+    if (dt > 0) {
+        c->tokens = qMin<double>(PluginIslandGate::kRateBurst,
+                                 c->tokens + dt * PluginIslandGate::kRatePerSec / 1000.0);
+        c->tokensAtMs = now;
+    }
+    if (c->tokens < 1.0) return false;
+    c->tokens -= 1.0;
+    return true;
+}
+
+// 按**码点**截断：QString 的 size()/left() 是 UTF-16 码元，
+// 直接 left(n) 会把代理对（生僻字/emoji）劈成替换符 U+FFFD。
+QString PluginHost::clipCodepoints(const QString &s, int maxCodepoints)
+{
+    if (maxCodepoints <= 0) return QString();
+    const int n = s.size();
+    int count = 0;
+    for (int i = 0; i < n; ++i) {
+        if (count == maxCodepoints) return s.left(i);
+        const QChar ch = s.at(i);
+        if (ch.isHighSurrogate() && i + 1 < n && s.at(i + 1).isLowSurrogate()) ++i;  // 整个代理对
+        ++count;
+    }
+    return s;
+}
+
+// 插件优先级：缺省 8（插件默认"重要"但低于管理端/紧急广播），钳到 [1,8]。
+// ⚠️ 如实记账：**本期岛本身还不消费优先级**（状态聚合/仲裁是 T 档，见方案 §5.1）；
+//    这里先把"第三方不能自称 9-10"这条**结构性**保证落地，并原样回给插件，
+//    等 T 档接上仲裁后即可直接用，不必再改协议。
+int PluginHost::clampPluginPriority(const QJsonObject &args)
+{
+    const int raw = args.value(QStringLiteral("priority")).toInt(PluginIslandGate::kMaxPriority);
+    return qBound(PluginIslandGate::kMinPriority, raw, PluginIslandGate::kMaxPriority);
+}
+
+void PluginHost::handleIslandShow(Conn *c, const QJsonObject &args, QJsonObject &r)
+{
+    // ① 开关：设置页「允许第三方推送灵动岛」关闭 ⇒ 静默丢弃（与考试门控同口径：不弹、不报错）
+    if (!islandGateOpen()) {
+        ++m_gateStats.deniedSwitch;
+        r.insert(QStringLiteral("ok"), true);
+        r.insert(QStringLiteral("dropped"), QStringLiteral("island-push-disabled"));
+        return;
+    }
+    // ② 频率：令牌桶空 ⇒ 静默丢弃 + 计数
+    if (!takeToken(c)) {
+        ++m_gateStats.deniedRate;
+        r.insert(QStringLiteral("ok"), true);
+        r.insert(QStringLiteral("dropped"), QStringLiteral("rate-limited"));
+        return;
+    }
+    const QString rawTitle = args.value(QStringLiteral("title")).toString().trimmed();
+    const QString rawDesc  = args.value(QStringLiteral("desc")).toString();
+    // ③ 长度：按码点截断（标题必填，截空则整条作废——标题是承认这是"一条通知"的最小前提）
+    QString title = clipCodepoints(rawTitle, PluginIslandGate::kMaxTitleChars);
+    QString desc  = clipCodepoints(rawDesc,  PluginIslandGate::kMaxDescChars);
+    if (title != rawTitle || desc != rawDesc) ++m_gateStats.trimmed;
+    if (title.isEmpty()) {
+        r.insert(QStringLiteral("ok"), false);
+        r.insert(QStringLiteral("error"), QStringLiteral("island_show 缺 title"));
+        return;
+    }
+    // ④ 归属：前缀「[插件名] 」。用 manifest.name（可读），空则回落 id（可辨识）。
+    //    ⚠️ fromAdmin 保持 false —— 插件不是管理端，历史排序与"管理端通知置顶"不能被污染。
+    const QString who = c->manifest.name.isEmpty() ? c->manifest.id : c->manifest.name;
+    if (!who.isEmpty()) title = QStringLiteral("[%1] %2").arg(who, title);
+    // ⑤ 紧急档：插件永远拿不到（9-10 级语义），emergency 参数强制 false。
+    if (args.value(QStringLiteral("emergency")).toBool(false)) ++m_gateStats.clampPriority;
+    const int form = args.value(QStringLiteral("form")).toInt(1);
+    const int durationMs = args.value(QStringLiteral("durationMs")).toInt(5000);
+    const qint64 noticeAt = QDateTime::currentMSecsSinceEpoch();   // 通知"发生时刻" = 插件调用那一刻
+    if (m_api.islandShowAt)
+        m_api.islandShowAt(title, desc, args.value(QStringLiteral("icon")).toString(),
+                           form, false, durationMs, noticeAt);
+    else if (m_api.islandShow)
+        m_api.islandShow(title, desc, args.value(QStringLiteral("icon")).toString(),
+                         form, false, durationMs);
+    ++m_gateStats.allowed;
+    r.insert(QStringLiteral("ok"), true);
+    r.insert(QStringLiteral("priority"), clampPluginPriority(args));
+    // 沙箱验证：把岛的状态快照一并回给插件（插件收到的是**自己这条**处理之后的岛状态）。
+    // 只读、不参与治理判定；未注入时不出该字段（生产侧零变化）。
+    if (m_api.islandSnapshot) {
+        const QString snap = m_api.islandSnapshot();
+        if (!snap.isEmpty()) r.insert(QStringLiteral("islandSnapshot"), snap);
+    }
+    return;
+}
+
+// notify 直通口：参数体原样交给 notifyFromParams（它会自己过考试门控/本地通知开关），
+// 这里只补两件插件边界该管的事：开关 + 频率。**不重复做长度裁剪** ——
+// notify 的 title/content 本来就会被岛/弹幕/TTS 各自消费，割一半反而造出"半截话"。
+void PluginHost::handleNotifyAt(Conn *c, const QJsonObject &args, QJsonObject &r)
+{
+    if (!islandGateOpen()) {
+        ++m_gateStats.rejectedSwitch;
+        r.insert(QStringLiteral("ok"), true);
+        r.insert(QStringLiteral("dropped"), QStringLiteral("island-push-disabled"));
+        return;
+    }
+    if (!takeToken(c)) {
+        ++m_gateStats.deniedRate;
+        r.insert(QStringLiteral("ok"), true);
+        r.insert(QStringLiteral("dropped"), QStringLiteral("rate-limited"));
+        return;
+    }
+    if (m_api.notify) m_api.notify(args);
+    ++m_gateStats.allowed;
+    r.insert(QStringLiteral("ok"), true);
+    // ⚠️ 如实记账：这里只回答"令牌桶放行了"，**不代表岛已显示** ——
+    //    notifyFromParams 还会过考试门控/本地通知开关，且它的返回值被 api.notify
+    //    （void）吞掉了。要拿到真实结果需要改 PluginAgentApi::notify 的签名
+    //    （对外 SDK 契约，留到 P 档协议 v2 一起做，见方案 §5.2）。
+}
+
+QJsonObject PluginHost::islandGateStats() const
+{
+    QJsonObject o;
+    o.insert(QStringLiteral("allowed"),         m_gateStats.allowed);
+    o.insert(QStringLiteral("deniedSwitch"),    m_gateStats.deniedSwitch);
+    o.insert(QStringLiteral("deniedRate"),      m_gateStats.deniedRate);
+    o.insert(QStringLiteral("deniedSize"),      m_gateStats.deniedSize);
+    o.insert(QStringLiteral("trimmed"),         m_gateStats.trimmed);
+    o.insert(QStringLiteral("clampPriority"),   m_gateStats.clampPriority);
+    o.insert(QStringLiteral("rejectedSwitch"),  m_gateStats.rejectedSwitch);
+    o.insert(QStringLiteral("maxTitleChars"),   PluginIslandGate::kMaxTitleChars);
+    o.insert(QStringLiteral("maxDescChars"),    PluginIslandGate::kMaxDescChars);
+    o.insert(QStringLiteral("ratePerSec"),      PluginIslandGate::kRatePerSec);
+    o.insert(QStringLiteral("rateBurst"),       PluginIslandGate::kRateBurst);
+    o.insert(QStringLiteral("maxPriority"),     PluginIslandGate::kMaxPriority);
+    return o;
 }
 
 void PluginHost::handleResult(Conn *c, const QJsonObject &j) {

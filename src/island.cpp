@@ -26,7 +26,7 @@
 //    改 QML 只该换"长什么样"，不该碰"什么时候显示、点了会怎样"。
 
 #include "island.h"
-#include "island_bridge.h"
+#include "island_bridge.h"       // P0-0：historySnapshotJson() 复用桥的 history() 组装口径
 #include "svgiconprovider.h"
 #include "whale_audio.h"
 #include "danmaku.h"             // 2026-10-15 组件5：祝福弹幕全屏浮层
@@ -394,6 +394,36 @@ QString IslandOverlay::historyPath() const
     return base + QStringLiteral("/island_history.json");
 }
 
+// ── 沙箱验证设施（2026-10-17 P0-0）─────────────────────────────────────────
+// 见 island.h 同名声明处的说明。要点：
+//   · 走桥的 history()（QML 用的同一套组装：现算 timeStr/timeFull/dateGroup）——
+//     自己再拼一份 JSON 必然与界面口径漂移；
+//   · 只读，不触发 sync / 不写盘；
+//   · 附带「岛当前这条」的 title/desc/noticeTs，便于断言"最近一条内容确实换成了新的"。
+QString IslandOverlay::historySnapshotJson() const
+{
+    QJsonObject o;
+    QJsonArray arr;
+    if (m_bridge) {
+        const QVariantList list = m_bridge->history();
+        for (const QVariant &v : list) arr.append(QJsonObject::fromVariantMap(v.toMap()));
+    }
+    o.insert(QStringLiteral("history"), arr);
+    o.insert(QStringLiteral("title"),    m_title);
+    o.insert(QStringLiteral("desc"),     m_desc);
+    o.insert(QStringLiteral("icon"),     m_icon);
+    o.insert(QStringLiteral("fromAdmin"), m_fromAdmin);
+    o.insert(QStringLiteral("noticeTs"), QJsonValue(double(m_shownTs)));
+    o.insert(QStringLiteral("titleLen"), int(m_title.size()));
+    o.insert(QStringLiteral("descLen"),  int(m_desc.size()));
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+void IslandOverlay::archiveNow()
+{
+    archiveToHistory();
+}
+
 void IslandOverlay::loadHistory()
 {
     QFile f(historyPath());
@@ -740,7 +770,12 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     m_icon = icon;
     // 2026-10-17：记录**这条内容出现的时刻**。历史归档的 ts 取它，岛本体显示的
     // 时间也取它 —— 两处必须同一个源，否则"岛上写 14:05、历史写 14:31"。
-    m_shownTs = QDateTime::currentSecsSinceEpoch();
+    // P0-0（同日晚）：调用方可经 setNoticeTimeForNext() 注入**发生时刻**（插件推的通知
+    // 用"插件调用那一刻"而不是"agent 处理那一刻"）。一次性消费，用完即清 ——
+    // 否则下一轮同样的 showIsland 会莫名继承上一次的时间。
+    m_shownTs = (m_noticeHintMs > 0) ? (m_noticeHintMs / 1000)
+                                     : QDateTime::currentSecsSinceEpoch();
+    m_noticeHintMs = 0;
     m_fromAdmin = fromAdmin;   // 2026-10-13：跟着这条内容走，归档时写进 HistoryItem
     m_durationMs = durationMs;
     m_form = form;
