@@ -162,6 +162,40 @@ t("鲸鱼在紧凑形态下隐藏（96px 角标放不下 28px 鲸鱼）", () => 
 	);
 });
 
+t("面组件的布局绑定不引用某 item 的 `.x`（会与锚点互触发 → binding loop）", () => {
+	// 2026-10-17 真机实证：IslandBannerFace 原来写
+	//   width: { const avail = bannerFace.width - bTitle.x - 20; … }
+	// 于是 width ↔ 锚点重算互相触发，Qt 每秒刷 "Binding loop detected for property width"。
+	// 探针的 errors 只数 QQmlError（编译期），**看不见这类运行时绑定环** ⇒ 只能靠这条门禁兜住。
+	for (const f of [BANNER_QML, MINI_QML]) {
+		const src = stripComments(read(f));
+		const m = src.match(/(?:^|[^.\w])([a-zA-Z_]\w*)\.x\b/);
+		ok(
+			!m,
+			`${path.basename(f)} 里出现了 \`${m ? m[1] : ""}.x\` —— width/布局绑定引用自己的 x ` +
+				`会与锚点互相触发（Qt: Binding loop detected for property "width"）；用常量占位算可用宽`
+		);
+	}
+});
+
+t("面组件的 width 绑定不读 implicitWidth（elide 文本会随之成环）", () => {
+	// 2026-10-17 真机实证（第二轮）：去掉 `.x` 之后环还在，真因是
+	//   width: { … Math.min(bTitle.implicitWidth, avail*0.4) … }
+	// 带 `elide` 的 Text，其 implicitWidth 会跟着 width 变 ⇒ width ↔ implicitWidth 互触发。
+	// 正解是 TextMetrics.advanceWidth（只由 text/font 决定）。这条门禁盯住别再写回去。
+	for (const f of [BANNER_QML, MINI_QML]) {
+		const src = stripComments(read(f));
+		const blocks = [...src.matchAll(/\bwidth\s*:\s*\{[\s\S]*?\}/g)].map((m) => m[0]);
+		for (const b of blocks) {
+			ok(
+				!/implicitWidth/.test(b),
+				`${path.basename(f)} 的 width 绑定里读了 implicitWidth —— ` +
+					`带 elide 的 Text 会与 width 互相触发（用 TextMetrics.advanceWidth）`
+			);
+		}
+	}
+});
+
 // ── 四、C++ 几何：新形态的尺寸真源与"圆/方"判定 ────────────────────
 t("geometryForForm 有 Banner / Mini 分支，且用 availableGeometry（避开任务栏）", () => {
 	const banner = /if\s*\(f\s*==\s*Form::Banner\)\s*\{([\s\S]{0,600}?)\n\s*\}/.exec(cppSrc);

@@ -28,6 +28,15 @@ Item {
     property string desc: ""
     readonly property bool hasDesc: bannerFace.desc !== ""
 
+    // 左右留白 / 图标块宽度：**常量**。
+    // ⚠️ 千万别在 Text.width 的绑定里引用它自己的 x —— x 由锚点驱动，
+    //    与锚点重算互相触发，Qt 会报 "Binding loop detected for property width"
+    //    （2026-10-17 真机日志实测：只在有图标+有描述的横幅上出现，每秒刷屏）。
+    readonly property int padL: 20
+    readonly property int padR: 20
+    readonly property int gap: 12
+    readonly property int iconBlock: bIcon.visible ? (bIcon.width + bannerFace.gap) : 0
+
     SvgIcon {
         id: bIcon
         name: bannerFace.icon
@@ -38,17 +47,31 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
     }
 
+    // 标题自然宽度度量器（不参与布局）。
+    // ⚠️ 必须用它，**不能**在 width 绑定里读 `bTitle.implicitWidth`：
+    //    带 `elide` 的 Text，其 implicitWidth 会跟着 width 走 ⇒
+    //    width ↔ implicitWidth 互相触发，Qt 报
+    //    "Binding loop detected for property width"（2026-10-17 真机实测两次，
+    //    第一次误以为是 `.x` 引起；真因是 implicitWidth）。
+    //    TextMetrics.advanceWidth 只由 text/font 决定，与 width 无关，天然不成环。
+    TextMetrics {
+        id: tmTitle
+        font: bTitle.font          // 引用而不是复制字体属性，避免两处漂移
+        text: bannerFace.title
+    }
+
     Text {
         id: bTitle
         anchors.left: bIcon.visible ? bIcon.right : parent.left
-        anchors.leftMargin: bIcon.visible ? 12 : 20
+        anchors.leftMargin: bIcon.visible ? bannerFace.gap : bannerFace.padL
         anchors.verticalCenter: parent.verticalCenter
         // 有描述 ⇒ 标题最多吃剩余宽的 40%（横幅的价值在描述那句话）；
         // 无描述 ⇒ 吃满剩余宽。elide 兜住长标题（不折行）。
         width: {
-            const avail = Math.max(0, bannerFace.width - bTitle.x - 20)
+            const avail = Math.max(0, bannerFace.width - bannerFace.padL
+                                      - bannerFace.iconBlock - bannerFace.padR)
             if (!bannerFace.hasDesc) return avail
-            return Math.min(Math.max(0, bTitle.implicitWidth), avail * 0.4)
+            return Math.min(Math.max(0, tmTitle.advanceWidth), avail * 0.4)
         }
         text: bannerFace.title
         color: bannerFace.th ? bannerFace.th.fg : "#FAFAFA"

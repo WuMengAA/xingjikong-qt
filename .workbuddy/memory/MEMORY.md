@@ -25,6 +25,12 @@
 - 版本真源＝云端 `ota.json`（**UTF-8 无 BOM，带 BOM ⇒ latest:null**；不入库）。`bump-version.mjs` 改 4 副本，**出包前先 bump**。
   发布 `publish-release.mjs publish --product agent|viewer --version X --file <包>`；验证 `curl 127.0.0.1:8788/api/public/ota?product=X[&current=旧]`。
   `ota.json.url` 同时是装机卡链接 ⇒ **只挂全量件**。
+- ⚠️ **「OTA 不生效」是三层叠加**（2026-10-17 取证，`docs/OTA不生效-加减归档-2026-10-17.md`）：
+  ①**端侧不查**：最新版本只随 WS `registered` 回执下发一次，长连设备永远看不到新版 ⇒ 已加 `otaSelfCheck()` 周期复查（`95a0d43`）；
+  ②**stable 不发布**：`ota.json` 自 10-16 23:17 停在 **0.6.37**，0.6.38~0.6.43 全在 `ota-gray.json` ⇒ 非灰度设备
+  `hasUpdate:false`，改代码也救不了 —— **必须发 stable**（待用户裁决，Danger 0）；
+  ③**端侧不自装**：`mandatory:false` 只弹提示、无人值守就永远不升 ⇒ 已改「非考试 + 桌面空闲≥10min」自动装（`603abe7`）。
+  查现状：`curl 127.0.0.1:8788/api/public/ota?product=agent&channel=stable|gray&current=0.6.43`。
 - ⚠️ **同一工作树有并行工作线**（2026-10-17）：他线提交 `03bafbc`（H264 空转修复 + bump **0.6.41**）并已**装机到生产**
   （10:32 安装）；此前 `4c228e5` 还发过 gray 0.6.40。他线另有 `src/ldc_streamer.cpp` 在途。**提交前先 `git log`**，
   版本号/发布可能与对方抢；装机后要核对"装进去的包是否含我这边改动"（比字节，不看版本号）。
@@ -83,7 +89,9 @@
 4. 站点 `/api/device/activate` 不回 classCode。
 5. `md3/Md3Btn.qml:11` 自定义 `enabled` 盖掉 `Item.enabled` ⇒ 祖先 enabled 传导失效（共享组件不擅自改）。
 6. 管理端下发 `kind=banner|mini` 的入口（viewer 未改，解析已在 main.cpp 就位）。
-7. 打包 0.6.42 走 OTA：C 盘剩 2.5G，打包+备份约需 100MB+，且与并行线抢版本号 ⇒ 需用户裁决。
+7. ⛔ **stable 清单停在 0.6.37（10-16 23:17），0.6.38~0.6.43 全在 gray** ⇒ 非灰度教室机永远升不上去。
+   两条路：A 直接 `publish-release.mjs publish --product agent --version 0.6.43 --file assets/pkg/stelarith-agent-setup-0.6.43.exe`
+   （包已在、立刻生效，但会推全体设备自动升级）；B 先 bump 0.6.44 重打包再发（干净，占 C 盘 ~100MB+，与并行线抢版本号）。
 
 ## 6 踩坑实证（最贵，按"还会再踩"排序）
 - ⚠️⚠️ **截图/几何取证必须声明 DPI 感知**：未 `SetProcessDpiAwareness(2)` 时 `GetWindowRect`/`PrintWindow` 返回**虚拟化坐标**
@@ -115,3 +123,14 @@
 - ⚠️ 探针自身也会骗人：QML 匿名类名（`_QML_21`）每次变（基线先剥序号）；`Repeater` delegate 的 objectName 不在 QObject 树；
   参数"看着该生效"先验它真生效（--actions 实测没注入）；假上下文属性**必须照真实签名**写。
 - ⚠️ 测量方法自身的错会污染判断：划范围看缩进层级+闭合标记；`uniq -c -f1` 在"行号:匹配"上不生效。
+- ⚠️ **带 `elide` 的 Text，`implicitWidth` 不是自然宽**（会跟 `width` 走）⇒ 在 `width` 绑定里读它必成环
+  （`Binding loop detected for property "width"`，真机每秒刷屏）。要自然宽用 `TextMetrics.advanceWidth`。
+  本轮先误判成 `.x` 与锚点互触发，改完仍刷 ⇒ 真因是 implicitWidth。
+- ⚠️ **`LNK1104 无法打开 stelarith-agent-qt.exe`** = 隔离测试实例还在跑、占着构建产物。
+  判据：`Get-CimInstance Win32_Process -Filter "Name='stelarith-agent-qt.exe'"` 看 `ExecutablePath`，
+  `build\` 下的是探针（可杀），`C:\Program Files\` 下的是生产（不能杀）。
+- ⚠️ **`GetLastInputInfo.dwTime` 是 32 位 tick** ⇒ 只能与 `GetTickCount()` 做 32 位无符号差；
+  用 `GetTickCount64()` 减会算出天文数字（表现"永远不空闲"，静默无报错）。
+- ⚠️ **写死的"到点才动作"延迟让探针没法取证** ⇒ 新逻辑的延迟一律做成环境变量可调
+  （本轮 `STE_QT_OTA_AUTO_DELAY_SEC`）。另：隔离实例日志是 **UTF-8**，用 `iconv -f GBK` 会把中文弄成乱码，
+  正确做法 Python `open(p,'rb').read().decode('utf-8','replace')` 再筛关键词。
