@@ -285,6 +285,30 @@ void LdcStreamer::renegotiate()
     });
 }
 
+bool LdcStreamer::pcAlive() const
+{
+    // 2026-10-18：判断"还能不能在这台 PC 上继续协商"。
+    // Failed/Closed 之后 renegotiate() 是打在死对象上：无回调、无 offer，
+    // 接线层的 g_rtcOn 却仍是 true ⇒ 之后每次 rtc-start 都只做这个空动作，
+    // RTC 永远不再重建（真机实证：Closed 之后 agent 一个 offer 都不再产生，
+    // 客户端只能一直吃 JPEG 轮询兜底）。
+    QMutexLocker lock(&m_mu);
+    if (!m_pc) return false;
+    auto *pc = static_cast<rtc::PeerConnection *>(m_pc.get());
+    try {
+        switch (pc->state()) {
+        case rtc::PeerConnection::State::New:
+        case rtc::PeerConnection::State::Connecting:
+        case rtc::PeerConnection::State::Connected:
+            return true;
+        default:
+            return false;
+        }
+    } catch (...) {
+        return false;   // 查询本身抛异常 = 这个对象不该再被用
+    }
+}
+
 void LdcStreamer::stop()
 {
     if (!m_active && !m_pc) return;

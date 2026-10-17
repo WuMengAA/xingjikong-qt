@@ -6293,9 +6293,19 @@ static void rtcStart()
         if (g_rtcOn) {
             // 2026-10-11 修「WebRTC 没实时」：offer 原本只发一次，新订阅/重连的
             // 管理端永远拿不到 offer。已推流时再次 rtc-start = 重新协商出 offer。
-            qInfo("[rtc-ldc] 已在推流，重新协商（新订阅者拿 offer）");
-            LdcStreamer::instance().renegotiate();
-            return;
+            if (LdcStreamer::instance().pcAlive()) {
+                qInfo("[rtc-ldc] 已在推流，重新协商（新订阅者拿 offer）");
+                LdcStreamer::instance().renegotiate();
+                return;
+            }
+            // ⚠️ 2026-10-18（真机实证）：上一轮 PC 已经 Failed/Closed 时，renegotiate()
+            //    打在死对象上——没有回调、没有 offer，而 g_rtcOn 还是 true ⇒ 此后每次
+            //    rtc-start 都只做这个空动作，RTC 永远不再重建，管理端只能一直吃
+            //    JPEG 轮询兜底（viewer 侧再发 remote_control_start 也没用）。
+            //    这里显式拆掉旧流，让它走下面的完整重建路径。
+            qWarning("[rtc-ldc] 上一轮 PC 已死（Failed/Closed）→ 拆除重建，而不是重协商");
+            LdcStreamer::instance().stop();
+            g_rtcOn = false;
         }
         g_offlineSince = 0;
         cancelRtcViewReap();

@@ -44,6 +44,11 @@ public:
     void renegotiate();
     void stop();
 
+    /** 2026-10-18：当前 PeerConnection 是否还活着（New/Connecting/Connected）。
+     *  接线层用它区分「真的在推流」与「g_rtcOn 还是 true 但 PC 早就 Failed/Closed」——
+     *  后者下 renegotiate() 打在死对象上，没有回调也没有 offer，RTC 永远不再重建。 */
+    bool pcAlive() const;
+
     bool active() const { return m_active; }
     bool connected() const { return m_connected.load(); }
 
@@ -92,7 +97,8 @@ private:
     std::shared_ptr<void> m_trackHold;    // rtc::Track*（screen 轨唯一持有者）
     std::shared_ptr<void> m_camTrackHold; // rtc::Track*（camera 轨唯一持有者）
     std::shared_ptr<void> m_dcHold;       // rtc::DataChannel*（唯一持有者）
-    QMutex m_mu;                  // 保护 m_track/m_dc/m_pc（回调线程 vs 主线程）
+    mutable QMutex m_mu;          // 保护 m_track/m_dc/m_pc（回调线程 vs 主线程）
+    // mutable：pcAlive() 是 const 方法但要加锁（只读查询也必须跟回调线程互斥）。
     void *m_track = nullptr;      // rtc::Track*（screen 轨，指向 m_trackHold 同对象）
     void *m_dc = nullptr;         // rtc::DataChannel*（同上）
     bool m_offerSent = false;     // 首个 offer 已发出（只发一次）
