@@ -541,6 +541,7 @@ ColumnLayout {
             cursorShape: pressed ? Qt.ClosedHandCursor : Qt.CrossCursor
 
             onPressed: function (mouse) {
+                screenArea.forceActiveFocus()   // 点击画面 → 键盘焦点给画面区（远控键盘生效）
                 var n = normOf(mouse.x, mouse.y)
                 if (!n) return
                 backend.sendPointer("down", n[0], n[1], btnOf(mouse.button))
@@ -558,6 +559,50 @@ ColumnLayout {
                 var n = normOf(mouse.x, mouse.y)
                 if (!n) return
                 backend.sendPointer("up", n[0], n[1], btnOf(mouse.button))
+            }
+
+            // ── 远控键盘（2026-10-17 补齐）：点击画面获得焦点后按键即下发 ──
+            // Qt.Key_* → Windows 虚拟键码（VK）。只映射常用键；特殊键（Ctrl+Alt+Del 等）
+            // 由 QML 按 vk 组合逐键 down/up 下发，被控端 SendInput 单键注入。
+            function vkOf(qk) {
+                // 字母（Qt.Key_A..Key_Z = 0x41..0x5A，与 VK_A..VK_Z 相同）
+                if (qk >= Qt.Key_A && qk <= Qt.Key_Z) return qk
+                // 数字（Qt.Key_0..9 = 0x30..0x39，与 VK_0..9 相同）
+                if (qk >= Qt.Key_0 && qk <= Qt.Key_9) return qk
+                // 功能键 F1..F24 = VK_F1..F24
+                if (qk >= Qt.Key_F1 && qk <= Qt.Key_F24)
+                    return qk - Qt.Key_F1 + 0x70
+                // 方向键：Qt 是 0x01000012..15，VK_LEFT..DOWN = 0x25..0x28
+                if (qk === Qt.Key_Left) return 0x25
+                if (qk === Qt.Key_Up) return 0x26
+                if (qk === Qt.Key_Right) return 0x27
+                if (qk === Qt.Key_Down) return 0x28
+                // 常用编辑/控制键
+                var map = {
+                    [Qt.Key_Escape]: 0x1B, [Qt.Key_Tab]: 0x09, [Qt.Key_Backtab]: 0x09,
+                    [Qt.Key_Backspace]: 0x08, [Qt.Key_Delete]: 0x2E, [Qt.Key_Insert]: 0x2D,
+                    [Qt.Key_Home]: 0x24, [Qt.Key_End]: 0x23, [Qt.Key_PageUp]: 0x21,
+                    [Qt.Key_PageDown]: 0x22, [Qt.Key_Return]: 0x0D, [Qt.Key_Enter]: 0x0D,
+                    [Qt.Key_Space]: 0x20, [Qt.Key_CapsLock]: 0x14, [Qt.Key_NumLock]: 0x90,
+                    [Qt.Key_ScrollLock]: 0x91, [Qt.Key_Pause]: 0x13, [Qt.Key_Print]: 0x2C,
+                    [Qt.Key_Shift]: 0x10, [Qt.Key_Control]: 0x11, [Qt.Key_Alt]: 0x12,
+                    [Qt.Key_Meta]: 0x5B, [Qt.Key_Context1]: 0x5D, [Qt.Key_SysReq]: 0x2C
+                }
+                return map[qk] !== undefined ? map[qk] : 0
+            }
+            focus: true
+            Keys.onPressed: function (event) {
+                var vk = vkOf(event.key)
+                if (vk <= 0) { event.accepted = false; return }
+                // 修饰键 + 普通键逐个 down（组合键由多次 onPressed 自然完成）
+                backend.sendKey(vk, "down")
+                event.accepted = true
+            }
+            Keys.onReleased: function (event) {
+                var vk = vkOf(event.key)
+                if (vk <= 0) { event.accepted = false; return }
+                backend.sendKey(vk, "up")
+                event.accepted = true
             }
         }
     }

@@ -457,6 +457,11 @@ public:
     Q_INVOKABLE void sendPointer(const QString &kind, double nx, double ny,
                                  const QString &button = QStringLiteral("left"));
 
+    // ── 远控/键鼠（2026-10-17 补齐）──
+    /** 发一次键盘事件（远控）。vk = Windows 虚拟键码，action = down | up。
+     *  组合键（Ctrl+C 等）由 QML 依次发多个 down 再逐个 up（被控端只做单键注入）。 */
+    Q_INVOKABLE void sendKey(int vk, const QString &action);
+
     // ── 语音对讲（设计文档 3.3，2026-10-07）──
     /** 开始讲话：开麦克风采集 → 通知云端 audio.start → 每帧 PCM 二进制发出。 */
     // ⚠️ speaking / broadcasting / speakError / *LeftSec 必须是 **Q_PROPERTY**，不能是 Q_INVOKABLE：

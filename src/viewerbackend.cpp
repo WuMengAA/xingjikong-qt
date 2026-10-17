@@ -2336,6 +2336,26 @@ void ViewerBackend::sendPointer(const QString &kind, double nx, double ny, const
     logf("[viewer] 操控→ %s 在 (%d%%, %d%%)", kind.toUtf8().constData(),
          (int)(nx * 100), (int)(ny * 100));
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// 远控/键鼠（2026-10-17 补齐）：键盘事件下发
+// 与 sendPointer 同一条 instruction/input 通道；kind=key + vk + action(down|up)。
+// 被控端（agent main.cpp input 分支 kind=key）直接 SendInput 注入。
+void ViewerBackend::sendKey(int vk, const QString &action)
+{
+    if (m_currentUid.isEmpty()) { logf("[viewer] FAIL 没选设备不发按键"); return; }
+    if (vk <= 0 || vk > 255) { logf("[viewer] FAIL vk 越界 %d，不发", vk); return; }
+    QJsonObject params;
+    params.insert(QStringLiteral("kind"), QStringLiteral("key"));
+    params.insert(QStringLiteral("vk"), vk);
+    params.insert(QStringLiteral("action"), action);
+    QJsonObject p;
+    p.insert(QStringLiteral("uid"), m_currentUid);
+    p.insert(QStringLiteral("action"), QStringLiteral("input"));
+    p.insert(QStringLiteral("params"), params);
+    sendEnvelope(QStringLiteral("instruction"), p);
+    logf("[viewer] 按键→ %s vk=%d", action.toUtf8().constData(), vk);
+}
 // ──────────────────────────────────────────────────────────────────────
 // 文件推送
 // ──────────────────────────────────────────────────────────────────────
