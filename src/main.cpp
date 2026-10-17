@@ -1764,6 +1764,16 @@ void applyUpdateInfo(const QJsonObject &pay)
             qInfo("[agent-qt] ⬆ 发现新版本 v%s（本机 v%s）%s —— 右键托盘 →「设置与信息…」可升级",
                   qPrintable(g_latestVer), kAppVersion,
                   canUpgrade ? "" : "（⚠ 清单缺 url/sha256，先别升，让管理员补 ota.json）");
+            // 2026-10-17：非强制也要能自己装上去 —— 延迟后再判安全窗口（见 maybeAutoUpdate）。
+            // 不在这里直接装：刚弹完提示就重启设备，观感太差。
+            // 延迟做成可配（STE_QT_OTA_AUTO_DELAY_SEC，默认 30s）：探针要在几十秒内跑完一轮，
+            // 写死 30s 会让"判据到底生效没"变得难以取证。
+            {
+                int delaySec = qEnvironmentVariableIntValue("STE_QT_OTA_AUTO_DELAY_SEC");
+                if (delaySec <= 0) delaySec = 30;
+                delaySec = qBound(1, delaySec, 3600);
+                QTimer::singleShot(delaySec * 1000, [] { maybeAutoUpdate(); });
+            }
         }
         // 2026-10-17：同一个版本**只主动提示一次**（周期性复查每 30 分钟会再来一遍；
         // 每次都弹岛/弹托盘就成了骚扰）。强制升级那条路不受影响 —— maybeAutoUpdate
@@ -2033,25 +2043,73 @@ static void otaRollback()
 }
 
 /** 该不该现在自动装：全部满足才动手，任何一条不满足都**如实说为什么**不装。 */
+/* 桌面空闲时长（毫秒）—— 判"安全窗口"用（2026-10-17 · 修 OTA 不生效第三层）。
+ * 用 GetLastInputInfo 而不是自己挂钩子：它是系统级"最后一次键鼠输入"，
+ * 不依赖本进程有没有焦点，也不受被控端藏在托盘影响。
+ * ⚠️ dwTime 是 32 位 GetTickCount 值 ⇒ 用 32 位差值（无符号自然回绕正确），
+ *    不要拿 GetTickCount64 去减它（跨 49 天会算出天文数字）。
+ * 取不到（远程/无输入会话）时返回 0 = 当作"正在使用"，宁可不升。 */
+static qint64 desktopIdleMs()
+{
+    LASTINPUTINFO li{};
+    li.cbSize = sizeof(LASTINPUTINFO);
+    if (!GetLastInputInfo(&li)) return 0;
+    const DWORD now = GetTickCount();
+    return qint64(DWORD(now - li.dwTime));
+}
+
 static void maybeAutoUpdate()
 {
-    if (!g_updateMandatory) return;                       // ① 只有云端明确要求强制才自动装
+    // ① 强制更新照旧"到点就装"；**非强制改判安全窗口**（2026-10-17 修）。
+    //    病灶：mandatory=false 只弹提示 ⇒ 教室机无人值守、没人点「立即更新」
+    //    ⇒ 版本永远卡在旧版。实测取证：stable 清单停在 0.6.37，而在线设备的日志
+    //    一直只有"发现新版本…右键托盘可升级"，没有一个人会去右键。
+    //    补法：非强制在 **非考试 + 桌面空闲 ≥ N 分钟** 时自动装 —— 老师在用电脑时
+    //    绝不重启它；空闲 = 没人在看课件，被控端重启一两分钟不打断课堂。
+    //    参数 STE_QT_OTA_AUTO_IDLE_MIN：默认 10（分钟），填 0 = 关掉非强制自动装。
+    if (!g_updateMandatory) {
+        const QString envIdle = qEnvironmentVariable("STE_QT_OTA_AUTO_IDLE_MIN").trimmed();
+        const int idleMin = envIdle.isEmpty() ? 10 : envIdle.toInt();
+        if (idleMin <= 0) return;                          // 管理员显式关掉了非强制自动装
+        if (ExamMode::inst().active()) {
+            // 考试期间绝不重启被控端（会打断考试计时/拦截逻辑），等考完再说。
+            // ⚠️ 这条**不受** STE_QT_OTA_AUTO_FORCE 影响：考试优先级高于维护便利。
+            qInfo("[agent-qt] ⏸ 非强制升级 v%s 暂缓：考试模式进行中",
+                  qPrintable(g_latestVer));
+            return;
+        }
+        // 跳过空闲判据：只给「管理员维护窗口」与「探针取证」用。
+        // 常态化设它 = 正在用电脑时也会被重启，所以每次跳过都打 warning 留痕。
+        if (qEnvironmentVariable("STE_QT_OTA_AUTO_FORCE") == QLatin1String("1")) {
+            qWarning("[agent-qt] ⚠ STE_QT_OTA_AUTO_FORCE=1 ⇒ 跳过空闲判据（维护窗口/探针专用）");
+        } else {
+            const qint64 idle = desktopIdleMs();
+            if (idle < qint64(idleMin) * 60000LL) {
+                qInfo("[agent-qt] ⏸ 非强制升级 v%s 等到空闲：桌面只空闲 %lld 秒（要求 ≥ %d 分钟）",
+                      qPrintable(g_latestVer), (long long)(idle / 1000), idleMin);
+                return;
+            }
+            qInfo("[agent-qt] ⬆ 非强制升级 v%s → v%s：桌面已空闲 %lld 秒、非考试 ⇒ 自动装"
+                  "（STE_QT_OTA_AUTO_IDLE_MIN 可调，0=关）",
+                  kAppVersion, qPrintable(g_latestVer), (long long)(idle / 1000));
+        }
+    }
     if (g_unconfigured) {                                 // ② 没配好就别自作主张（升完照样连不上）
-        qInfo("[agent-qt] 强制升级跳过：本机还没配好云端（未配置）");
+        qInfo("[agent-qt] 升级跳过：本机还没配好云端（未配置）");
         return;
     }
     if (otaIsBusy()) {                                    // ③ 上一次下载还没完
-        qInfo("[agent-qt] 强制升级跳过：上一个更新任务还在跑");
+        qInfo("[agent-qt] 升级跳过：上一个更新任务还在跑");
         return;
     }
     if (g_updateUrl.isEmpty() || g_updateSha.length() != 64) {   // ④ 清单不完整 = 不许升
-        qWarning("[agent-qt] 强制升级跳过：清单缺 url 或 sha256（不让管理员补 ota.json 就别硬升）");
+        qWarning("[agent-qt] 升级跳过：清单缺 url 或 sha256（不让管理员补 ota.json 就别硬升）");
         return;
     }
     if (compareVersion(g_latestVer, QString::fromLatin1(kAppVersion)) <= 0) return;   // ⑤ 已经是最新
 
     if (otaPaused()) {                                    // ⑥ 人工紧急刹车
-        qWarning("[agent-qt] ⛔ 强制升级已在本机暂停（存在 %s）—— 管理员排查用，删掉这个文件即恢复",
+        qWarning("[agent-qt] ⛔ 升级已在本机暂停（存在 %s）—— 管理员排查用，删掉这个文件即恢复",
                  qPrintable(otaPausePath()));
         return;
     }
@@ -2060,7 +2118,7 @@ static void maybeAutoUpdate()
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const qint64 nextAt = otaLoadState().value(QStringLiteral("nextAt")).toVariant().toLongLong();
         if (nextAt > now) {
-            qInfo("[agent-qt] ⏳ 强制升级还没到点：%lld 秒后再试（上次结果 %s）",
+            qInfo("[agent-qt] ⏳ 升级还没到点：%lld 秒后再试（上次结果 %s）",
                   (nextAt - now) / 1000, qPrintable(otaLoadState().value(QStringLiteral("lastError")).toString()));
             return;
         }
@@ -2069,13 +2127,14 @@ static void maybeAutoUpdate()
         QStorageInfo si(qEnvironmentVariable("LOCALAPPDATA"));
         si.refresh();
         if (si.bytesAvailable() < kOtaMinFreeBytes) {      // ⑦ 盘快满了：宁可不升，也别装到一半没地方
-            qWarning("[agent-qt] ⚠ 强制升级跳过：数据盘只剩 %lld 字节（要求 ≥ %lld）",
+            qWarning("[agent-qt] ⚠ 升级跳过：数据盘只剩 %lld 字节（要求 ≥ %lld）",
                      (long long)si.bytesAvailable(), (long long)kOtaMinFreeBytes);
             return;
         }
     }
 
-    qInfo("[agent-qt] 🔒 云端要求强制升级：v%s → v%s，开始自动下载安装（无需人工操作）",
+    qInfo("[agent-qt] 🔒 %s：v%s → v%s，开始自动下载安装（无需人工操作）",
+          g_updateMandatory ? "云端要求强制升级" : "空闲窗口自动升级",
           kAppVersion, qPrintable(g_latestVer));
     QJsonObject p;
     p.insert(QStringLiteral("url"), g_updateUrl);
