@@ -248,8 +248,22 @@ check(/rtcDisabledWarn/.test(stubSeg), '空实现会打日志说明"本次构建
 check(/不含 WebRTC 推流/.test(CMAKE_TXT), 'CMake else 分支写明"不含 WebRTC 推流"');
 check(/放回 _probe\/ldc_libs\//.test(CMAKE_TXT), 'CMake else 分支写明还原方法');
 
-// ── 十、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
-console.log('── 十、反向检查 ──');
+// ── 十、多面切换的"系统回落 vs 用户主动选择"（2026-10-18 缺陷修复）────────
+console.log('── 十、多面切换 face 逻辑 ──');
+const ROOT_QML_TXT = fs.readFileSync(path.join(ROOT, 'Stelarith-shared-qml/island/IslandRoot.qml'), 'utf8');
+// 守的缺陷：faceNow 原本只回落不回写 face，且无法区分"系统回落"与"用户切换"，
+// 导致用户切走后，媒体/历史恢复时被"记忆"拽回（用户意图被违背）。
+check(/property int faceUserPick: -1/.test(ROOT_QML_TXT),
+      '有 faceUserPick（用户主动选择的记录，默认 -1 = 从未选过）');
+check(/root\.faceUserPick = modelData\.id/.test(ROOT_QML_TXT),
+      '面签点击会记录用户主动选择');
+check(/faceUserPick >= 0\) return 0/.test(ROOT_QML_TXT),
+      '用户主动选过 ⇒ 失效面彻底回落（不再自动恢复）');
+check(!/onClicked: root\.face = modelData\.id\s*$/.test(ROOT_QML_TXT),
+      '面签点击不再只改 face（必须同时记录 faceUserPick）');
+
+// ── 十一、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
+console.log('── 十一、反向检查 ──');
 check(/QVector<IslandOverlay::Task>|\bQVector<Task>/.test(H), 'island.h 声明任务表容器');
 check(/const QVector<Task> &tasks\(\) const/.test(H), 'tasks() 只读访问器存在（桥与快照共用）');
 // 快照里带任务表，供沙箱验证"每条状态源都进表"

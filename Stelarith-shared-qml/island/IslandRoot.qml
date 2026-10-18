@@ -198,6 +198,16 @@ Item {
     //   · faceNow 是**有效面**：选中的面失效（媒体停了/历史清了）自动回概览，
     //     不倒扣 face 本身（用户切换意图保留）。
     property int face: 0
+    // ⚠️ 2026-10-18 · 区分「系统回落」与「用户主动选择」（face 混淆缺陷修复）
+    // 原实现：faceNow 只在选中面失效时回落 0，但 **face 永不回写** ⇒ 用户主动切到
+    // 别的面后，一旦"失效的面"（媒体/历史）再次可用，又会被**记忆拽回**那个面。
+    // 例：face=1(媒体) → 媒体停 → 回概览 → 用户切到态(face=3) → 媒体重启 →
+    //     原实现 faceNow 又变回 1（因为 face 还是 1），用户意图被违背。
+    // 修法：faceUserPick 记录"用户最后一次主动选择"。faceNow 的回落规则改为：
+    //   · 用户从未主动选过（faceUserPick==-1）⇒ 选中面失效时回落，但**保留 face**，
+    //     等它恢复（系统替我记住"最近看过媒体"）；
+    //   · 用户主动选过 ⇒ 失效就**彻底回概览**（尊重用户最后一次选择，不被拽回）。
+    property int faceUserPick: -1
     readonly property bool mediaFaceOn: root._mediaActive || root.mediaIsContent
         || (root.vhRef !== null && root.vhRef.active)
     readonly property bool histFaceOn: root._history.length > 0
@@ -211,6 +221,10 @@ Item {
     readonly property bool facesOn: root._expanded && !root._showActionsNow
         && !root.searchPageOn && !root.submitPageOn && root.faceModel.length >= 2
     readonly property int faceNow: {
+        // 用户主动选过：失效面彻底回落概览，且**不再自动恢复**（用户意图优先）。
+        if (root.face === 1 && !root.mediaFaceOn && root.faceUserPick >= 0) return 0;
+        if (root.face === 2 && !root.histFaceOn && root.faceUserPick >= 0) return 0;
+        // 用户从未主动选：系统替我记住最近的面，失效时回落但恢复后自动回来。
         if (root.face === 1 && !root.mediaFaceOn) return 0;
         if (root.face === 2 && !root.histFaceOn) return 0;
         return root.face;
@@ -2321,7 +2335,10 @@ Item {
                         }
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: root.face = modelData.id
+                            // ⚠️ 2026-10-18：用户主动选面 ⇒ 记录 faceUserPick。
+                            //    否则 faceNow 无法区分"系统回落"和"用户切换"，
+                            //    媒体/历史恢复时会违背用户意图自动跳回（见上面注释）。
+                            onClicked: { root.face = modelData.id; root.faceUserPick = modelData.id; }
                         }
                     }
                 }
