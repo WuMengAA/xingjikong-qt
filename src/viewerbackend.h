@@ -79,6 +79,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
 class QWebSocket;
+class RfbClient;            // 2026-10-18：远控隧道 RFB 客户端（RFB over WS）
 class QWebEngineView;
 class OAuthLogin;
 
@@ -410,6 +411,13 @@ public:
     QString rtcState() const { return m_rtcState; }
     QString frameSource() const { return m_frameSource; }
 
+    // ── 远控隧道（2026-10-18 · RFB over WS）──
+    /** 对 uid 这台设备拉起远控隧道（第二条 WS + RFB 客户端）；成功贯通后画面走 RFB。 */
+    Q_INVOKABLE void startRfbTunnel(const QString &uid);
+    /** 停掉当前远控隧道，画面回退到常规（轮询/JPEG 或 RTC）通道。 */
+    Q_INVOKABLE void stopRfbTunnel();
+    bool rfbActive() const { return m_rfbActive; }
+
     /** 切到某台设备 → 向云端订阅它的画面。
      *  ⚠️ 2026-10-10：必须 `Q_INVOKABLE` —— 它是 Q_PROPERTY currentUid 的 WRITE，
      *    但 QML 里写的是 `backend.setCurrentUid(uid)`（**当函数调**），而 WRITE 只在属性赋值时
@@ -667,6 +675,10 @@ signals:
     void rtcStateChanged();
     /** 2026-10-09：libdatachannel 收流帧就绪（ldc_receiver.frameReady → QML）。 */
     void rtcFrameReady(const QImage &frame);
+    /** 2026-10-18：远控隧道 RFB 客户端解出一帧（→ QML 上屏）。 */
+    void rfbFrameReady(const QImage &frame);
+    /** 2026-10-18：远控隧道贯通/断开（QML 可据此切实时画面源）。 */
+    void rfbTunnelStateChanged(bool on);
     /** 2026-10-12 · 四·双画面：摄像头第二轨帧就绪（ldc_receiver.cameraFrameReady → QML）。
      *  QML 收到就把 image://frames/cam 的 tick +1，摄像头格重取图。 */
     void cameraFrameChanged();
@@ -747,6 +759,8 @@ private:
     void applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,
                          FrameSource src = PushJpeg);
     void setStatic(bool s);
+    /** 远控隧道 RFB 客户端解出一帧 → 写 m_frame 并上屏（frameSource 切到 "rfb"）。 */
+    void onRfbFrame(const QImage &frame);
     void tickFps();
     void sendEnvelope(const QString &type, const QJsonObject &payload);
     /** 断线 / 退出时把语音和广播一起收掉，why 直接显示成状态行那句话。 */
@@ -857,6 +871,13 @@ private:
     // ── 2026-10-11「选中即远控」状态：记住现在正接管哪台，切换/清空时好收尾 ──
     bool m_remoteControlling = false;
     QString m_remoteControlUid;
+    // ── 2026-10-18 远控隧道（RFB over WS）──────────────────────────────────
+    // 接管某设备时拉起；m_rfbActive 期间，本机鼠标/键盘经隧道以 RFB 事件下发，
+    // 且**屏蔽**旧的 instruction/input 通道（避免和 VNC 服务双重注入）；屏幕帧由 RFB 提供。
+    RfbClient *m_rfb = nullptr;
+    bool m_rfbActive = false;
+    quint8 m_rfbBtnMask = 0;          // 当前鼠标按键位（RFB PointerEvent 用）
+    QString m_vncPassword;            // 教室机 VNC 密码（环境变量 STE_VNC_PASSWORD 或设置项）
     bool m_screenActive = true;   // 2026-10-08：带画面页是否可见（不可见则暂停单台拉流）
     QStringList m_capActions;              // 当前设备的指令能力全集（空=没上报过）
     QStringList m_procBlacklist;           // 2026-10-11：进程黑名单（QSettings proc/blacklist）

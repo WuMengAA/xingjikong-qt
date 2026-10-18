@@ -371,15 +371,15 @@ ColumnLayout {
                 anchors.left: parent.left
                 anchors.leftMargin: ctx.window.linkBusy ? 18 : 7
                 anchors.verticalCenter: parent.verticalCenter
-                text: backend.frameSource === "rtc" ? "实时"
+                text: (backend.frameSource === "rtc" || backend.frameSource === "rfb") ? "实时"
                     : ctx.window.linkBusy ? "正在接通…"
                     : backend.frameSource === "jpeg" ? "轮询" : "等待画面"
-                color: backend.frameSource === "rtc" ? th.win
+                color: (backend.frameSource === "rtc" || backend.frameSource === "rfb") ? th.win
                      : th.fg3
                 // 稿上没有 10px 这一档（最小是"注 11"），徽标字太小会把
                 // "实时/轮询"变成需要凑近看的装饰 —— 统一提到 11。
                 font.pixelSize: 12
-                font.weight: backend.frameSource === "rtc" ? Font.Medium : Font.Normal
+                font.weight: (backend.frameSource === "rtc" || backend.frameSource === "rfb") ? Font.Medium : Font.Normal
             }
 
             MouseArea {

@@ -1,6 +1,7 @@
 // 星集控 · 管理端后端实现（从 main.cpp 原样搬过来，行为保持一致）
 #include "viewerbackend.h"
 #include "oauthlogin.h"
+#include "rfb_client.h"       // 2026-10-18：远控隧道 RFB 客户端（RFB over WS）
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
 #include "audio_playback.h"  // B6（2026-10-11）：winmm waveOut 播放学生回传的 audio/pcm
 #include <cmath>             // std::isfinite：拦住 NaN/Inf 坐标（2026-10-11）
@@ -827,6 +828,8 @@ void ViewerBackend::setLdcRtcState(const QString &s)
 }
 void ViewerBackend::emitLdcFrame(const QImage &img)
 {
+    // 2026-10-18：远控隧道(RFB)激活时，RTC 帧让行（见 applyFrameBytes 同款守卫）。
+    if (m_rfbActive) return;
     // ── 2026-10-11 修 #171 / E6「RTC 画面不显」──
     // 老 WebEngine 路径（setRtcFrame → applyFrameBytes(RtcGrab)）本来就把 RTC 帧写进
     // m_frame、经 frameChanged → QML 的 image://frames/f 上屏。换成 libdatachannel 后，
@@ -1115,6 +1118,7 @@ void ViewerBackend::setCurrentUid(const QString &uid)
             logf("[viewer] 离开 %s，收掉对它的远控", prev.toUtf8().constData());
             m_remoteControlling = false;
             m_remoteControlUid.clear();
+            stopRfbTunnel();      // 2026-10-18：顺手关掉这台设备的远控隧道
         }
     }
 
@@ -1155,6 +1159,7 @@ void ViewerBackend::setCurrentUid(const QString &uid)
         m_remoteControlling = true;
         m_remoteControlUid = uid;
         logf("[viewer] 选中即远控：已对 %s 下发 remote_control_start", uid.toUtf8().constData());
+        startRfbTunnel(uid);   // 2026-10-18：接管即拉远控隧道（RFB over WS）
     } else {
         logf("[viewer] 选中 %s 但未自动进远控（role=%s，远控能力=%d）——权限或设备能力不满足",
              uid.toUtf8().constData(), role().toUtf8().constData(),
@@ -1739,6 +1744,9 @@ void ViewerBackend::refreshDevices(const QJsonArray &arr)
 void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,
                                     FrameSource src)
 {
+    // 2026-10-18：远控隧道(RFB)激活时，常规画面通道（JPEG 轮询 / RTC）整帧让行，
+    // 屏幕上只显示 RFB 解出的画面，避免两套抓屏抢同一张桌面、显示打架。
+    if (m_rfbActive) return;
     if (jpeg.isEmpty()) {
         logf("[viewer] FAIL 收到一帧但内容是空的");
         return;
@@ -2322,6 +2330,17 @@ void ViewerBackend::sendPointer(const QString &kind, double nx, double ny, const
              kind.toUtf8().constData());
         return;
     }
+    // 2026-10-18：远控隧道激活 → 鼠标走 RFB PointerEvent（和 VNC 服务同源，不双重注入）。
+    if (m_rfbActive && m_rfb) {
+        quint8 bit = 1;   // 默认左键
+        if (button == QStringLiteral("right")) bit = 2;
+        else if (button == QStringLiteral("middle")) bit = 4;
+        if (kind == QStringLiteral("down")) m_rfbBtnMask |= bit;
+        else if (kind == QStringLiteral("up")) m_rfbBtnMask &= ~bit;
+        // move 保持当前 mask 不变
+        m_rfb->sendPointer(nx, ny, m_rfbBtnMask);
+        return;
+    }
     QJsonObject params;
     params.insert(QStringLiteral("kind"), kind);
     params.insert(QStringLiteral("x"), nx);
@@ -2345,6 +2364,13 @@ void ViewerBackend::sendKey(int vk, const QString &action)
 {
     if (m_currentUid.isEmpty()) { logf("[viewer] FAIL 没选设备不发按键"); return; }
     if (vk <= 0 || vk > 255) { logf("[viewer] FAIL vk 越界 %d，不发", vk); return; }
+    // 2026-10-18：远控隧道激活 → 键盘走 RFB KeyEvent（VK→X11 keysym），同源不双重注入。
+    if (m_rfbActive && m_rfb) {
+        m_rfb->sendKeyVk(vk, action == QStringLiteral("down"));
+        logf("[viewer] 远控键→ keysym=0x%X %s", (unsigned)RfbClient::vkToKeysym(vk),
+             action == QStringLiteral("down") ? "down" : "up");
+        return;
+    }
     QJsonObject params;
     params.insert(QStringLiteral("kind"), QStringLiteral("key"));
     params.insert(QStringLiteral("vk"), vk);
@@ -2356,6 +2382,104 @@ void ViewerBackend::sendKey(int vk, const QString &action)
     sendEnvelope(QStringLiteral("instruction"), p);
     logf("[viewer] 按键→ %s vk=%d", action.toUtf8().constData(), vk);
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// 远控隧道（2026-10-18 · RFB over WS）
+//
+// 接管某台设备时拉起：第二条 WS（/ws/tunnel，复用管理端令牌）做字节中继，
+// 在其上跑标准 RFB（见 rfb_client.cpp）解出教室机桌面，并接收老师鼠标/键盘
+// （RFB PointerEvent/KeyEvent 原路发回，由 VNC 服务注入——不走 instruction/input，
+// 避免和 VNC 服务双重注入）。
+// ──────────────────────────────────────────────────────────────────────
+void ViewerBackend::startRfbTunnel(const QString &uid)
+{
+    if (uid.isEmpty()) return;
+    if (!m_rfb) {
+        m_rfb = new RfbClient(this);
+        connect(m_rfb, &RfbClient::frameReady, this, &ViewerBackend::onRfbFrame);
+        connect(m_rfb, &RfbClient::tunnelOpened, this, [this]() {
+            m_rfbActive = true;
+            m_rfbBtnMask = 0;
+            emit rfbTunnelStateChanged(true);
+            logf("[viewer] 远控隧道贯通，鼠标/键盘切到 RFB 事件通道");
+        });
+        connect(m_rfb, &RfbClient::status, this, [](const QString &m) { logf("[viewer] [rfb] %s", qPrintable(m)); });
+        connect(m_rfb, &RfbClient::closed, this, [this]() {
+            m_rfbActive = false;
+            m_rfbBtnMask = 0;
+            if (m_frameSource == QStringLiteral("rfb")) {
+                m_frameSource = QStringLiteral("none");
+                emit frameSourceChanged();
+            }
+            emit rfbTunnelStateChanged(false);
+        });
+    }
+    // VNC 密码：环境变量 STE_VNC_PASSWORD 优先（同机/内网部署）；可后续扩设置项。
+    if (m_vncPassword.isEmpty())
+        m_vncPassword = qEnvironmentVariable("STE_VNC_PASSWORD", QString()).trimmed();
+
+    // 隧道地址：把 /ws/viewer 换成 /ws/tunnel（同一云端、复用管理端令牌）。
+    QString tunnelUrl = m_url;
+    const int i = tunnelUrl.lastIndexOf(QStringLiteral("/ws/viewer"));
+    if (i >= 0) tunnelUrl = tunnelUrl.left(i) + QStringLiteral("/ws/tunnel");
+    else if (tunnelUrl.endsWith(QLatin1Char('/'))) tunnelUrl = tunnelUrl + QStringLiteral("ws/tunnel");
+    else tunnelUrl = tunnelUrl + QStringLiteral("/ws/tunnel");
+
+    m_rfbActive = true;       // 立刻路由输入（RfbClient 在 tunnel.opened 前不会真正下发）
+    m_rfbBtnMask = 0;
+    logf("[viewer] 拉起远控隧道：uid=%s → %s", qPrintable(uid), qPrintable(tunnelUrl));
+    m_rfb->start(tunnelUrl, m_token, uid, m_vncPassword);
+
+    // 不再走常规画面通道：退订这台设备的常规帧，省得两套抓屏抢同一张桌面、带宽打架。
+    QJsonObject un;
+    un.insert(QStringLiteral("uid"), uid);
+    sendEnvelope(QStringLiteral("unsubscribe"), un);
+}
+
+void ViewerBackend::stopRfbTunnel()
+{
+    if (!m_rfbActive && !m_rfb) return;
+    m_rfbActive = false;
+    m_rfbBtnMask = 0;
+    if (m_rfb) m_rfb->stop();
+    if (m_frameSource == QStringLiteral("rfb")) {
+        m_frameSource = QStringLiteral("none");
+        emit frameSourceChanged();
+    }
+    emit rfbTunnelStateChanged(false);
+    logf("[viewer] 远控隧道已停止");
+    // 恢复常规画面通道：重新订阅当前设备。
+    if (!m_currentUid.isEmpty() && m_screenActive) {
+        QJsonObject sp;
+        sp.insert(QStringLiteral("uid"), m_currentUid);
+        sendEnvelope(QStringLiteral("subscribe"), sp);
+    }
+}
+
+void ViewerBackend::onRfbFrame(const QImage &img)
+{
+    if (img.isNull()) return;
+    if (m_frameSource != QStringLiteral("rfb")) {
+        m_frameSource = QStringLiteral("rfb");
+        emit frameSourceChanged();
+    }
+    m_frameCount++;
+    m_frame = img;
+    m_frameUid = m_currentUid;
+    m_lastFrameBytes = (int)img.sizeInBytes();
+    const quint64 fp = frameFingerprint(img);
+    m_sameFrameStreak = (fp == m_frameHash) ? (m_sameFrameStreak + 1) : 0;
+    m_frameHash = fp;
+    setStatic(m_sameFrameStreak >= kStaticStreak);
+    if (!m_screenStatic) emit frameChanged();
+    emit rfbFrameReady(img);
+    emit statsChanged();
+    if (m_frameCount % 30 == 1) {
+        logf("[viewer] 远控画面在动[RFB]：第 %d 帧（%dx%d）",
+             m_frameCount, img.width(), img.height());
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // 文件推送
 // ──────────────────────────────────────────────────────────────────────

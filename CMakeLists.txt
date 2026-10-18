@@ -148,6 +148,11 @@ qt_add_executable(viewer-qt
   src/main.cpp
   src/viewerbackend.cpp
   src/viewerbackend.h
+  # 2026-10-18：远控隧道 RFB 客户端（RFB 003.008 over WS，替换自研 WebRTC 远控桌面）。
+  # 不依赖 Qt 的纯算法头（DES）+ 状态机实现，独立编译单元给 viewerbackend.cpp 减负。
+  src/rfb_des.h
+  src/rfb_client.cpp
+  src/rfb_client.h
   # 2026-10-15 组件6 配套：互动审批桥（审批数据面 + 共享灵动岛的桥面）。
   # 独立编译单元（不给 2700 行的 viewerbackend.cpp 再加负担，同 ldc_rtc_bridge 的先例）。
   src/interactbridge.cpp
