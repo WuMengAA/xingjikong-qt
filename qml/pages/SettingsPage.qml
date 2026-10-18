@@ -73,9 +73,10 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: colSettings1.implicitHeight + 32
                 Layout.fillHeight: true
-                radius: th.rCard
-                color: th.panel
-                border.color: th.card
+                // 2026-10-18 MD3：卡片从最低档 panel 升 elevated（与概览页同语言）——cContLow 底 + outlineVar 细边
+                radius: 12
+                color: th.cContLow
+                border.color: th.cOutlineVar
                 border.width: 1
                 Column {
                     id: colSettings1
@@ -84,7 +85,8 @@ Item {
                     anchors.top: parent.top
                     anchors.margins: 16
                     spacing: 14
-                    Text { text: "账户"; color: th.fg3; font.pixelSize: 12 }
+                    // 2026-10-18 MD3：分节头 labelLarge（14px Medium + onSurfaceVar + 0.1 字距）
+                Text { text: "账户"; color: th.cOnSurfaceVar; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
 
                     // 没登录：两颗按钮 + 一句话说清"登录之后会发生什么"
                     Column {
@@ -192,9 +194,10 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: colSettings2.implicitHeight + 32
                 Layout.fillHeight: true
-                radius: th.rCard
-                color: th.panel
-                border.color: th.card
+                // 2026-10-18 MD3：卡片从最低档 panel 升 elevated（与概览页同语言）——cContLow 底 + outlineVar 细边
+                radius: 12
+                color: th.cContLow
+                border.color: th.cOutlineVar
                 border.width: 1
                 Column {
                     id: colSettings2
@@ -203,7 +206,8 @@ Item {
                     anchors.top: parent.top
                     anchors.margins: 16
                     spacing: 14
-                    Text { text: "连接"; color: th.fg3; font.pixelSize: 12 }
+                    // 2026-10-18 MD3：分节头 labelLarge（14px Medium + onSurfaceVar + 0.1 字距）
+                Text { text: "连接"; color: th.cOnSurfaceVar; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
                     // 稿 .kv：键 70px 辅助色，值 12px 操作色
                     Column {
                         width: parent.width
@@ -256,9 +260,10 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: colSettings3.implicitHeight + 32
                 Layout.fillHeight: true
-                radius: th.rCard
-                color: th.panel
-                border.color: th.card
+                // 2026-10-18 MD3：卡片从最低档 panel 升 elevated（与概览页同语言）——cContLow 底 + outlineVar 细边
+                radius: 12
+                color: th.cContLow
+                border.color: th.cOutlineVar
                 border.width: 1
                 Column {
                     id: colSettings3
@@ -267,7 +272,8 @@ Item {
                     anchors.top: parent.top
                     anchors.margins: 16
                     spacing: 14
-                    Text { text: "提醒"; color: th.fg3; font.pixelSize: 12 }
+                    // 2026-10-18 MD3：分节头 labelLarge（14px Medium + onSurfaceVar + 0.1 字距）
+                Text { text: "提醒"; color: th.cOnSurfaceVar; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
                     Column {
                         width: parent.width
                         spacing: 4
@@ -300,9 +306,10 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: colSettingsBoot.implicitHeight + 32
                 Layout.fillHeight: true
-                radius: th.rCard
-                color: th.panel
-                border.color: th.card
+                // 2026-10-18 MD3：卡片从最低档 panel 升 elevated（与概览页同语言）——cContLow 底 + outlineVar 细边
+                radius: 12
+                color: th.cContLow
+                border.color: th.cOutlineVar
                 border.width: 1
                 visible: !ctx.window.isPhone   // 开机自启/桌面快捷方式 = Windows 专属，手机隐藏
                 Column {
@@ -312,7 +319,8 @@ Item {
                     anchors.top: parent.top
                     anchors.margins: 16
                     spacing: 14
-                    Text { text: "启动"; color: th.fg3; font.pixelSize: 12 }
+                    // 2026-10-18 MD3：分节头 labelLarge（14px Medium + onSurfaceVar + 0.1 字距）
+                Text { text: "启动"; color: th.cOnSurfaceVar; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
                     Column {
                         width: parent.width
                         spacing: 4
@@ -341,9 +349,10 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: colSettings4.implicitHeight + 32
                 Layout.fillHeight: true
-                radius: th.rCard
-                color: th.panel
-                border.color: th.card
+                // 2026-10-18 MD3：卡片从最低档 panel 升 elevated（与概览页同语言）——cContLow 底 + outlineVar 细边
+                radius: 12
+                color: th.cContLow
+                border.color: th.cOutlineVar
                 border.width: 1
                 Column {
                     id: colSettings4
@@ -396,9 +405,10 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: colSettings5.implicitHeight + 32
                 Layout.fillHeight: true
-                radius: th.rCard
-                color: th.panel
-                border.color: th.card
+                // 2026-10-18 MD3：卡片从最低档 panel 升 elevated（与概览页同语言）——cContLow 底 + outlineVar 细边
+                radius: 12
+                color: th.cContLow
+                border.color: th.cOutlineVar
                 border.width: 1
                 Column {
                     id: colSettings5
@@ -447,9 +457,10 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: colSettings6.implicitHeight + 32
                 Layout.fillHeight: true
-                radius: th.rCard
-                color: th.panel
-                border.color: th.card
+                // 2026-10-18 MD3：卡片从最低档 panel 升 elevated（与概览页同语言）——cContLow 底 + outlineVar 细边
+                radius: 12
+                color: th.cContLow
+                border.color: th.cOutlineVar
                 border.width: 1
                 Column {
                     id: colSettings6
@@ -458,7 +469,8 @@ Item {
                     anchors.top: parent.top
                     anchors.margins: 16
                     spacing: 6
-                    Text { text: "关于"; color: th.fg3; font.pixelSize: 12 }
+                    // 2026-10-18 MD3：分节头 labelLarge（14px Medium + onSurfaceVar + 0.1 字距）
+                Text { text: "关于"; color: th.cOnSurfaceVar; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
                     Text { text: "星集控 · 管理端"; color: th.fg; font.pixelSize: 13 }
                     Row {
                         spacing: 0
