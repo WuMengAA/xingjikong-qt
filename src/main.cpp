@@ -50,6 +50,7 @@
 #include <QTextEdit>    // P3：长期记录对话框（QTextEdit 不在 QWidgets 总含头里）
 #include <QCheckBox>    // P3：播放时段配置对话框
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
+#include "tunnel_agent.h"       // 2026-10-18：远控隧道第二条 WS（RFB over WS，纯字节桥）
 #include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
 #include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
 #include "proc_guard.h"        // 2026-10-13：进程终止安全闸门（与 exam_mode 共用同一道门）
@@ -6586,6 +6587,24 @@ void handleControlText(const QString &text)
             const QString toStr = tv.isDouble() ? QString::number(tv.toInt()) : tv.toString();
             qInfo("[rtc] 云端回执：%s 已投给 %s 个对端",
                   rtype.toUtf8().constData(), toStr.toUtf8().constData());
+        }
+        return;
+    }
+    // ── 远控隧道（2026-10-18 · RFB over WS）──────────────────────────────────
+    // 云端要开一条「老师端 ↔ 本机 VNC」的字节隧道：下发一次性 sid/key/port。
+    // 本机拨出第二条 WS（/ws/tunnel-agent，无需鉴权），attach 后云端把两端配对，
+    // 之后 TunnelAgent 在 WS 与 127.0.0.1:5900 之间纯搬字节（不解析 RFB）。
+    // 安全边界：本地 TCP 只连 loopback，云端拿不到真实 host:port。
+    if (type == QStringLiteral("tunnel.open")) {
+        const QString sid = pay.value(QStringLiteral("sid")).toString();
+        const QString key = pay.value(QStringLiteral("key")).toString();
+        const quint16 port = (quint16)qBound(1, pay.value(QStringLiteral("port")).toInt(5900), 65535);
+        const QString baseUrl = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
+        qInfo("[agent-qt] 云端要开远控隧道 sid=%s port=%d", qPrintable(sid), port);
+        if (sid.isEmpty() || key.isEmpty()) {
+            qWarning("[agent-qt] FAIL tunnel.open 缺 sid/key，忽略");
+        } else {
+            TunnelAgent::instance().start(baseUrl, sid, key, port);
         }
         return;
     }
