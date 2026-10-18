@@ -8,6 +8,10 @@
 #include <QFileInfo>
 
 // libdatachannel（仅本 .cpp 引入，头文件保持零依赖）
+// 2026-10-18：RTC_STATIC 守卫——缺 libdatachannel 时整份实现编译为空实现（接口一致、可逆摘除），
+// 对齐 control-qt b8ab77d 方案 A。RTC_STATIC 由 CMake 在 _probe/ldc_libs/datachannel.lib 存在时定义；
+// 放回该 lib 后重新 configure 即自动回到 RTC 分支，源码无需改动。
+#if defined(RTC_STATIC)
 #include "rtc/rtc.hpp"
 
 LdcReceiver &LdcReceiver::instance()
@@ -383,3 +387,23 @@ void LdcReceiver::onCamDecStdout()
         emit cameraFrameReady(img.copy());
     }
 }
+
+#else  // !RTC_STATIC —— libdatachannel 缺失：WebRTC 收流不可用，空实现保持接口一致
+
+LdcReceiver &LdcReceiver::instance()
+{
+    static LdcReceiver inst;
+    return inst;
+}
+
+LdcReceiver::LdcReceiver(QObject *parent) : QObject(parent) {}
+
+void LdcReceiver::onSignal(const QString &, const QByteArray &)
+{
+    // 不假装成功：明确告知上层走 JPEG / RFB 兜底（假成功会让管理端一直等 offer，更难查）
+    emit failed(QStringLiteral("RTC 未编译（libdatachannel 缺失）：WebRTC 收流不可用，请走 JPEG 帧 / RFB 远控路径"));
+}
+
+void LdcReceiver::stop() {}
+
+#endif  // RTC_STATIC

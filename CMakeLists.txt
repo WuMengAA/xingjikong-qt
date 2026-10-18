@@ -365,7 +365,11 @@ if(NOT STE_IS_ANDROID AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_l
   target_compile_definitions(viewer-qt PRIVATE RTC_STATIC)
   message(STATUS "[viewer] libdatachannel 已链入（RTC_STATIC）")
 else()
-  message(WARNING "[viewer] _probe/ldc_libs/datachannel.lib 缺失——ldc_receiver 编译会失败，请先重建 libdatachannel")
+  # 2026-10-18：对齐 control-qt b8ab77d 方案 A——缺 lib 时 ldc_receiver.cpp 走空实现（接口一致、可逆摘除），
+  # 本包不含 WebRTC 收流；画面监控走独立 JPEG 帧路径、远控走 P2 的 RFB，均不受影响。
+  # 还原：把 datachannel.lib/srtp2.lib/juice.lib/usrsctp.lib 放回 _probe/ldc_libs/（含 libdatachannel-master/include）
+  # 后重新 configure，自动回到 RTC_STATIC 分支，源码无需改动。
+  message(WARNING "[viewer] _probe/ldc_libs/datachannel.lib 缺失——RTC 编译为空实现（WebRTC 收流不可用，JPEG/RFB 不受影响）；放回 lib 重 configure 即恢复")
 endif()
 
 # ── OpenSSL 运行时 DLL 拷进 build/（2026-10-14 补，对齐被控端）────────────
