@@ -2,6 +2,11 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"     // Btn / ToggleRow（本端自有通用组件）
+// 2026-10-18：MD3 布局组件（Md3SwitchRow / Md3ListItem / Md3NavBar…）。
+// 真源在 Stelarith-shared-qml/ui/md3/，构建时由 CMake copy_directory 落到
+// qml/Stelarith/components/md3/ —— 故源码树下 qmllint 解析不到（磁盘加载模式），
+// 以「构建 + 运行」验证为准，与岛同套路。
+import "../components/md3"
 
 // 设置页（整屏页 · U5「两端同 shell」A-2 第一页）
 //
@@ -277,19 +282,22 @@ Item {
                     Column {
                         width: parent.width
                         spacing: 4
-                        ToggleRow {
+                        // 2026-10-18 MD3 布局：开关行从手写 ToggleRow 换成 Md3SwitchRow
+                        // （56/72 高列表行 + 52×32 轨道开关 + supporting 说明），
+                        // 与设置页其它分节的 MD3 语言一致——这是"列表行"的 MD3 标准形态。
+                        Md3SwitchRow {
                             width: parent.width
-                            theme: th
+                            md3: th
                             text: "操作完成时提示"
-                            note: "机器上真的做完了才说一句（云端收下不算）"
+                            supporting: "机器上真的做完了才说一句（云端收下不算）"
                             checked: backend.notifyOnDone
                             onToggled: function (on) { backend.notifyOnDone = on }
                         }
-                        ToggleRow {
+                        Md3SwitchRow {
                             width: parent.width
-                            theme: th
+                            md3: th
                             text: "设备离线时提醒"
-                            note: "与云端断开时弹一条（后台也能看见）"
+                            supporting: "与云端断开时弹一条（后台也能看见）"
                             checked: backend.notifyOnOffline
                             onToggled: function (on) { backend.notifyOnOffline = on }
                         }
@@ -324,19 +332,20 @@ Item {
                     Column {
                         width: parent.width
                         spacing: 4
-                        ToggleRow {
+                        // 2026-10-18 MD3 布局：同提醒区，启动项开关行也换成 Md3SwitchRow
+                        Md3SwitchRow {
                             width: parent.width
-                            theme: th
+                            md3: th
                             text: "开机自动启动"
-                            note: "登录 Windows 后自动打开（免管理员）"
+                            supporting: "登录 Windows 后自动打开（免管理员）"
                             checked: backend.autoStart
                             onToggled: function (on) { backend.setAutoStart(on) }
                         }
-                        ToggleRow {
+                        Md3SwitchRow {
                             width: parent.width
-                            theme: th
+                            md3: th
                             text: "桌面快捷方式"
-                            note: "在桌面放一枚「星集控管理端」图标"
+                            supporting: "在桌面放一枚「星集控管理端」图标"
                             checked: backend.desktopShortcut
                             onToggled: function (on) { backend.setDesktopShortcut(on) }
                         }
