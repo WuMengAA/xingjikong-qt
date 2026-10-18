@@ -8,7 +8,22 @@ Rectangle {
     color: blockType === 0 ? "#0078d4" : "#555"
     radius: 4
 
-    // 由 TimeAxis 传入
+    // ── 拖拽手柄的可见性（2026-10-18 · 用户反馈「没有拖拽式编辑功能」根因）──
+    // 手柄原本 `color: "transparent"` ⇒ **完全看不见**。功能其实一直在（上有
+    // topHandle/bottomHandle 改起止时间、走 undoManager），但老师看不出哪里能拖，
+    // 感受上就是"没有拖拽编辑"。
+    // 修法：给手柄加抓握条（hover/pressed/拖拽中显现），命中区 10px → 14px。
+    property bool handlesHint: blockMa.containsMouse
+    readonly property bool handleVisible: dragActive || handlesHint
+
+    MouseArea {
+        id: blockMa
+        anchors.fill: parent
+        hoverEnabled: true
+        // 只做 hover 探测，不消费点击（块的点击由内层手柄处理）
+        acceptedButtons: Qt.NoButton
+    }
+
     required property int blockIndex
     required property var timeAxisRef
     required property string blockName
@@ -52,13 +67,27 @@ Rectangle {
     }
 
     // 顶部拖拽手柄：改开始时间
+    // 2026-10-18：命中区 10 → 14px，并加可见抓握条（原 color:transparent 完全看不见）
     Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 10
+        height: 14
         color: "transparent"
         visible: parent.height > 24
+
+        // 抓握条：hover/拖拽时显现，告诉老师"这里能拖"
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: 4
+            width: 24
+            height: 3
+            radius: 2
+            color: "#FFFFFF"
+            opacity: block.handleVisible ? 0.75 : 0
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+        }
 
         MouseArea {
             id: topHandle
@@ -95,13 +124,26 @@ Rectangle {
     }
 
     // 底部拖拽手柄：改结束时间
+    // 2026-10-18：命中区 10 → 14px，并加可见抓握条（同顶部）
     Rectangle {
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 10
+        height: 14
         color: "transparent"
         visible: parent.height > 24
+
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 4
+            width: 24
+            height: 3
+            radius: 2
+            color: "#FFFFFF"
+            opacity: block.handleVisible ? 0.75 : 0
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+        }
 
         MouseArea {
             id: bottomHandle

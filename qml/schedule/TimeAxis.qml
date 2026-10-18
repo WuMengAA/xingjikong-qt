@@ -31,8 +31,13 @@ Rectangle {
     }
 
     // 内容总高度：取最晚结束时间
+    // ⚠️ 2026-10-18 用户反馈「显示不了更多滑动时间轴」第二个根因：
+    //    原实现取「最晚结束 + 60」，且最小兜底只有 480 分钟(=8:00)。
+    //    课表若只排到上午，滚区高 = 8 小时 ⇒ **滚不到下午**，看起来"滑不动/滑不出更多"。
+    //    修法：下限抬到完整 24 小时（1440 分钟），保证任何排期都能滚到任意时刻；
+    //    上限仍按实际最晚结束（排到 23:00 也不会多出无意义空白）。
     property real contentHeight: {
-        var maxEnd = 480
+        var maxEnd = 1440            // 一整天（分钟）
         for (var i = 0; i < timeSlotModel.count; ++i) {
             var endMin = timeSlotModel.endMinAt(i)
             if (endMin > maxEnd) maxEnd = endMin
@@ -58,9 +63,17 @@ Rectangle {
         }
 
         Flickable {
+            id: labelFlick
             anchors.fill: parent
             contentHeight: root.contentHeight
             clip: true
+            // ⚠️ 2026-10-18 用户反馈「显示不了更多滑动时间轴」根因：
+            //    左侧刻度与本区是**两个独立 Flickable**，各自滚动互不联动 ——
+            //    滚左边刻度时右边时间块不动、滚右边块时左边刻度不动，
+            //    于是"滑动时间轴"看起来只动一边、像是滑不动。
+            //    修法：contentY 双向绑定（interactive 只留一边接手势，避免两个同时吃拖动）。
+            interactive: false
+            contentY: blockFlick.contentY
             Repeater {
                 model: 24  // 24 小时刻度
                 Rectangle {
