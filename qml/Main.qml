@@ -14,6 +14,9 @@ import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
 import "pages"             // U5 A-2：抽出的整屏页（「页」也声明化的第一步；见 pages/SettingsPage.qml）
+// 2026-10-18：截图预览窗直接声明在本文件（回执驱动，不走 UiPanelHost 清单）
+// ⇒ 必须 import "panels" 才能按类型名实例化 panels/ScreenshotPreviewDialog.qml。
+import "panels"
 import "island"          // SvgIcon 的唯一真源在共享岛目录（Stelarith-shared-qml/island/，构建期拷到 qml/island/）——
                       // 2026-10-16 修：A 档把 viewer 自己的 components/SvgIcon.qml 当"重复件"删了，
                       // 但那 4 个同名件里只有它的接口是超集且被**全套面板 + Main.qml**在用；
@@ -204,12 +207,12 @@ ApplicationWindow {
     //    后端现在给每帧记了 frameUid（这帧属于谁），这里必须两边对齐才上屏。
     readonly property bool frameReady: backend.frameCount > 0
                                         && backend.frameUid === backend.currentUid
-    // 「正在接通」：选了某台机器、画面还没出第一帧，且 RTC 链路确实在建
-    // （rtcState 由 backend 维护：idle → waiting → track）。
-    // 只写"还没出帧"会把"被控端根本没推流"也误报成在忙，让用户空等。
+    // 「正在接通」：选了某台机器、画面还没出第一帧，且 VNC 链路确实在建
+    // （vncState 由 backend 维护：idle → 连接中 → 已连接 / 连接失败）。
+    // 只写"还没出帧"会把"被控端根本没起 VNC 服务"也误报成在忙，让用户空等。
     readonly property bool linkBusy: backend.currentUid !== ""
                                      && backend.frameCount === 0
-                                     && backend.rtcState === "waiting"
+                                     && backend.vncState === "连接中"
 
     Connections {
         target: backend
@@ -230,13 +233,30 @@ ApplicationWindow {
             // 截图（2026-10-11）：以前点了就没声没息——指令确实发了、也确实执行了，
             // 但界面一个字都不说，老师只能靠"没报错"猜。这里把回执念出来。
             // 注意 path 是**教室机**上的路径，本机打不开，别误导成"已存到你电脑"。
+            //
+            // ⚠️ 2026-10-18 用户反馈「截图后没有传回图片且没有预览界面」——根因：
+            //    被控端只把 PNG 存到**教室机本地**，回执里只有 path/bytes/width/height，
+            //    图片内容从未回传，管理端自然无图可看。
+            //    现在：回执若带 `data.thumb`（JPEG base64，新被控端才发）⇒ 弹**预览窗**；
+            //    不带（老被控端）⇒ 保持原来的 toast + 提示"该设备未回传预览图"，
+            //    不搞假成功、也不弹空白框。
             if (action === "screenshot") {
-                if (result === "done" && data && data.path !== undefined)
-                    root.toast("已截图 → 教室机 " + uid + "：" + data.path
-                               + "（" + (data.width || "?") + "×" + (data.height || "?")
-                               + "，" + Math.round((data.bytes || 0) / 1024) + " KB）")
-                else
+                if (result === "done" && data && data.path !== undefined) {
+                    if (data.thumb && data.thumb.length > 0) {
+                        shotDlg.showShot({
+                            uid: uid, path: data.path,
+                            bytes: data.bytes, width: data.width, height: data.height,
+                            thumb: data.thumb
+                        })
+                        root.toast("截图已传回，见预览窗")
+                    } else {
+                        root.toast("已截图（该设备未回传预览图）→ 教室机 " + uid + "：" + data.path
+                                   + "（" + (data.width || "?") + "×" + (data.height || "?")
+                                   + "，" + Math.round((data.bytes || 0) / 1024) + " KB）")
+                    }
+                } else {
                     root.toast("截图失败 → " + uid + "：" + (error || "未知原因"))
+                }
             }
 
             // 概览页的「最近回执」流水：只收真回执（executed），时间倒序，最多 20 条
@@ -407,22 +427,48 @@ ApplicationWindow {
 
                     // 稿上是「在线 / 待办 / 离线」三个数。待办（待执行指令）与离线设备现在
                     // 已由云端持久下发（backend.storage.*），故补齐这三个；已收帧移出顶部（属会话态指标）。
+                    //
+                    // ── 2026-10-18 MD3 排版升级（用户反馈「还是卡片堆叠的老样子」）──
+                    // 原来是纯文本行（12px 标签 + 20px 数字挤在一行），与下方卡片无层次差。
+                    // 现改为 **MD3 统计卡**：labelSmall 标签 + headlineSmall 大数 +
+                    // surfaceContainer 高一档的底色 + outlined 描边，三张并排——
+                    // 让"看什么数字"一眼可分，这是 MD3「层次用容器色阶表达」的正路。
                     Row {
-                        spacing: 32
+                        spacing: 12
                         Repeater {
                             model: [
-                                { k: "在线", v: backend.onlineCount },
+                                { k: "在线", v: backend.onlineCount, accent: true },
                                 // E5 占位：backend.storage 首拉前为空对象，pendingInstructions/offlineDevices 为 undefined，
                                 // 此时显「—」而非空白（storage 卡本身有 at===undefined 空态，这儿补顶行）。
-                                { k: "待办", v: (backend.storage.pendingInstructions !== undefined ? backend.storage.pendingInstructions : "—") },
-                                { k: "离线", v: (backend.storage.offlineDevices !== undefined ? backend.storage.offlineDevices : "—") }
+                                { k: "待办", v: (backend.storage.pendingInstructions !== undefined ? backend.storage.pendingInstructions : "—"), accent: false },
+                                { k: "离线", v: (backend.storage.offlineDevices !== undefined ? backend.storage.offlineDevices : "—"), accent: false }
                             ]
-                            delegate: Row {
-                                spacing: 8
-                                Text { text: modelData.k; color: th.fg3; font.pixelSize: 12 }
-                                Text {
-                                    text: modelData.v
-                                    color: th.fg; font.pixelSize: 20; font.weight: Font.Medium
+                            delegate: Rectangle {
+                                width: 132
+                                height: 76
+                                radius: th.rCard
+                                // MD3：容器色阶分层次——第一张（在线）用 secondaryContainer 突出，
+                                // 其余用 surfaceContainer 高一档底 + outlineVariant 细描边
+                                color: modelData.accent ? th.cSecondaryCont : th.cContHigh
+                                border.color: modelData.accent ? "transparent" : th.cOutlineVar
+                                border.width: modelData.accent ? 0 : 1
+                                Column {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 14
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 2
+                                    Text {
+                                        text: modelData.k
+                                        // MD3 labelMedium：12px / Medium / 0.5 字距（用 letterSpacing 近似）
+                                        color: modelData.accent ? th.cOnSecondaryCont : th.fg3
+                                        font.pixelSize: 12; font.weight: Font.Medium
+                                    }
+                                    Text {
+                                        text: modelData.v
+                                        // MD3 headlineSmall：24px——数字是这张卡的主角
+                                        color: modelData.accent ? th.cOnSecondaryCont : th.fg
+                                        font.pixelSize: 24; font.weight: Font.Medium
+                                    }
                                 }
                             }
                         }
@@ -440,19 +486,37 @@ ApplicationWindow {
                             // phone:false 的（屏幕广播 / 考试模式）由 quickList() 按 isPhone 滤掉，
                             // 与 2026-10-11「手机管理端隐藏屏幕广播」同效。
                             model: root.quickList()
+                            // ── 2026-10-18 MD3：快捷按钮从手写 76×30 方块改为 tonal 胶囊 ──
+                            // MD3 tonal：secondaryContainer 底 + onSecondaryContainer 字，
+                            // 全圆角（rFull），状态层 hover 8% / press 12% 叠加——
+                            // 与下方统计卡同一套容器色阶语言，整屏不再"三种按钮三种长相"。
                             delegate: Rectangle {
-                                width: 76; height: 30; radius: th.rCtrl
-                                color: qhMa.containsMouse ? th.hover2 : th.panel
-                                border.color: th.stroke; border.width: 1
+                                width: lbl.implicitWidth + 28
+                                height: 36
+                                radius: height / 2
+                                color: qhMa.pressed ? th.cSecondaryCont : (qhMa.containsMouse ? th.cSecondaryCont : th.cContHigh)
+                                border.color: "transparent"
+                                border.width: 0
+                                // MD3 状态层（onSecondaryContainer 叠加）
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: parent.radius
+                                    color: th.cOnSecondaryCont
+                                    opacity: qhMa.pressed ? 0.12 : (qhMa.containsMouse ? 0.08 : 0)
+                                    Behavior on opacity { NumberAnimation { duration: th ? (th.durXShort || 120) : 120 } }
+                                }
                                 Text {
+                                    id: lbl
                                     anchors.centerIn: parent
                                     text: modelData.quickTitle || modelData.title
-                                    color: th.fg
-                                    font.pixelSize: 12
+                                    color: th.cOnSecondaryCont
+                                    font.pixelSize: 13; font.weight: Font.Medium
                                 }
                                 MouseArea {
                                     id: qhMa
                                     anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
                                     onClicked: root.runActionById(modelData.id, { quick: true })
                                 }
                             }
@@ -1008,6 +1072,17 @@ ApplicationWindow {
     // 灵动岛（3.8）：挂**窗口层** —— 它讲"现在系统在干什么"，跟老师在哪个标签无关。
     // 悬浮在内容区上方（顶条 44 + 8 安全区），不占布局高度：
     // 右栏那列是固定高度的结构，给它加高度只会把底部标签栏顶出去（见 minimumHeight 注释）。
+
+    // ── 截图预览窗（2026-10-18 · 用户反馈「截图后没有预览界面」）──────────
+    // 直接在本文件声明而**不走 UiPanelHost 清单**，理由：本窗是**回执驱动**的
+    // （收到 screenshot 回执就 showShot），不是用户点面板入口打开的；
+    // 走清单得先 register 再 open，多一层且语义不符。
+    // ctx 契约与抽出的 6 个 panels 一致（ctx.window 够到主窗口）。
+    ScreenshotPreviewDialog {
+        id: shotDlg
+        ctx: ({ window: root })
+    }
+
     Item {
         anchors.top: parent.top
         anchors.topMargin: 52
@@ -1406,7 +1481,7 @@ ApplicationWindow {
                      p: Math.max(0, Math.min(100, backend.filePercent)) / 100 })
         if (alerts.length > 0)
             s.push({ k: "alert", t: alerts.length + " 条没处理", d: alerts[0].uid + " · " + alerts[0].action })
-        if (backend.rtcState === "track")
+        if (backend.vncState === "已连接")
             s.push({ k: "monitor", t: "正在看 " + backend.currentUid, d: "实时画面" })
         // 语音对讲 / 屏幕广播：有真实状态源（backend.speaking / broadcasting）
         // 才亮；没在讲/没在播就不出现（宁可不亮，不冒充聚合器）
