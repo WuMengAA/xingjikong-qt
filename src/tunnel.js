@@ -1,5 +1,10 @@
 // 远控隧道（RFB over WS）——云端只做字节中继，不解析内容。
 //
+// ⚠️ 2026-10-18 统一方案 A：本模块**已下线**。两端统一走主 WS 的 vnc-data 二进制帧
+//   （viewer 主 WS ↔ 云端 ↔ agent 主 WS，见 index.js 的 vncDataToAgent/vncDataToViewer），
+//   不再拨第二条 /ws/tunnel-agent。本文件保留但不再被新客户端使用（P2 遗留升级期兼容；
+//   若确认无旧客户端，可整体删除并摘掉 index.js 的 upgrade 挂载）。
+//
 // 协议见 docs/方案-远控隧道-RFB-over-WS-协议草案-2026-10-18.md
 //
 // 为什么要它：教室机在 NAT 后，WebRTC 的 ICE 打洞反复失败（2026-10-17/18 两次卡死）。

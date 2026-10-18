@@ -830,6 +830,43 @@ export function sendToAgentMsg(uid, type, payload = {}) {
   }
 }
 
+/** 远控统一 A（2026-10-18 · vnc-data 走主 WS）：管理端 vnc-data 帧 → 目标设备主 WS。
+ *  整个信封**原样转发**（含 header 的 uid/direction/seq），云端不解析、不重写；
+ *  direction 由发送方决定，云端只按 header.uid 做字节中继。
+ *  @returns {{ok:boolean, to:number, detail?:string}} */
+export function vncDataToAgent(uid, buf) {
+  const key = String(uid || '').trim();
+  const d = devices.get(key);
+  if (!d || !d.ws || d.ws.readyState !== 1) return { ok: false, to: 0, detail: '设备不在线' };
+  try {
+    d.ws.send(buf, { binary: true });
+    return { ok: true, to: 1 };
+  } catch (e) {
+    pushEvent('error', 'vnc-data 写给设备失败', { uid: key, error: e.message });
+    return { ok: false, to: 0, detail: e.message };
+  }
+}
+
+/** 远控统一 A（2026-10-18 · vnc-data 走主 WS）：设备 vnc-data 帧 → 订阅该 uid 的管理端。
+ *  与画面帧同口径：谁订阅投谁（谁在看画面谁才该收到远控画面），不群发。
+ *  @returns {{ok:boolean, to:number}} */
+export function vncDataToViewer(uid, buf) {
+  const key = String(uid || '').trim();
+  let hits = 0;
+  for (const [ws, v] of viewers) {
+    if (!v.subs.has(key) && !v.live.has(key)) continue;
+    if (ws.readyState !== 1) { viewers.delete(ws); continue; }
+    try {
+      ws.send(buf, { binary: true });
+      hits++;
+    } catch (e) {
+      pushEvent('error', 'vnc-data 写给管理端失败：写 socket 出错', { uid: key, error: e.message });
+      viewers.delete(ws);
+    }
+  }
+  return { ok: hits > 0, to: hits };
+}
+
 /** 设备 -> 管理端的 WebRTC 信令（offer/answer/ice）转发，只投给订阅了这个 uid 的管理端。
  *  @returns {{ok:boolean, to:number, detail?:string}} */
 export function rtcRelayToViewers(uid, type, payload = {}) {

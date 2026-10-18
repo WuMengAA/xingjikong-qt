@@ -180,3 +180,23 @@ export function parseFrame(buf) {
   // 旧格式：整块就是图片
   return { ok: true, header: null, payload: buf, legacy: true };
 }
+
+/**
+ * 宽松版帧解析（2026-10-18 · 远控统一 A）：v1 头 **type 不限**，非 v1 整块当 payload。
+ * 画面帧请用 parseFrame（只认 type:'frame'）；vnc-data 等新类型走这里 —— 云端只
+ * 按 header.uid 做字节中继，不解析、不重写信封。
+ * @returns {{ok:true, header:object|null, payload:Buffer, legacy:boolean} | {ok:false, code:string, detail:string}}
+ */
+export function parseAnyFrame(buf) {
+  if (buf.length >= 4 && buf.readUInt8(0) === PROTOCOL_VERSION) {
+    const hLen = buf.readUInt16BE(1);
+    if (hLen > 0 && hLen <= 4096 && buf.length >= 3 + hLen) {
+      let header = null;
+      try { header = JSON.parse(buf.subarray(3, 3 + hLen).toString('utf8')); }
+      catch (e) { return { ok: false, code: 'BAD_JSON', detail: `帧头解析失败：${e.message}` }; }
+      return { ok: true, header, payload: buf.subarray(3 + hLen), legacy: false };
+    }
+  }
+  // 旧格式：整块当 payload（语音/广播的裸字节走这里）
+  return { ok: true, header: null, payload: buf, legacy: true };
+}

@@ -140,7 +140,7 @@ import { createSongKeyStore } from './class-songkey.js';
 import { initSongKeyStore, readSongKeys, writeSongKeys } from './class-songkey-db.js';
 // 2026-10-18 · 点歌代发：端上只能"请求"，写入由云端用该班 Key 发往 VoiceHub。
 import { requestSongViaVoiceHub } from './song-request-proxy.js';
-import { parseIncoming, parseFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
+import { parseIncoming, parseFrame, parseAnyFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 import { timingSafeEqual } from 'node:crypto';
 
 /** 常量时间比较（防时序侧信道）。
@@ -179,6 +179,7 @@ import {
   touchHeartbeat, sweepStale,
   rtcSignalToAgent, rtcRelayToViewers, rtcRelayToAgent,
   sendToAgentMsg,   // 2026-10-18：远控隧道的 tunnel.open 走这条
+  vncDataToAgent, vncDataToViewer,   // 2026-10-18：远控统一 A —— vnc-data 走主 WS 双向中继
   broadcastAudioToAgents, setAudioBroadcasting, isAudioBroadcasting,
   duplexActive, sendAudioToTeacher,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
@@ -1399,10 +1400,29 @@ viewerWss.on('connection', (ws) => {
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
-      // 管理端二进制帧 = 语音 PCM 或屏幕广播 JPEG（2026-10-07）。
-      // 按当前活跃会话路由：语音播着就按音频转发，屏幕广播播着就按广播转发；
-      // 都没有 → 丢弃并提示（不许静默收下再扔掉）。
+      // 管理端二进制帧 = 语音 PCM / 屏幕广播 JPEG / 远控 vnc-data（2026-10-18）。
       const buf = Buffer.from(data);
+      // ── 远控统一 A：vnc-data 帧 → 目标设备主 WS（原样信封，云端只按 uid 中继）──
+      // 权限与「订阅画面」同一口径：看得到这台才能控它。语音/广播的裸字节走
+      // parseAnyFrame 的 legacy 分支（header=null），不会误进这条。
+      if (authed) {
+        const f = parseAnyFrame(buf);
+        if (f.ok && f.header?.type === 'vnc-data') {
+          const uid = String(f.header.uid ?? '').trim();
+          if (!uid) { pushEvent('warn', 'vnc-data 帧缺 uid，已丢弃', { bytes: buf.length }); return; }
+          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid))) {
+            pushEvent('warn', 'vnc-data 被拒（无权限远控该设备）', { uid });
+            sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限远控设备 ${uid}`);
+            return;
+          }
+          const r = vncDataToAgent(uid, buf);
+          if (!r.ok) {
+            pushEvent('warn', 'vnc-data 未送达设备（可能不在线）', { uid, bytes: buf.length });
+            snd(ws, 'vnc-relayed', { uid, ok: false, to: 0, detail: r.detail || '设备不在线' });
+          }
+          return;
+        }
+      }
       if (authed && isAudioBroadcasting()) {
         broadcastAudioToAgents(buf, 'audio/pcm', ++audioSeq);
         return;
@@ -1824,8 +1844,19 @@ wss.on('connection', (ws) => {
     }
 
     if (isBinary) {
-      const f = parseFrame(Buffer.from(data));
+      const f = parseAnyFrame(Buffer.from(data));
       if (!f.ok) { sndErr(ws, f.code, f.detail); return; }
+      // ── 远控统一 A：设备 vnc-data 帧 → 订阅该 uid 的管理端主 WS（原样信封）──
+      if (f.header?.type === 'vnc-data') {
+        const hUid = String(f.header.uid ?? '').trim();
+        // 原样转发整个信封（含 header 的 uid/direction/seq），云端不重写。
+        const r2 = vncDataToViewer(hUid || uid, Buffer.from(data));
+        if (r2.to === 0) {
+          pushEvent('warn', 'vnc-data 未送达任何管理端（无人订阅该设备）',
+            { uid: hUid || uid, bytes: data.length });
+        }
+        return;
+      }
       const seq = f.header?.seq ?? 0;
       // ── 语音通话上行（2026-10-09）：学生 mic 音频帧 → 单播回发起老师 ──
       // 帧头 mime=audio/pcm 时走 duplex 通道，不走画面帧的 broadcastFrame。
