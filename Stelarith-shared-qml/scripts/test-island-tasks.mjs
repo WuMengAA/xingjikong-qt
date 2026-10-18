@@ -282,8 +282,45 @@ check(/root\._noticeTime !== "" && root\.faceNow !== 0/.test(ROOT_QML_TXT),
 check(/root\.face = 0;\s*root\.faceUserPick = -1;/.test(ROOT_QML_TXT),
       '复位动作：face 回概览 + faceUserPick 清空');
 
-// ── 十一、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
-console.log('── 十一、反向检查 ──');
+// ── 十二、QML↔C++ 接口对齐（2026-10-18 新增）────────────────────────────
+// 守的是一类**静默故障**：QML 引用了 bridgeRef 上**不存在**的属性/方法。
+// QML 遇到 undefined 不报错、不崩，只是"那块永远不显示/永远不响应"——
+// 历史真实事故：`theme.err` 不存在 ⇒ 失败态静默画成黑色，没人发现（2026-10-18 修）。
+// 桥是 C++ 侧唯一的对外面（island_bridge.h），改名/删除后 QML 不会自动跟着改。
+console.log('── 十二、QML↔C++ 接口对齐 ──');
+{
+  const BRIDGE_H_PATH = path.join(ROOT, 'Stelarith-control-qt/src/island_bridge.h');
+  // C++ 侧对外暴露的名字：Q_PROPERTY 的属性名 + Q_INVOKABLE/信号的函数名。
+  // ⚠️ 用宽口径（任何 `名字(` 形声明 + Q_PROPERTY 名）而非严格解析：
+  //    目的是抓"完全不存在"，不追求区分属性与方法（QML 里两者都是 bridgeRef.x）。
+  const hRaw = fs.readFileSync(BRIDGE_H_PATH, 'utf8');
+  const cppNames = new Set();
+  // Q_PROPERTY(<类型> <名字> READ …)
+  for (const m of hRaw.matchAll(/Q_PROPERTY\s*\(\s*[^)\s]+\s+(\w+)\s+READ\b/g)) cppNames.add(m[1]);
+  // 普通成员函数 / Q_INVOKABLE / signals（名字紧跟左括号）
+  for (const m of hRaw.matchAll(/\b(\w+)\s*\(/g)) cppNames.add(m[1]);
+  // QML 侧实际用到的 bridgeRef.<名字>
+  const used = new Map();
+  const islandDir = path.join(ROOT, 'Stelarith-shared-qml/island');
+  for (const f of fs.readdirSync(islandDir).filter((n) => n.endsWith('.qml'))) {
+    const src = fs.readFileSync(path.join(islandDir, f), 'utf8');
+    for (const m of src.matchAll(/\bbridgeRef\.(\w+)/g)) {
+      if (!used.has(m[1])) used.set(m[1], new Set());
+      used.get(m[1]).add(f);
+    }
+  }
+  const missing = [...used.keys()].filter((n) => !cppNames.has(n)).sort();
+  check(used.size > 0, `找到 ${used.size} 个 QML 引用的 bridgeRef 成员（检查器自身有效）`);
+  check(missing.length === 0,
+        `QML 引用的 bridgeRef 成员全部在 island_bridge.h 存在（${used.size} 个）`,
+        missing.length ? `缺失：${missing.map((n) => `${n}（${[...used.get(n)].join(',')}）`).join('；')}` : '');
+  // 反向提示：C++ 有但 QML 没用到的成员不报错（桥也为 viewer 侧/未来用），只作信息
+  const unused = [...cppNames].filter((n) => !used.has(n) && /^(island|history|file|media|spectrum|whale|notice|form|severity|light|idle|expanded|interactive|can|actions|states|title|desc|icon|search|submit|bless|song|feedback|danmaku|loop|auto)/i.test(n));
+  if (unused.length) console.log(`  INFO  桥暴露但岛 QML 未用（可能给 viewer/未来）：${unused.slice(0, 8).join(', ')}${unused.length > 8 ? ' …' : ''}`);
+}
+
+// ── 十三、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
+console.log('── 十三、反向检查 ──');
 check(/QVector<IslandOverlay::Task>|\bQVector<Task>/.test(H), 'island.h 声明任务表容器');
 check(/const QVector<Task> &tasks\(\) const/.test(H), 'tasks() 只读访问器存在（桥与快照共用）');
 // 快照里带任务表，供沙箱验证"每条状态源都进表"
