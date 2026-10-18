@@ -28,7 +28,8 @@ Item {
 
     visible: face.idle
     opacity: face.idle ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 160 } }
+    // 2026-10-18：淡出用 durShort（原硬编码 160）
+    Behavior on opacity { NumberAnimation { duration: face.th ? face.th.durShort : 160 } }
 
     IslandClock {
         id: idleClock

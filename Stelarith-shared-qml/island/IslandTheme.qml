@@ -74,7 +74,25 @@ QtObject {
     property int shapeCollapsed: 56
     property int shapeExpanded:  320
 
-    // ── 动效 ────────────────────────────────────────────────
-    property int durShape: 380   // 几何缓动（管理端 DynamicIsland 同值）
-    property int durFade:  220
+    // ── 动效（2026-10-18 · 用户指令「统一动画时长为主题令牌」）──────────────
+    // 之前只有 durShape/durFade 两个令牌，岛内另有 14 处**硬编码时长**
+    // （60/75/80/90/120×6/160×2/180/200×2/600×2/1600×2）——
+    // 改节奏要满岛找数字，且同一语义在不同文件里取不同值（120 出现在进度条、
+    // 颜色过渡、宽高过渡三处，语义其实不同）。
+    //
+    // 现在按 **MD3 动效阶梯**（见 docs/MD3风格与排版标准-2026-10-18.md §1.6）建令牌：
+    //   short 系列＝微交互（状态层/按键反馈/小位移）
+    //   mid   系列＝常规过渡（颜色/进度/尺寸）
+    //   long  系列＝大元素（几何形变/面板）
+    // ⚠️ 旧名 durShape/durFade 保留为别名（存量零改动），语义映射见下。
+    property int durInstant: 90    // 即时反馈（按下缩放等，短到"跟上手"）
+    property int durXShort:  120   // 微过渡（进度条/颜色/小尺寸）
+    property int durShort:   160   // 快速（透明度、悬停态）
+    property int durMid:     200   // 常规（淡入淡出、状态切换）
+    property int durLong:    380   // 几何形变（岛展开/收起，原 durShape）
+    property int durXLong:   600   // 强调动作（弹幕滑入、大面板）
+
+    // 旧名别名（迁移桥）—— 语义同 durLong / durMid
+    property int durShape: durLong   // 几何缓动 380（管理端 DynamicIsland 同值）
+    property int durFade:  durMid    // 淡入淡出 220 → 归到 mid 档 200
 }

@@ -38,10 +38,13 @@ Item {
     property real superness: 5.0
     // 每个角的采样段数：10 段在 1x/1.5x 下已看不出多边形
     property int cornerSteps: 10
+    // 2026-10-18：主题令牌（可选）。传入则颜色过渡时长走 durMid，未传回落 200。
+    // ⚠️ 新增但**不改任何既有行为**：不传 theme 的调用方（如 viewer 侧）与改造前完全一致。
+    property var th: null
 
     default property alias content: host.data
 
-    Behavior on fillColor { ColorAnimation { duration: 200 } }
+    Behavior on fillColor { ColorAnimation { duration: surface.th ? surface.th.durMid : 200 } }
 
     Canvas {
         id: cv

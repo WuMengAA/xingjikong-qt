@@ -130,11 +130,15 @@ Item {
     }
 
     // rua 弹一下
+    // 2026-10-18「提升灵动元素与质感」：时长改走令牌 + 回弹曲线更自然
+    //   放大 120 → durXShort；回弹 260 保持（OutBack 的过冲需要足够时间落地，
+    //   套 durMid(200) 会显"弹得太急"）。缓动从 OutQuad 换 OutBack 让起手更脆。
     SequentialAnimation {
         id: ruaAnim
         NumberAnimation {
             target: avatar; property: "scale"
-            to: 1.15; duration: 120; easing.type: Easing.OutQuad
+            to: 1.15; duration: whale.theme ? whale.theme.durXShort : 120
+            easing.type: Easing.OutBack
         }
         NumberAnimation {
             target: avatar; property: "scale"
@@ -206,11 +210,12 @@ Item {
         border.color: whale.light ? "#E0E0E0" : "#3C3C3C"
         opacity: whale.bubbleVisible ? 1 : 0
 
+        // 2026-10-18：气泡过渡全部走令牌（原硬编码 180/120/120）
         Behavior on opacity {
-            NumberAnimation { duration: 180; easing.type: Easing.OutQuad }
+            NumberAnimation { duration: whale.theme ? whale.theme.durShort : 180; easing.type: Easing.OutQuad }
         }
-        Behavior on height { NumberAnimation { duration: 120 } }
-        Behavior on width  { NumberAnimation { duration: 120 } }
+        Behavior on height { NumberAnimation { duration: whale.theme ? whale.theme.durXShort : 120 } }
+        Behavior on width  { NumberAnimation { duration: whale.theme ? whale.theme.durXShort : 120 } }
 
         // 气泡小尾巴（指向鲸鱼）
         Canvas {

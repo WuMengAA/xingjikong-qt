@@ -649,7 +649,8 @@ Item {
         opacity: root._idle ? 0.7 : 1.0
         z: 100
 
-        Behavior on opacity { NumberAnimation { duration: 200 } }
+        // 2026-10-18：透明度过渡走 durMid 令牌（原硬编码 200，值相同、改为可调）
+        Behavior on opacity { NumberAnimation { duration: root.th ? root.th.durMid : 200 } }
         Behavior on px       { NumberAnimation { duration: root.th.durShape; easing.type: Easing.OutBack } }
     }
 
@@ -793,7 +794,8 @@ Item {
         // #330：紧凑外框（Banner/Mini）有自己的面，胶囊那套内容整体让位
         visible: !root._idle && !root._compactForm && !root._bigForm
         opacity: root._idle ? 0 : 1
-        Behavior on opacity { NumberAnimation { duration: 160 } }
+        // 2026-10-18：走 durShort 令牌（原硬编码 160）
+        Behavior on opacity { NumberAnimation { duration: root.th ? root.th.durShort : 160 } }
 
         // ── 收起态 ───────────────────────────────────────
         Item {
@@ -1056,7 +1058,8 @@ Item {
                         width: Math.max(0, parent.width * root._ftPct)
                         radius: 4
                         color: root.th.accent
-                        Behavior on width { NumberAnimation { duration: 120 } }
+                        // 2026-10-18：文件传输进度条走 durXShort（原硬编码 120）
+                        Behavior on width { NumberAnimation { duration: root.th ? root.th.durXShort : 120 } }
                     }
                 }
 
@@ -1136,6 +1139,10 @@ Item {
                                                     * (typeof modelData === "number" ? modelData : 0))
                                 radius: 1.5
                                 color: root.th.accent
+                                // ⚠️ 2026-10-18「统一动画时长为主题令牌」的**例外**：
+                                //    频谱条每帧（~50Hz）都在变，60ms 是"平滑但不拖影"的
+                                //    调优点；套 durInstant(90) 会让柱子互相追赶、视觉发糊。
+                                //    高频信号的过渡时长**不该**跟 UI 动效 token 走。
                                 Behavior on height { NumberAnimation { duration: 60 } }
                             }
                         }
@@ -1414,15 +1421,20 @@ Item {
                     running: false
                     PropertyAnimation {
                         target: likeFly; property: "y"
-                        to: -28; duration: 600; easing.type: Easing.OutCubic
+                        // 2026-10-18：飞心时长走 durXLong 令牌（原硬编码 600）
+                        to: -28; duration: root.th ? root.th.durXLong : 600
+                        easing.type: Easing.OutCubic
                     }
                     NumberAnimation {
                         target: likeFly; property: "opacity"
-                        to: 0.0; duration: 600
+                        to: 0.0; duration: root.th ? root.th.durXLong : 600
                     }
                     onFinished: likeFly.visible = false
                 }
                 // 组件4：计数回弹（150ms = 75 放大 + 75 缩回；详规口径）
+                // ⚠️ 2026-10-18 令牌化例外：75ms 是"放大/缩回"两段对称弹性，
+                //    合成 150ms 语义；令牌阶梯里没有 75 这一档，强行套 durInstant(90)
+                //    会变成 180ms，回弹变拖沓、失去"Q 弹"手感。
                 SequentialAnimation {
                     id: likePopAnim
                     running: false
@@ -2335,22 +2347,51 @@ Item {
                     model: root.faceModel
                     delegate: Rectangle {
                         required property var modelData
+                        // ── 2026-10-18 · MD3 适配（用户裁决：仅控件/元素，透明度尽量不变）──
+                        // 面签是岛内最小的交互控件，按 MD3 规范对齐：
+                        //   形状：radius 5（非标）→ 网格对齐，配合 MD3 extraSmall(4) 档的观感
+                        //   状态层：hover/press 叠加 onSurface 色（MD3 state layer 口径 0.08/0.12）
+                        //   文字：10px 在 MD3 labelSmall(11) 之下，提到 11 保证教室机可读
+                        //   反馈：压下轻微收缩（90ms，跟手），选中态加轻微"亮起"过渡
+                        // ⚠️ 底色透明度**沿用原值**（浅 0.07 / 深 0.10），不按 MD3 的 0.12 改。
+                        id: faceTab
                         width: 22
                         height: 16
-                        radius: 5
+                        // 形状：5 → 4（对齐 MD3 extraSmall 档；22×16 的小块上 4 与 5 观感差极小，
+                        //       但值落在规范档位上，日后统一迁移不再需要"这个 5 是哪来的"）
+                        radius: 4
+                        property bool hov: tabMa.containsMouse
+                        property bool down: tabMa.pressed
                         color: root.faceNow === modelData.id
                                ? root.th.accent
                                : (root.th.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.10))
+                        // MD3 状态层：hover 8% / press 12%（叠在容器色之上，不改容器本身的透明度）
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: parent.radius
+                            color: root.th.light ? "#161616" : "#FAFAFA"
+                            opacity: faceTab.down ? 0.12 : (faceTab.hov ? 0.08 : 0)
+                            Behavior on opacity {
+                                NumberAnimation { duration: root.th ? root.th.durXShort : 120 }
+                            }
+                        }
+                        scale: faceTab.down ? 0.94 : 1.0
+                        Behavior on scale {
+                            NumberAnimation { duration: root.th ? root.th.durInstant : 90; easing.type: Easing.OutQuad }
+                        }
                         Text {
                             anchors.centerIn: parent
                             text: modelData.label
-                            font.pixelSize: 10
+                            // 10 → 11（MD3 labelSmall 下限，教室机可读性）
+                            font.pixelSize: 11
                             color: root.faceNow === modelData.id
                                    ? (root.th.light ? "#FFFFFF" : "#101014")
                                    : root.th.sub
                         }
                         MouseArea {
+                            id: tabMa
                             anchors.fill: parent
+                            hoverEnabled: true
                             // ⚠️ 2026-10-18：用户主动选面 ⇒ 记录 faceUserPick。
                             //    否则 faceNow 无法区分"系统回落"和"用户切换"，
                             //    媒体/历史恢复时会违背用户意图自动跳回（见上面注释）。
@@ -2948,7 +2989,8 @@ Item {
                         color: maHov.containsMouse
                             ? (root.th.light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.10))
                             : (root.th.light ? Qt.rgba(0, 0, 0, 0.02) : Qt.rgba(1, 1, 1, 0.04))
-                        Behavior on color { ColorAnimation { duration: 80 } }
+                        // 2026-10-18：悬停底色走 durInstant（原硬编码 80，差 10ms 无感）
+                        Behavior on color { ColorAnimation { duration: root.th ? root.th.durInstant : 80 } }
                     }
 
                     // 未读小蓝点（设计稿 §4.3：未读项左侧有标记）

@@ -282,12 +282,50 @@ check(/root\._noticeTime !== "" && root\.faceNow !== 0/.test(ROOT_QML_TXT),
 check(/root\.face = 0;\s*root\.faceUserPick = -1;/.test(ROOT_QML_TXT),
       '复位动作：face 回概览 + faceUserPick 清空');
 
-// ── 十二、QML↔C++ 接口对齐（2026-10-18 新增）────────────────────────────
+// ── 十二、动效时长令牌化（2026-10-18 · 用户指令「统一动画时长为主题令牌」）──
+console.log('── 十二、动效时长令牌化 ──');
+{
+  const THEME_TXT = fs.readFileSync(path.join(ROOT, 'Stelarith-shared-qml/island/IslandTheme.qml'), 'utf8');
+  // 令牌阶梯必须存在（MD3 动效分档）
+  for (const tok of ['durInstant', 'durXShort', 'durShort', 'durMid', 'durLong', 'durXLong']) {
+    check(new RegExp(`property int ${tok}:\\s*\\d+`).test(THEME_TXT), `主题有动效令牌 ${tok}`);
+  }
+  // 旧名必须保留为别名（存量 QML 零改动）
+  check(/property int durShape:\s*durLong/.test(THEME_TXT), 'durShape 保留为 durLong 别名（兼容旧引用）');
+  check(/property int durFade:\s*durMid/.test(THEME_TXT), 'durFade 保留为 durMid 别名（兼容旧引用）');
+
+  // ⚠️ 硬编码时长白名单（每一条都必须有注释说明"为什么不令牌化"）。
+  //    允许存在的理由只有两类：① 高频信号（跟手优先于节奏统一）；
+  //    ② 令牌阶梯里没有对应档位的特殊弹性（强套会破坏手感）。
+  //    其余一律应当走 th.dur*。
+  const ALLOW = [
+    { file: 'IslandRoot.qml', value: 60,   why: '频谱条高频刷新，60ms 是防拖影的调优点' },
+    { file: 'IslandRoot.qml', value: 75,   why: '点赞回弹 75+75 对称弹性，阶梯无此档' },
+    { file: 'WhaleMascot.qml', value: 1600, why: '鲸鱼呼吸循环动画，非过渡' },
+    { file: 'WhaleMascot.qml', value: 260,  why: 'OutBack 过冲落地时长' },
+  ];
+  let hardcoded = [];
+  for (const f of fs.readdirSync(path.join(ROOT, 'Stelarith-shared-qml/island')).filter((n) => n.endsWith('.qml'))) {
+    const src = strip(fs.readFileSync(path.join(ROOT, 'Stelarith-shared-qml/island', f), 'utf8'));
+    for (const m of src.matchAll(/duration:\s*(\d+)/g)) {
+      const v = Number(m[1]);
+      // 形如 `xxx.theme ? xxx.theme.durY : 120` 的回落值不算硬编码（它已经是令牌驱动）
+      const tail = src.slice(m.index, m.index + 90);
+      if (/:\s*\d+\s*\}/.test(tail) && /theme\s*\?|th\s*\?/.test(src.slice(Math.max(0, m.index - 120), m.index))) continue;
+      if (!ALLOW.some((a) => a.file === f && a.value === v)) hardcoded.push(`${f}:${v}`);
+    }
+  }
+  check(hardcoded.length === 0,
+        `除白名单外，所有动效时长都走主题令牌（白名单 ${ALLOW.length} 条均有注释理由）`,
+        hardcoded.length ? `仍硬编码：${hardcoded.join(', ')}` : '');
+}
+
+// ── 十三、QML↔C++ 接口对齐（2026-10-18 新增）────────────────────────────
 // 守的是一类**静默故障**：QML 引用了 bridgeRef 上**不存在**的属性/方法。
 // QML 遇到 undefined 不报错、不崩，只是"那块永远不显示/永远不响应"——
 // 历史真实事故：`theme.err` 不存在 ⇒ 失败态静默画成黑色，没人发现（2026-10-18 修）。
 // 桥是 C++ 侧唯一的对外面（island_bridge.h），改名/删除后 QML 不会自动跟着改。
-console.log('── 十二、QML↔C++ 接口对齐 ──');
+console.log('── 十三、QML↔C++ 接口对齐 ──');
 {
   const BRIDGE_H_PATH = path.join(ROOT, 'Stelarith-control-qt/src/island_bridge.h');
   // C++ 侧对外暴露的名字：Q_PROPERTY 的属性名 + Q_INVOKABLE/信号的函数名。
@@ -319,8 +357,8 @@ console.log('── 十二、QML↔C++ 接口对齐 ──');
   if (unused.length) console.log(`  INFO  桥暴露但岛 QML 未用（可能给 viewer/未来）：${unused.slice(0, 8).join(', ')}${unused.length > 8 ? ' …' : ''}`);
 }
 
-// ── 十三、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
-console.log('── 十三、反向检查 ──');
+// ── 十四、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
+console.log('── 十四、反向检查 ──');
 check(/QVector<IslandOverlay::Task>|\bQVector<Task>/.test(H), 'island.h 声明任务表容器');
 check(/const QVector<Task> &tasks\(\) const/.test(H), 'tasks() 只读访问器存在（桥与快照共用）');
 // 快照里带任务表，供沙箱验证"每条状态源都进表"

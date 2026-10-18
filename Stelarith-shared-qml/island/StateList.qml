@@ -125,7 +125,9 @@ Item {
                     anchors.topMargin: 3
                     text: (index + 1) + ". " + (row.it && row.it.t ? row.it.t : "")
                     color: list.theme ? list.theme.fg : "#FAFAFA"
-                    font.pixelSize: 13
+                    // 2026-10-18 MD3 适配：13（非标）→ bodyMedium 14
+                    // 状态行的主信息按 MD3 bodyMedium 档；同时把行高预算一起抬（见上方 height）
+                    font.pixelSize: list.theme ? list.theme.fsBadge : 14
                     font.weight: index === 0 ? Font.DemiBold : Font.Normal
                     elide: Text.ElideRight
                 }
@@ -139,7 +141,8 @@ Item {
                     anchors.topMargin: 1
                     text: row.it && row.it.d ? row.it.d : ""
                     color: list.theme ? list.theme.sub : "#C8C8C8"
-                    font.pixelSize: 12
+                    // 2026-10-18 MD3 适配：12 与 bodySmall 同值，改走令牌便于统一调
+                    font.pixelSize: list.theme ? list.theme.fsNote : 12
                     elide: Text.ElideRight
                     visible: text !== ""
                 }
@@ -173,7 +176,8 @@ Item {
                             width: Math.max(0, parent.width * Math.min(1, row.prog))
                             radius: 4
                             color: list.theme ? list.theme.accent : "#5B8CFF"
-                            Behavior on width { NumberAnimation { duration: 120 } }
+                            // 2026-10-18：进度条宽度过渡用 durXShort（原硬编码 120）
+                            Behavior on width { NumberAnimation { duration: list.theme ? list.theme.durXShort : 120 } }
                         }
                     }
                 }

@@ -34,7 +34,8 @@ Item {
         border.width: btn.role === "primary" ? 0 : 1
         border.color: btn.light ? "#D0D0D0" : "#3C3C3C"
 
-        Behavior on color { ColorAnimation { duration: 120 } }
+        // 2026-10-18：时长改用主题令牌（原硬编码 120）
+        Behavior on color { ColorAnimation { duration: btn.theme ? btn.theme.durXShort : 120 } }
 
         Text {
             id: txt
@@ -62,5 +63,6 @@ Item {
     }
 
     scale: btnMa.pressed ? 0.96 : 1.0
-    Behavior on scale { NumberAnimation { duration: 90 } }
+    // 按下回弹：用 durInstant（原硬编码 90）——要"跟上手"，不能慢
+    Behavior on scale { NumberAnimation { duration: btn.theme ? btn.theme.durInstant : 90 } }
 }
