@@ -229,24 +229,36 @@ check(/STALE_MS = 95_000/.test(BRIDGE_CPP_JS), '过期阈值 95s（服务端 90s
 check(/失败\*\*不动 snapshot|保留上一次/.test(BRIDGE_CPP_JS), '拉取失败保留上一次状态（有说明与实现）');
 
 // ── 九、RTC 条件编译守卫（2026-10-18 · 用户裁决方案 A / 可逆摘除）──────────
+// ⚠️ 2026-10-18 14:1x 故障记：被控端随即也做 WebRTC→VNC 重构（删掉 ldc_streamer.*、
+//    CMakeLists 里 RTC 段全清，换 vnc_server/screen_capture/input_inject）。
+//    本段原先**硬读** ldc_streamer.cpp ⇒ 文件一删，脚本直接 ENOENT 崩掉，
+//    连其余 100+ 条岛断言全部失效。门禁不能因为"被守对象退役"而整体不可用。
+// 修法：文件在就守、不在就明确 SKIP 并打印原因（不是静默跳过，也不是崩）。
 console.log('── 九、RTC 条件编译守卫 ──');
-const LDC_CPP = fs.readFileSync(path.join(ROOT, 'Stelarith-control-qt/src/ldc_streamer.cpp'), 'utf8');
+const LDC_PATH = path.join(ROOT, 'Stelarith-control-qt/src/ldc_streamer.cpp');
 const CMAKE_TXT = fs.readFileSync(path.join(ROOT, 'Stelarith-control-qt/CMakeLists.txt'), 'utf8');
-// 守的是一条**真实发生过的故障**：CMake 的 if(EXISTS lib) 只决定"不链接库"，
-// 但 ldc_streamer.cpp 仍在源文件列表里且无 #if 保护 ⇒ 缺库时直接编译失败。
-// "看着有保护、实际没有"比不写更糟（让人以为缺库能降级）。
-check(/#if defined\(RTC_STATIC\)/.test(LDC_CPP), 'ldc_streamer.cpp 有 RTC_STATIC 守卫');
-check(/#else\s+\/\/ ── 无 libdatachannel/.test(LDC_CPP), '存在无库时的空实现分支');
-check(/#endif \/\/ RTC_STATIC/.test(LDC_CPP), '守卫有闭合');
-// 空实现必须"诚实"：不能假装成功（假成功会让管理端一直等 offer，更难查）
-const stubSeg = LDC_CPP.slice(LDC_CPP.indexOf('#else  // ── 无 libdatachannel'));
-check(/emit failed\(QStringLiteral\("rtc-unavailable"\)\)/.test(stubSeg),
-      '空实现的 start() 明确发 failed 信号（不假装成功）');
-check(/pcAlive\(\) const \{ return false; \}/.test(stubSeg), '空实现 pcAlive() 返回 false');
-check(/rtcDisabledWarn/.test(stubSeg), '空实现会打日志说明"本次构建不含 WebRTC"');
-// CMake：库缺失分支必须说明后果与还原方法，不能只说"会失败"
-check(/不含 WebRTC 推流/.test(CMAKE_TXT), 'CMake else 分支写明"不含 WebRTC 推流"');
-check(/放回 _probe\/ldc_libs\//.test(CMAKE_TXT), 'CMake else 分支写明还原方法');
+if (fs.existsSync(LDC_PATH)) {
+  const LDC_CPP = fs.readFileSync(LDC_PATH, 'utf8');
+  // 守的是一条**真实发生过的故障**：CMake 的 if(EXISTS lib) 只决定"不链接库"，
+  // 但 ldc_streamer.cpp 仍在源文件列表里且无 #if 保护 ⇒ 缺库时直接编译失败。
+  // "看着有保护、实际没有"比不写更糟（让人以为缺库能降级）。
+  check(/#if defined\(RTC_STATIC\)/.test(LDC_CPP), 'ldc_streamer.cpp 有 RTC_STATIC 守卫');
+  check(/#else\s+\/\/ ── 无 libdatachannel/.test(LDC_CPP), '存在无库时的空实现分支');
+  check(/#endif \/\/ RTC_STATIC/.test(LDC_CPP), '守卫有闭合');
+  // 空实现必须"诚实"：不能假装成功（假成功会让管理端一直等 offer，更难查）
+  const stubSeg = LDC_CPP.slice(LDC_CPP.indexOf('#else  // ── 无 libdatachannel'));
+  check(/emit failed\(QStringLiteral\("rtc-unavailable"\)\)/.test(stubSeg),
+        '空实现的 start() 明确发 failed 信号（不假装成功）');
+  check(/pcAlive\(\) const \{ return false; \}/.test(stubSeg), '空实现 pcAlive() 返回 false');
+  check(/rtcDisabledWarn/.test(stubSeg), '空实现会打日志说明"本次构建不含 WebRTC"');
+  // CMake：库缺失分支必须说明后果与还原方法，不能只说"会失败"
+  check(/不含 WebRTC 推流/.test(CMAKE_TXT), 'CMake else 分支写明"不含 WebRTC 推流"');
+  check(/放回 _probe\/ldc_libs\//.test(CMAKE_TXT), 'CMake else 分支写明还原方法');
+} else {
+  console.log('  SKIP  ldc_streamer.cpp 已不存在（被控端 WebRTC 退役、改 VNC）⇒ 本组 8 条跳过');
+  // 反向守卫：既然 ldc 已退役，CMake 里**不该**还留着引用（否则是删了一半）
+  check(!/ldc_streamer/.test(CMAKE_TXT), 'ldc_streamer 已退役 ⇒ CMakeLists 不得再引用它');
+}
 
 // ── 十、多面切换的"系统回落 vs 用户主动选择"（2026-10-18 缺陷修复）────────
 console.log('── 十、多面切换 face 逻辑 ──');
