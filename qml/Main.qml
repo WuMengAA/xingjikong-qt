@@ -524,12 +524,16 @@ ApplicationWindow {
                     }
 
                     // ── 今日课表（2026-10-06 补上：读真机 ClassIsland 档案，不再空）──
+                    // ── 2026-10-18 MD3：卡片从"最低档底"升为 **elevated 卡** ──
+                    // 统计卡是 cContHigh（最高档容器），课表卡若是 th.panel（最低档）
+                    // 会显得"越重要越淡"。MD3 的做法：内容卡用 elevated（cContLow 底 +
+                    // outlineVariant 细边），与统计卡的 filled 形成"主次 + 深浅"双层次。
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 148
-                        radius: th.rCard
-                        color: th.panel
-                        border.color: th.card
+                        radius: 12
+                        color: th.cContLow
+                        border.color: th.cOutlineVar
                         border.width: 1
                         Column {
                             anchors.fill: parent
@@ -544,16 +548,22 @@ ApplicationWindow {
                                 height: 16
                                 Text {
                                     text: "今日课表"
-                                    color: th.fg; font.pixelSize: 13; font.weight: Font.Medium
+                                    // MD3 titleSmall：14px / Medium / 0.1 字距
+                                    color: th.cOnSurface
+                                    font.pixelSize: 14; font.weight: Font.Medium
+                                    font.letterSpacing: 0.1
                                 }
                                 Text {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: Qt.formatDate(new Date(), "MM月dd日 dddd")
-                                    color: th.fg3; font.pixelSize: 12
+                                    color: th.cOnSurfaceVar; font.pixelSize: 12
                                 }
                             }
                             // 课程列表（scheduleToday.rows：JSON 数组）
+                            // ── 2026-10-18 MD3：行高亮从 th.cream 手写改为容器色阶 ──
+                            // 现在这节 = secondaryContainer 底 + onSecondaryContainer 字
+                            //（与统计卡「在线」同语言），过去/未来回落 onSurfaceVar。
                             ListView {
                                 width: parent.width
                                 height: parent.height - 30
@@ -562,19 +572,23 @@ ApplicationWindow {
                                 delegate: Rectangle {
                                     width: parent.width
                                     height: 30
-                                    color: modelData.isNow ? th.cream : "transparent"
+                                    radius: 8
+                                    color: modelData.isNow ? th.cSecondaryCont : "transparent"
                                     Row {
                                         anchors.verticalCenter: parent.verticalCenter
-                                        x: 8; spacing: 12
+                                        x: 10; spacing: 12
                                         Text {
                                             text: modelData.time
-                                            color: modelData.isNow ? th.fg : th.fg3
-                                            font.pixelSize: 12; width: 88
+                                            // 时间戳固定宽，右缘对齐，避免跟课程名长短抖动
+                                            color: modelData.isNow ? th.cOnSecondaryCont : th.cOnSurfaceVar
+                                            font.pixelSize: 12
+                                            width: 66
+                                            horizontalAlignment: Text.AlignRight
                                         }
                                         Text {
                                             text: modelData.subject
-                                            color: modelData.isNow ? th.fg
-                                                 : (modelData.isPast ? th.fg4 : th.fg)
+                                            color: modelData.isNow ? th.cOnSecondaryCont
+                                                 : (modelData.isPast ? th.cOutline : th.cOnSurface)
                                             font.pixelSize: 13
                                             font.weight: modelData.isNow ? Font.Medium : Font.Normal
                                         }
@@ -586,12 +600,16 @@ ApplicationWindow {
 
                     // ── 云端存储概况（需求 #2：概览页要展示云端存储信息）──
                     // 数据面来自 backend.storage（/api/storage 返回），界面只消费，不自己再数一遍。
+                    // ── 2026-10-18 MD3：整卡从 th.panel 升至 elevated；小指标从裸文本列
+                    //    改为 chip 组（cSurfaceVar 底 + 圆角 8 药丸）——与上方三张
+                    //    大统计卡（headlineSmall 大数）形成"大数字 / 小指标"两个层次，
+                    //    不再是一屏里三种各自为政的小字。
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 124
-                        radius: th.rCard
-                        color: th.panel
-                        border.color: th.card
+                        radius: 12
+                        color: th.cContLow
+                        border.color: th.cOutlineVar
                         border.width: 1
                         Column {
                             anchors.fill: parent
@@ -599,16 +617,16 @@ ApplicationWindow {
                             spacing: 10
                             Item {
                                 width: parent.width; height: 16
-                                Text { text: "云端存储概况"; color: th.fg; font.pixelSize: 13; font.weight: Font.Medium }
+                                Text { text: "云端存储概况"; color: th.cOnSurface; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
                                 Text {
                                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                                     text: (backend.storage.at ? ("更新于 " + backend.storage.at) : "")
-                                    color: th.fg3; font.pixelSize: 12
+                                    color: th.cOnSurfaceVar; font.pixelSize: 12
                                 }
                             }
                             Flow {
                                 width: parent.width
-                                spacing: 18
+                                spacing: 8
                                 Repeater {
                                     model: [
                                         { k: "已知设备",   v: backend.storage.knownDevices },
@@ -618,12 +636,22 @@ ApplicationWindow {
                                         { k: "待执行指令", v: backend.storage.pendingInstructions },
                                         { k: "事件落盘",   v: backend.storage.eventsFiles }
                                     ]
-                                    delegate: Column {
-                                        spacing: 2
-                                        Text { text: modelData.k; color: th.fg3; font.pixelSize: 12 }
-                                        Text {
-                                            text: (modelData.v === undefined || modelData.v === null) ? "—" : String(modelData.v)
-                                            color: th.fg; font.pixelSize: 16; font.weight: Font.Medium
+                                    // MD3 信息 chip：labelLarge + 药丸底，一眼是"一组标签"
+                                    delegate: Rectangle {
+                                        width: chipRow.implicitWidth + 18
+                                        height: 28
+                                        radius: 14
+                                        color: th.cSurfaceVar
+                                        Row {
+                                            id: chipRow
+                                            anchors.centerIn: parent
+                                            spacing: 5
+                                            Text { text: modelData.k; color: th.cOnSurfaceVar; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                                            Text {
+                                                text: (modelData.v === undefined || modelData.v === null) ? "—" : String(modelData.v)
+                                                color: th.cOnSurface; font.pixelSize: 13; font.weight: Font.Medium
+                                                anchors.verticalCenter: parent.verticalCenter
+                                            }
                                         }
                                     }
                                 }
