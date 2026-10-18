@@ -42,14 +42,27 @@ Item {
         spacing: 14
 
 // ───── 左：设备（配角）─────
-Column {
-    // 响应式（三·响应式增量层）：窄窗且未手动展开时收起，监控画面吃满宽度；
-    // 展开时给 200 更舒服。完整三栏重排属 dsh S2 Main.qml 重构，本层不抢。
-    Layout.preferredWidth: ctx.window.compact ? (ctx.window.devOpen ? 200 : 0) : 160
-    Layout.maximumWidth: ctx.window.compact ? (ctx.window.devOpen ? 220 : 0) : 184
-    visible: !(ctx.window.compact && !ctx.window.devOpen)
-    Layout.fillHeight: true
-    spacing: 2
+    // ── 2026-10-18 真布局修复：左栏整体包 Flickable（原来没有滚动）──
+    // 原来这里是裸 Column，设备一多（>10 台）就**超出左栏高度被裁掉**，
+    // 老师以为"机器没上线"——其实是列表撑不下了。右栏早就用 Flickable 解决了
+    // 同样的问题（见 653 行注释），左栏漏了。现在补上，与右栏同模式。
+    Flickable {
+        // 响应式（三·响应式增量层）：窄窗且未手动展开时收起，监控画面吃满宽度；
+        // 展开时给 200 更舒服。完整三栏重排属 dsh S2 Main.qml 重构，本层不抢。
+        Layout.preferredWidth: ctx.window.compact ? (ctx.window.devOpen ? 200 : 0) : 160
+        Layout.maximumWidth: ctx.window.compact ? (ctx.window.devOpen ? 220 : 0) : 184
+        visible: !(ctx.window.compact && !ctx.window.devOpen)
+        Layout.fillHeight: true
+        contentWidth: width
+        contentHeight: devCol.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        Column {
+            id: devCol
+            width: parent.width
+            spacing: 2
 
     Text {
         text: "设备"
@@ -291,7 +304,8 @@ Column {
         leftPadding: 10
         topPadding: 12
     }
-}
+    }   // ← devCol（内部 Column）结束
+    }   // ← Flickable 结束（2026-10-18 新增的滚动层）
 
 // ───── 中：画面（主体）─────
 ColumnLayout {
