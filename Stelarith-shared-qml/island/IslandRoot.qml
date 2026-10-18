@@ -104,6 +104,22 @@ Item {
     //    bridgeRef["noticeTime"] 会在组件创建那一刻锁死（上面 _idle 长注释同款坑）。
     //   viewer 侧桥没有这个属性 ⇒ undefined ⇒ "" ⇒ 整块时间不显示，退化成旧样子。
     readonly property string _noticeTime: (bridgeRef && bridgeRef.noticeTime) ? bridgeRef.noticeTime : ""
+    // ⚠️ 2026-10-18 · 新通知到来时复位多面切换（face 自动逻辑缺陷修复）
+    // 原行为：face / faceUserPick 是**永久 property**，收起、展开、换内容都不复位。
+    //   ⇒ 用户上次展开看了媒体面，岛收起后来了条新通知，再展开**仍停在媒体面**，
+    //     而用户这次想看的可能是通知本身 —— 上次的选择残留成了新内容的"挡板"。
+    // 边界（与 1d95146 的"媒体重启不跳回"不冲突）：
+    //   · 同一内容延续（媒体重启）⇒ 保留用户意图（faceUserPick 生效，不跳回）；
+    //   · 新内容到来（新通知）⇒ 复位到概览，用户想先看新的。
+    // 为什么用 _noticeTime 而不是 _title：媒体也会改 title（顶通知时），但只有
+    //   通知才设置 noticeTime（_showNoticeTime 已区分媒体态）⇒ 这是"新通知"的
+    //   可靠信号。_noticeTime 从空变非空 = 一条新通知到达。
+    on_NoticeTimeChanged: {
+        if (root._noticeTime !== "" && root.faceNow !== 0) {
+            root.face = 0;
+            root.faceUserPick = -1;
+        }
+    }
     // 媒体占据岛面时标题行被播放条挤用，且"媒体不是通知" ⇒ 不显示通知时间。
     readonly property bool   _showNoticeTime: root._noticeTime !== ""
                                                && !root._mediaPresenting

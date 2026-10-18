@@ -261,6 +261,14 @@ check(/faceUserPick >= 0\) return 0/.test(ROOT_QML_TXT),
       '用户主动选过 ⇒ 失效面彻底回落（不再自动恢复）');
 check(!/onClicked: root\.face = modelData\.id\s*$/.test(ROOT_QML_TXT),
       '面签点击不再只改 face（必须同时记录 faceUserPick）');
+// ⚠️ 新通知到来必须复位 face（否则上次看媒体面，新通知展开还停在媒体面，
+//    新内容被旧选择挡住）。用 _noticeTime 作信号：只有通知设置它，媒体不会。
+check(/on_NoticeTimeChanged:/.test(ROOT_QML_TXT),
+      '有新通知复位 face 的 handler（on_NoticeTimeChanged）');
+check(/root\._noticeTime !== "" && root\.faceNow !== 0/.test(ROOT_QML_TXT),
+      '复位条件：新通知到达且当前不在概览面');
+check(/root\.face = 0;\s*root\.faceUserPick = -1;/.test(ROOT_QML_TXT),
+      '复位动作：face 回概览 + faceUserPick 清空');
 
 // ── 十一、反向：不许出现绕过任务表的旁路 ───────────────────────────────────────
 console.log('── 十一、反向检查 ──');
