@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../components"     // Btn / ToggleRow / RtcVideoSurface（本端自有通用组件）
+import "../components"     // Btn / ToggleRow 等本端自有通用组件
 import "../island"         // SvgIcon（唯一真源在共享岛目录，构建期拷到 qml/island/）
 
 // 控制页（整屏页 · U5「两端同 shell」A-2 第二页）
@@ -340,9 +340,9 @@ ColumnLayout {
             height: 20
             // 文案宽度不固定，交给 trailing Text 自己撑
             width: linkLabel.implicitWidth + (ctx.window.linkBusy ? 24 : 14)
-            color: backend.frameSource === "rtc" ? th.inv
+            color: backend.frameSource === "vnc" ? th.inv
                  : ctx.window.linkBusy ? th.todo : "transparent"
-            border.color: backend.frameSource === "rtc" ? th.inv
+            border.color: backend.frameSource === "vnc" ? th.inv
                         : ctx.window.linkBusy ? th.stroke : th.stroke
             border.width: 1
 
@@ -371,15 +371,15 @@ ColumnLayout {
                 anchors.left: parent.left
                 anchors.leftMargin: ctx.window.linkBusy ? 18 : 7
                 anchors.verticalCenter: parent.verticalCenter
-                text: (backend.frameSource === "rtc" || backend.frameSource === "rfb") ? "实时"
+                text: backend.frameSource === "vnc" ? "实时"
                     : ctx.window.linkBusy ? "正在接通…"
                     : backend.frameSource === "jpeg" ? "轮询" : "等待画面"
-                color: (backend.frameSource === "rtc" || backend.frameSource === "rfb") ? th.win
+                color: backend.frameSource === "vnc" ? th.win
                      : th.fg3
                 // 稿上没有 10px 这一档（最小是"注 11"），徽标字太小会把
                 // "实时/轮询"变成需要凑近看的装饰 —— 统一提到 11。
                 font.pixelSize: 12
-                font.weight: (backend.frameSource === "rtc" || backend.frameSource === "rfb") ? Font.Medium : Font.Normal
+                font.weight: backend.frameSource === "vnc" ? Font.Medium : Font.Normal
             }
 
             MouseArea {
@@ -387,7 +387,7 @@ ColumnLayout {
                 hoverEnabled: true
                 ToolTip.visible: containsMouse
                 ToolTip.delay: 400
-                ToolTip.text: backend.frameSource === "rtc"
+                ToolTip.text: backend.frameSource === "vnc"
                               ? "实时画面，延迟百毫秒级"
                               : ctx.window.linkBusy
                                 ? "正在建立实时连接…"
@@ -414,7 +414,7 @@ ColumnLayout {
             id: screenImg
             anchors.fill: parent
             fillMode: Image.PreserveAspectFit
-            visible: backend.frameSource !== "rtc"
+            visible: backend.frameSource !== "vnc"
             cache: false
             property int tick: 0
             source: ctx.window.frameReady ? ("image://frames/f?" + tick) : ""
@@ -425,19 +425,22 @@ ColumnLayout {
             }
         }
 
-        // ── 实时画面（WebRTC / libdatachannel）：frameSource==='rtc' 时挂载 ──
-        // 接线：viewerbackend.rtcFrameReady(QImage) → vidSurf.onFrame(img)
-        // 与 MobileMain.qml:494 同一接法；这是 #171「WebRTC 画面在桌面管理端显出来」的关键。
-        // jpeg 轮询模式下本组件隐藏，画面走上面的 screenImg；rtc 模式下反过来。
-        RtcVideoSurface {
-            id: vidSurf
+        // ── 远控画面（VNC over WebSocket · libvncclient）──
+        // 渲染管线：libvncclient 帧缓冲 → QImage → VncImageProvider → QML Image。
+        // 绝不用 QWidget 画图（约束）；tick 递增逼 Image 重取图（source 不变时 Qt 不重读）。
+        // jpeg 轮询模式下本图隐藏，画面走上面的 screenImg；vnc 模式下反过来。
+        Image {
+            id: vncImg
             anchors.fill: parent
-            theme: th
-            visible: backend.frameSource === "rtc"
+            fillMode: Image.PreserveAspectFit
+            visible: backend.frameSource === "vnc"
+            cache: false
+            property int tick: 0
+            source: backend.frameSource === "vnc" ? ("image://vnc/live?" + tick) : ""
         }
         Connections {
             target: backend
-            function onRtcFrameReady(img) { vidSurf.onFrame(img) }
+            function onVncFrameReady(img) { vncImg.tick++ }
         }
 
         // 空态照稿 .empty：标题 12/操作色 + 说明 11/辅助色，两行。
@@ -445,7 +448,7 @@ ColumnLayout {
         // 用户看不出是"正在办"还是"没人理"。
         Column {
             anchors.centerIn: parent
-            visible: !ctx.window.frameReady && backend.frameSource !== "rtc"
+            visible: !ctx.window.frameReady && backend.frameSource !== "vnc"
             spacing: 6
 
             BusyIndicator {
@@ -484,7 +487,7 @@ ColumnLayout {
             anchors.top: parent.top
             anchors.right: parent.right
             anchors.margins: 9
-            visible: backend.screenStatic && ctx.window.frameReady && backend.frameSource !== "rtc"
+            visible: backend.screenStatic && ctx.window.frameReady && backend.frameSource !== "vnc"
             text: "画面未变化 · 已暂停刷新"
             // 固定灰，刻意不跟主题走：这行浮在**远程画面**上，底色是对方的桌面（不可控），
             // 用主题色反而可能在浅色画面上消失。
@@ -503,7 +506,7 @@ ColumnLayout {
         MouseArea {
             id: screenArea
             anchors.fill: parent
-            enabled: backend.frameCount > 0 || vidSurf.framesReceived > 0
+            enabled: backend.frameCount > 0
 
             // 鼠标键 → 协议里的 button：以前只有左键，右键/中键远控过去被当左键按，
             //   右键菜单、中键自动滚全指望它。
@@ -685,19 +688,42 @@ Flickable {
             // 宽度往上问，别自己拍。见 Btn 里那段注释：写死具体值会让
             // "跟着容器变"这件事失效，而 Loader 那条路又是单向绑不回来的。
             width: parent ? parent.width : 94
-            height: 30
-            radius: th.rCtrl
-            // 未实现的：留白 + 极淡描边，看得出"还没做"，也不引诱人去点
-            color: pressed2 ? th.hover2
-                 : ma.containsMouse ? th.hover : "transparent"
-            border.color: heavy ? th.op : th.stroke
+            // ── 2026-10-18 MD3：动作按钮从 30px 描边方块升级为 40px tonal 胶囊 ──
+            // 旧样式（th.stroke 描边 + th.hover 底）与概览页被改掉的快捷按钮同源，
+            // 是"一眼老样子"的主因之一。现按 MD3 tonal 按钮：
+            //   · 高度 30→40（MD3 标准按钮高），radius 全圆
+            //   · heavy（不可逆操作）用 filled error 语义（cError 底 + cOnError 字）
+            //   · 普通动作用 tonal（cSecondaryCont 底 + cOnSecondaryCont 字）
+            //   · 状态层 hover 8% / press 12% 叠 onSecondaryContainer（MD3 规范）
+            //   · 未实现（灰）保持留白 + 淡描边（不引诱点击，语义不变）
+            height: 40
+            radius: 20
+            property bool md3Heavy: heavy
+            color: {
+                if (!capOkAll(d) && !permOk(d ? d.role : "")) return "transparent"
+                if (heavy) return th.cError
+                return th.cSecondaryCont
+            }
+            border.color: (!capOkAll(d) && !permOk(d ? d.role : "")) ? th.cOutlineVar : "transparent"
             border.width: 1
+            // MD3 状态层：onSecondaryContainer 或 onError 叠加
+            Rectangle {
+                anchors.fill: parent
+                radius: parent.radius
+                color: heavy ? th.cOnError : th.cOnSecondaryCont
+                opacity: pressed2 ? 0.12 : (ma.containsMouse ? 0.08 : 0)
+                Behavior on opacity { NumberAnimation { duration: th ? th.durShort : 200 } }
+            }
 
             Text {
                 anchors.centerIn: parent
                 text: d ? d.title : ""
-                color: heavy ? th.fg : th.op
-                font.pixelSize: 13
+                color: {
+                    if (!capOkAll(d) && !permOk(d ? d.role : "")) return th.cOnSurfaceVar
+                    if (heavy) return th.cOnError
+                    return th.cOnSecondaryCont
+                }
+                font.pixelSize: 13; font.weight: Font.Medium
             }
 
             MouseArea {
