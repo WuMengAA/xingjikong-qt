@@ -22,9 +22,9 @@
  *
  *   node scripts/publish-release.mjs publish --product agent --version 0.6.0 \
  *          --file ../Stelarith-control-qt/dist/stelarith-agent-setup-0.6.0.exe \
- *          [--notes "本次改了什么"] [--mandatory] [--base-url https://host] [--dry-run]
+ *          [--notes "本次改了什么"] [--mandatory] [--base-url https://host] [--dry-run] [--no-verify]
  *       算 sha256/大小 → **复制**（不是移动）到 assets/pkg/ → 只改 ota.json 里这一个产品
- *       → 回读校验 → 打印结果。
+ *       → 回读校验 → 发布后自验（GET 公网站点确认这一版取得到；--no-verify 跳过）→ 打印结果。
  *
  *   灰度渠道（2026-10-10 加）：加 --channel gray 即把这一版本发到 ota-gray.json
  *       （而不是 ota.json）。stable 设备读不到它；只有 register 带 channel=gray 的设备才拿得到。
@@ -32,7 +32,8 @@
  *             --file …/stelarith-agent-setup-0.6.24-rc.4.exe --base-url https://control.245959623.xyz
  *       验证够稳后，把同一包再 --channel stable 发一次（全量推送）。
  *
- * 退出码：0 成功 / 1 失败（失败时不会留下半成品：ota.json 只在全部校验通过后才写）
+ * 退出码：0 成功 / 1 失败（护栏不通过时不会留下半成品：ota.json 只在全部校验通过后才写；
+ *   唯一的例外是发布后自验失败——那时清单已写入，脚本以 1 退出要求人工核对公网端点）
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,7 +46,10 @@ import { fileURLToPath } from 'node:url';
 import { cmpVersion } from '../../scripts/version-compare.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let MANIFEST = path.join(ROOT, process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.json');
+// ⚠️ 必须 path.resolve 而不是 path.join：join 不把第二参当绝对路径，
+//    CLOUD_OTA_MANIFEST_FILE 给绝对路径（隔离测试就这么用）时会拼出
+//    ROOT/C:/… 这种四不像路径 ⇒ 写到莫名其妙的地方去。resolve 两种都认。
+let MANIFEST = path.resolve(ROOT, process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.json');
 const EXAMPLE = path.join(ROOT, 'ota.json.example');
 const PKG_DIR = path.join(ROOT, process.env.CLOUD_ASSETS_DIR || 'assets', 'pkg');
 const PRODUCTS = ['agent', 'viewer'];
@@ -86,7 +90,7 @@ const has = (name) => argv.includes(`--${name}`);
 // 这样"推出灰度更新渠道"不惊动全网，验证够稳再手动把同一包 publish 到 stable（全量）。
 const CHANNEL = String(arg('channel', 'stable') || 'stable').trim();
 if (CHANNEL && CHANNEL !== 'stable') {
-	MANIFEST = path.join(ROOT, `ota-${CHANNEL}.json`);
+	MANIFEST = path.resolve(ROOT, `ota-${CHANNEL}.json`);
 }
 
 const log = (m) => console.log(m);
@@ -478,9 +482,46 @@ async function cmdPublish() {
 	const len = writeManifest(m);
 	log(`\n已写入 ${path.relative(ROOT, MANIFEST)}（UTF-8 无 BOM，${len} 字节，回读解析通过）`);
 
+	// ── 发布后自验（2026-10-20 加）：清单写完了不算完，要能真的取到 ──────────
+	// 为什么：ota.json 只是"权威声明"，从声明到生效还有一层 —— 云端进程**每请求现读磁盘**。
+	// BOM、进程 cwd 与清单目录不符、CDN 缓存，都会让"写对了的清单"表现为接口
+	// 假"未发布"（latest:null），而发布脚本自己是全绿的。这类假成功等到教室机
+	// 来报"没有新版"才暴露，比发布时直接炸晚得多。所以发布后立刻打一次公网站点。
+	// --no-verify：内网发布/临时网络不可达时跳过（只警告，不把"没网"渲染成"发版失败"）。
+	if (has('no-verify')) {
+		log('\n--no-verify：跳过发布后自验');
+	} else {
+		const probe = `${origin}/api/public/ota?product=${encodeURIComponent(product)}&channel=${encodeURIComponent(CHANNEL)}`;
+		log(`\n发布后自验：GET ${probe}`);
+		try {
+			const resp = await fetch(probe, { signal: AbortSignal.timeout(20000) });
+			const j = await resp.json().catch(() => null);
+			const got = j && j.latest && j.latest.version;
+			if (got !== version) {
+				fail(
+					`发布后自验失败：公网返回 v${got || '(未发布)'}，不是刚发的 v${version}。\n`
+					+ `  清单已写入 ${path.relative(ROOT, MANIFEST)}，但端点取到的不是它 —— 典型原因：\n`
+					+ `  云端进程 cwd 与清单目录不一致 / 文件带 BOM / CDN 还在缓存（private 60s）。\n`
+					+ `  人工核对：curl "${probe}"`
+				);
+			}
+			if (j.latest.sha256 !== sha) {
+				fail(
+					`发布后自验失败：版本号对上了，但 sha256 不一致 —— 公网清单里 v${version} 的包不是刚发的这个。\n`
+					+ `  典型原因：同一版本号发过两个不同的包（并发发布/重打包）。人工核对：curl "${probe}"`
+				);
+			}
+			log(`  ✓ 公网已生效：v${got}，sha256 一致`);
+		} catch (e) {
+			// 网络不可达 ≠ 发布失败：清单已落盘，云端现读即生效。警告 + 给人工核对命令。
+			log(`  ⚠ 自验请求失败（${e.message}）—— 清单已写入，但未能确认公网生效。`);
+			log(`     内网发布/临时网络问题属预期；确认无碍后可加 --no-verify 跳过。`);
+			log(`     人工核对：curl "${probe}"`);
+		}
+	}
+
 	log('\n下一步可以做的验证：');
 	log(`  · 本地体检：node scripts/publish-release.mjs check${CHANNEL !== 'stable' ? ` --channel ${CHANNEL}` : ''}`);
-	log(`  · 云端现读生效（不必重启）：curl "${origin}/api/public/ota?product=${product}${CHANNEL !== 'stable' ? `&channel=${CHANNEL}` : ''}"`);
 	log(`  · 官网下载页会自动跟着变：它读的就是这个接口，站点无需重新构建`);
 	if (CHANNEL !== 'stable') {
 		log(`  · 灰度只下发给 register 带 channel=${CHANNEL} 的设备；要全量请同包再 --channel stable 发一次`);

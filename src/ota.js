@@ -20,9 +20,34 @@
 // （如 ota-gray.json），形态完全一致。latestFor(product, channel) 读对应通道清单；
 // 通道清单缺失即回落 null（该通道"无更新"），不会去读 stable。灰度发布 = 把候选版本
 // 发到 ota-gray.json，只有 register 带 channel=gray 的设备拿得到，不惊动全网。
+// （2026-10-20：管理台 POST /api/admin/ota 也支持带 channel 直接写灰度清单，
+//  走 manifestFileFor() 同一真源，不再只能运维手工编辑文件。）
 
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { OTA_MANIFEST_FILE } from './config.js';
+
+/**
+ * 通道 → 清单文件路径（2026-10-20 抽为单一真源）。
+ *
+ * 为什么抽出来：读方（loadManifest/latestFor）与写方（POST /api/admin/ota 管理台发布）
+ * 此前各拼各的文件名 —— 管理端只写 ota.json，灰度清单 ota-gray.json 只能运维手工编辑。
+ * 两边一旦对不上（发到 A 文件、设备读 B 文件），表现是"发布成功、设备不升级"的
+ * **静默错位**，比报错难查得多。现在两边都走这一个函数。
+ *
+ *   'stable' / 空 / 不合规 → OTA_MANIFEST_FILE（ota.json）
+ *   灰度通道（gray 等）    → **同目录**的 ota-<channel>.json
+ *
+ * ⚠️ 白名单在这里兜底（2026-10-13 三端审计修复点）：channel 来自 URL query 与设备
+ *    register 载荷，曾直接拼进文件名 ⇒ 传 `channel=../secret` 就能读任意 *.json
+ *    （路径穿越）。不合规一律回落 stable 清单，**绝不**把 ../ 之类拼进文件名。
+ */
+export function manifestFileFor(channel) {
+  const ch = String(channel || '').trim();
+  if (ch === '' || ch === 'stable') return OTA_MANIFEST_FILE;
+  if (!/^[a-z0-9_-]{1,16}$/.test(ch)) return OTA_MANIFEST_FILE;
+  return path.join(path.dirname(OTA_MANIFEST_FILE), `ota-${ch}.json`);
+}
 
 /** 读取并解析清单；文件不存在/坏 JSON → null（调用方据此说"没发布过版本"）。
  *  @param {string} [channel] 更新通道：'stable'（默认）读 ota.json；其它值（如 'gray'）
@@ -31,10 +56,8 @@ import { OTA_MANIFEST_FILE } from './config.js';
 function loadManifest(channel) {
   // ⚠️ 2026-10-13 三端审计修复：channel 来自 URL query 与设备 register 载荷，此前**直接拼进文件名**
   //    ⇒ 传 `channel=../secret` 就能读任意 *.json（路径穿越；虽限 .json，仍足以泄露配置）。
-  //    在**唯一真源**处白名单收口（所有调用点自动受益）：不合规一律回落 stable 清单。
-  const ch = String(channel || '').trim();
-  const isGray = ch !== 'stable' && /^[a-z0-9_-]{1,16}$/.test(ch);
-  const file = isGray ? `ota-${ch}.json` : OTA_MANIFEST_FILE;
+  //    在**唯一真源** manifestFileFor() 处白名单收口（所有调用点自动受益）：不合规一律回落 stable 清单。
+  const file = manifestFileFor(channel);
   try {
     const raw = readFileSync(file, 'utf8');
     const obj = JSON.parse(raw);

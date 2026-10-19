@@ -9,20 +9,44 @@
  * 用法（起好一份云端后）：
  *   CLOUD_OTA_TEST_BASE=http://127.0.0.1:18999 \
  *   CLOUD_OTA_TEST_TOKEN=selftestviewertoken00000001 \
- *   CLOUD_OTA_MANIFEST_FILE=ota.selftest.json \
  *   node scripts/test-ota-guard.mjs
  *
- * 关键设计：**自始至终不碰仓库里那份真 ota.json**。
- * 自测实例用 CLOUD_OTA_MANIFEST_FILE 指到一个临时清单文件，脚本自己造、自己收尾删掉。
+ * 关键设计：**自始至终不碰仓库里那份真 ota.json / ota-gray.json**。
+ * 清单默认落在系统临时目录（<tmp>/stelarith-ota-guard/ota.json，灰度清单 ota-gray.json
+ * 同目录），脚本自己造、自己收尾删掉。可用 CLOUD_OTA_MANIFEST_FILE 指到别处，
+ * 但**必须避开仓库**：ota-gray.json 是生产云端**每请求现读**的文件，测试写它
+ * 等于当场把灰度设备升级到自测版本（脚本启动时会检查，碰到仓库真清单直接拒绝运行）。
  * 这样就算中途崩了也不会污染"已经发布的版本"。
  */
 
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import os from 'node:os';
 
 const BASE = process.env.CLOUD_OTA_TEST_BASE || 'http://127.0.0.1:18999';
 const TOKEN = process.env.CLOUD_OTA_TEST_TOKEN || 'selftestviewertoken00000001';
-const MANIFEST = process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.selftest.json';
+// 默认走临时目录（含灰度清单同目录落盘）—— 见头注释"关键设计"。
+const MANIFEST = process.env.CLOUD_OTA_MANIFEST_FILE
+  || join(os.tmpdir(), 'stelarith-ota-guard', 'ota.json');
+// 灰度清单路径与服务端 ota.js manifestFileFor() 同一算法：同目录 ota-gray.json
+const GRAY = join(dirname(MANIFEST), 'ota-gray.json');
+// 🛡️ 起飞线：灰度测试要**写**清单，而仓库里那份 ota-gray.json 是生产云端现读的文件。
+//    老用法（CLOUD_OTA_MANIFEST_FILE=ota.selftest.json，仓库根）会让灰度发布落到
+//    真灰度清单上 ⇒ 当场把灰度设备升到自测版本。宁可拒绝运行，不赌"应该不会"。
+{
+  const here = process.cwd();
+  const bad = [];
+  if (resolve(MANIFEST) === resolve(here, 'ota.json')) bad.push(MANIFEST);
+  if (resolve(GRAY) === resolve(here, 'ota-gray.json')) bad.push(GRAY);
+  if (bad.length) {
+    console.error(
+      '拒绝运行：清单路径会碰到仓库真清单（生产云端现读，写了等于改线上灰度）：\n'
+      + bad.map((f) => `  ${f}`).join('\n')
+      + '\n请把 CLOUD_OTA_MANIFEST_FILE 指到仓库外的临时目录（默认即是，别覆盖）。'
+    );
+    process.exit(2);
+  }
+}
 // 临时清单可能落在仓库外，目录自己建起来（服务端写盘时不会替你 parent 建目录）
 mkdirSync(dirname(MANIFEST), { recursive: true });
 
@@ -78,8 +102,8 @@ async function getJson(path) {
 }
 
 /** 校验清单文件当前内容：合法 JSON、无 BOM、有该条目 */
-function readManifest() {
-  const raw = existsSync(MANIFEST) ? readFileSync(MANIFEST) : Buffer.alloc(0);
+function readManifest(file = MANIFEST) {
+  const raw = existsSync(file) ? readFileSync(file) : Buffer.alloc(0);
   const bom = raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf;
   let json = null;
   try {
@@ -193,10 +217,77 @@ try {
       rr.status === 200 && !rr.json.version, `status=${rr.status} ${JSON.stringify(rr.json)}`);
   }
 
-  console.log(`\n【7】全程没碰仓库里那份真 ota.json`);
+  console.log(`\n【7】候选版（rc/alpha）与灰度通道（2026-10-20 加：管理台以前发不了候选版）`);
+  seed(FOUND);
+  // rc / alpha 与 scripts/publish-release.mjs 同一道正则；阶段号从 1 起 ——
+  // alpha.0 会被被控端 compareVersion 当成"无阶段=正式版"⇒ 云端发了、教室机判已是最新，
+  // 静默不升级（2026-10-07 预演抓到过，见 publish 脚本注释）。
+  await expectAccept('发布候选版 selftest 0.6.1-rc.1', {
+    product: 'selftest', version: '0.6.1-rc.1', url: GOOD_URL, sha256: GOOD_SHA, size: 1,
+  });
   {
-    const real = existsSync('ota.json') ? readFileSync('ota.json', 'utf8') : null;
-    console.log(`        （真清单 sha256: ${require$sha256(real)}）`);
+    const e = readManifest().json?.products?.selftest;
+    ck('候选版本号原样落进清单（后缀不被规范化掉）', !!e && e.version === '0.6.1-rc.1', e && e.version);
+  }
+  await expectAccept('候选版可继续升级 0.6.1-rc.2', {
+    product: 'selftest', version: '0.6.1-rc.2', url: GOOD_URL, sha256: GOOD_SHA, size: 1,
+  });
+  await expectAccept('内测版 0.6.2-alpha.1 高于当前 selftest 0.6.1-rc.2，放行', {
+    product: 'selftest', version: '0.6.2-alpha.1', url: GOOD_URL, sha256: GOOD_SHA, size: 1,
+  });
+  await expectReject('alpha.0 拒收（阶段号从 1 起，0 会被当成正式版）',
+    { product: 'selftest', version: '0.6.1-alpha.0', url: GOOD_URL, sha256: GOOD_SHA, size: 1 }, 'version 形如');
+  await expectReject('beta 不是合法阶段', { product: 'selftest', version: '0.6.1-beta.1', url: GOOD_URL, sha256: GOOD_SHA, size: 1 }, 'version 形如');
+  await expectReject('非三段式 0.6 拒收（旧正则反而放行它）', { product: 'selftest', version: '0.6', url: GOOD_URL, sha256: GOOD_SHA, size: 1 }, 'version 形如');
+  await expectReject('残缺后缀 -rc 拒收', { product: 'selftest', version: '0.6.1-rc', url: GOOD_URL, sha256: GOOD_SHA, size: 1 }, 'version 形如');
+  await expectReject('四段式 0.6.1.2 拒收', { product: 'selftest', version: '0.6.1.2', url: GOOD_URL, sha256: GOOD_SHA, size: 1 }, 'version 形如');
+
+  // ── 灰度通道：写 ota-gray.json，不碰 stable 清单；灰度设备才读得到 ──
+  seed(FOUND);
+  try { unlinkSync(GRAY); } catch { /* 没有就算了 */ }
+  const grayR = await expectAccept('灰度通道发布 selftest 0.6.2-rc.1（channel=gray）', {
+    product: 'selftest', version: '0.6.2-rc.1', url: GOOD_URL, sha256: GOOD_SHA, size: 1, channel: 'gray',
+  });
+  {
+    ck('回执带 channel=gray', !!grayR && grayR.channel === 'gray', JSON.stringify(grayR));
+    const g = readManifest(GRAY).json;
+    const e = g && g.products && g.products.selftest;
+    ck('灰度清单里确有 0.6.2-rc.1', !!e && e.version === '0.6.2-rc.1',
+      JSON.stringify(g && g.products).slice(0, 120));
+    ck('灰度清单 UTF-8 无 BOM', readManifest(GRAY).bom === false, '头字节是 EF BB BF');
+    const s = readManifest().json;
+    ck('stable 清单没被灰度发布污染（仍只有 seed 的 agent 0.6.0）',
+      !!s && !!s.products && s.products.agent && s.products.agent.version === '0.6.0' && !s.products.selftest,
+      JSON.stringify(s && s.products).slice(0, 120));
+  }
+  {
+    const rr = await getJson('/api/ota/latest?product=selftest&channel=gray');
+    ck('GET /api/ota/latest?channel=gray 立刻取到 0.6.2-rc.1',
+      rr.status === 200 && rr.json.latest && rr.json.latest.version === '0.6.2-rc.1',
+      `status=${rr.status} ${JSON.stringify(rr.json)}`);
+    const rs = await getJson('/api/ota/latest?product=selftest');
+    ck('不带 channel（stable）取不到灰度版（灰度不泄漏到全网）',
+      rs.status === 200 && (!rs.json.latest || rs.json.latest.version !== '0.6.2-rc.1'),
+      `status=${rs.status} ${JSON.stringify(rs.json)}`);
+  }
+  // 灰度清单独立走倒退闸门：灰度设备也是真设备，发低版本同样把它们降级
+  await expectReject('灰度渠道倒退同样被拒（0.6.2-rc.1 → 0.6.1-rc.1）',
+    { product: 'selftest', version: '0.6.1-rc.1', url: GOOD_URL, sha256: GOOD_SHA, size: 1, channel: 'gray' }, '拒绝发布');
+  // channel 白名单：路径穿越在 ota.js manifestFileFor 有兜底（读方），这里是写方入口先挡
+  await expectReject('channel=../config 穿越拒收',
+    { product: 'selftest', version: '0.6.3', url: GOOD_URL, sha256: GOOD_SHA, size: 1, channel: '../config' }, 'channel 只允许');
+  await expectReject('channel=GRAY 大写拒收（白名单只认小写）',
+    { product: 'selftest', version: '0.6.3', url: GOOD_URL, sha256: GOOD_SHA, size: 1, channel: 'GRAY' }, 'channel 只允许');
+  await expectReject('channel 超长（17 位）拒收',
+    { product: 'selftest', version: '0.6.3', url: GOOD_URL, sha256: GOOD_SHA, size: 1, channel: 'a'.repeat(17) }, 'channel 只允许');
+  cleanup.push(GRAY);
+
+  console.log(`\n【8】全程没碰仓库里那份真 ota.json / ota-gray.json`);
+  {
+    for (const f of ['ota.json', 'ota-gray.json']) {
+      const real = existsSync(f) ? readFileSync(f, 'utf8') : null;
+      console.log(`        （真清单 ${f} sha256: ${require$sha256(real)}）`);
+    }
   }
 } finally {
   cleanup.forEach((f) => { try { if (existsSync(f)) unlinkSync(f); } catch (e) { /* 收尾失败不惊扰结果 */ } });

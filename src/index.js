@@ -26,7 +26,7 @@ import { ensureQmlPatch, qmlPatchManifest, qmlPatchZipPath } from './qml-patch.j
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
-  INTERACT_SWEEP_INTERVAL_MS, OTA_MANIFEST_FILE } from './config.js';
+  INTERACT_SWEEP_INTERVAL_MS } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENV_FILE = join(__dirname, '..', '.env');
@@ -134,7 +134,7 @@ import { initInteract, interactReady, sweepInteract,
   submitSongRequest, submitFeedback, submitBlessing,
   listSongRequests, listBlessings, feedbackSummary,
   handleSongRequest, handleBlessing } from './interact.js';
-import { latestFor, cmpVersion } from './ota.js';
+import { latestFor, cmpVersion, manifestFileFor } from './ota.js';
 // 2026-10-18 · VoiceHub「正在播放」桥：云端集中轮询一次、缓存在内存、经既有 WS 下发。
 // 为什么在云端而不是被控端：60 台教室机各连 VoiceHub = 60 条外网长连接，且教室断网就全瞎。
 // 只读（绝不下发写指令），数据源是公开接口 /api/music/broadcast。
@@ -994,7 +994,7 @@ const server = http.createServer((req, res) => {
   // GET /admin  → 返回 admin.html（管理面板单页）
   // GET /api/admin/config  → 读当前 .env 配置（令牌脱敏显示）
   // POST /api/admin/config  → 改 .env（换令牌/放开0.0.0.0）→ 自动重启
-  // POST /api/admin/ota     → 写 ota.json 发布新版本
+  // POST /api/admin/ota     → 写 ota.json（或带 channel 写 ota-<channel>.json）发布新版本
 
   if (req.method === 'GET' && u.pathname === '/admin') {
     if (!existsSync(ADMIN_HTML)) return send(404, { ok: false, error: 'admin.html 不存在' });
@@ -1061,11 +1061,30 @@ const server = http.createServer((req, res) => {
       let payload;
       try { payload = JSON.parse(body || '{}'); }
       catch (e) { return send(400, { ok: false, error: 'JSON 解析失败: ' + e.message }); }
-      const { product = 'agent', version, url, sha256, size, notes, mandatory, allowDowngrade } = payload;
+      const { product = 'agent', version, url, sha256, size, notes, mandatory, allowDowngrade, channel } = payload;
       if (!version || !url) return send(400, { ok: false, error: '缺 version 或 url' });
-      if (!/^\d+(\.\d+)*$/.test(String(version))) {
-        return send(400, { ok: false, error: 'version 形如 0.6.1' });
+      // 2026-10-20：版本正则对齐 scripts/publish-release.mjs（X.Y.Z[-alpha.N|-rc.N]）。
+      // 此前这里是 /^\d+(\.\d+)*$/ —— 既放行 '1' / '0.6' 这种非三段式，
+      // 又**拒收 rc/alpha 候选版**：管理台发不了灰度，而灰度机制（ota-<channel>.json +
+      // register channel）本来就为候选版服务 ⇒ 能力倒挂，运维只能手工编辑 ota-gray.json。
+      // 阶段号从 1 起：alpha.0 曾让被控端 compareVersion 判成"正式版"⇒ 静默不升级。
+      if (!/^\d+\.\d+\.\d+(?:-(?:alpha|rc)\.[1-9]\d*)?$/.test(String(version))) {
+        return send(400, {
+          ok: false,
+          error: 'version 形如 0.6.1（正式）/ 0.6.1-rc.1（候选）/ 0.6.1-alpha.1（内测）；见 docs/版本号命名规范-2026-10-07.md',
+        });
       }
+      // 2026-10-20：更新通道。默认 stable 写 ota.json；灰度（如 gray）写 ota-<channel>.json。
+      // 白名单与 ota.js manifestFileFor() 同一道（防 ../ 路径穿越），写哪个文件也由它算 ——
+      // 读方 latestFor 与写方这里必须是同一个文件名，否则"发布成功、设备不升级"。
+      const ch = String(channel || '').trim() || 'stable';
+      if (ch !== 'stable' && !/^[a-z0-9_-]{1,16}$/.test(ch)) {
+        return send(400, {
+          ok: false,
+          error: 'channel 只允许小写字母/数字/下划线/横线（1-16 位），留空表示 stable',
+        });
+      }
+      const targetFile = manifestFileFor(ch);
       if (!/^https?:\/\/.+/i.test(String(url))) {
         return send(400, { ok: false, error: 'url 必须是 http(s) 地址' });
       }
@@ -1091,25 +1110,26 @@ const server = http.createServer((req, res) => {
         return send(400, { ok: false, error: 'size 必须是正整数（点「计算 SHA256」时会一并填好）' });
       }
 
-      // 读取现有清单（有则改，无则建）。
-      // ⚠️ 这里**故意不再 catch 成空对象**：旧写法遇到带 BOM 的 ota.json（PowerShell 的
+      // 读取现有清单（有则改，无则建）。灰度通道读自己那份（ota-gray.json 等），
+      // 与 stable 清单互不覆盖 —— 灰度是显式发布，不能顺手改到全网清单上。
+      // ⚠️ 这里**故意不再 catch 成空对象**：旧写法遇到带 BOM 的清单（PowerShell 的
       //    Set-Content -Encoding UTF8 会写 BOM）就会 JSON.parse 抛错 → 被 catch 吞掉 →
       //    manifest 重置为 {products:{}} → **把另一个产品的条目整条抹掉**。
       //    文件坏掉应该吵出来，而不是静默清空别人的发布。
       let manifest = { products: {} };
-      if (existsSync(OTA_MANIFEST_FILE)) {
-        const raw = readFileSync(OTA_MANIFEST_FILE);
+      if (existsSync(targetFile)) {
+        const raw = readFileSync(targetFile);
         if (raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf) {
           return send(400, {
             ok: false,
-            error: `${OTA_MANIFEST_FILE} 带 UTF-8 BOM，JSON.parse 会失败（云端会当成"没发布过版本"）。请另存为「UTF-8 无 BOM」后重试。`,
+            error: `${targetFile} 带 UTF-8 BOM，JSON.parse 会失败（云端会当成"没发布过版本"）。请另存为「UTF-8 无 BOM」后重试。`,
           });
         }
         try {
           manifest = JSON.parse(raw.toString('utf8'));
         } catch (e) {
           // 解析不了就拒绝，**不要**用空清单覆盖它
-          return send(400, { ok: false, error: `现有 ${OTA_MANIFEST_FILE} 不是合法 JSON（${e.message}），已拒绝写入以免覆盖其它产品条目` });
+          return send(400, { ok: false, error: `现有 ${targetFile} 不是合法 JSON（${e.message}），已拒绝写入以免覆盖其它产品条目` });
         }
         if (!manifest || typeof manifest !== 'object') manifest = { products: {} };
       }
@@ -1134,12 +1154,18 @@ const server = http.createServer((req, res) => {
       try {
         // 显式 Buffer ⇒ 绝不带 BOM（与脚本侧同一条硬要求）
         const text = JSON.stringify(manifest, null, 2) + '\n';
-        writeFileSync(OTA_MANIFEST_FILE, Buffer.from(text, 'utf8'));
-        JSON.parse(readFileSync(OTA_MANIFEST_FILE, 'utf8')); // 写完回读，坏 JSON 当场炸
-        pushEvent('info', '管理面板发布了 OTA', { product, version });
-        return send(200, { ok: true, product, version, sha256: sha, size: sizeNum, note: 'OTA 清单已写入，立即生效' });
+        writeFileSync(targetFile, Buffer.from(text, 'utf8'));
+        JSON.parse(readFileSync(targetFile, 'utf8')); // 写完回读，坏 JSON 当场炸
+        pushEvent('info', '管理面板发布了 OTA', { product, version, channel: ch });
+        return send(200, {
+          ok: true, product, version, channel: ch, file: targetFile,
+          sha256: sha, size: sizeNum,
+          note: ch === 'stable'
+            ? 'OTA 清单已写入，立即生效'
+            : `灰度清单已写入，仅 register 带 channel=${ch} 的设备拿得到，立即生效`,
+        });
       } catch (e) {
-        return send(500, { ok: false, error: '写入 ota.json 失败: ' + e.message });
+        return send(500, { ok: false, error: `写入 ${targetFile} 失败: ` + e.message });
       }
     });
     return undefined;

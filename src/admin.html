@@ -241,6 +241,14 @@
           <input type="text" id="otaVersion" class="mono" placeholder="0.5.0">
         </div>
         <div class="row">
+          <label>更新通道</label>
+          <select id="otaChannel">
+            <option value="stable">stable（全网正式版）</option>
+            <option value="gray">gray（灰度候选版）</option>
+          </select>
+          <span class="note">灰度只下发给 register 带 channel=gray 的设备；候选版号形如 0.6.45-rc.1</span>
+        </div>
+        <div class="row">
           <label>下载 URL</label>
           <input type="text" id="otaUrl" placeholder="https://..." spellcheck="false">
         </div>
@@ -860,9 +868,11 @@ function copyText(id) {
 }
 
 // ---- OTA ----
+// 更新通道（2026-10-20）：stable 读/写 ota.json；gray 读/写 ota-gray.json（灰度候选版）。
 async function loadOta() {
+  const channel = document.getElementById('otaChannel').value || 'stable';
   try {
-    const r = await api('/api/ota/latest?product=agent');
+    const r = await api('/api/ota/latest?product=agent&channel=' + encodeURIComponent(channel));
     if (r.ok && r.latest) {
       document.getElementById('otaVersion').value = r.latest.version || '';
       document.getElementById('otaUrl').value = r.latest.url || '';
@@ -883,10 +893,11 @@ async function publishOta() {
     size: Number(document.getElementById('otaSize').value) || 0,
     notes: document.getElementById('otaNotes').value.trim(),
     mandatory: document.getElementById('otaMandatory').checked,
+    channel: document.getElementById('otaChannel').value || 'stable',
   };
   if (!body.version || !body.url) return toast('版本号和 URL 必填', 'err');
   const r = await api('/api/admin/ota', 'POST', body);
-  r.ok ? toast('OTA 已发布: '+body.version, 'ok') : toast(r.error||'发布失败', 'err');
+  r.ok ? toast(`OTA 已发布: ${body.version}（${body.channel}）`, 'ok') : toast(r.error||'发布失败', 'err');
 }
 
 async function calcSha256() {
