@@ -120,6 +120,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <windows.h>
+#include "winlauncher.h"   // 2026-10-19 需求①：子进程静默启动（杜绝任何场景弹出 cmd 窗）
 #include <tlhelp32.h>   // 进程快照（process_list / process_stop）
 #include <psapi.h>      // 进程工作集内存
 #include <mmsystem.h>   // waveOutSetVolume（set_volume，Rust 版实测零依赖可用）
@@ -2091,8 +2092,9 @@ static void otaRollback()
         "copy /Y \"%1\" \"%2\" >nul && "
         "del /f /q \"%3\" && "
         "start \"\" \"%2\"");
-    QProcess::startDetached(QStringLiteral("cmd.exe"),
-                            {QStringLiteral("/c"), cmd.arg(prev, exe, otaPendingPath())});
+    // #368 需求①：用静默 detached 拉起，杜绝回滚脚本弹出 cmd 黑窗
+    stelarithStartHiddenDetached(QStringLiteral("cmd.exe"),
+                                 {QStringLiteral("/c"), cmd.arg(prev, exe, otaPendingPath())});
     otaNoteFailure(QStringLiteral("新版本未能在 %d 秒内连上云端，已回滚").arg(kOtaRollbackMs / 1000));
     QTimer::singleShot(1500, [] { QCoreApplication::quit(); });   // 让位给刚拉起来的旧版
 }
@@ -2253,6 +2255,7 @@ static bool procWaitFinished(QProcess &p, int timeoutMs)
 static bool agentAutostartEnabled()
 {
     QProcess p;
+    stelarithHideChildConsole(p);   // #368 需求①：schtasks 查询静默，不弹控制台窗
     p.start(QStringLiteral("schtasks"),
             {QStringLiteral("/Query"), QStringLiteral("/TN"), QString::fromLatin1(kAgentTaskName)});
     if (!procWaitFinished(p, 4000)) { p.kill(); return false; }
@@ -2713,9 +2716,15 @@ void openPluginStore()
                 { QFile f(tmp); if (f.open(QIODevice::WriteOnly)) { f.write(data); f.close(); } }
                 const QString dir = g_pluginHost->pluginDir() + QLatin1Char('/') + id;
                 QDir().mkpath(dir);
-                QProcess::execute(QStringLiteral("powershell"),
-                    QStringList() << QStringLiteral("-Command")
-                                  << QStringLiteral("Expand-Archive -Force '%1' '%2'").arg(tmp, dir));
+                // #368 需求①：进程内 powershell 解压静默，挂 CREATE_NO_WINDOW
+                {
+                    QProcess p;
+                    stelarithHideChildConsole(p);
+                    p.start(QStringLiteral("powershell"),
+                            QStringList() << QStringLiteral("-Command")
+                                          << QStringLiteral("Expand-Archive -Force '%1' '%2'").arg(tmp, dir));
+                    p.waitForFinished(-1);
+                }
                 g_pluginHost->installAndLaunch(id);
                 QMessageBox::information(&dlg, QStringLiteral("插件市场"), QStringLiteral("已安装并启动：%1").arg(id));
             });
@@ -4062,7 +4071,8 @@ static void otaOnFinished()
         }
     }
     if (QFile::exists(helper))
-        QProcess::startDetached(QStringLiteral("cmd.exe"), {QStringLiteral("/c"), helper});
+        // #368 需求①：静默 detached，杜绝重启助手弹出 cmd 黑窗
+        stelarithStartHiddenDetached(QStringLiteral("cmd.exe"), {QStringLiteral("/c"), helper});
 
     // ② 启动安装包。它先 Stop-Process 掉本进程，再覆盖文件。
     //   静默参数同时给 NSIS(/S) 与 Inno(/VERYSILENT)：旧版 NSIS 包认 /S，
@@ -6987,9 +6997,15 @@ void agentUiWire(AgentUi *ui)
             { QFile f(tmp); if (f.open(QIODevice::WriteOnly)) { f.write(data); f.close(); } }
             const QString dir = g_pluginHost->pluginDir() + QLatin1Char('/') + id;
             QDir().mkpath(dir);
-            QProcess::execute(QStringLiteral("powershell"),
-                QStringList() << QStringLiteral("-Command")
-                              << QStringLiteral("Expand-Archive -Force '%1' '%2'").arg(tmp, dir));
+            // #368 需求①：进程内 powershell 解压静默，挂 CREATE_NO_WINDOW
+            {
+                QProcess p;
+                stelarithHideChildConsole(p);
+                p.start(QStringLiteral("powershell"),
+                        QStringList() << QStringLiteral("-Command")
+                                      << QStringLiteral("Expand-Archive -Force '%1' '%2'").arg(tmp, dir));
+                p.waitForFinished(-1);
+            }
             g_pluginHost->installAndLaunch(id);
             qInfo("[agent-shell] 已安装并启动插件：%s", qPrintable(id));
             agentUiFill(ui);

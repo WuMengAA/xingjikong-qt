@@ -2,6 +2,7 @@
 
 #include "terminal_console.h"
 #include "cloud_proto.h"      // 协议 v1 信封的唯一声明（定义在 main.cpp）
+#include "winlauncher.h"      // 2026-10-19 需求①：子进程静默启动（杜绝终端子进程弹 cmd 窗）
 
 #include <QWebSocket>
 #include <QProcess>
@@ -196,6 +197,8 @@ void TerminalConsole::runLine(const QString &line)
     connect(m_proc, &QProcess::finished, this, &TerminalConsole::onProcFinished);
 
     m_proc->setWorkingDirectory(m_cwd);
+    // #368 需求①：终端子进程（cmd/powershell）I/O 已走管道接 Qt，禁止再分配可见控制台窗
+    stelarithHideChildConsole(*m_proc);
     // ⚠️ 只能 start 一次：连着 start 两次会把第一个进程顶掉（那正是第一版的写法）
     m_proc->start(ps ? QStringLiteral("powershell.exe") : QStringLiteral("cmd.exe"), args);
     if (!m_proc->waitForStarted(5000)) {
