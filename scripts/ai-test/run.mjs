@@ -157,11 +157,17 @@ async function t1Cloud() {
   instA.kill();
 
   if (!QUICK) {
-    // ota-guard：自带临时清单的第二个实例（不碰仓库真 ota.json）
+    // ota-guard：自带临时清单的第二个实例（不碰仓库真 ota.json / ota-gray.json）。
+    // ⚠️ 2026-10-20：清单必须指到**仓库外临时目录** —— 护栏测试含灰度通道发布，
+    //    会写 ota-gray.json，而仓库里那份是生产云端每请求现读的文件；
+    //    老写法（ota.selftest.json 落仓库根）会让灰度测试落到真灰度清单上。
+    const guardDir = path.join(os.tmpdir(), 'ai-test-ota-guard');
+    const guardManifest = path.join(guardDir, 'ota.json');
+    fs.mkdirSync(guardDir, { recursive: true });
     const instB = startIsolated(PORT_B, {
       CLOUD_WS_TOKEN: 'selftestviewertoken00000001',
       CLOUD_VIEWER_TOKEN: 'selftestviewertoken00000001',
-      CLOUD_OTA_MANIFEST_FILE: 'ota.selftest.json',
+      CLOUD_OTA_MANIFEST_FILE: guardManifest,
     });
     const okB = await waitReady(PORT_B);
     if (!okB) {
@@ -173,12 +179,13 @@ async function t1Cloud() {
         env: {
           CLOUD_OTA_TEST_BASE: `http://127.0.0.1:${PORT_B}`,
           CLOUD_OTA_TEST_TOKEN: 'selftestviewertoken00000001',
-          CLOUD_OTA_MANIFEST_FILE: 'ota.selftest.json',
+          CLOUD_OTA_MANIFEST_FILE: guardManifest,
         },
       });
       record('cloud', 'OTA 发布护栏（guard）', r.code === 0, r.ms, r.code !== 0 ? r.out.slice(-200) : '');
     }
     instB.kill();
+    try { fs.rmSync(guardDir, { recursive: true, force: true }); } catch {}
   }
 }
 
