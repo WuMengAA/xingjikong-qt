@@ -124,8 +124,14 @@ if ($procs.Count -gt 0) {
     Start-Sleep -Seconds 2
 }
 
-Write-GuardLog 'LAUNCH production agent'
-$env:STE_QT_CHANNEL = 'gray'
+# NOTE (2026-10-20): do NOT set STE_QT_CHANNEL here. The agent resolves its own
+#   channel at startup (env -> channel.txt -> stable; see resolvedChannel /
+#   persistChannel in control-qt src/main.cpp), so a guard-launched process keeps
+#   whatever track the machine is already on. The previous line hardcoded 'gray'
+#   here, which silently moved every guard-relaunched machine onto the gray
+#   track (the logon trigger task does not set the variable, and the env value
+#   takes priority over the persisted channel.txt).
+Write-GuardLog 'LAUNCH production agent (channel left to the agent: env -> channel.txt -> stable)'
 try {
     Start-Process -FilePath $Prod -ErrorAction Stop | Out-Null
 } catch {

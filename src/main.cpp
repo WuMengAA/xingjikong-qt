@@ -1929,6 +1929,10 @@ static qint64 otaRetryDelayMs(int failCount)
 }
 
 /** 记一次失败：把"下次最早几点能试"一起算好写进状态文件。 */
+// OTA 健康快照上报（M3，2026-10-20）—— 定义在 sendEvent 之后（本文件靠后），
+// 这里只提前声明：失败/成功/暂停/周期复查四个点都要调它。
+static void otaReportHealth(const QString &why);
+
 static void otaNoteFailure(const QString &why)
 {
     QJsonObject st = otaLoadState();
@@ -1943,6 +1947,9 @@ static void otaNoteFailure(const QString &why)
     otaSaveState(st);
     qWarning("[agent-qt] ⏳ 自动升级失败（连续 %d 次：%s）→ %lld 分钟后再试",
              n, qPrintable(why), otaRetryDelayMs(n) / 60000LL);
+    // M3（2026-10-20）：失败是 OTA 最该被云端看见的状态 —— 退避 ladder 每升一级
+    // 快照就变一次（failCount/nextAt），变化才发，不会刷屏。
+    otaReportHealth(QStringLiteral("failure"));
 }
 
 /** 记一次成功：清空失败计数（下次有网就立刻再试，不用再等退避）。 */
@@ -1959,6 +1966,9 @@ static void otaNoteSuccess()
     //   「备份当前 exe 失败」，把"其实没事"误判成"OTA 坏了"（本轮实测踩到）。
     st.remove(QStringLiteral("lastError"));
     otaSaveState(st);
+    // M3（2026-10-20）：升级确认成功（新版本注册上了云端）也上报一次 ——
+    // failCount 归零 + lastError 清空，快照与"失败中"是两个人，运营侧能看到闭环。
+    otaReportHealth(QStringLiteral("success"));
 }
 
 static bool otaPaused()
@@ -2139,6 +2149,9 @@ static void maybeAutoUpdate()
     if (otaPaused()) {                                    // ⑥ 人工紧急刹车
         qWarning("[agent-qt] ⛔ 升级已在本机暂停（存在 %s）—— 管理员排查用，删掉这个文件即恢复",
                  qPrintable(otaPausePath()));
+        // M3（2026-10-20）：暂停/恢复是管理员**从外部**拨的开关（往数据目录扔/删一个文件），
+        // 端侧无从"感知事件"，只能靠快照比对：paused 翻转即上报一次（变化才发）。
+        otaReportHealth(QStringLiteral("paused"));
         return;
     }
 
@@ -3645,6 +3658,14 @@ static void otaSelfCheck()
     const QString wsUrl = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
     if (wsUrl.isEmpty()) return;                // 没配云端地址：无从查起（注册回执那条路也走不通）
 
+    // M3（2026-10-20）：每轮复查先做一次健康快照比对。它是"外部变更"的唯一感知途径：
+    //   · 管理员放下/拿走 ota-pause（maybeAutoUpdate 不一定会被调到）；
+    //   · 状态文件被手工改过（排障时常见）；
+    //   · 开机以来的基线快照（本进程第一次上报，让云端知道这台机器的 OTA 子系统活着、
+    //     在哪个 channel、当前有没有欠账）。
+    // 全程只读本地状态文件 + 一个文件存在性判断，不发网络请求；**没变就静默**。
+    otaReportHealth(QStringLiteral("periodic"));
+
     // ws(s)://host[:port]/ws/agent → http(s)://host[:port]（与 uploadRecordingAsync 同款推导）
     QString base = wsUrl;
     base.replace(QLatin1String("wss://"), QLatin1String("https://"))
@@ -3748,6 +3769,69 @@ static void sendEvent(const QString &level, const QString &msg, const QJsonObjec
     p.insert(QStringLiteral("msg"), msg);
     if (!extra.isEmpty()) p.insert(QStringLiteral("extra"), extra);
     g_ws->sendTextMessage(makeEnvelope(QStringLiteral("event"), p));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * OTA 健康快照上报（M3，2026-10-20）
+ *
+ * 病灶：被控端 OTA 是"无人值守自更新"—— 失败退避、暂停刹车、回滚三件套全都只在
+ *   **本机日志**里闭环。云端/管理端看不到一台机器"已经连续失败 N 次、下次几点再试、
+ *   是否被管理员按下暂停"。表现：OTA 悄悄坏了对云端是静默的，只能等老师打电话。
+ *   （对照：管理端批次2 刚补上"周期自动检查 + 新版本气泡"，被控端这边却没有对应回咀。）
+ *
+ * 补法：OTA 状态每次**变化**时经 sendEvent 上报一份健康快照。走 type:"event" 旁路
+ *   （与 A6 噪音遥测同一条路）：云端 index.js:2147 收下后 pushEvent 记进事件流水，
+ *   不污染按指令 id 落表的 results 表。
+ *
+ * ⚠️ 只在**变化**时上报（s_last 进程内比对）：
+ *   · 退避 ladder 每升一级快照必然变（failCount/nextAt）⇒ 每级正好一条，不重不漏；
+ *   · 周期复查 30 分钟一轮，状态不变时**一条都不发** —— 否则 events.log 会被
+ *     "每分钟一条没事"的遥测淹掉（2026-10-15 逐帧事件把事件表写爆的前车之鉴）；
+ *   · 进程重启后 s_last 清空 ⇒ 首轮必发一条基线（failCount=0 也算"变化"），
+ *     顺便让云端看见这台机器当前的 channel 与是否带欠账上线。
+ *
+ * 调用点（四个）：otaNoteFailure（失败记账）/ otaNoteSuccess（升级确认成功）/
+ *   maybeAutoUpdate 的暂停分支（管理员放下刹车）/ otaSelfCheck 每轮（外部变更感知 + 基线）。
+ * ══════════════════════════════════════════════════════════════════════════ */
+static void otaReportHealth(const QString &why)
+{
+    const QJsonObject st = otaLoadState();
+    QJsonObject snap;
+    snap.insert(QStringLiteral("kind"), QStringLiteral("ota_health"));
+    snap.insert(QStringLiteral("curVer"), QString::fromLatin1(kAppVersion));
+    snap.insert(QStringLiteral("latestVer"), g_latestVer);
+    snap.insert(QStringLiteral("failCount"), st.value(QStringLiteral("failCount")).toInt(0));
+    snap.insert(QStringLiteral("lastResult"), st.value(QStringLiteral("lastResult")).toString());
+    snap.insert(QStringLiteral("lastError"), st.value(QStringLiteral("lastError")).toString());
+    snap.insert(QStringLiteral("lastAt"), st.value(QStringLiteral("lastAt")).toDouble());
+    snap.insert(QStringLiteral("nextAt"), st.value(QStringLiteral("nextAt")).toDouble());
+    snap.insert(QStringLiteral("paused"), otaPaused());
+    snap.insert(QStringLiteral("channel"), g_channel);
+
+    static QJsonObject s_last;   // 上一份上报过的快照（进程内；重启后首次必然发一条）
+    // ⚠️ lastAt **不参与比对**：otaNoteSuccess 每次注册回执都会把它刷成 now ⇒ 它一进比对，
+    //    机器每重连一次就上报一条"什么都没变"的 success（实测抓到的设计缺陷，2026-10-20）——
+    //    "变化才上报"会被一个时间戳字段架空。它只作为载荷里的参考信息发出去。
+    QJsonObject cmp = snap;
+    cmp.remove(QStringLiteral("lastAt"));
+    if (cmp == s_last) {
+        qInfo("[agent-qt] OTA 健康快照未变化（%s），不上报", qPrintable(why));
+        return;
+    }
+    s_last = cmp;
+
+    // 有失败欠账或被管理员暂停 = 需要人看一眼 ⇒ warn；其余（含成功/基线）info。
+    const bool trouble = snap.value(QStringLiteral("failCount")).toInt() > 0
+                        || snap.value(QStringLiteral("paused")).toBool();
+    sendEvent(trouble ? QStringLiteral("warn") : QStringLiteral("info"),
+              QStringLiteral("ota_health"), snap);
+    qInfo("[agent-qt] 📊 OTA 健康已上报（%s）：failCount=%d lastResult=%s lastError=%s paused=%s channel=%s",
+          qPrintable(why),
+          snap.value(QStringLiteral("failCount")).toInt(),
+          qPrintable(snap.value(QStringLiteral("lastResult")).toString()),
+          qPrintable(snap.value(QStringLiteral("lastError")).toString()),
+          snap.value(QStringLiteral("paused")).toBool() ? "yes" : "no",
+          qPrintable(snap.value(QStringLiteral("channel")).toString()));
 }
 
 static void otaOnFinished();   // 前向声明（下载结束回调）
