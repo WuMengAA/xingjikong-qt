@@ -687,6 +687,113 @@ ApplicationWindow {
                         }
                     }
 
+                    // ── 动作排行（2026-10-19 · 用户指令②方向 A：云端 instructions 表）──
+                    // 数据面来自 backend.actionRanking（/api/actions/ranking，最近 7 天），
+                    // 界面只消费。排行 = 老师常用指令的执行热度，与「最近回执」互补：
+                    // 回执看"刚发生了什么"，排行看"哪些操作被用得多 / 哪台被管得多"。
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 170
+                        radius: 12
+                        color: th.cContLow
+                        border.color: th.cOutlineVar
+                        border.width: 1
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 14
+                            spacing: 8
+                            Item {
+                                width: parent.width; height: 18
+                                Text { text: "动作排行 · 近 7 天"; color: th.cOnSurface; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
+                                Rectangle {
+                                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                    width: 52; height: 24; radius: 12
+                                    color: rankRefreshMa.containsMouse ? th.cContHigh : th.cSurfaceVar
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "刷新"
+                                        color: th.cOnSurfaceVar; font.pixelSize: 11
+                                    }
+                                    MouseArea {
+                                        id: rankRefreshMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            backend.fetchActionRanking()
+                                            root.toast("已刷新动作排行")
+                                        }
+                                    }
+                                }
+                            }
+                            // 排行列表（最多 8 条；每行：名次 + 中文动作名 + 次数 + 成功率）
+                            ListView {
+                                width: parent.width
+                                height: parent.height - 40
+                                clip: true
+                                model: backend.actionRanking
+                                delegate: Row {
+                                    width: parent.width
+                                    height: 16
+                                    spacing: 8
+                                    Text {
+                                        width: 22
+                                        text: (index + 1)
+                                        color: index < 3 ? th.cPrimary : th.cOnSurfaceVar
+                                        font.pixelSize: 12; font.weight: index < 3 ? Font.Bold : Font.Normal
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        width: 90
+                                        elide: Text.ElideRight
+                                        text: root.actionTitleOf(modelData.action) !== ""
+                                              ? root.actionTitleOf(modelData.action)
+                                              : modelData.action
+                                        color: th.cOnSurface
+                                        font.pixelSize: 12
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        width: parent.width - 220
+                                        // 副信息：成功/总次数（失败也可见，不藏）
+                                        text: "成功 " + modelData.ok + " / " + modelData.total
+                                        color: th.cOnSurfaceVar
+                                        font.pixelSize: 11
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Rectangle {
+                                        width: 56; height: 14; radius: 7
+                                        color: (modelData.ok > 0 && modelData.settled > 0
+                                                && modelData.ok >= modelData.settled)
+                                               ? th.cSurfaceVar : th.cSecondaryCont
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: (modelData.settled > 0)
+                                                  ? Math.round(modelData.ok * 100 / modelData.settled) + "%"
+                                                  : "—"
+                                            color: (modelData.ok > 0 && modelData.settled > 0
+                                                    && modelData.ok >= modelData.settled)
+                                                   ? th.cOnSurfaceVar : th.cOnSecondaryCont
+                                            font.pixelSize: 10
+                                        }
+                                    }
+                                }
+                            }
+                            // 空态：还没拉到（首次连上自动拉一次）
+                            // ⚠️ Column 内**不能**用 anchors.centerIn（Column 禁用锚点，
+                            //    会报 "Column will not function" 且布局失效）——用宽度+文本对齐居中。
+                            Text {
+                                visible: backend.actionRanking.length === 0
+                                width: parent.width
+                                horizontalAlignment: Text.AlignHCenter
+                                topPadding: 26
+                                text: "还没有排行数据（连上云端后自动统计；无历史则说明近 7 天没下发过指令）"
+                                color: th.fg4; font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
