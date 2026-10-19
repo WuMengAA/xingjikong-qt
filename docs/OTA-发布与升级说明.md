@@ -42,7 +42,7 @@
 ### 2.0 一条命令（推荐路径）
 
 ```bash
-cd Stelarith-cloud-ws
+cd Stelarith-cloud
 node scripts/publish-release.mjs publish \
      --product agent --version 0.6.0 \
      --file ../Stelarith-control-qt/dist/stelarith-agent-setup-0.6.0.exe \
@@ -96,7 +96,7 @@ certutil -hashfile dist\stelarith-agent-setup.exe SHA256
 for %A in (dist\stelarith-agent-setup.exe) do @echo size=%~zA
 
 :: 3) 复制到托管位（**复制**，别把源文件移走）
-copy dist\stelarith-agent-setup.exe ..\Stelarith-cloud-ws\assets\pkg\stelarith-agent-setup-0.6.0.exe
+copy dist\stelarith-agent-setup.exe ..\Stelarith-cloud\assets\pkg\stelarith-agent-setup-0.6.0.exe
 
 :: 4) 改 ota.json —— 用能存「UTF-8 无 BOM」的编辑器，改完必须回读验证：
 node -e "console.log(JSON.parse(require('fs').readFileSync('ota.json','utf8')).products.agent.version)"

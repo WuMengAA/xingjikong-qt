@@ -16,7 +16,7 @@
 |---|---|---|---|
 | `Stelarith-control-qt` | Qt6 C++ / AUTOMOC | **教室机被控端** | 产物 `stelarith-agent-qt.exe`，托盘常驻、抓屏推帧；依赖 Core/Gui/Widgets/WebSockets/WebEngineWidgets/Network；带 OOBE 绑定（POST 站点 `/api/device/activate`）；MSI 装机包 |
 | `Stelarith-viewer-qt` | Qt6 + QML | **老师机管理端** | `qml\Main.qml` + 6 个 dialog；`src\viewerbackend.{h,cpp}` 管连接/鉴权/设备表/帧/指令/文件推送 |
-| `Stelarith-cloud-ws` | Node.js | **中转站 WS** | `127.0.0.1:8788`；`/ws/agent` 注册被控端、`/ws/viewer` 订阅下发；计划任务 `StelarithCloud` |
+| `Stelarith-cloud` | Node.js | **中转站 WS** | `127.0.0.1:8788`；`/ws/agent` 注册被控端、`/ws/viewer` 订阅下发；计划任务 `StelarithCloud` |
 
 依赖顺序：`control-qt` ↔ `cloud-ws` ↔ `viewer-qt`（viewer 与 cloud 同机，8788 不起 viewer 连不上）。
 
@@ -57,3 +57,27 @@
 - **T-3** 管理端收流 ⏸ **前置阻塞已消除**（见第三节），可直接开工，只改 `viewer-qt`
 - **T-4** 三进程端到端真画面 ⏸ **未做**：上一轮的"管理端"是 node ws 客户端回假 answer，
   **从未有浏览器解码真帧**，这条不证明，"画面出来了"就是假象
+
+## 六、四端版本对齐表（2026-10-15 起维护）
+
+| 端 | 位置 | 当前版本 | 版本真源 | 发布物 |
+|---|---|---|---|---|
+| **被控端** agent | `Stelarith-control-qt`（gitlink） | **0.6.44** | `CMakeLists.txt` → `set(AGENT_VERSION ...)` | `stelarith-agent-setup-0.6.44.exe` |
+| **管理端** viewer | `Stelarith-viewer-qt`（gitlink） | **0.6.44** | `CMakeLists.txt` → `set(VIEWER_VERSION ...)` | `stelarith-viewer-setup-0.6.44.exe` |
+| **云端** server | `Stelarith-cloud`（gitlink） | 0.5.0（内含） | `package.json` → `version` | 常驻服务（无独立安装包） |
+| **手机端** mobile | `Stelarith-mobile`（本仓库内普通目录） | 无版本常量 | — | APK（`com.stelarith.mobile`） |
+| **协议** | `Stelarith-cloud/src/protocol.js` | **v1** | `PROTOCOL_VERSION = 1` | **两端必须都认** |
+
+**各端版本独立**（agent 与 viewer 不要求同号）；**只有协议必须两端一致**。
+
+### gitlink 指针（本仓库 `git ls-files -s`）
+
+| 子仓库 | 钉死的 commit |
+|---|---|
+| `Stelarith-cloud` | `46a87d8` |
+| `Stelarith-control-qt` | `dd34d80` |
+| `Stelarith-viewer-qt` | `c8415c0` |
+
+> 子仓库提交后，本仓库用一次 `git add <子目录>` + commit「gitlink 推进」把它钉到新 commit。
+> 这是跨端「哪个版本的 agent 配哪个版本的 server」的**强一致**答案 —— 比手写版本表可靠。
+> 版本号 / tag / 分支 / 提交信息约定见 `docs/命名与版本约定.md`。

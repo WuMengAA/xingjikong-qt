@@ -17,7 +17,7 @@
 
 | 线 | 工程 / 目录 | 归属 | 边界 |
 |---|---|---|---|
-| **Qt 线** | `Stelarith-xingjikong-qt\{Stelarith-cloud-ws, Stelarith-control-qt, Stelarith-viewer-qt}` | **DeepSeek Harness**（2026-10-06 00:33 接手；此前 WorkBuddy） | 云端中转 8788 + 教室机被控端 + 老师机管理端 |
+| **Qt 线** | `Stelarith-xingjikong-qt\{Stelarith-cloud, Stelarith-control-qt, Stelarith-viewer-qt}` | **DeepSeek Harness**（2026-10-06 00:33 接手；此前 WorkBuddy） | 云端中转 8788 + 教室机被控端 + 老师机管理端 |
 | **站点线** | `D:\Stelarith\Stelarith-website\stelarith`（8090） | **DeepSeek Harness** | 网页 / 集控面板 / 账号 / 站点 API |
 | CIMS 线 | （**已退役**） | **无人** | 不要动 8096/8097/8098；隧道里指向 8096 的规则已删 |
 | 其它工程 | Music / voicehub / canteen / esp32 / cims-eval … | **都不属于本项目** | **谁都不许碰**（改别人工程=最严重违规） |

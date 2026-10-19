@@ -204,7 +204,7 @@ check(/t\.tag == QStringLiteral\("media"\)\s*\)\s*\{\s*t\.progress = p/.test(adv
 console.log('── 八、VoiceHub 广播链路 ──');
 const MAIN_CPP = strip(read('Stelarith-control-qt/src/main.cpp'));
 const BRIDGE_H = strip(read('Stelarith-control-qt/src/island.h'));
-const BRIDGE_CPP_JS = fs.readFileSync(path.join(ROOT, 'Stelarith-cloud-ws/src/voicehub-bridge.js'), 'utf8');
+const BRIDGE_CPP_JS = fs.readFileSync(path.join(ROOT, 'Stelarith-cloud/src/voicehub-bridge.js'), 'utf8');
 // 被控端：消息分支 + 岛侧接口
 check(/voicehub_nowplaying/.test(MAIN_CPP), 'main.cpp 处理 voicehub_nowplaying 消息');
 check(/setBroadcastTask/.test(MAIN_CPP) && /clearBroadcastTask/.test(MAIN_CPP),

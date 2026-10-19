@@ -30,7 +30,7 @@
 | 音频/通知 | 当前 Windows-only（无 Android 分支）| 被控端是教室机 Windows 为主 |
 | `main.cpp` setApplicationName | 2026-10-12 补齐（QSettings 落点）| 与管理端对齐 |
 
-## 三、云端（cloud-ws）
+## 三、云端（Stelarith-cloud）
 
 - 无 Android 代码——纯 Node.js 服务。
 
