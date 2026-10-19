@@ -318,6 +318,28 @@ ApplicationWindow {
                 else root.batchStep(uid, result === "done", error || "")
             }
             if (result !== "done") root.pushAlert(uid, action, error || detail || "")
+
+            // ── ① 所有功能必须做到有反馈（2026-10-19 · 用户指令）────────────
+            // 之前成功回执**只有特例有 toast**（截图/音量），其余只进"最近回执"
+            // 流水列表（隐性，老师看不见）。这里在通用回执处补**默认成功反馈**：
+            //   · done 且非静默/面板/批量/多选类 ⇒ toast「XXX 成功 → 教室机XX」
+            //   · 失败（非 done）已由上面 pushAlert 覆盖，不重复
+            // 排除清单（这些成功已有别的反馈或无需打扰）：
+            //   面板/拉数据：notify / screenshot / set_volume / process_list /
+            //     log_tail / media_list / list_schedules / list_shortcut_candidates
+            //   批量（batch.active 已逐台反馈）；多选（pick-* 走 runOnPicked 自己的汇总）
+            //   相机 / 语音 / 屏幕广播 / 考试模式：均有专属面板或状态源
+            else if (!batch.active && action.indexOf("pick-") !== 0) {
+                var _quiet = { notify:1, screenshot:1, set_volume:1, process_list:1,
+                               log_tail:1, media_list:1, list_schedules:1,
+                               list_shortcut_candidates:1, camera_list:1, camera_test:1,
+                               camera_bind:1, camera_snapshot:1, terminal_open:1 };
+                if (!_quiet[action]) {
+                    var _title = root.actionTitleOf(action)
+                    if (_title !== "")
+                        root.toast(_title + " 成功 → " + uid)
+                }
+            }
             root.refreshIsland()
         }
     }
@@ -1316,6 +1338,20 @@ ApplicationWindow {
     }
 
     // ── 唯一执行入口 ──────────────────────────────────────────────────────
+
+    // 回执里的 action 是**动作名**（如 "lock"、"remote_control_start"），
+    // manifest 里 send 类记在 `action` 字段、panel/special 类只有 `id`。
+    // 这里反查出中文标题供「所有功能必须有反馈」的默认成功 toast 用；
+    // 查不到返回 ""（调用方决定不提示，避免英文 action 名裸奔到界面上）。
+    function actionTitleOf(actionName) {
+        const list = ActionDefs.manifest()
+        for (var i = 0; i < list.length; i++) {
+            const p = list[i]
+            if (p.action === actionName || p.id === actionName)
+                return p.title || p.palName || p.quickTitle || ""
+        }
+        return ""
+    }
     // 闸门顺序与改造前一致：角色（看人）→ 能力（看机器）→ 危险确认。
     // 右栏按钮、快捷行、批量条、命令面板**全部**汇到这里 ⇒ 任何一条路都绕不过去。
     // opts.quick = 来自快捷行（那边历史上多一道 quickGuard，见 UiContract 注释）。
