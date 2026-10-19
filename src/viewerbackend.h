@@ -72,15 +72,14 @@ inline int envMaxMs(const char *key, int fallback)
 
 class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向声明，避免引入 mmsystem）
 class AudioPlayback; // B6：管理端播放（学生回传的 audio/pcm 帧）
-class LdcReceiver;  // 2026-10-09：WebRTC 收流（libdatachannel 替换 QWebEngine 离屏）
+class VncClient;         // 远控 · 管理端 VNC 客户端（libvncclient，RFB over WS）
+class VncImageProvider;  // 远控画面 → QML（image://vnc/live）
 
 class QDateTime;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
 class QWebSocket;
-class RfbClient;            // 2026-10-18：远控隧道 RFB 客户端（RFB over WS）
-class QWebEngineView;
 class OAuthLogin;
 
 /** 全局日志（定义在 main.cpp；backend 与界面共用同一份落盘日志）。 */
@@ -121,6 +120,8 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QJsonObject recordings READ recordings NOTIFY recordingsChanged)
     // 2026-10-11：事件流水（/api/events，最近 50 条）——手机端告警页数据源
     Q_PROPERTY(QJsonArray events READ events NOTIFY eventsChanged)
+    // 2026-10-19：动作执行排行（/api/actions/ranking，管理端排行卡）
+    Q_PROPERTY(QJsonArray actionRanking READ actionRanking NOTIFY actionRankingChanged)
     // ── 自习模式（2026-10-13）：噪音检测 + 异常录制 ──
     // 被控端每拍回传一份噪音样本（type=noise_sample，走订阅中继），这里聚合成：
     //   noiseDb      最新 dB（-96..0，越大越吵；< -90 视作安静）
@@ -205,16 +206,13 @@ class ViewerBackend : public QObject
     // 数据面由云端 getStorageInfo 算好推下来，界面只消费，不许前端自己再数一遍（避免两端口径不一致）。
     Q_PROPERTY(QJsonObject storage READ storage NOTIFY storageChanged)
 
-    // ── WebRTC 收流（T-3，2026-10-04）──
-    // 管理端做 answer 侧：被控端 captureStream 推 video track → 云端中继 →
-    // 这里 QWebEngineView 离屏跑 RTCPeerConnection.setRemoteDescription(offer) →
-    // createAnswer 回云端 → ontrack 拿到 track 塞进 <video> → 抽帧走现有 frame 通道。
-    // 只收、不发——发是 agent 侧的事。
-    Q_PROPERTY(bool rtcReady READ rtcReady NOTIFY rtcStateChanged)
-    Q_PROPERTY(QString rtcState READ rtcState NOTIFY rtcStateChanged)
+    // ── 远控（VNC over WS，libvncclient）状态 ──
+    // vncActive：是否正在远控（画面走 VNC）。vncState：连接状态文案（连接中/已连接/断开/错误），
+    // 界面（Theme 组件）据此给用户提示，禁止原生弹窗。
+    Q_PROPERTY(bool vncActive READ vncActive NOTIFY vncStateChanged)
+    Q_PROPERTY(QString vncState READ vncState NOTIFY vncStateChanged)
     // 当前画面**实际来自哪条链路**："none"（还没帧）/ "jpeg"（被控端 JPEG 推送）
-    // / "rtc"（WebRTC 实时流）。界面要靠它告诉用户"现在看的是实时还是轮询"，
-    // 否则 RTC 通没通、有没有降级回落，只能靠猜。
+    // / "vnc"（VNC 远控实时画面）。界面靠它告诉用户"现在看的是远控还是轮询"。
     Q_PROPERTY(QString frameSource READ frameSource NOTIFY frameSourceChanged)
     // 远程终端状态读数：界面靠它决定"开终端"按钮能不能点、显示什么提示。
     // 状态机 Idle → Pending（请求已发，等本机点头）→ Open（会话在跑）→ Idle。
@@ -229,14 +227,6 @@ public:
      *  帧头带 uid → 按 uid 分槽存。 */
     Q_INVOKABLE void subscribeThumbnails(const QVariantList &uids);
 
-    // ── 2026-10-09 ldc 桥接（ldc_rtc_bridge.cpp 调用，避免大文件膨胀）──
-    // 信令出站（answer/candidate → 云端）；状态设置；帧就绪信号
-    void sendLdcSignal(const QString &type, const QJsonObject &payload);
-    void setLdcRtcState(const QString &s);
-    void emitLdcFrame(const QImage &img);
-    // 摄像头第二轨（2026-10-12 · 四·双画面）：mid="camera" 的 RTC 帧落到 m_camFrame，
-    // 经 cameraFrameChanged 通知 QML 刷 image://frames/cam（与屏幕帧互不干扰）。
-    void emitLdcCameraFrame(const QImage &img);
     // 自习模式（2026-10-13）：收 agent 的噪音样本 / 异常记录
     void handleNoiseSample(const QJsonObject &pay);
     void handleNoiseAlert(const QJsonObject &pay);
@@ -246,7 +236,7 @@ public:
     // 帧率虚高一倍，而日志上看起来一切正常。
     enum FrameSource {
         PushJpeg,   ///< 被控端经云端推来的 JPEG（二进制帧 / 文本 frame / 裸帧三条老路径）
-        RtcGrab     ///< WebRTC 收流页抽出来的帧
+        VncGrab     ///< VNC 远控解出的一帧（libvncclient）
     };
 
     /// 远程终端会话状态：没会话 / 请求已发出在等被控端本机点头 / 会话开着。
@@ -258,7 +248,6 @@ public:
     };
     Q_ENUM(TermState)
     explicit ViewerBackend(QObject *parent = nullptr);
-    /** 析构：QWebEngineView 必须在 event loop 停止之后销毁，否则 Chromium 直接崩。 */
     ~ViewerBackend() override;
 
     /** 读环境变量（STE_VIEWER_URL / STE_VIEWER_TOKEN）并开始连接。 */
@@ -282,14 +271,6 @@ public:
     Q_INVOKABLE void setCurrentClass(const QString &c) { if (m_currentClass != c) { m_currentClass = c; emit classesChanged(); } }
     QJsonObject storage() const { return m_storage; }
 
-    /**
-     * 只给自检用：退订 → 重订，逼被控端把 WebRTC 连接重建一次（重新 offer）。
-     *
-     * 正常界面用不到：被控端只在 rtc-start 时建一次连接，而首次订阅必然触发 rtc-start。
-     * 需要它的场景是"被控端那次 offer 发出去时并没人订阅（云端丢了），之后再订阅就没新 offer"，
-     * 界面上退订重订一次是唯一不需要改被控端代码的重来办法。
-     */
-    Q_INVOKABLE void rtcRenegotiate(const QString &uid);
     QImage frame() const { return m_frame; }
     /** 现在这张画面属于哪台设备（见 frameUid 属性的注释）。 */
     QString frameUid() const { return m_frameUid; }
@@ -406,17 +387,18 @@ public:
     QString fileBytesText() const;
     QString fileTotalText() const;
 
-    // RTC 读数
-    bool rtcReady() const { return m_rtcReady; }
-    QString rtcState() const { return m_rtcState; }
+    // 远控读数（上面 Q_PROPERTY 的 READ 端）
+    bool vncActive() const { return m_vncActive; }
+    QString vncState() const { return m_vncState; }
     QString frameSource() const { return m_frameSource; }
 
-    // ── 远控隧道（2026-10-18 · RFB over WS）──
-    /** 对 uid 这台设备拉起远控隧道（第二条 WS + RFB 客户端）；成功贯通后画面走 RFB。 */
-    Q_INVOKABLE void startRfbTunnel(const QString &uid);
-    /** 停掉当前远控隧道，画面回退到常规（轮询/JPEG 或 RTC）通道。 */
-    Q_INVOKABLE void stopRfbTunnel();
-    bool rfbActive() const { return m_rfbActive; }
+    // ── 远控（VNC over WebSocket · libvncclient）──
+    /** 对 uid 这台设备拉起 VNC 会话：RFB 字节全部走主 WS 的 vnc-data 二进制帧。 */
+    Q_INVOKABLE void startVnc(const QString &uid);
+    /** 收掉 VNC 会话，画面回退到常规 JPEG 轮询通道。 */
+    Q_INVOKABLE void stopVnc();
+    /** 注册 QML 图像提供器（main.cpp 建 engine 时传入 image://vnc 那个实例）。 */
+    void setVncImageProvider(VncImageProvider *p);
 
     /** 切到某台设备 → 向云端订阅它的画面。
      *  ⚠️ 2026-10-10：必须 `Q_INVOKABLE` —— 它是 Q_PROPERTY currentUid 的 WRITE，
@@ -529,6 +511,8 @@ public:
     Q_INVOKABLE void fetchRecordings();
     // 2026-10-11：拉事件流水（/api/events）——手机端告警页
     Q_INVOKABLE void fetchEvents();
+    // 2026-10-19：拉动作执行排行（/api/actions/ranking）——概览页排行卡
+    Q_INVOKABLE void fetchActionRanking();
     // 2026-10-11：QML 热更（一源响应式）——查 /api/qml-patch 清单，版本不同则
     // 下载 zip 解压到本地 qml-live/（下次启动本地优先；改 UI 不用重出 APK）
     Q_INVOKABLE void checkQmlPatch();
@@ -549,6 +533,7 @@ public:
     /** 托盘「诊断与反馈」入口 → 通知 QML 打开对话框。 */
     Q_INVOKABLE void requestDiagFeedback();
     QJsonArray events() const { return m_events; }
+    QJsonArray actionRanking() const { return m_actionRanking; }
     /** 录制列表（QML 读，QJsonObject：uid → 文件数组）。 */
     QJsonObject recordings() const { return m_recordings; }
     /** 取某台设备的缩略图帧（多班面板；无则空图）。 */
@@ -595,23 +580,6 @@ public:
     /** 中断当前推送：让被控端把半截文件关掉、清会话（不留下半个坏文件在那台机器上）。 */
     Q_INVOKABLE void cancelPush();
 
-    // ── QWebChannel 回调（JS → C++，收流页里的 __qt.* 就是调这四个）──
-    /** JS 抽到的一帧 JPEG（base64，可能带 data: 前缀）；复用 frame 通道交给 QML。 */
-    Q_INVOKABLE void setRtcFrame(const QString &b64);
-    /** 远端 answer 的 SDP 字符串（正常流里管理端不产出，仅日志记录）。 */
-    Q_INVOKABLE void rtcGotAnswer(const QString &sdp);
-    /**
-     * 收流页**本端** RTCPeerConnection 产出的 ICE candidate（JS 侧 onicecandidate 回调）。
-     *
-     * 只做一件事：发给云端转交被控端。**不再回灌给自己** —— 自己的候选本来就是从
-     * 这个 pc 里出来的，再 addIceCandidate 回去只会让 Chromium 静默报 ice-FAIL。
-     */
-    Q_INVOKABLE void rtcGotIce(const QString &candidateJson);
-    /** JS 侧的诊断输出（setOffer/ontrack/ICE 全程）。 */
-    Q_INVOKABLE void rtcDiag(const QString &s);
-    /** JS 侧 ontrack 触发（真正拿到远端视频轨）。 */
-    Q_INVOKABLE void rtcGotTrack();
-
     // ── 远程终端（2026-10-06）──────────────────────────────────────────
     /**
      * 开一个远程终端。shell 只收 "cmd" / "powershell"，别的（wscript 之流）云端这侧也不认。
@@ -651,6 +619,7 @@ signals:
     void cloudUrlChanged();
     void recordingsChanged();
     void eventsChanged();   // 2026-10-11：事件流水（告警页）
+    void actionRankingChanged();   // 2026-10-19：动作执行排行（概览页排行卡）
     /** 某台设备的缩略图帧更新了（多班面板缩略图墙）。uid 为空表示全部。 */
     void thumbnailChanged(const QString &uid = QString());
     /** 站点账号状态/文本变化（登录成功、失败、票换了、用户点了忘记）。 */
@@ -671,16 +640,12 @@ signals:
      * 返回不需要它。
      */
     void filePicked(const QString &url);
-    /** WebRTC 收流链路状态变化（ready / negotiating / failed / idle）。 */
-    void rtcStateChanged();
-    /** 2026-10-09：libdatachannel 收流帧就绪（ldc_receiver.frameReady → QML）。 */
-    void rtcFrameReady(const QImage &frame);
-    /** 2026-10-18：远控隧道 RFB 客户端解出一帧（→ QML 上屏）。 */
-    void rfbFrameReady(const QImage &frame);
-    /** 2026-10-18：远控隧道贯通/断开（QML 可据此切实时画面源）。 */
-    void rfbTunnelStateChanged(bool on);
-    /** 2026-10-12 · 四·双画面：摄像头第二轨帧就绪（ldc_receiver.cameraFrameReady → QML）。
-     *  QML 收到就把 image://frames/cam 的 tick +1，摄像头格重取图。 */
+    /** 远控链路状态变化（连接中/已连接/断开/错误）。Q_PROPERTY vncActive/vncState 共用它。 */
+    void vncStateChanged();
+    /** 远控解出一帧（libvncclient → QImage）。主画面走 frameChanged，这里给 QML 直连。 */
+    void vncFrameReady(const QImage &frame);
+    /** 2026-10-12 · 四·双画面：摄像头第二轨帧就绪（→ QML 刷 image://frames/cam）。
+     *  帧源（RTC 摄像头轨）已随 libdatachannel 移除，当前无人 emit；保留通道待接入。 */
     void cameraFrameChanged();
     // ── 自习模式（2026-10-13）──
     /** 噪音样本更新（db/active/samples 一起变）。 */
@@ -759,8 +724,12 @@ private:
     void applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,
                          FrameSource src = PushJpeg);
     void setStatic(bool s);
-    /** 远控隧道 RFB 客户端解出一帧 → 写 m_frame 并上屏（frameSource 切到 "rfb"）。 */
-    void onRfbFrame(const QImage &frame);
+    /** 远控解出一帧 → 写 m_frame 并上屏（frameSource 切到 "vnc"）。 */
+    void onVncFrame(const QImage &frame);
+    /** 云端下发的 vnc-data 原始 RFB 字节 → 喂 VncClient 的入站缓冲。 */
+    void onVncData(const QByteArray &data);
+    /** 改远控状态并通知界面（vncState / vncActive 共用一个信号）。 */
+    void setVncState(const QString &s);
     void tickFps();
     void sendEnvelope(const QString &type, const QJsonObject &payload);
     /** 断线 / 退出时把语音和广播一起收掉，why 直接显示成状态行那句话。 */
@@ -797,36 +766,6 @@ private:
     void setFileFail(const QString &why);
     void clearFilePush();
 
-    // ── WebRTC 收流内部 ──
-    void initRtcView();          // 懒建 QWebEngineView + 注入 answer 侧 JS
-    void setRtcState(const QString &s);
-    /**
-     * 把**远端**（被控端）的 ICE candidate 灌进收流页的 RTCPeerConnection。
-     *
-     * 和 rtcGotIce() 是严格相反的两个方向，别再合并：
-     *   本端候选 → rtcGotIce()   → 发云端
-     *   远端候选 → addRemoteIce() → 注入页面（**不回发云端**，否则被控端收到自己的候选，回环）
-     *
-     * 页面 load 完成前先入队（见 m_pendingIce），就绪后按序补灌。
-     */
-    void addRemoteIce(const QString &candJson);
-    /**
-     * 把 offer 灌进收流页（页面没就绪就先存 m_pendingOffer，就绪时补灌）。
-     *
-     * ⚠️ 灌之前会先 __resetPc()：被控端每个 offer 都是一个全新 peer，复用旧 pc 会
-     * "called in wrong state"，表现为"第一台机器有画面、切到第二台永远黑屏"。
-     */
-    void deliverOffer(const QString &sdp);
-    /**
-     * 2026-10-13 审计 2.10 改名：WebEngine 已移除，此函数不再回收任何 Chromium 页，
-     * 只把 RTC 状态清回 idle（保留调用路径安全收尾）。原名 releaseRtcView() 是
-     * WebEngine 时代残留，空壳名字会误导后来人以为还在做资源清理。
-     */
-    void resetRtcState();
-    void scheduleRtcViewReap();
-    void cancelRtcViewReap();
-    void stopRtcTimers();        // 抽帧/诊断节拍停表（收流页回收时必须一起停）
-
     // ── 站点账号（OAuth 一户通）──
     OAuthLogin *m_oauth = nullptr;
     QNetworkAccessManager *m_nam = nullptr;
@@ -856,12 +795,6 @@ private:
     QTimer *m_termCloseWait = nullptr; // 等 terminal_close 回话（默认 2.5s）
     bool m_termClosing = false;        // 关闭请求已下发、还没拿到 terminal_closed（去重用）
     QTimer *m_fpsTimer = nullptr;
-    QTimer *m_rtcReap = nullptr;          // 收流页延迟回收（scheduleRtcViewReap）
-    // 抽帧节拍与 RTC 诊断心跳：必须是成员，不能在建页的加载回调里 new。
-    // 之前挂在 this 上、页面回收时不停 —— 收流页每建一次就多留两个常驻 timer，
-    // 一天下来断线重连几十轮就是上百个空转的 timer，全在 tick 里空判 nullptr。
-    QTimer *m_grabTimer = nullptr;        // 收流页抽帧节拍（默认 40ms ≈ 25fps 上限）
-    QTimer *m_rtcDiagTimer = nullptr;     // 每 2 秒捞一次收流页内部状态
     qint64 m_offlineSince = 0;            // 与云端断开的起始时刻（0 = 在线）
 
     QString m_url;
@@ -871,13 +804,16 @@ private:
     // ── 2026-10-11「选中即远控」状态：记住现在正接管哪台，切换/清空时好收尾 ──
     bool m_remoteControlling = false;
     QString m_remoteControlUid;
-    // ── 2026-10-18 远控隧道（RFB over WS）──────────────────────────────────
-    // 接管某设备时拉起；m_rfbActive 期间，本机鼠标/键盘经隧道以 RFB 事件下发，
-    // 且**屏蔽**旧的 instruction/input 通道（避免和 VNC 服务双重注入）；屏幕帧由 RFB 提供。
-    RfbClient *m_rfb = nullptr;
-    bool m_rfbActive = false;
-    quint8 m_rfbBtnMask = 0;          // 当前鼠标按键位（RFB PointerEvent 用）
-    QString m_vncPassword;            // 教室机 VNC 密码（环境变量 STE_VNC_PASSWORD 或设置项）
+    // ── 2026-10-18 远控（VNC over WebSocket · libvncclient）──────────────
+    // 与旧 P2 的「第二条隧道 WS」不同：RFB 字节走**主 WS** 的 vnc-data 二进制帧。
+    // m_vncActive 期间，本机鼠标/键盘经 RFB PointerEvent/KeyEvent 下发（不再走
+    // instruction/input，避免与 VNC 服务双重注入）；屏幕帧由 libvncclient 解出。
+    VncClient *m_vnc = nullptr;
+    VncImageProvider *m_vncProvider = nullptr;   // 非拥有（engine 持有）
+    bool m_vncActive = false;
+    QString m_vncState = QStringLiteral("idle");   // 连接中/已连接/已断开/连接失败
+    quint8 m_vncBtnMask = 0;          // 当前鼠标按键位（RFB PointerEvent 用）
+    QString m_vncPassword;            // 被控端 VNC 密码（STE_VNC_PASSWORD）
     bool m_screenActive = true;   // 2026-10-08：带画面页是否可见（不可见则暂停单台拉流）
     QStringList m_capActions;              // 当前设备的指令能力全集（空=没上报过）
     QStringList m_procBlacklist;           // 2026-10-11：进程黑名单（QSettings proc/blacklist）
@@ -919,34 +855,8 @@ private:
     // 报失败并让对面删掉半截文件 —— 否则流程永远卡在 sending，界面像死了一样。
     QTimer *m_pushWatchdog = nullptr;
 
-    // ── WebRTC 收流现场 ──
-    QWebEngineView *m_rtcView = nullptr;
-    bool m_ldcInitialized = false;   // 2026-10-09：libdatachannel 收流已初始化（并行方案标记）
-    QString m_rtcHtmlPath;        // rtc page temp file (created by QTemporaryFile), removed on exit
-    QString m_pendingOffer;   // 收流页 load 完成前到的 offer 先存这儿（见 initRtcView 的补灌）
-    bool m_rtcReady = false;
-    QString m_rtcState = QStringLiteral("idle");
-
-    // 收流页 load 完成前到的远端 ICE 先排这儿，就绪后补灌。
-    // 为什么必须有这个队列：判断"页面能不能用"不能看 m_rtcView 是否非空 —— view 对象一 new
-    // 出来就非空了，但 page->load() 是异步的，那段时间里 runJavaScript 是对着 about:blank
-    // 执行的，window.__addIce 还不存在，调用**静默失败**（C++ 侧连个错都收不到），
-    // 表现就是"ICE 收到了但 ICE 永远连不上"。offer 那边早就有 m_pendingOffer 处理同一件事，
-    // 这一半当时漏了。
-    bool m_rtcPageReady = false;
-    QStringList m_pendingIce;
-    // 队列上限：被控端一次建连最多也就几十个候选，超了说明有异常（比如对端在疯狂重连），
-    // 与其无限攒着把内存吃光，不如丢掉并留一行日志。
-    static const int kMaxPendingIce = 128;
-
-    // ── 画面来源（JPEG 推送 vs WebRTC 实时流）──
+    // ── 画面来源（JPEG 推送 vs VNC 远控）──
     QString m_frameSource = QStringLiteral("none");
-    // 最后一次收到 RTC 帧的时刻（ms）。用来判断"RTC 还活着吗"：
-    // 活着就不要让 JPEG 轮询帧把它盖掉，超过 kRtcStaleMs 没来就认为断了、自动让 JPEG 接管。
-    qint64 m_rtcLastFrameMs = 0;
-    // 这个数直接决定"多久没 RTC 帧算断"。1.5s 是被控端抽帧节拍（25fps≈40ms）的近 40 倍，
-    // 网络抖一两拍不会误判；又短于 JPEG 轮询的可见间隔，断了能在人感觉到之前就降回来。
-    static const qint64 kRtcStaleMs = 1500;
 
     QJsonArray m_devices;
     QJsonArray m_classes;            // 2026-10-08 分班制：云端返回的全部班级
@@ -1019,6 +929,7 @@ private:
     // ── 班级监控（2026-10-07）──
     QJsonObject m_recordings;                 // recordings/<uid>/[文件] 分组缓存
     QJsonArray m_events;                      // 2026-10-11：/api/events 事件流水缓存
+    QJsonArray m_actionRanking;               // 2026-10-19：/api/actions/ranking 动作排行缓存
 
     // 2026-10-11：store 模式 zip 解压（qml-patch 热更；无压缩，只读中央目录拷数据）
     bool unzipStore(const QString &outDir, const QByteArray &zip);

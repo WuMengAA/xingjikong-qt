@@ -35,6 +35,7 @@
 #include <QQmlContext>
 #include <QQuickImageProvider>
 #include "svgiconprovider.h"
+#include "vnc_image_provider.h"   // 2026-10-18：远控画面 image://vnc/live
 #include <QTimer>
 #include <QDir>          // 2026-10-06 SPIKE：从磁盘加载 QML 需要定位 qml 目录
 #include <QFile>
@@ -493,6 +494,11 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
+    // 2026-10-18 远控：QML 用 Image { source: "image://vnc/live?t=<tick>" } 渲染 VNC 画面。
+    // 提供器归 engine 所有；把裸指针交给 backend，帧到达时直接 update（应用同生命周期）。
+    auto *vncProvider = new VncImageProvider;
+    engine.addImageProvider(QStringLiteral("vnc"), vncProvider);
+    backend.setVncImageProvider(vncProvider);
     // 2026-10-08 lucide(morphicons 同款) SVG 图标：image://svgicon/<name>?color=<tint>
     engine.addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider);
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);

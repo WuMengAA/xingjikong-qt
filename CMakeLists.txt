@@ -106,15 +106,9 @@ if (MSVC)
   add_compile_options(/EHsc)
 endif()
 
-# Qt Quick 版：界面用 QML，逻辑在 ViewerBackend（C++）
-# Widgets 只为拿到 QFileDialog（选本机文件）。QtQuick.Dialogs 那套 QML 插件得单独部署，
-# 少一层依赖就少一处"装了 exe 却跑不起来"的地方 —— 2026-10-03 在真机上撞过一次。
-#
-# WebEngineWidgets（2026-10-04 加）：T-3 管理端 WebRTC 收流要一个离屏 QWebEngineView，
-# 让 Chromium 里的 RTCPeerConnection 跑 answer 侧、ontrack 拿到被控端推来的视频轨。
-# 刻意选 Widgets 版而不是 QML 版 WebEngineView：收流页根本不参与界面布局（它只负责
-# 渲染 <video> 再由 C++ 抽帧走现有 frame 通道），用 Widget 版可以像被控端那样 show 到屏幕外，
-# 不必为了一个隐藏渲染层去改 QML 布局。
+# 2026-10-18 远控改 VNC（libvncclient）：本工程**不再**依赖 WebEngine / libdatachannel，
+# 画面与远控全部走自绘 QML + 主 WS 二进制帧。Widgets 只为拿 QFileDialog（选本机文件）——
+# QtQuick.Dialogs 那套 QML 插件得单独部署，少一层依赖就少一处"装了 exe 却跑不起来"。
 # Network（2026-10-06 加）：站点账号登录要 QNetworkAccessManager（换令牌、取云端接入票）
 # 与 QTcpServer（接OAuth 回拨的 loopback 端口）。QWebSockets 会传递依赖到 Qt6::Network，
 # 但这里显式列出来 —— 链接表上读得见，换掉 WebSockets 时才不会被顺手漏掉。
@@ -148,21 +142,22 @@ qt_add_executable(viewer-qt
   src/main.cpp
   src/viewerbackend.cpp
   src/viewerbackend.h
-  # 2026-10-18：远控隧道 RFB 客户端（RFB 003.008 over WS，替换自研 WebRTC 远控桌面）。
-  # 不依赖 Qt 的纯算法头（DES）+ 状态机实现，独立编译单元给 viewerbackend.cpp 减负。
-  src/rfb_des.h
-  src/rfb_client.cpp
-  src/rfb_client.h
+  # 2026-10-18：远控 = libvncclient（VNC over WebSocket）。
+  # vnc_client 负责 RFB 协议与帧缓冲解码；vnc_image_provider 把 QImage 交给 QML
+  # 的 image://vnc/live（禁 QWidget 画图）。两者默认常编：未链 libvncclient 时
+  # vnc_client.cpp 退化为安全桩（不引 rfb 头），整个工程仍可干净构建。
+  src/vnc_client.cpp
+  src/vnc_client.h
+  src/vnc_image_provider.cpp
+  src/vnc_image_provider.h
   # 2026-10-15 组件6 配套：互动审批桥（审批数据面 + 共享灵动岛的桥面）。
-  # 独立编译单元（不给 2700 行的 viewerbackend.cpp 再加负担，同 ldc_rtc_bridge 的先例）。
+  # 独立编译单元（不给 2700 行的 viewerbackend.cpp 再加负担）。
   src/interactbridge.cpp
   src/interactbridge.h
   # 2026-10-13 架构拆分（审计 2.1）：文件推送状态机独立编译单元，给 viewerbackend.cpp 减负
   src/viewerbackend_file.cpp
   # 2026-10-13 架构拆分：语音对讲 + 屏幕广播子域独立编译单元
   src/viewerbackend_voice.cpp
-  # 2026-10-13 架构拆分：RTC 收流方法域独立编译单元
-  src/viewerbackend_rtc.cpp
   # 2026-10-13 架构拆分：站点账号域（OAuth + 接入票 + 凭据）独立编译单元
   src/viewerbackend_account.cpp
   ${STE_SINGLEINSTANCE_SRC}
@@ -202,15 +197,9 @@ qt_add_executable(viewer-qt
   # ── SVG 图标提供器（2026-10-08：image://svgicon/，lucide/morphicons 同款）──
   src/svgiconprovider.cpp
   src/svgiconprovider.h
-  # ── WebRTC 收流（2026-10-09：libdatachannel 替换 QWebEngine 离屏，探针全绿）──
-  src/ldc_receiver.cpp
-  src/ldc_receiver.h
   # ── H264 MF 解码兜底（2026-10-16：viewer 无 ffmpeg 时的备选解码通道）──
   src/mfx_h264_decode.cpp
   src/mfx_h264_decode.h
-  # ── WebRTC ldc 桥接（2026-10-09：独立编译单元，viewerbackend.cpp 大文件不膨胀）──
-  src/ldc_rtc_bridge.cpp
-  src/ldc_rtc_bridge.h
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块；Android 不编）──
   ${STE_APP_RC}
 )
@@ -341,53 +330,33 @@ if(MSVC)
   set_source_files_properties(src/viewerbackend.cpp PROPERTIES COMPILE_FLAGS "/Od /Ob0")
 endif()
 
-# ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
-#    STE_USE_LDC_RTC=1 默认走 ldc，=0 回退 WebEngine）────────────────────
-# 2026-10-11：桌面专用（MSVC .lib + PG OpenSSL）；Android 走文件尾的 ldc_libs_android 分支
-# 2026-10-13 审计 #26：OpenSSL 路径从硬编码 PostgreSQL 默认改为可覆盖——
-#   STE_OPENSSL_ROOT 指向含 libssl.lib/libcrypto.lib 的目录（默认仍 PG 17 路径，
-#   兼容现有构建机；别的机器设 env 即可，不再要求必须装在默认位置）。
-if(NOT STE_IS_ANDROID AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
-  set(STE_OPENSSL_ROOT "$ENV{STE_OPENSSL_ROOT}" CACHE PATH "OpenSSL lib 目录（含 libssl.lib/libcrypto.lib）")
-  if(NOT STE_OPENSSL_ROOT)
-    set(STE_OPENSSL_ROOT "C:/Program Files/PostgreSQL/17/lib" CACHE PATH "" FORCE)
+# ── 2026-10-18 远控：libvncclient（VNC over WebSocket）──────────────────────
+# 默认 OFF：未提供预编译库时 vnc_client.cpp 走安全桩，工程仍可干净构建。
+# 打开方式：把 LibVNCClient.lib（及依赖）放 third_party/libvncclient/lib/、
+#           把 rfb/rfbclient.h 等头文件放 third_party/libvncclient/include/，
+#           然后 -DSTE_USE_LIBVNCCLIENT=ON 重 configure。
+# ⚠️ 链接方式须与 agent 一致（x64 / msvc2022 / 与本工程相同的 CRT）：
+#    静态库用 /MD 或 /MT 必须与 lib 编译时一致，否则 LNK2038 运行库不匹配。
+option(STE_USE_LIBVNCCLIENT "启用 libvncclient 远控（需预编译库）" OFF)
+set(STE_LIBVNCCLIENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libvncclient"
+    CACHE PATH "libvncclient 预编译库根目录（含 include/ 与 lib/）")
+if(STE_USE_LIBVNCCLIENT)
+  if(NOT EXISTS "${STE_LIBVNCCLIENT_DIR}/include/rfb/rfbclient.h")
+    message(FATAL_ERROR
+      "[viewer] STE_USE_LIBVNCCLIENT=ON 但找不到 ${STE_LIBVNCCLIENT_DIR}/include/rfb/rfbclient.h\n"
+      "  请把 LibVNC 头文件放到 third_party/libvncclient/include/rfb/")
   endif()
-  target_include_directories(viewer-qt PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
-  target_link_libraries(viewer-qt PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/srtp2.lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/juice.lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/usrsctp.lib"
-    "${STE_OPENSSL_ROOT}/libssl.lib"
-    "${STE_OPENSSL_ROOT}/libcrypto.lib"
-    ws2_32 bcrypt crypt32 userenv secur32)
-  target_compile_definitions(viewer-qt PRIVATE RTC_STATIC)
-  message(STATUS "[viewer] libdatachannel 已链入（RTC_STATIC）")
+  target_include_directories(viewer-qt PRIVATE "${STE_LIBVNCCLIENT_DIR}/include")
+  file(GLOB STE_LIBVNCCLIENT_LIBS "${STE_LIBVNCCLIENT_DIR}/lib/*.lib")
+  if(NOT STE_LIBVNCCLIENT_LIBS)
+    message(FATAL_ERROR
+      "[viewer] ${STE_LIBVNCCLIENT_DIR}/lib/ 下没有 .lib（LibVNCClient.lib 及其依赖）")
+  endif()
+  target_link_libraries(viewer-qt PRIVATE ${STE_LIBVNCCLIENT_LIBS} ws2_32)
+  target_compile_definitions(viewer-qt PRIVATE STE_USE_LIBVNCCLIENT)
+  message(STATUS "[viewer] libvncclient 已启用：${STE_LIBVNCCLIENT_DIR}")
 else()
-  # 2026-10-18：对齐 control-qt b8ab77d 方案 A——缺 lib 时 ldc_receiver.cpp 走空实现（接口一致、可逆摘除），
-  # 本包不含 WebRTC 收流；画面监控走独立 JPEG 帧路径、远控走 P2 的 RFB，均不受影响。
-  # 还原：把 datachannel.lib/srtp2.lib/juice.lib/usrsctp.lib 放回 _probe/ldc_libs/（含 libdatachannel-master/include）
-  # 后重新 configure，自动回到 RTC_STATIC 分支，源码无需改动。
-  message(WARNING "[viewer] _probe/ldc_libs/datachannel.lib 缺失——RTC 编译为空实现（WebRTC 收流不可用，JPEG/RFB 不受影响）；放回 lib 重 configure 即恢复")
-endif()
-
-# ── OpenSSL 运行时 DLL 拷进 build/（2026-10-14 补，对齐被控端）────────────
-# 为什么必须有：libdatachannel 的 DTLS 让 exe **静态导入** libssl-3-x64.dll /
-# libcrypto-3-x64.dll，windeployqt 不认识这两个（非 Qt 件）不会部署；
-# 而 build-qt-viewer.bat 每次干净重建（rd /s /q build）会把它们冲掉 ——
-# 0.6.33 出包现场实证：makensis 报 "File ..\build\libssl-3-x64.dll -> no files found"。
-# 历史上（0.6.25~0.6.32）靠手工拷进 build/，干净构建一次就缺一次。
-# DLL 与 .lib 同源：PG17 布局下 lib/ 的同级 bin/ 目录；STE_OPENSSL_ROOT 可覆盖。
-if(NOT STE_IS_ANDROID AND STE_OPENSSL_ROOT)
-  set(STE_OPENSSL_BIN "${STE_OPENSSL_ROOT}/../bin")
-  foreach(_ossl libssl-3-x64.dll libcrypto-3-x64.dll)
-    add_custom_command(TARGET viewer-qt POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-              "${STE_OPENSSL_BIN}/${_ossl}" "$<TARGET_FILE_DIR:viewer-qt>/${_ossl}"
-      COMMENT "[viewer] 拷贝 ${_ossl} → 构建输出目录（libdatachannel DTLS 运行时）"
-      VERBATIM)
-  endforeach()
+  message(STATUS "[viewer] libvncclient 未启用（STE_USE_LIBVNCCLIENT=OFF）——远控为安全桩")
 endif()
 
 # ── Qt 运行时部署（用 Qt 官方部署工具 windeployqt）──
@@ -418,8 +387,7 @@ endif()
 
 # ═══ 2026-10-11：Android target —— 手机 App 并入管理端（用户裁决）═══
 # 与桌面并行：桌面全部逻辑不动，ANDROID 时额外配置。QML 在 Android 用 qrc 嵌入
-#（APK 无磁盘 build 目录；桌面保留磁盘热更）。ldc（libdatachannel）走 Android
-# 静态库（_probe/ldc_libs_android，mbedTLS 后端，配方见 _probe/WebRTC-Android-构建配方-2026-10-11.md）。
+#（APK 无磁盘 build 目录；桌面保留磁盘热更）。
 if(STE_IS_ANDROID)
   # ① QML 整树嵌入 qrc（递归 GLOB，杜绝手写漏项；PREFIX "/" + BASE qml → qrc:/Main.qml）
   # 2026-10-11：`qml/*.qml` 只匹配根层 → mobile/ 子目录漏打包（手机壳加载不到）。
@@ -452,42 +420,28 @@ if(STE_IS_ANDROID)
     "${STE_SHARED_UI_DIR}/*.js")
   qt_add_resources(viewer-qt "viewerui" PREFIX "/components"
     BASE "${STE_SHARED_UI_DIR}" FILES ${STE_SHARED_UI_FILES})
-  # ② Android libdatachannel 静态链（mbedTLS 后端，路径与桌面 ldc_libs 平行）
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android")
-    target_include_directories(viewer-qt PRIVATE
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
-    target_link_libraries(viewer-qt PRIVATE
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libdatachannel.a"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libjuice.a"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libsrtp2.a"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libusrsctp.a"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libmbedtls.a"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libmbedcrypto.a"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs_android/libmbedx509.a"
-      log android log)
-    target_compile_definitions(viewer-qt PRIVATE RTC_STATIC)
-    # 2026-10-11：Android 令牌编译期注入（mobile 同款：打包前设 STE_VIEWER_TOKEN_BUILD）
-    if(DEFINED ENV{STE_VIEWER_TOKEN_BUILD} AND NOT "$ENV{STE_VIEWER_TOKEN_BUILD}" STREQUAL "")
-      target_compile_definitions(viewer-qt PRIVATE
-        "STE_VIEWER_TOKEN_CMake=\"$ENV{STE_VIEWER_TOKEN_BUILD}\"")
-      message(STATUS "[viewer] Android 令牌已从 STE_VIEWER_TOKEN_BUILD 注入")
-    else()
-      message(WARNING "[viewer] 未设 STE_VIEWER_TOKEN_BUILD——Android 无静态令牌，未登录时云端会拒")
-    endif()
-    # 2026-10-11：Android 云端地址覆盖（联调/隔离实例用；默认仍生产 wss）
-    if(DEFINED ENV{STE_VIEWER_URL_BUILD} AND NOT "$ENV{STE_VIEWER_URL_BUILD}" STREQUAL "")
-      target_compile_definitions(viewer-qt PRIVATE
-        "STE_VIEWER_URL_CMake=\"$ENV{STE_VIEWER_URL_BUILD}\"")
-      message(STATUS "[viewer] Android 云端地址已覆盖为 $ENV{STE_VIEWER_URL_BUILD}")
-    endif()
-    # 2026-10-11 诊断：桌面 Main.qml 手机 GPU SIGABRT → 软件渲染测试（STE_SOFT_RENDER_BUILD=1）
-    if(DEFINED ENV{STE_SOFT_RENDER_BUILD} AND "$ENV{STE_SOFT_RENDER_BUILD}" STREQUAL "1")
-      target_compile_definitions(viewer-qt PRIVATE STE_SOFT_RENDER_BUILD)
-      message(STATUS "[viewer] Android 软件渲染已开启（QT_QUICK_BACKEND=software）")
-    endif()
-    message(STATUS "[viewer] Android ldc 已链入（mbedTLS 后端, RTC_STATIC）")
+  # ② 2026-10-18：Android 不再链 libdatachannel（WebRTC 已移除）。
+  #    远控走 libvncclient（VNC over WS），与桌面同一套代码路径；Android 侧
+  #    只有在 STE_USE_LIBVNCCLIENT=ON 且提供 Android 版 .a/.so 时才真正启用，
+  #    否则 vnc_client.cpp 的安全桩照常编译（手机上远控暂不可用，其余功能不受影响）。
+  # 2026-10-11：Android 令牌编译期注入（mobile 同款：打包前设 STE_VIEWER_TOKEN_BUILD）
+  if(DEFINED ENV{STE_VIEWER_TOKEN_BUILD} AND NOT "$ENV{STE_VIEWER_TOKEN_BUILD}" STREQUAL "")
+    target_compile_definitions(viewer-qt PRIVATE
+      "STE_VIEWER_TOKEN_CMake=\"$ENV{STE_VIEWER_TOKEN_BUILD}\"")
+    message(STATUS "[viewer] Android 令牌已从 STE_VIEWER_TOKEN_BUILD 注入")
   else()
-    message(FATAL_ERROR "[viewer] _probe/ldc_libs_android 缺失——先按 WebRTC-Android-构建配方交编译")
+    message(WARNING "[viewer] 未设 STE_VIEWER_TOKEN_BUILD——Android 无静态令牌，未登录时云端会拒")
+  endif()
+  # 2026-10-11：Android 云端地址覆盖（联调/隔离实例用；默认仍生产 wss）
+  if(DEFINED ENV{STE_VIEWER_URL_BUILD} AND NOT "$ENV{STE_VIEWER_URL_BUILD}" STREQUAL "")
+    target_compile_definitions(viewer-qt PRIVATE
+      "STE_VIEWER_URL_CMake=\"$ENV{STE_VIEWER_URL_BUILD}\"")
+    message(STATUS "[viewer] Android 云端地址已覆盖为 $ENV{STE_VIEWER_URL_BUILD}")
+  endif()
+  # 2026-10-11 诊断：桌面 Main.qml 手机 GPU SIGABRT → 软件渲染测试（STE_SOFT_RENDER_BUILD=1）
+  if(DEFINED ENV{STE_SOFT_RENDER_BUILD} AND "$ENV{STE_SOFT_RENDER_BUILD}" STREQUAL "1")
+    target_compile_definitions(viewer-qt PRIVATE STE_SOFT_RENDER_BUILD)
+    message(STATUS "[viewer] Android 软件渲染已开启（QT_QUICK_BACKEND=software）")
   endif()
   # ③ Android 打包目录（QT_ANDROID_PACKAGE_SOURCE_DIR 已在 qt_add_executable 前设置）
 else()
