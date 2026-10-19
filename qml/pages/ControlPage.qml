@@ -2,6 +2,11 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"     // Btn / ToggleRow 等本端自有通用组件
+// 2026-10-18：MD3 布局组件（Md3Chip / Md3SwitchRow…）。
+// 真源在 Stelarith-shared-qml/ui/md3/，构建时由 CMake copy_directory 落到
+// qml/Stelarith/components/md3/ —— 源码树下 qmllint 解析不到（磁盘加载模式），
+// 以「构建 + 运行」验证为准，与岛同套路。
+import "../components/md3"
 import "../island"         // SvgIcon（唯一真源在共享岛目录，构建期拷到 qml/island/）
 
 // 控制页（整屏页 · U5「两端同 shell」A-2 第二页）
@@ -80,20 +85,14 @@ Item {
         bottomPadding: 4
         Repeater {
             model: [ { k: "all", l: "全部" }, { k: "online", l: "在线" }, { k: "offline", l: "离线" } ]
-            delegate: Rectangle {
-                width: 42; height: 22; radius: th.rCtrl
-                color: (ctx.window.deviceFilter === modelData.k) ? th.inv : "transparent"
-                border.color: th.stroke; border.width: 1
-                Text {
-                    anchors.centerIn: parent
-                    text: modelData.l
-                    color: (ctx.window.deviceFilter === modelData.k) ? th.win : th.fg3
-                    font.pixelSize: 11
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: ctx.window.deviceFilter = modelData.k
-                }
+            // 2026-10-18 MD3 布局：分组筛选从手写 42×22 方块 → Md3Chip（filter 变体）。
+            // 高 32/圆角 8、选中 secondaryContainer + ✓、未选 outline 描边 + 状态层。
+            // 三枚 chip 一排 + 计数，是把"分段筛选"说清楚的 MD3 标准形态。
+            delegate: Md3Chip {
+                md3: th
+                text: modelData.l
+                selected: (ctx.window.deviceFilter === modelData.k)
+                onClicked: ctx.window.deviceFilter = modelData.k
             }
         }
         // 计数（放在筛选右边，一眼看到每组多少台）
