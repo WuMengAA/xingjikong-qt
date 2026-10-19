@@ -23,7 +23,7 @@ $env:ANDROID_JAVA_HOME = 'C:\Program Files\Java\jdk-17'
 $env:JAVA_HOME = 'C:\Program Files\Java\jdk-17'
 $env:PATH = 'D:\QTqwq\6.12.0\android_arm64_v8a\bin;D:\QTqwq\Tools\Ninja;' + $env:PATH
 if (-not $env:STE_VIEWER_TOKEN_BUILD) {
-    $envFile = 'D:\Stelarith\Stelarith-xingjikong-qt\Stelarith-cloud-ws\.env'
+    $envFile = 'D:\Stelarith\Stelarith-xingjikong-qt\Stelarith-cloud\.env'
     $envLine = (Get-Content $envFile | Select-String '^CLOUD_VIEWER_TOKEN=' | Select-Object -First 1).Line
     $env:STE_VIEWER_TOKEN_BUILD = $envLine -replace '^CLOUD_VIEWER_TOKEN=',''
 }

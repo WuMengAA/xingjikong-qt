@@ -1,7 +1,8 @@
 // 星集控 · 管理端后端实现（从 main.cpp 原样搬过来，行为保持一致）
 #include "viewerbackend.h"
 #include "oauthlogin.h"
-#include "rfb_client.h"       // 2026-10-18：远控隧道 RFB 客户端（RFB over WS）
+#include "vnc_client.h"       // 2026-10-18：远控 VNC 客户端（libvncclient，RFB over WS）
+#include "vnc_image_provider.h" // 远控画面 → QML（image://vnc/live）
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
 #include "audio_playback.h"  // B6（2026-10-11）：winmm waveOut 播放学生回传的 audio/pcm
 #include <cmath>             // std::isfinite：拦住 NaN/Inf 坐标（2026-10-11）
@@ -28,11 +29,11 @@
 #include <QClipboard>     // 诊断与反馈：复制诊断信息到剪贴板
 #include <QSysInfo>       // 诊断与反馈：系统信息
 #include <QProcess>
+#include "winlauncher.h"   // 2026-10-19 需求①：子进程静默启动（杜绝建快捷方式弹 cmd 窗）
 #include <QTemporaryFile>
 #include <QTimer>
 #include <QUrl>
 #include <QWebSocket>
-#include "ldc_rtc_bridge.h"   // 2026-10-10：WebRTC ldc 桥接（轻量前向声明，大文件不膨胀 C1060）
 #include "android_notify.h"   // 2026-10-11：手机系统通知栏横幅（桌面为空实现）
 
 #if defined(Q_OS_ANDROID)
@@ -343,8 +344,21 @@ ViewerBackend::ViewerBackend(QObject *parent)
 }
 ViewerBackend::~ViewerBackend()
 {
-    // 2026-10-10 去 WebEngine 底层：收流页 temp 文件清理 + QWebEngineView 析构已移除
-    // （ldc 收流无 Chromium 无 temp 页；老的 m_rtcHtmlPath/m_rtcView 清理随代码删除）。
+    // 修复③（2026-10-19）：退出前把远控会话礼貌地收掉 —— 以前只停本地
+    // VncClient，被控端侧 g_remoteControl 永真（灵动岛冻结 + server 空转），
+    // 只能等被控端看门狗（25s 无保活）兜底，白冻 25s。send 后 flush 一把，
+    // 尽量让字节在进程退出前真正出网（WS 退出竞态仍在，看门狗是最终兜底）。
+    if (m_remoteControlling && m_ws && m_ws->state() == QAbstractSocket::ConnectedState
+        && m_authed) {
+        sendAction(QStringLiteral("remote_control_stop"), QJsonObject());
+        m_ws->flush();
+        logf("[viewer] 进程退出，收掉对 %s 的远控", m_remoteControlUid.toUtf8().constData());
+        m_remoteControlling = false;
+        m_remoteControlUid.clear();
+    }
+    // 远控会话必须先收干净再让 QML/引擎收尾：VncClient 的解码线程仍在读
+    // 帧缓冲，留到成员析构顺序里去停，容易踩到"引擎已拆、回调还在发信号"。
+    if (m_vnc) { m_vnc->stop(); m_vnc = nullptr; }
 }
 // ───────────────────────────────────────────────────────────────────────────
 // 版本 / 身份 / 角色 / 提醒偏好
@@ -428,12 +442,12 @@ void ViewerBackend::openRegisterPage()
     }
     const QUrl u(QStringLiteral("%1/register").arg(m_siteUrl));
     logf("[viewer] 打开站点注册页 %s", u.toString().toUtf8().constData());
-    QDesktopServices::openUrl(u);
+    steOpenUrlExternal(u);   // 提权安全（oauthlogin.h）
 }
 void ViewerBackend::openExternal(const QString &url)
 {
     if (url.isEmpty()) return;
-    QDesktopServices::openUrl(QUrl(url));
+    steOpenUrlExternal(QUrl(url));   // 提权安全（oauthlogin.h）
 }
 void ViewerBackend::setNotifyOnDone(bool on)
 {
@@ -648,7 +662,8 @@ void ViewerBackend::setDesktopShortcut(bool on)
         "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%1');"
         "$s.TargetPath='%2';$s.WorkingDirectory='%3';$s.IconLocation='%2,0';$s.Save()")
         .arg(QDir::toNativeSeparators(lnk), exe, work);
-    QProcess::startDetached(QStringLiteral("powershell"),
+    // #368 需求①：静默 detached 拉起，杜绝建桌面快捷方式时弹出 powershell 窗
+    stelarithStartHiddenDetached(QStringLiteral("powershell"),
         {QStringLiteral("-NoProfile"), QStringLiteral("-ExecutionPolicy"), QStringLiteral("bypass"),
          QStringLiteral("-Command"), ps});
     emit autostartChanged();
@@ -666,7 +681,7 @@ void ViewerBackend::start()
     // ⚠️ 2026-10-06 改默认值：原来是 ws://127.0.0.1:8788/ws/viewer（本机 dev 云端）。
     // 包一发出去老师机拿到的就是这份默认值 → 指向"这台机器自己" = 永远连不上，
     // 界面上表现就是"连不上云端 + 设备列表空"（用户看到的"半成品"其实是根本没连上云端）。
-    // 生产入口 = 云端监听 0.0.0.0:8788 的公网域名（见 Stelarith-cloud-ws/src/provision.js 的 CLOUD_PUBLIC_BASE）。
+    // 生产入口 = 云端监听 0.0.0.0:8788 的公网域名（见 Stelarith-cloud/src/provision.js 的 CLOUD_PUBLIC_BASE）。
     // 本机联调照旧设 STE_VIEWER_URL 覆盖就行，不要为了联调把默认值改回去。
     m_url = qEnvironmentVariable("STE_VIEWER_URL", kDefaultViewerUrl).trimmed();
     if (m_url.isEmpty()) m_url = kDefaultViewerUrl;
@@ -741,37 +756,6 @@ void ViewerBackend::start()
 
     connectToCloud();
 }
-// ────────────────────────────────────────────────────────────────────────────
-// WebRTC 收流（T-3，2026-10-04）
-//
-// 管理端是 **answer 侧**：
-//   被控端 captureStream → createOffer →（云端中继 rtc-offer）→ 这里 setRemoteDescription
-//   → createAnswer → rtc-answer 回云端 → ontrack 拿到 video track 塞进 <video>
-//   → 定时器 drawImage 到 canvas → toDataURL 抽 JPEG → setRtcFrame 走现有 frame 通道。
-//
-// 为什么用离屏 QWebEngineView 而不是纯 C++ WebRTC 库：被控端（control-qt）已经用同样的
-// canvas.captureStream 跑通了推流，这里用同套 Chromium 栈做 answer 侧是最短路径，
-// 省掉整套 native WebRTC 依赖，而且 ontrack/ICE/codec 协商交给浏览器实现，不自己造。
-//
-// 为什么只收不发：被控端已经建了 RTCPeerConnection 并持有 track，管理端只需要接收；
-// 双向视频（远控回环）不在这一批范围内。
-// ────────────────────────────────────────────────────────────────────────────
-/**
- * 取 WebRTC 信令里的字段（sdp / candidate），**两层都找**。
- *
- * 为什么必须往里再剥一层：被控端（control-qt 的 rtcSendSignal）发信封时把信令又包了一层 ——
- *   信封.payload = { payload: { kind, sdp, candidate }, from: "agent" }
- * 云端原样把这个 payload 转给管理端（registry.rtcRelayToViewers），所以到管理端手上就变成
- *   顶层 { payload: { kind, sdp, candidate }, from, uid }
- * 只看顶层 pay.value("sdp") 必然是空 → 日志上就一句"收到 rtc-offer 但没有 sdp 字段"，
- * 看不出真正的问题是协议包了两层。这里先取顶层、取不到再取内层，两种写法都吃。
- */
-static QString rtcField(const QJsonObject &pay, const QLatin1String &key)
-{
-    QJsonValue v = pay.value(key);
-    if (v.isUndefined() || v.isNull()) v = pay.value(QStringLiteral("payload")).toObject().value(key);
-    return v.toString();
-}
 void ViewerBackend::setStatus(const QString &s, bool warn)
 {
     if (m_statusText == s && m_statusWarn == warn) return;
@@ -817,72 +801,6 @@ void ViewerBackend::sendEnvelope(const QString &type, const QJsonObject &payload
     if (!m_ws) return;
     m_ws->sendTextMessage(makeEnvelope(type, payload));
 }
-// ── 2026-10-10 ldc 桥接（ldc_rtc_bridge.cpp 调用，见 viewerbackend.h 声明）──
-void ViewerBackend::sendLdcSignal(const QString &type, const QJsonObject &payload)
-{
-    sendEnvelope(type, payload);
-}
-void ViewerBackend::setLdcRtcState(const QString &s)
-{
-    setRtcState(s);
-}
-void ViewerBackend::emitLdcFrame(const QImage &img)
-{
-    // 2026-10-18：远控隧道(RFB)激活时，RTC 帧让行（见 applyFrameBytes 同款守卫）。
-    if (m_rfbActive) return;
-    // ── 2026-10-11 修 #171 / E6「RTC 画面不显」──
-    // 老 WebEngine 路径（setRtcFrame → applyFrameBytes(RtcGrab)）本来就把 RTC 帧写进
-    // m_frame、经 frameChanged → QML 的 image://frames/f 上屏。换成 libdatachannel 后，
-    // 这条 emitLdcFrame 只 emit rtcFrameReady 就完事，漏了「落 m_frame」，于是：
-    //   ① image://frames/f 永远拿不到 RTC 帧（走 jpeg 路径的 screenImg 看不到画面）；
-    //   ② RtcVideoSurface.onFrame 里的 Image 直赋 QImage 在 Qt 6.12 报
-    //      "Cannot assign QImage to QUrl"，同样显不出来。
-    // 修法（路 A）：让 RTC 帧并入已验证可用的 frame 通道 —— 补上落 m_frame + emit。
-    if (img.isNull()) return;
-
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    m_rtcLastFrameMs = now;                 // RTC 优先：jpeg 轮询帧据此让行（见 applyFrameBytes）
-
-    const QString wantSource = QStringLiteral("rtc");
-    if (m_frameSource != wantSource) {
-        m_frameSource = wantSource;
-        emit frameSourceChanged();
-    }
-    m_frameCount++;
-    m_frame = img;
-    // 2026-10-12 修（审计 #13）：以前 RTC 帧不更新 m_lastFrameBytes → 界面帧信息
-    // 一直显示上一次 JPEG 的大小，RTC 模式下数字恒不动，看不出画面在变。补上。
-    m_lastFrameBytes = (int)img.sizeInBytes();
-    m_frameUid = m_currentUid;              // ldc 帧不带 uid，按"当前这台"记账
-    const quint64 fp = frameFingerprint(img);
-    m_sameFrameStreak = (fp == m_frameHash) ? (m_sameFrameStreak + 1) : 0;
-    m_frameHash = fp;
-    setStatic(m_sameFrameStreak >= kStaticStreak);
-    if (!m_screenStatic) emit frameChanged();
-    if (m_frameCount % 30 == 1) {
-        logf("[viewer] 画面在动[RTC]：第 %d 帧（%.1f fps，%dx%d）",
-             m_frameCount, m_fps, img.width(), img.height());
-    }
-    emit statsChanged();
-
-    // 兼容：老接线若仍监听 rtcFrameReady 也保留（不破坏既有消费者）。
-    emit rtcFrameReady(img);
-}
-// ── 摄像头第二轨帧（2026-10-12 · 四·双画面）──────────────────────────────
-// 与 emitLdcFrame（屏幕）分开：不碰 m_frame / m_frameSource / m_screenStatic，
-// 只落自己的 m_camFrame 并通知 QML 刷 image://frames/cam。这样屏幕与摄像头互不干扰。
-void ViewerBackend::emitLdcCameraFrame(const QImage &img)
-{
-    if (img.isNull()) return;
-    m_camFrame = img;
-    m_camFrameCount++;
-    if (m_camFrameCount % 30 == 1) {
-        logf("[viewer] 摄像头画面在动[RTC]：第 %d 帧（%dx%d）",
-             m_camFrameCount, img.width(), img.height());
-    }
-    emit cameraFrameChanged();
-}
-
 // ── 自习模式（2026-10-13）：噪音检测 + 异常录制 ────────────────────────────
 // 被控端每拍回传一份噪音样本（db/active/study/captureOk…，见 agent main.cpp）。
 // 这里只做"聚合成 QML 能直接画的东西"：最新 dB + 最近 N 个样本 + 开关状态。
@@ -964,8 +882,7 @@ void ViewerBackend::stopStudyMode()
 void ViewerBackend::onConnected()
 {
     m_connected = true;
-    m_offlineSince = 0;      // 离线看门狗解除（配合 onDisconnected 里的回收）
-    if (m_rtcReap && m_rtcReap->isActive()) cancelRtcViewReap();
+    m_offlineSince = 0;      // 离线看门狗解除
     emit connectedChanged();
     logf("[viewer] 已连上云端 %s，正在鉴权…", m_url.toUtf8().constData());
     setStatus(QStringLiteral("已连上云端，正在鉴权…"), false);
@@ -985,14 +902,10 @@ void ViewerBackend::onDisconnected()
     // 而老师那边的"正在讲话"不会自己变。旧代码一直保持 m_speaking = true，
     // 表现出来就是"我什么都没点，怎么一直在讲话"。
     stopAllLive(QStringLiteral("与云端断开，语音与广播已自动停"));
-    // 离线看门狗：跟云端断了这么久还没连回来，收流页里那个 Chromium 渲染进程（~137MB）
-    // 已经送不出任何画面，留着纯占内存。判据用"跟云端断多久"而不是"多久没收到信令"——
-    // 画面稳定后对端本来就不发东西，按后者数会误杀正在看的画面。
-    // 阈值可用 STE_RTC_IDLE_MS 覆盖（毫秒，默认 20000），排障时调小值能快验。
-    // 只认**第一次**断连：下面每次重连失败都会再走到 onDisconnected，
-    // 起点刷新一次倒计时就往后推一次，看门狗永远走不到头（实测断线 26 秒、重连失败 3 次没触发）。
+    // 远控会话也一并收掉：主 WS 断了，vnc-data 帧已经不可能到达，
+    // 留着 VncClient 的解码线程只会对着空缓冲干等。
+    if (m_vncActive) stopVnc();
     if (!m_offlineSince) m_offlineSince = QDateTime::currentMSecsSinceEpoch();
-    scheduleRtcViewReap();
     emit connectedChanged();
     // 「设备离线时提醒」：断线是常驻程序最该让用户知道的一件事，
     // 以前只在日志里留一行，用户得盯着屏幕才知道"怎么没画面了"。
@@ -1050,50 +963,12 @@ void ViewerBackend::requestDevices()
 {
     sendEnvelope(QStringLiteral("devices"), QJsonObject());
 }
-/**
- * 自检用：订 → 退 → 再订，逼被控端重建连接重新 offer。
- *
- * 顺序不能省也不能乱：退订必须先发生在"已经订上了"之后，否则云端那条 rtc-stop
- * 落到"本来就没订阅"上直接空转，被控端的 g_rtcOn 一直是 true，
- * 后面再收到 rtc-start 时 rtcStart() 一句 `if (g_rtcOn && g_rtcView) return` 就原地返回，
- * 一个 offer 都不发 —— 表现还是"订阅成功但永远不来画面"。
- * 退订让云端发 rtc-stop（被控端 g_rtcOn=false 且页面 __reset），
- * 再订让云端发 rtc-start（被控端重建 RTCPeerConnection → 新 offer）。
- */
-void ViewerBackend::rtcRenegotiate(const QString &uid)
-{
-    QJsonObject sp;
-    sp.insert(QStringLiteral("uid"), uid);
-    logf("[viewer] 自检：订 %s →（1.5s 后）退订 →（0.8s 后）重订，逼它重新 offer",
-         uid.toUtf8().constData());
-    // 必须走 setCurrentUid 而不是直接发 subscribe：它同时会把 m_currentUid 改掉，
-    // 之后 answer / 本端 ICE 回云端时才知道该投给谁（直接发信封的话会投到上一台设备上）
-    m_currentUid = uid;
-    emit currentUidChanged();
-    sendEnvelope(QStringLiteral("subscribe"), sp);
-    QTimer::singleShot(1500, this, [this, uid] {
-        QJsonObject s;
-        s.insert(QStringLiteral("uid"), uid);
-        sendEnvelope(QStringLiteral("unsubscribe"), s);
-        logf("[viewer] 自检：退订 %s（云端应下发 rtc-stop）", uid.toUtf8().constData());
-    });
-    QTimer::singleShot(2300, this, [this, uid] {
-        QJsonObject s;
-        s.insert(QStringLiteral("uid"), uid);
-        sendEnvelope(QStringLiteral("subscribe"), s);
-        logf("[viewer] 自检：重订 %s（云端应下发 rtc-start）", uid.toUtf8().constData());
-    });
-}
 void ViewerBackend::setCurrentUid(const QString &uid)
 {
     if (uid.isEmpty() || uid == m_currentUid) return;
     const QString prev = m_currentUid;
     m_currentUid = uid;
     refreshCapActions();          // 换机器 = 换一套能力，门控要立刻跟着变
-    // 2026-10-12 修（审计 #12）：从 RTC 设备 A 切到 JPEG 设备 B 时，m_rtcLastFrameMs
-    // 还是 A 的时刻——B 的 JPEG 帧到后 1.5s 内被当"RTC 还活着"吞掉，用户看到
-    // "切了设备 1.5 秒后才有画面"。切设备即清空 RTC 计时，让 JPEG 帧立刻可上屏。
-    m_rtcLastFrameMs = 0;
 
     // ⚠️ 2026-10-08 修「切了设备画面还是第一台」的两个源头，两个都要治：
     //
@@ -1118,7 +993,7 @@ void ViewerBackend::setCurrentUid(const QString &uid)
             logf("[viewer] 离开 %s，收掉对它的远控", prev.toUtf8().constData());
             m_remoteControlling = false;
             m_remoteControlUid.clear();
-            stopRfbTunnel();      // 2026-10-18：顺手关掉这台设备的远控隧道
+            stopVnc();      // 2026-10-18：顺手关掉这台设备的 VNC 会话
         }
     }
 
@@ -1155,11 +1030,15 @@ void ViewerBackend::setCurrentUid(const QString &uid)
     if (role() == QStringLiteral("admin")
         && m_capActions.contains(QStringLiteral("remote_control_start"))) {
         QJsonObject rc;
+        // 帧率随单下发（2026-10-18 晚修复）：原先 rc 是空对象，被控端取默认 20
+        // 且 VncServer 抓屏节奏写死 100ms=10fps —— 客户端要多少都只有 10fps。
+        // 现在一路带到 VncServer::start(0, fps)，抓屏间隔按 1000/fps 算（clamp 33ms）。
+        rc.insert(QStringLiteral("fps"), 24);
         sendAction(QStringLiteral("remote_control_start"), rc);
         m_remoteControlling = true;
         m_remoteControlUid = uid;
         logf("[viewer] 选中即远控：已对 %s 下发 remote_control_start", uid.toUtf8().constData());
-        startRfbTunnel(uid);   // 2026-10-18：接管即拉远控隧道（RFB over WS）
+        startVnc(uid);   // 2026-10-18：接管即拉起 VNC 会话（RFB over WS）
     } else {
         logf("[viewer] 选中 %s 但未自动进远控（role=%s，远控能力=%d）——权限或设备能力不满足",
              uid.toUtf8().constData(), role().toUtf8().constData(),
@@ -1180,6 +1059,17 @@ void ViewerBackend::setScreenActive(bool on)
     } else {
         // 离开带画面页：退订 + 清本地帧。云端停推，被控端停抓这台。
         sendEnvelope(QStringLiteral("unsubscribe"), sp);
+        // 修复③（2026-10-19）：离开画面页 = 不再看这台 ⇒ 远控会话一并收口。
+        //   以前只退订不停远控：被控端 g_remoteControl 永真、灵动岛冻结、
+        //   VNC server 空转（老师切到概览页就不管了，无声泄漏；与被控端
+        //   看门狗兜底相比，这里主动发 stop 是零代价的优雅路径）。
+        if (m_remoteControlling) {
+            sendAction(QStringLiteral("remote_control_stop"), QJsonObject());
+            logf("[viewer] 离开带画面页，收掉对 %s 的远控", m_currentUid.toUtf8().constData());
+            m_remoteControlling = false;
+            m_remoteControlUid.clear();
+            stopVnc();
+        }
         m_frameUid.clear();
         m_frame = QImage();
         m_frameHash = 0;
@@ -1242,16 +1132,6 @@ void ViewerBackend::onTextMessage(const QString &text)
     const bool isV1 = o.contains(QStringLiteral("v"));
     const QJsonObject pay = isV1 ? o.value(QStringLiteral("payload")).toObject() : o;
     const QString type = o.value(QStringLiteral("type")).toString();
-    // RTC 报文级流水：offer 到没到、ice 到没到、answer 回没回，靠的就是这几行。
-    // 以前只有"成功/失败"两种日志，缺中间态，排障只能靠猜。
-    if (type.startsWith(QStringLiteral("rtc-"))) {
-        logf("[viewer] 云端 RTC 报文到了 type=%s len=%d uid=%s sdp=%d cand=%d payload=%d",
-             type.toUtf8().constData(), text.size(),
-             pay.value(QStringLiteral("uid")).toString().toUtf8().constData(),
-             pay.value(QStringLiteral("sdp")).toString().size(),
-             pay.value(QStringLiteral("candidate")).toString().size(),
-             pay.value(QStringLiteral("payload")).toObject().size());
-    }
     if (type == QStringLiteral("authed") || type == QStringLiteral("auth-ok")) {
         m_authed = true;
         m_retryCount = 0;           // 通了就把退避计清零，下一次断线还是 5 秒起步
@@ -1263,12 +1143,13 @@ void ViewerBackend::onTextMessage(const QString &text)
         requestDevices();   // 鉴权过后再拉设备表（之前是连上就拉，现在会被云端拒）
         requestClasses();  // 2026-10-08 拉班级列表
         requestStorage();  // 2026-10-08 拉云端存储概况（需求 #2：概览页要展示）
+        fetchActionRanking();  // 2026-10-19 拉动作排行（用户指令②；概览页排行卡）
         // 2026-10-08 兜底轮询：云端推 + 本地 15s 轮询双保险，避免 WS 抖动时设备表卡旧。
         if (!m_refreshTimer) {
             m_refreshTimer = new QTimer(this);
             m_refreshTimer->setInterval(15000);
             connect(m_refreshTimer, &QTimer::timeout, this, [this] {
-                if (m_authed) { requestDevices(); requestClasses(); requestStorage(); }
+                if (m_authed) { requestDevices(); requestClasses(); requestStorage(); fetchActionRanking(); }
             });
         }
         m_refreshTimer->start();
@@ -1374,99 +1255,6 @@ void ViewerBackend::onTextMessage(const QString &text)
         if (m_broadcasting) { m_broadcasting = false; emit broadcastingChanged(); }
     } else if (type == QStringLiteral("subscribed")) {
         logf("[viewer] 云端确认订阅 %s", pay.value(QStringLiteral("uid")).toString().toUtf8().constData());
-    } else if (type == QStringLiteral("rtc-offer")) {
-        // 被控端发起了建连：把它带过来的 offer 灌进离屏 QWebEngineView，
-        // setRemoteDescription 之后 createAnswer 回云端（__setOffer 里做完了全流程）
-        //
-        // ⚠️ 必须先把 offer 里的 uid 同步到 m_currentUid（2026-10-05 修）。
-        // offer 携带的 uid 是"这条协商属于哪台机器"的**权威来源**，比本地的设备表可靠：
-        // rtcGotAnswer() / rtcGotIce() 回云端时都只认 m_currentUid，而它可能被
-        // refreshDevices() 在"设备表短暂为空"（云端重启/被控端掉线重连）时清空，
-        // 或者 viewer 刚起来设备表还没到就是空的。那样 answer 会带着空 uid 回去，
-        // 云端 devices.get("") 找不到设备 → answer 静默丢在云端，
-        // 被控端 offeredAt 一直不变、answeredAt 永远是 0，卡在 pc-failed 无限重发 offer。
-        // 现象是"两端都连上了、JPEG 兜底画面在动，就是 RTC 永远建不起来"。
-        const QString offerUid = rtcField(pay, QLatin1String("uid"));
-        if (!offerUid.isEmpty() && offerUid != m_currentUid) {
-            logf("[viewer] RTC offer 带的 uid=%s 与本地当前 uid=%s 不一致，以 offer 为准修正",
-                 offerUid.toUtf8().constData(), m_currentUid.toUtf8().constData());
-            m_currentUid = offerUid;
-            emit currentUidChanged();
-        }
-        initRtcView();
-        const QString sdp = rtcField(pay, QLatin1String("sdp"));
-        if (sdp.isEmpty()) {
-            // 失败也要把来路摊开：哪台机器、整条消息长啥样（截断），否则"没有 sdp"就没法往下查
-            logf("[viewer] FAIL 收到 rtc-offer 但没有 sdp 字段（uid=%s 原始=%s）",
-                 pay.value(QStringLiteral("uid")).toString().toUtf8().constData(),
-                 text.left(220).toUtf8().constData());
-            setRtcState(QStringLiteral("failed"));
-        } else {
-            // ── 2026-10-09 ldc 路：offer 直接喂 libdatachannel（代替灌离屏 view）──
-            if (qgetenv("STE_USE_LDC_RTC") != "0") {
-                // 2026-10-11 诊断：收到 offer 是整条链路的第一个可见节点。
-                // 之前"WebRTC 不生效"到底是卡在被控端没发、云端没转、还是本端没接，
-                // 全靠这一行区分。
-                logf("[viewer-ldc] 收到 offer（uid=%s，%d 字节）→ 喂 libdatachannel",
-                     m_currentUid.toUtf8().constData(), sdp.size());
-                ldcFeedSignal(this, QStringLiteral("offer"), sdp.toUtf8());
-                setRtcState(QStringLiteral("negotiating"));
-                return;
-            }
-            // 新 offer = 新的一轮协商，上一轮攒下的候选已经作废，先清干净再灌。
-            // 不清的话，上次那台机器的候选会被喂给新建的 pc，ICE 往一个不存在的对端上撞。
-            if (!m_pendingIce.isEmpty()) {
-                logf("[viewer] RTC 收到新 offer，丢弃上一轮残留的 %d 个候选", m_pendingIce.size());
-                m_pendingIce.clear();
-            }
-            deliverOffer(sdp);   // 页面就绪就直接灌，没就绪就暂存等补灌
-        }
-    } else if (type == QStringLiteral("rtc-ice")) {
-        // 被控端的 ICE candidate → 转给离屏 view 里的 RTCPeerConnection
-        //
-        // 同样以报文里的 uid 为准（见上面 rtc-offer 分支的长注释）：ICE 可能**先于 offer** 到达，
-        // 那一刻 m_currentUid 很可能还是空的，不补的话本端候选回给云端时 uid 也是空 → 丢。
-        const QString iceUid = rtcField(pay, QLatin1String("uid"));
-        if (!iceUid.isEmpty() && iceUid != m_currentUid) {
-            m_currentUid = iceUid;
-            emit currentUidChanged();
-        }
-        const QString cand = rtcField(pay, QLatin1String("candidate"));
-        if (cand.isEmpty()) {
-            // 同样把原始报文摊开：candidate 空有三种来路（被控端发了空串、包了两层没剥到、
-            // 云端转发时被砍了），只一句"是空的"分不清是哪一种
-            logf("[viewer] WARN 收到 rtc-ice 但 candidate 是空的（原始=%s）",
-                 text.left(200).toUtf8().constData());
-        } else {
-            // ── 2026-10-09 ldc 路：candidate 直接喂 libdatachannel ──
-            if (qgetenv("STE_USE_LDC_RTC") != "0") {
-                ldcFeedSignal(this, QStringLiteral("candidate"), cand.toUtf8());
-                return;
-            }
-            // 和 offer 一样懒建：云端转发顺序不保证 offer 一定先到，ICE 抢先是可能的。
-            // 以前这种情况直接丢弃 → "候选平白少一半、ICE 怎么都连不上"，现在建页并排队。
-            if (!m_rtcView) {
-                logf("[viewer] RTC 收到 ice 但收流页还没建（offer 未先到），先建页再排队");
-                initRtcView();
-            }
-            addRemoteIce(cand);
-        }
-    } else if (type == QStringLiteral("rtc-answer")) {
-        logf("[viewer] 收到意外的 rtc-answer（管理端是 answer 侧，不该收到）");
-    } else if (type == QStringLiteral("rtc-start") || type == QStringLiteral("rtc-stop")) {
-        // rtc-stop 就是"没人看了"的确切信号：收流页留 5 秒没人来就回收（省那 137MB）。
-        // rtc-start 不用管回收 —— 下一份 offer 到达时 initRtcView() 自己会建回来。
-        if (type == QStringLiteral("rtc-stop")) scheduleRtcViewReap();
-        logf("[viewer] 云端广播 %s（推流开关，管理端据此%s收流页）",
-             type.toUtf8().constData(),
-             type == QStringLiteral("rtc-stop") ? "回收" : "保持");
-    } else if (type == QStringLiteral("rtc-relayed")) {
-        // 云端回给我们自己的信令投递结果——排查"发出去到底到没到"就靠这条
-        logf("[viewer] RTC 信令已中继 type=%s ok=%s to=%s %s",
-             pay.value(QStringLiteral("type")).toString().toUtf8().constData(),
-             (pay.value(QStringLiteral("ok")).toBool() ? "true" : "false"),
-             pay.value(QStringLiteral("to")).toString().toUtf8().constData(),
-             pay.value(QStringLiteral("detail")).toString().toUtf8().constData());
     } else if (type == QStringLiteral("frame")) {
         // 兼容旧文本 frame（base64）；v1 客户端走的是二进制帧分支
         const QByteArray b64 = QByteArray::fromBase64(pay.value(QStringLiteral("data")).toString().toUtf8());
@@ -1518,6 +1306,19 @@ void ViewerBackend::onTextMessage(const QString &text)
         QJsonObject data = pay.value(QStringLiteral("data")).toObject();
         logf("[viewer] 指令 %s → %s（%s）", action.toUtf8().constData(),
              state.toUtf8().constData(), detail.toUtf8().constData());
+        // 修复③（2026-10-19）：被控端泄漏看门狗自动收口时，回执的 action 也是
+        // remote_control_stop（本地没发过）—— 照它清理本地状态 + 停 VNC，
+        // 否则老师对着定格画面和"已远控"的陈旧状态继续操作，越点越错。
+        // 本地自己发的 stop 在发出时就已清理（m_remoteControlling 已落），
+        // 不会双重触发；uid 不匹配当前远控对象的回执不误伤。
+        if (action == QStringLiteral("remote_control_stop") && m_remoteControlling
+            && (uid.isEmpty() || uid == m_remoteControlUid)) {
+            logf("[viewer] 被控端侧收掉了远控（uid=%s），本地状态同步清理",
+                 uid.toUtf8().constData());
+            m_remoteControlling = false;
+            m_remoteControlUid.clear();
+            stopVnc();
+        }
         // 探活的往返时间只有 backend 知道（发出时刻记在这儿），算好塞进 data 给界面用
         if (action == QStringLiteral("ping") && m_pingSentMs > 0) {
             data.insert(QStringLiteral("rttMs"),
@@ -1568,6 +1369,12 @@ void ViewerBackend::onBinaryMessage(const QByteArray &buf)
             if (mime == QLatin1String("audio/pcm")) {
                 if (!m_audioPlayback) m_audioPlayback = new AudioPlayback(this);
                 m_audioPlayback->write(buf.mid(3 + hLen));
+                return;
+            }
+            // 远控：云端下发的 vnc-data 帧 = 被控端 VNC 服务产出的**原始 RFB 字节**。
+            // 这是本任务唯一新增的路由（不改 WS 握手）；字节直接喂 libvncclient 的入站缓冲。
+            if (h.value(QStringLiteral("type")).toString() == QStringLiteral("vnc-data")) {
+                onVncData(buf.mid(3 + hLen));
                 return;
             }
             if (h.value(QStringLiteral("type")).toString() != QStringLiteral("frame")) {
@@ -1744,9 +1551,10 @@ void ViewerBackend::refreshDevices(const QJsonArray &arr)
 void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,
                                     FrameSource src)
 {
-    // 2026-10-18：远控隧道(RFB)激活时，常规画面通道（JPEG 轮询 / RTC）整帧让行，
-    // 屏幕上只显示 RFB 解出的画面，避免两套抓屏抢同一张桌面、显示打架。
-    if (m_rfbActive) return;
+    // 2026-10-18：VNC 远控激活时，常规画面通道（JPEG 轮询）整帧让行，
+    // 屏幕上只显示 libvncclient 解出的画面，避免两套抓屏抢同一张桌面、显示打架。
+    if (m_vncActive) return;
+    Q_UNUSED(src)   // 目前只剩 JPEG 一路；VNC 帧走 onVncFrame（不经这里）
     if (jpeg.isEmpty()) {
         logf("[viewer] FAIL 收到一帧但内容是空的");
         return;
@@ -1788,25 +1596,9 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
         return;
     }
 
-    // ── 两路取其一：RTC 活着的时候，JPEG 轮询帧一律不上屏 ──
-    // 被控端现在**同时**在推旧 JPEG 通道和 WebRTC 流（迁移期的现实状况），
-    // 两边都往同一个 m_frame 写，画面就在两张不同毫秒级的截图之间来回跳、
-    // fps 和字节数虚高一倍，用户看到的是"画面有点飘"，日志却一切正常。
-    // 这里定死优先级：RTC 优先；RTC 断流超过 kRtcStaleMs 自动降级回 JPEG
-    // （教室网络抖一下就黑屏是不可接受的，宁可降画质也不能没画面）。
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (src == RtcGrab) {
-        m_rtcLastFrameMs = now;
-    } else if (m_rtcLastFrameMs > 0 && now - m_rtcLastFrameMs < kRtcStaleMs) {
-        static int swallow = 0;
-        if (++swallow == 1 || swallow % 100 == 0) {
-            logf("[viewer] RTC 正在出帧，旧 JPEG 通道的帧不上屏（已让行 %d 帧）", swallow);
-        }
-        return;
-    }
-    const QString wantSource = (src == RtcGrab) ? QStringLiteral("rtc") : QStringLiteral("jpeg");
-    if (m_frameSource != wantSource) {
-        m_frameSource = wantSource;
+    // ── 画面来源标记：常规轮询一律记 jpeg（VNC 帧由 onVncFrame 自己记账）──
+    if (m_frameSource != QStringLiteral("jpeg")) {
+        m_frameSource = QStringLiteral("jpeg");
         emit frameSourceChanged();
     }
     m_frameCount++;
@@ -1837,8 +1629,8 @@ void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &h
         const QString seq = header.isEmpty()
                                 ? QStringLiteral("(旧帧)")
                                 : QString::number(header.value(QStringLiteral("seq")).toInt());
-        logf("[viewer] 画面在动[%s]：第 %d 帧（seq=%s，%d 字节，%.1f fps）",
-             (src == RtcGrab ? "RTC" : "JPEG"), m_frameCount, seq.toUtf8().constData(),
+        logf("[viewer] 画面在动[JPEG]：第 %d 帧（seq=%s，%d 字节，%.1f fps）",
+             m_frameCount, seq.toUtf8().constData(),
              m_lastFrameBytes, m_fps);
     }
     emit statsChanged();
@@ -1934,6 +1726,36 @@ void ViewerBackend::fetchEvents()
     });
 }
 
+// ── 2026-10-19：拉动作执行排行（/api/actions/ranking，最近 7 天）→ 概览页排行卡 ──
+void ViewerBackend::fetchActionRanking()
+{
+    // 2026-10-13 审计 2.9：m_nam 已在构造函数创建，这里直接用
+    QString httpUrl = m_url;
+    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
+           .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0) httpUrl.truncate(wsIdx);
+    httpUrl += QStringLiteral("/api/actions/ranking?days=7&limit=20");
+    QNetworkRequest req{ QUrl(httpUrl) };
+    const QByteArray token = !m_cloudTicket.isEmpty()
+        ? m_cloudTicket.toUtf8() : m_token.toUtf8();
+    if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
+    QNetworkReply *reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 200) {
+            const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            if (doc.isObject()) {
+                m_actionRanking = doc.object().value(QStringLiteral("ranking")).toArray();
+                emit actionRankingChanged();
+            }
+        } else {
+            logf("[viewer] 拉动作排行失败（HTTP %d）", status);
+        }
+        reply->deleteLater();
+    });
+}
+
 // ── 2026-10-11：QML 热更（一源响应式）──
 // 手机端定期拉与桌面一致的 QML 树：GET /api/qml-patch → {version,url}，
 // 与本地 qml-live/.version 不同 → 下载 zip → QZipReader 解压到 qml-live/
@@ -1987,7 +1809,7 @@ void ViewerBackend::openLogFolder() const
     const QString dir = m_logPath.isEmpty()
             ? QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
             : QFileInfo(m_logPath).absolutePath();
-    if (!dir.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+    if (!dir.isEmpty()) steOpenUrlExternal(QUrl::fromLocalFile(dir));   // 提权安全（oauthlogin.h）
 }
 
 void ViewerBackend::requestDiagFeedback()
@@ -2330,15 +2152,15 @@ void ViewerBackend::sendPointer(const QString &kind, double nx, double ny, const
              kind.toUtf8().constData());
         return;
     }
-    // 2026-10-18：远控隧道激活 → 鼠标走 RFB PointerEvent（和 VNC 服务同源，不双重注入）。
-    if (m_rfbActive && m_rfb) {
+    // 2026-10-18：VNC 会话激活 → 鼠标走 RFB PointerEvent（与 VNC 服务同源，不双重注入）。
+    if (m_vncActive && m_vnc) {
         quint8 bit = 1;   // 默认左键
         if (button == QStringLiteral("right")) bit = 2;
         else if (button == QStringLiteral("middle")) bit = 4;
-        if (kind == QStringLiteral("down")) m_rfbBtnMask |= bit;
-        else if (kind == QStringLiteral("up")) m_rfbBtnMask &= ~bit;
+        if (kind == QStringLiteral("down")) m_vncBtnMask |= bit;
+        else if (kind == QStringLiteral("up")) m_vncBtnMask &= ~bit;
         // move 保持当前 mask 不变
-        m_rfb->sendPointer(nx, ny, m_rfbBtnMask);
+        m_vnc->sendPointer(nx, ny, m_vncBtnMask);
         return;
     }
     QJsonObject params;
@@ -2364,10 +2186,10 @@ void ViewerBackend::sendKey(int vk, const QString &action)
 {
     if (m_currentUid.isEmpty()) { logf("[viewer] FAIL 没选设备不发按键"); return; }
     if (vk <= 0 || vk > 255) { logf("[viewer] FAIL vk 越界 %d，不发", vk); return; }
-    // 2026-10-18：远控隧道激活 → 键盘走 RFB KeyEvent（VK→X11 keysym），同源不双重注入。
-    if (m_rfbActive && m_rfb) {
-        m_rfb->sendKeyVk(vk, action == QStringLiteral("down"));
-        logf("[viewer] 远控键→ keysym=0x%X %s", (unsigned)RfbClient::vkToKeysym(vk),
+    // 2026-10-18：VNC 会话激活 → 键盘走 RFB KeyEvent（VK→X11 keysym），同源不双重注入。
+    if (m_vncActive && m_vnc) {
+        m_vnc->sendKeyVk(vk, action == QStringLiteral("down"));
+        logf("[viewer] 远控键→ vk=%d %s", vk,
              action == QStringLiteral("down") ? "down" : "up");
         return;
     }
@@ -2384,70 +2206,121 @@ void ViewerBackend::sendKey(int vk, const QString &action)
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// 远控隧道（2026-10-18 · RFB over WS）
+// 远控（2026-10-18 · VNC over WebSocket · libvncclient）
 //
-// 接管某台设备时拉起：第二条 WS（/ws/tunnel，复用管理端令牌）做字节中继，
-// 在其上跑标准 RFB（见 rfb_client.cpp）解出教室机桌面，并接收老师鼠标/键盘
-// （RFB PointerEvent/KeyEvent 原路发回，由 VNC 服务注入——不走 instruction/input，
-// 避免和 VNC 服务双重注入）。
+// 与上一版（P2 第二条隧道 WS + 手写 RFB）的区别：
+//   · 不再开第二条 WS、不再自己解析 RFB —— 协议栈交给 libvncclient；
+//   · libvncclient 只连**本进程回环端口**（见 vnc_client.cpp），字节由本类与主 WS
+//     互搬：
+//       入站：云端下发 vnc-data 二进制帧 → onVncData() → VncClient::feedIncoming()
+//       出站：VncClient::vncOut → 这里包成 vnc-data 二进制帧 → 主 WS
+//   · 被控端侧是同源的 libvncserver（只监听 127.0.0.1，由 agent 泵字节），公网 5900 不暴露。
+//
+// vnc-data 帧格式（与既有画面帧同信封）：
+//   [1B 版本=1][2B 大端 headerLen][header JSON][原始 RFB 字节流]
+//   header：type=vnc-data / uid / direction（down=管理端→被控端，up=被控端→管理端）
+//           / seq（发送方自增，调试与丢包检测用）。
+//   ⚠️ Payload 直接装 RFB 原始字节，**不在帧内再切分** —— 拆包/粘包由两端各自
+//   的流式消费处理（libvncclient/libvncserver 对 socket 天然按流读）。
 // ──────────────────────────────────────────────────────────────────────
-void ViewerBackend::startRfbTunnel(const QString &uid)
+static quint64 g_vncOutSeq = 0;   // 出站帧序号（仅调试/丢包检测，非协议强依赖）
+
+/** 把一段原始 RFB 字节包成主 WS 的 vnc-data 二进制帧（信封格式与画面帧一致）。 */
+static QByteArray makeVncFrame(const QString &uid, const QByteArray &rfb)
+{
+    QJsonObject h;
+    h.insert(QStringLiteral("v"), 1);
+    h.insert(QStringLiteral("type"), QStringLiteral("vnc-data"));
+    h.insert(QStringLiteral("mime"), QStringLiteral("application/vnc"));
+    h.insert(QStringLiteral("uid"), uid);
+    h.insert(QStringLiteral("direction"), QStringLiteral("down")); // 管理端→被控端
+    h.insert(QStringLiteral("seq"), double(++g_vncOutSeq));
+    const QByteArray hb = QJsonDocument(h).toJson(QJsonDocument::Compact);
+    QByteArray out;
+    out.reserve(3 + hb.size() + rfb.size());
+    out.append(char(1));                                  // 版本
+    out.append(char((hb.size() >> 8) & 0xFF));            // 大端头长
+    out.append(char(hb.size() & 0xFF));
+    out.append(hb);
+    out.append(rfb);
+    return out;
+}
+
+void ViewerBackend::setVncImageProvider(VncImageProvider *p)
+{
+    m_vncProvider = p;
+}
+
+void ViewerBackend::setVncState(const QString &s)
+{
+    if (m_vncState == s) return;
+    m_vncState = s;
+    emit vncStateChanged();
+}
+
+void ViewerBackend::startVnc(const QString &uid)
 {
     if (uid.isEmpty()) return;
-    if (!m_rfb) {
-        m_rfb = new RfbClient(this);
-        connect(m_rfb, &RfbClient::frameReady, this, &ViewerBackend::onRfbFrame);
-        connect(m_rfb, &RfbClient::tunnelOpened, this, [this]() {
-            m_rfbActive = true;
-            m_rfbBtnMask = 0;
-            emit rfbTunnelStateChanged(true);
-            logf("[viewer] 远控隧道贯通，鼠标/键盘切到 RFB 事件通道");
+    if (!m_vnc) {
+        m_vnc = new VncClient(this);
+        connect(m_vnc, &VncClient::frameReady, this, &ViewerBackend::onVncFrame);
+        // 出站：libvncclient 想发的 RFB 字节（协议版本/认证/更新请求/键鼠）→ 主 WS
+        connect(m_vnc, &VncClient::vncOut, this, [this](const QByteArray &data) {
+            if (data.isEmpty() || !m_ws) return;
+            const qint64 n = m_ws->sendBinaryMessage(makeVncFrame(m_currentUid, data));
+            // 诊断（2026-10-18 深夜排障）：down 方向此前完全黑盒 —— 打头几帧看字节去哪了
+            static int dbgSent = 0;
+            if (dbgSent < 4)
+                logf("[viewer-vnc] down 已发 #%d：%d 字节（uid=%s）", ++dbgSent,
+                     int(n), m_currentUid.toUtf8().constData());
         });
-        connect(m_rfb, &RfbClient::status, this, [](const QString &m) { logf("[viewer] [rfb] %s", qPrintable(m)); });
-        connect(m_rfb, &RfbClient::closed, this, [this]() {
-            m_rfbActive = false;
-            m_rfbBtnMask = 0;
-            if (m_frameSource == QStringLiteral("rfb")) {
-                m_frameSource = QStringLiteral("none");
-                emit frameSourceChanged();
+        connect(m_vnc, &VncClient::stateChanged, this, [this](int st) {
+            switch (st) {
+            case VncClient::Connecting: setVncState(QStringLiteral("连接中")); break;
+            case VncClient::Connected:  setVncState(QStringLiteral("已连接")); break;
+            case VncClient::Error:      setVncState(QStringLiteral("连接失败")); break;
+            default:                    setVncState(QStringLiteral("已断开")); break;
             }
-            emit rfbTunnelStateChanged(false);
+            emit vncStateChanged();   // vncActive 与状态同信号，一起刷新
         });
     }
-    // VNC 密码：环境变量 STE_VNC_PASSWORD 优先（同机/内网部署）；可后续扩设置项。
+    // VNC 密码：环境变量 STE_VNC_PASSWORD 优先（被控端 libvncserver 侧的密码）。
     if (m_vncPassword.isEmpty())
         m_vncPassword = qEnvironmentVariable("STE_VNC_PASSWORD", QString()).trimmed();
 
-    // 隧道地址：把 /ws/viewer 换成 /ws/tunnel（同一云端、复用管理端令牌）。
-    QString tunnelUrl = m_url;
-    const int i = tunnelUrl.lastIndexOf(QStringLiteral("/ws/viewer"));
-    if (i >= 0) tunnelUrl = tunnelUrl.left(i) + QStringLiteral("/ws/tunnel");
-    else if (tunnelUrl.endsWith(QLatin1Char('/'))) tunnelUrl = tunnelUrl + QStringLiteral("ws/tunnel");
-    else tunnelUrl = tunnelUrl + QStringLiteral("/ws/tunnel");
+    m_vncActive = true;
+    m_vncBtnMask = 0;
+    if (m_frameSource != QStringLiteral("vnc")) {
+        m_frameSource = QStringLiteral("vnc");
+        emit frameSourceChanged();
+    }
+    setVncState(QStringLiteral("连接中"));
+    emit vncStateChanged();
+    logf("[viewer] 拉起 VNC 会话：uid=%s（RFB 字节走主 WS 的 vnc-data 帧）",
+         uid.toUtf8().constData());
+    m_vnc->start(m_vncPassword);
 
-    m_rfbActive = true;       // 立刻路由输入（RfbClient 在 tunnel.opened 前不会真正下发）
-    m_rfbBtnMask = 0;
-    logf("[viewer] 拉起远控隧道：uid=%s → %s", qPrintable(uid), qPrintable(tunnelUrl));
-    m_rfb->start(tunnelUrl, m_token, uid, m_vncPassword);
-
-    // 不再走常规画面通道：退订这台设备的常规帧，省得两套抓屏抢同一张桌面、带宽打架。
-    QJsonObject un;
-    un.insert(QStringLiteral("uid"), uid);
-    sendEnvelope(QStringLiteral("unsubscribe"), un);
+    // ⚠️ 2026-10-18 深夜实证修复：这里**不能退订**！云端 vncDataToViewer 只投给
+    //    「订阅中」的管理端（谁订阅投谁），退订之后被控端的 up 帧会被云端静默丢弃
+    //    —— RFB 握手第一帧（ProtocolVersion 12B）就到不了 viewer，画面永远黑。
+    //    （此前退订的动机是"两套抓屏抢桌面"，实际上 agent 侧抓屏不受订阅影响，
+    //     真正的互斥靠 m_vncActive 让 applyFrameBytes 让行，见 onBinaryMessage。）
+    //    stopVnc 里的重新订阅保留（幂等，双保险）。
 }
 
-void ViewerBackend::stopRfbTunnel()
+void ViewerBackend::stopVnc()
 {
-    if (!m_rfbActive && !m_rfb) return;
-    m_rfbActive = false;
-    m_rfbBtnMask = 0;
-    if (m_rfb) m_rfb->stop();
-    if (m_frameSource == QStringLiteral("rfb")) {
+    if (!m_vncActive && !m_vnc) return;
+    m_vncActive = false;
+    m_vncBtnMask = 0;
+    if (m_vnc) m_vnc->stop();
+    if (m_vncProvider) m_vncProvider->clear();
+    if (m_frameSource == QStringLiteral("vnc")) {
         m_frameSource = QStringLiteral("none");
         emit frameSourceChanged();
     }
-    emit rfbTunnelStateChanged(false);
-    logf("[viewer] 远控隧道已停止");
+    setVncState(QStringLiteral("已断开"));
+    logf("[viewer] VNC 会话已停止");
     // 恢复常规画面通道：重新订阅当前设备。
     if (!m_currentUid.isEmpty() && m_screenActive) {
         QJsonObject sp;
@@ -2456,26 +2329,37 @@ void ViewerBackend::stopRfbTunnel()
     }
 }
 
-void ViewerBackend::onRfbFrame(const QImage &img)
+void ViewerBackend::onVncData(const QByteArray &data)
 {
-    if (img.isNull()) return;
-    if (m_frameSource != QStringLiteral("rfb")) {
-        m_frameSource = QStringLiteral("rfb");
+    if (data.isEmpty()) return;
+    if (!m_vnc) {
+        logf("[viewer] WARN 收到 vnc-data 但 VNC 客户端未建立（丢弃 %d 字节）", data.size());
+        return;
+    }
+    m_vnc->feedIncoming(data);
+}
+
+void ViewerBackend::onVncFrame(const QImage &img)
+{
+    if (img.isNull() || !m_vncActive) return;
+    if (m_frameSource != QStringLiteral("vnc")) {
+        m_frameSource = QStringLiteral("vnc");
         emit frameSourceChanged();
     }
     m_frameCount++;
     m_frame = img;
-    m_frameUid = m_currentUid;
+    m_frameUid = m_currentUid;              // libvncclient 帧不带 uid，按当前这台记账
     m_lastFrameBytes = (int)img.sizeInBytes();
     const quint64 fp = frameFingerprint(img);
     m_sameFrameStreak = (fp == m_frameHash) ? (m_sameFrameStreak + 1) : 0;
     m_frameHash = fp;
     setStatic(m_sameFrameStreak >= kStaticStreak);
+    if (m_vncProvider) m_vncProvider->update(img);   // image://vnc/live
     if (!m_screenStatic) emit frameChanged();
-    emit rfbFrameReady(img);
+    emit vncFrameReady(img);
     emit statsChanged();
     if (m_frameCount % 30 == 1) {
-        logf("[viewer] 远控画面在动[RFB]：第 %d 帧（%dx%d）",
+        logf("[viewer] 远控画面在动[VNC]：第 %d 帧（%dx%d）",
              m_frameCount, img.width(), img.height());
     }
 }

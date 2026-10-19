@@ -19,7 +19,7 @@
 | 日志 | `…\viewer-run.log` | `D:\Stelarith\Stelarith-viewer-qt\viewer-run.log` |
 | 截图 | `…\shots` | `D:\Stelarith\Stelarith-viewer-qt\shots` |
 
-> 同批迁移的还有 `Stelarith-control-qt`、`Stelarith-cloud-ws`。
+> 同批迁移的还有 `Stelarith-control-qt`、`Stelarith-cloud`。
 > 总册见 `D:\Stelarith\路径变更告知书-2026-10-04.md`。
 
 ---
