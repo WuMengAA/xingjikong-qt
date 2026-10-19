@@ -262,3 +262,40 @@ export function closeStore() {
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
+
+/**
+ * 动作执行排行（2026-10-19 · 用户指令②「广播之类的排行」方向 A）。
+ * 统计 instructions 表按 action 分组：执行次数 / 成功数 / 失败数 / 最近一次时间。
+ * 时间窗可选：days=7（默认）→ dispatched_at >= now - 7d。
+ * 返回按次数降序的数组；state 只计"已出结果"的（done/failed），
+ * 仍在途的 dispatched 不计入次数（但计入总下发数，供"下发 vs 完成"对比）。
+ */
+export function actionRanking({ days = 7, limit = 20 } = {}) {
+  if (!db) return [];
+  try {
+    const since = Date.now() - days * 24 * 3600 * 1000;
+    const rows = db.prepare(`
+      SELECT action,
+             COUNT(*)                                          AS total,
+             SUM(CASE WHEN state IN ('done','failed') THEN 1 ELSE 0 END) AS settled,
+             SUM(CASE WHEN result = 'done' THEN 1 ELSE 0 END)  AS ok,
+             SUM(CASE WHEN result = 'failed' THEN 1 ELSE 0 END) AS fail,
+             MAX(dispatched_at)                                 AS lastAt
+      FROM instructions
+      WHERE dispatched_at >= ?
+      GROUP BY action
+      ORDER BY settled DESC, total DESC
+      LIMIT ?`).all(since, limit);
+    return rows.map((r) => ({
+      action: r.action,
+      total: Number(r.total || 0),
+      settled: Number(r.settled || 0),
+      ok: Number(r.ok || 0),
+      fail: Number(r.fail || 0),
+      lastAt: r.lastAt || 0,
+    }));
+  } catch (e) {
+    console.error(`[cloud] FAIL 动作排行查询异常: ${e.message}`);
+    return [];
+  }
+}

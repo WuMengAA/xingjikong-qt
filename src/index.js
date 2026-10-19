@@ -123,7 +123,7 @@ function restartCloudTask() {
 import { verifyViewerTicket, mintViewerTicket, verifyAgentTicket } from './ticket.js';
 import { createTunnel } from './tunnel.js';   // 2026-10-18：远控隧道（RFB over WS，替代 WebRTC 主路）
 import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
-import { initStore, sweepQueue, storeReady, receiptsByNotice } from './store.js';
+import { initStore, sweepQueue, storeReady, receiptsByNotice, actionRanking } from './store.js';
 import { initInteract, interactReady, sweepInteract,
   submitSongRequest, submitFeedback, submitBlessing,
   listSongRequests, listBlessings, feedbackSummary,
@@ -487,6 +487,8 @@ const server = http.createServer((req, res) => {
     u.pathname === '/api/ota/latest' || u.pathname.startsWith('/api/repairs') ||
     u.pathname === '/api/recordings' || u.pathname === '/api/qml-patch' ||
     u.pathname === '/api/qml-patch/download' || u.pathname.startsWith('/api/interact') ||
+    // 2026-10-19 · 动作排行（管理面统计，需鉴权）
+    u.pathname === '/api/actions/ranking' ||
     // 2026-10-18 · 点歌请求：教室端发起，但**必须鉴权**——
     // 教室身份由班级代表，不允许公网匿名 POST 刷爆 VoiceHub 的点歌配额。
     u.pathname === '/api/songs/request' || isAdminApi;
@@ -618,6 +620,14 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && u.pathname === '/api/events') {
     return send(200, { ok: true, events: listEvents(Number(u.searchParams.get('limit') || 50)) });
+  }
+
+  // 2026-10-19 · 动作执行排行（用户指令②方向 A：基于云端 instructions 表）
+  //   GET /api/actions/ranking?days=7&limit=20 → 按执行次数降序的动作排行
+  if (req.method === 'GET' && u.pathname === '/api/actions/ranking') {
+    const days = Math.max(1, Math.min(90, Number(u.searchParams.get('days') || 7)));
+    const limit = Math.max(1, Math.min(50, Number(u.searchParams.get('limit') || 20)));
+    return send(200, { ok: true, ranking: actionRanking({ days, limit }) });
   }
 
   if (req.method === 'GET' && u.pathname === '/api/instructions/pending') {
