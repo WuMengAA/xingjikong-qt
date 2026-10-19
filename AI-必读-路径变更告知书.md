@@ -51,3 +51,25 @@
 ## 留给你的引用
 
 - `_archive\` 内是已归档的旧日志与临时脚本（`cloud.log` / `cloud8788.log` / `probe.out` / `tmp-*.py` / `tmp-*.mjs`）
+
+---
+
+## 2026-10-20 改名：`Stelarith-cloud-ws` → `Stelarith-cloud`（去 ws 后缀）
+
+用户点单「云端改名，去 ws 后缀」。**目录/包名/计划任务/bare 远端全部切换；令牌、端口、协议零改动。**
+
+| 项 | 旧 | 新 |
+|---|---|---|
+| 工程目录 | `D:\Stelarith\Stelarith-xingjikong-qt\Stelarith-cloud-ws` | `D:\Stelarith\Stelarith-xingjikong-qt\Stelarith-cloud` |
+| package.json `name` | `stelarith-cloud-ws` | `stelarith-cloud` |
+| 计划任务 `StelarithCloud` | `…\Stelarith-cloud-ws\run-cloud.cmd` | `…\Stelarith-cloud\run-cloud.cmd` |
+| 计划任务 `StelarithCloudWatchdog` | `…\Stelarith-cloud-ws\cloud-watchdog.cmd` | `…\Stelarith-cloud\cloud-watchdog.cmd` |
+| bare 远端（remote `outer`） | `D:/Stelarith/Stelarith-cloud-ws` | `D:/Stelarith/Stelarith-cloud` |
+
+**不变**：`.env`（含 `CLOUD_WS_TOKEN` / `CLOUD_VIEWER_TOKEN`，客户端成对不受影响）、8788 端口、
+`run-cloud.cmd` / `cloud-watchdog.cmd` 内部逻辑（均 `%~dp0` 自定位，搬家天然无感）。
+
+**生产在跑时的改名方法（2026-10-20 实证）**：`Disable-ScheduledTask StelarithCloudWatchdog`
+→ `Stop-ScheduledTask StelarithCloud`（node 句柄锁目录，`git mv` 会 Permission denied，属正常）
+→ `git mv Stelarith-cloud-ws Stelarith-cloud` → 改两条任务动作 → `Enable` + `Start`。
+验证：8788 重新 LISTENING、看门狗手动触发 exit 0（no-op）、`/api/public/ota` 正常应答。
