@@ -1,98 +1,66 @@
-# Stelarith-xingjikong-qt · 项目笔记（速查）
-> 细节见 `.workbuddy/memory/YYYY-MM-DD.md`（append-only）与根 `docs/*.md`（归档）。压缩于 2026-10-17（19.6K→9.9K）。
+# Stelarith-xingjikong-qt · 项目速查
+> 细节见 `.workbuddy/memory/YYYY-MM-DD.md`（append-only）。**说明文档统一写 README.md，不再新建 docs/ 独立文档**（用户 2026-10-19 定）。精简于 2026-10-19。
 
 ## 0 铁律
-- 总纲=skill `stelarith-project-overview`；裁决序：**生产事故 > 用户点单 > 已就绪未接线 > 战略**。
-- 属实 bug 直接修并同轮闭环。**只改三工程** `{cloud-ws,control-qt,viewer-qt}`（`D:\Stelarith\` 下同名三份是 bare 远端，只 push）。
-- **顺带发现 ≠ 点名重点**：只报清单等点单；不许在烂地基上叠补丁。取证避让：不跑被控端/不动桌面；「复制」只 cp 不 mv。
-  红线可越（已授权）但先备份 + 汇报。
+- 裁决序：**生产事故 > 用户点单 > 已就绪未接线 > 战略**。属实 bug 直接修并同轮闭环。
+- **只改三工程** `{Stelarith-cloud,Stelarith-control-qt,Stelarith-viewer-qt}`（2026-10-20 云端改名去 ws 后缀；`D:\Stelarith\` 同名三份是 bare 远端，只 push）。
+- **顺带发现 ≠ 点名重点**：只报清单等点单；不许在烂地基上叠补丁。取证避让：不跑被控端/不动桌面；「复制」只 cp 不 mv。红线可越（已授权）但先备份+汇报。
+- **避开工作区运行程序**：部署/调试一律到生产安装目录，工作区只编译。
 
 ## 1 部署 / 发版
-- ⚠️ **生产真源＝`C:\Program Files\Stelarith\`**（`StelarithAgentGuard` 每 10 分钟按进程名拉起）⇒ **换生产 = 换 exe + `qml/` 整目录**
-  （QML 从 exe 旁读盘，混版 ⇒ `UiRegistry is not a type`）。线上现为 **0.6.44**（stable）；viewer 0.6.37。
-- ⚠️ **C 盘长期告急**（剩 10–850MB）：打安装包/整树 cp 会失败；只留 `_appqml-bak-pre-*` 小备份。
-- 443/wss：`control.245959623.xyz/ws/agent`(被控)、`/ws/viewer`(管理)；cloudflared 回源 8788；本地验证一律 `127.0.0.1:8788`。
-- 版本真源＝云端 `ota.json`（**UTF-8 无 BOM**，带 BOM ⇒ latest:null）。`bump-version.mjs` 改 4 副本，**出包前先 bump**；
-  `publish-release.mjs` 发布；`ota.json.url` 同时是装机卡链接 ⇒ 只挂全量件。
-- **stable 必须"先 bump 再发"**：bump → 重编 → `build-agent-installer.sh`（Inno Setup 6，ISCC 在 `%LOCALAPPDATA%\Programs\Inno Setup 6\`）→ publish。
-  ⚠️ bump 会同时改 viewer 2 处 ⇒ viewer 仓要单独提交版本号。
-- **「OTA 不生效」= 三层**（已全修）：①端侧只在注册回执看一次版本 ⇒ `otaSelfCheck()` 周期复查；②stable 长期没发布；
-  ③`mandatory:false` 无人值守永不升 ⇒ 空闲≥10min 自动装。
-- ⚠️ **同一工作树有并行工作线**：`a1e915c`(H264 addSSRC)/`03bafbc` 已提交。**提交前先 `git log`**；同文件有他人改动时
-  **别指望"留着不提交"**（我的 #171 修复就这样被他们 commit 带走）。装机后按字节核对，不看版本号。
+- 生产真源=`C:\Program Files\Stelarith\`（AgentGuard 每 10min 按完整路径巡检；互斥体 `Global\StelarithAgentQt_Singleton`）⇒ **换生产=换 exe + `qml/` 整目录**（QML 从 exe 旁读盘，混版⇒`UiRegistry is not a type`）。线上 agent 0.6.44 / viewer 0.6.37。
+- **云端生产=工作区份** `D:\Stelarith\Stelarith-xingjikong-qt\Stelarith-cloud\`（计划任务 StelarithCloud/StelarithCloudWatchdog 直指；2026-10-20 从「外部份」切回并改名，子仓 README 旧说法已更正）。
+- ⚠️ C 盘长期告急（剩 10–850MB）：打安装包/整树 cp 会失败；只留小备份。
+- 版本真源=云端 `ota.json`（**UTF-8 无 BOM**）；`bump-version.mjs` 改 4 副本，**stable 必须"先 bump 再发"**（bump→重编→build-agent-installer.sh→publish-release.mjs）；bump 会同时改 viewer 2 处。
+- **最新版本=0.6.45**（用户 2026-10-19 指定；当前 4 副本=0.6.44 一致，发版即 `bump-version.mjs bump`）。
+- ⚠️ **安卓 manifest 不在 bump 脚本覆盖内**：`viewer-qt/android/AndroidManifest.xml` 停在 `versionCode=1`/`versionName=0.6.25`（10-11 老值）。发安卓必须手改 versionName→当期版本 + versionCode→**必须 >1**（已装包全是 1，不涨必拒装；推荐 semver 映射 0.6.45→645）。bump 脚本纳入 manifest 待点单。
+- ⚠️ 同一工作树有并行工作线：**提交前先 `git log`**；装机后按字节核对，不看版本号。
+- 443/wss：`control.245959623.xyz/ws/agent|viewer`；cloudflared 回源 8788；本地验证一律 `127.0.0.1:8788`。
 
 ## 2 编译 / 自检
-- Qt **6.12.0** `D:/QTqwq/6.12.0/msvc2022_64`；被控端 `scripts/_build_agent.py`（viewer 用 `_build_viewer.py`，-j4）。
-- ⚠️ MSVC C1060 ⇒ `-j1`。改 CMakeLists 源列后手动 configure（带脚本同款 -D）；`file(GLOB)` 不自动重查 ⇒ 改 resources 名后重跑。
-- 离屏自检：`STE_ALLOW_MULTI=1 ... -platform offscreen`（无 CJK ⇒ 加 `msyh.ttc`）；日志走 OutputDebugString ⇒
-  判定看**退出码**（10 过/20 败/30 兜底），看文字加 `QT_ASSUME_STDERR_HAS_CONSOLE=1`。
-- ⚠️ **探针 QML 来自 `build/qml`** ⇒ 改共享岛后先 `cp shared-qml/island/*.qml build/qml/island/`。
-- ⚠️ **探针链的是 agent 的 `island.cpp.obj`** ⇒ 改 enum/头文件后**先重编 agent**（否则新枚举落 else：实测 Banner 变 Fullscreen
-  752×752 而 form 仍 capsule）。判据：几何=全屏尺寸却串是 capsule ⇒ 先疑 obj 混版。
-- **AUTOMOC**：被 include 的头会单独成 TU（不能引用 main.cpp 符号）；含 Q_OBJECT 的头必须显式列入 add_executable（否则 LNK2001）；
-  moc 对 .cpp 输入生成的 TU 不含原文件 ⇒ 夹具拆头；include 自家头绝不能进匿名 namespace。`LNK1104` = 隔离实例占用产物（先看 ExecutablePath）。
+- Qt 6.12.0 `D:/QTqwq/6.12.0/msvc2022_64`；被控端 `scripts/_build_agent.py`（viewer `_build_viewer.py`，-j4）。
+- ⚠️ MSVC C1060⇒`-j1`。改 CMakeLists 源列后手动 configure；`file(GLOB)` 不自动重查。
+- 离屏自检：`STE_ALLOW_MULTI=1 ... -platform offscreen`（无 CJK⇒加 `msyh.ttc`）；判定看**退出码**（10 过/20 败/30 兜底），文字加 `QT_ASSUME_STDERR_HAS_CONSOLE=1`。
+- AUTOMOC：被 include 的头会单独成 TU；含 Q_OBJECT 的头必须显式列入 add_executable；`LNK1104`=隔离实例占用产物。
+- ⚠️ VNC 线构建用隔离目录 `build-vnc/`（防并发 configure 撞车）；部署前 grep CMakeCache + 二进制 strings 双验签。
 
 ## 3 仓库 / UI / 探针
 - github `WuMengAA/xingjikong-qt` 四分支；curl 到 github 恒 000，push 用 `git -c credential.helper=`。根仓即 meta（gitlink，无 remote）。
-- QML 纪律：字号 12/13/14/16(+20)；**锚只锚 parent**；不用 Qt Button/TextField；令牌实例 id 用 `tok` 不用 `md3`；
-  `Flickable` 显式 `contentWidth: width`；符号字形（▶♪）教室机 tofu ⇒ `SvgIcon` 或单字汉字。NSIS `.nsi` UTF-8 带 BOM。
+- QML 纪律：字号 12/13/14/16(+20)；**锚只锚 parent**；不用 Qt Button/TextField；令牌实例 id 用 `tok`；`Flickable` 显式 `contentWidth: width`；符号字形教室机 tofu⇒`SvgIcon` 或汉字。NSIS `.nsi` UTF-8 带 BOM。
 - 提交路径限定（**永不 `-A`**）。探针 `scripts/_*.py`/`_*.mjs` 不入库（白名单 `_build_agent.py`、`_voicehub_fake_server.mjs`）。
-- 门禁（`shared-qml/scripts/`）：`test-ui-contract`(32) `test-action-manifest`(23) `test-island-metrics`(11) `test-manifest-scope`(15)
-  `test-module-registry`(10) `test-agent-qml-deps`(12) `test-island-forms`(21) `diff-island-tree`。
+- 门禁（`shared-qml/scripts/`）：test-ui-contract(32) test-action-manifest(23) test-island-metrics(11) test-manifest-scope(15) test-module-registry(10) test-agent-qml-deps(12) test-island-forms(21) diff-island-tree。
 
-## 4 已交付（细节查 git log / docs）
-- U1–U5 + D 档：共享 ui 基座（Md3+12 件）、`UiContract`+`UiRegistry`+`UiPanelHost`、14 面板声明化、44 动作单一真源、
-  `ui/UiPageHost.qml`、被控端控制面板 5 页（`2b30a7a`/`a8b843e`）。岛基座：管理端跑共享 IslandRoot + 被控端 qml-patch 并岛（MD5 门禁）。
-- **内置模块层 + U盘**（`b851e67`）：`src/modules/`(modulehost/usb/voicehub) 编进 agent，与 PluginHost 并列；`executeAction` 内置优先；
-  U盘走 WM_DEVICECHANGE + Centered 询问，只开根目录、不自动运行、考试静默。
-- **VoiceHub**（`92be4c6`）：SSE `{base}/api/music/websocket` + 30s 轮询 `GET /api/music/broadcast` 兜底（clamp 5s）+ staleSec 自愈（10s）；
-  控制三件（点歌/歌词/广播下发）留桩默认关（x-api-key 未定）。
-- **多界面**（`f12f79b`）：`face` 0概/1媒/2史/3态 + `facesOn`/`facePanelOn`；右上竖排面签 22×16；概览面零改动。
-- **形态五档**（`3a82ec5`）：Banner 通栏（可用宽−48 ≤1280，高 72/60，单行 elide）；Mini 右下角标（112 方牌/96 正圆，点一下升格）；
-  `showWithActions` 有按钮强制 Centered；开关 `STE_QT_ISLAND_DEMO_FORM=banner|mini|mini-nodesc|centered|fullscreen`。
-- **G2 圆角 + 大卡片**（`87afff8`）：`IslandSurface.qml`（Canvas 超椭圆 n=5）六档圆角 + C++ `steG2Path()` 同口径；
-  补 `IslandCardFace`/`IslandFullscreenFace`（此前两档套胶囊版式 = 用户说的"丑"）；几何改用 availableGeometry。
-- **通知记录与逻辑**（`c2ba193`）：`id/category/level/read/dateGroup`；`historyCategoryOf()` 空串=不进历史；四分类 告警>指令>系统>消息；
-  筛选**收口在 `historyOrder()`**（防"看第 N 条点开第 M 条"）；筛选行默认收起、收起即清筛子；老数据无 `read` ⇒ 已读。
-- **通知时间**（`dd34d80`+`983e30f`）：岛上本体按形态显示 `noticeTime`；`m_shownTs` 在 showIsland 落点（ts=发生时刻）；
-  timeStr/dateGroup 在 bridge **现算**不用 JSON 死值。归档 `docs/归档-通知写上时间-2026-10-17.md`。
-- **WebRTC #171**（随 `a1e915c`）：`renegotiate` 先 `Rollback` 再显式 `Type::Offer`，见 §6。
+## 4 已交付（细节查 git log）
+U1–U5+D 档（共享 ui 基座/14 面板声明化/44 动作单一真源/被控端 5 页）；内置模块层+U盘（`b851e67`）；VoiceHub（`92be4c6`）；多界面/形态五档/G2 圆角（`f12f79b`/`3a82ec5`/`87afff8`）；通知记录与时间（`c2ba193`+`dd34d80`+`983e30f`）；ClassIsland 插件线 v1.5.0.0（连被控端 `ws://127.0.0.1:26789` 认领 4 action）；CIMS 课表供给（Stelarith-cloud `c6ebdac`，必须 node:http 不能 fetch）。
 
 ## 5 待点单（只报清单，等点头）
-1. `permOk("admin")` 恒真越权（teacher 可锁屏）。2. `check-circle` 图标名错配（资源叫 `circle-check.svg`，历史图标加载失败刷日志）。
-3. viewerbackend 5 处 URL 派生未收敛。4. 站点 `/api/device/activate` 不回 classCode。
-5. `Md3Btn.qml:11` 自定义 `enabled` 盖掉 `Item.enabled`。6. 管理端下发 `kind=banner|mini` 的入口（解析已在 main.cpp 就位）。
-7. **stable 0.6.44 不含 G2 / 通知记录 / 通知时间三批** ⇒ 是否 bump ≥0.6.45 重打包（等他线收口一并 bump，别抢版本号）。
+1. `permOk("admin")` 恒真越权。2. `check-circle` 图标名错配。3. viewerbackend 5 处 URL 派生未收敛。4. 站点 `/api/device/activate` 不回 classCode。5. `Md3Btn.qml:11` 自定义 `enabled` 盖掉 `Item.enabled`。6. 管理端下发 `kind=banner|mini` 入口。7. ~~stable 0.6.44 是否 bump≥0.6.45~~ **已定：0.6.45**（用户 2026-10-19）——G2/通知记录/通知时间三批 + #368/#369/#370 随 0.6.45 发；流程 bump→重编→installer→publish-release.mjs；安卓另手改 manifest（name 0.6.45 + code>1，推荐 645）→ make-apk.ps1 → 发 `WuMengAA/xingjikong-qt` release（tag 待给）。8. 远控 VNC 收口：DXGI 化已部署生产（sha256 `25bffbf4…`）；14:58 实测（id=4730）抓到位——**「没有画面」根因=200KB/s 配额丢全屏首帧**（`main.cpp:7337`，275KB 首帧>204800 ⇒ 有 `桥出向` 无 `up 已发`，viewer 无基础图全空白；丢帧在 WS lambda，libvncserver 不重发）；次要干扰=GameViewer 虚拟屏横跳拓扑；**会话泄漏**（viewer 离开不发 stop ⇒ 岛长期冻结）。待点单：首帧免配额/配额上调、DXGI 输出选择加固、会话泄漏收口、关 id=4730。两仓 git 提交 + bump 发版仍等他线。
 
 ## 6 踩坑实证（按"还会再踩"排序）
-- ⚠️⚠️ **时间戳在「事件发生」时落，不在「消费」时算**：历史 ts 原取归档时刻（归档在"被顶掉/收回空闲"）⇒ 10:00 弹的记成 10:30、
-  23:59 弹的分到第二天组。**派生时间文本（分组/相对时间）绝不能持久化**（昨天算的「今天」今天看还是「今天」）。
-  ⇒ 落盘只存原始 ts、显示时现算。取证：探针 `--hold N` 让第一条停 N 秒再被顶掉，ts 比归档写入早 ~N 秒即成立。
-- ⚠️⚠️ **libdatachannel `setLocalDescription` 的 state 陷阱**（#171）：`Unspec` 按 signaling state **猜类型** —— Stable 猜 Offer
-  所以首次能工作，掩盖了"非 Stable 静默忽略"。首次 offer 未收 answer ⇒ 停在 `HaveLocalOffer(1)`，此后 `setLocalDescription(Offer)`
-  走 `peerconnection.cpp:132` default：`LOG_WARNING + return`（不抛不回调）⇒ **先 `Rollback` 再显式 `Type::Offer`**。
-  判据打在 `signalingState()` 上，别只看"有没有 offer"。
-- ⚠️⚠️ **探针跨线程 connect 不带 context ⇒ 直连在库线程跑**：回调里注册 `QTimer::singleShot` 撞
-  `QBasicTimer::start: event dispatcher already destroyed`（表现为"函数没被调用"）。必须带 `&s` + `Qt::QueuedConnection`。
-  裸 `PeerConnection` 只 addTrack 不配 mediaHandler/不建 dataChannel 崩 0xC0000409。
-- ⚠️⚠️ **截图/几何取证必须声明 DPI 感知**（`SetProcessDpiAwareness(2)`）：否则返回**虚拟化坐标**，右侧一列+底部一条永远在截图外，
-  被误判成"没画"。判据：彩条标尺（80 逻辑→120px ⇒ 缩放 1.5）。
-- ⚠️⚠️ **qmllint 给假安全感**（不查目录导入类型缺失，0 Error 也能加载失败）——唯一可靠出口是**运行时探针**。
-- ⚠️ **被控端没有 `QtQuick.Controls` 也没有 `QtQuick.Shapes`**（有 qml 没 C++ 后端）⇒ 只能用 QtQuick 基础类型；G2 等自定义路径只能 `Canvas`。
-  `Rectangle.radius` 是圆弧不是 G2，收益只在 20~28px 档。**Canvas 超椭圆角**：曲线起点必须等于前一段 `lineTo` 落点
-  （sin/cos 写反 ⇒ 路径自交 ⇒ 露白三角）。
-- ⚠️ **带 `elide` 的 Text，`implicitWidth` 跟 width 走** ⇒ 在 width 绑定里读它必成环（真机每秒刷屏），用 `TextMetrics.advanceWidth`
-  （门禁 `test-island-forms` 会拦）。**QML 隐式作用域**：裸标识符搬文件后链断且无声；`property var X: Y` 要替换 RHS 防自引用；
-  删组件判据是**类型名**不是路径；`z` 只在同父级比较 ⇒ 盖不住就关下层 `visible`；跨父级锚被静默丢弃；
-  隐藏不零高（锚链对不可见 item 仍起效）；普通 `Item` 的 height 不跟 implicitHeight。
-- ⚠️ **`setProperty` 后 QML 绑定异步重算**：同帧读派生属性得 `<invalid>`（探针假红）⇒ 注入留 ≥500ms。
-- ⚠️ **契约默认值是"对一半人正确"的陷阱**：`UiContract.js` 的 `scope` 默认 `["viewer"]` ⇒ 被控端漏写就全被过滤（零日志）。
-- ⚠️ **`qBound` 下限会钳掉探针的"压缩时间参数"** ⇒ 等待窗口按**下限值**设计，设计探针前先读 clamp。
-- ⚠️ **假服务必须复刻真实载荷形状**：SSE `broadcast_state.data` 挂 nextUp/listeners、轮询端点平级 ⇒ 两种都认；线上 SSE **无 `event:` 行**，
-  行尾 `\n`/`\r\n` 必须归一。**门禁正则**会误杀合法写法/命中注释 ⇒ 先剥注释，断言锁到具体行。
-- ⚠️ **Windows 原生事件**：`PostThreadMessageW` 投的 WM_DEVICECHANGE **到不了** QAbstractNativeEventFilter；SendMessage 到 Qt 顶层窗口能到。
-  `GetLastInputInfo.dwTime` 是 32 位 tick ⇒ 只能与 `GetTickCount()` 做 32 位差。
-- ⚠️ **cl 链接步绝不带 /TP**；Git Bash 把 `/EHsc` 当路径 ⇒ cl 参数走 Python subprocess（list）。**嵌套 lambda 捕获 `app` ⇒ C2326** ⇒ 用 `qApp`。
-- ⚠️ **`availableGeometry()` 的 x/y 偏移让"反推可用区"算错**（本机 ag=(48,0,1659,960)）⇒ 几何核对把 ag 打进日志。
-- ⚠️ 探针自身会骗人：QML 匿名类名每次变（先剥序号）；`Repeater` delegate 的 objectName 不在 QObject 树；参数"看着该生效"先验它真生效。
-  写死的"到点才动作"延迟让探针没法取证 ⇒ 新逻辑延迟做成环境变量可调。隔离实例日志是 **UTF-8**（别 iconv GBK）。
+- ⚠️ **云端目录改名先停服务**：node 占着日志/DB 句柄，`git mv` 必 Permission denied；时序=Disable 看门狗→Stop 任务→改名→改任务动作→Enable+Start（`%~dp0` 自定位的 .cmd 搬家零影响；看门狗手动触发 exit 0=no-op 验证）。
+- ⚠️⚠️ **QML 属性自遮蔽（2026-10-20 实证，探针抓到的生产级真 bug）**：Dialog 里 `Child { theme: ctx.window.th; backend: ctx.window.backendRef; ctx: ctx }`——右值裸 `ctx` 在**子对象作用域优先解析到子组件自己的属性**。子组件一旦也声明 `ctx`，三行全变自引用 ⇒ theme/backend/ctx 恒 undefined，面板能开但全死。规则：**宿主注入上下文的子组件，属性名必须避开 `ctx`（本批改名 `panelCtx`），且 Dialog 侧赋值一律显式 `dlgId.ctx` 限定**。Popup 无 `children`（内容在 `contentItem`）——探针遍历对象树必须兼顾。
+- ⚠️⚠️ **时间戳在「事件发生」时落，不在「消费」时算**；派生时间文本绝不持久化，显示时现算。
+- ⚠️⚠️ **截图/几何取证必须声明 DPI 感知**（`SetProcessDpiAwareness(2)`）否则虚拟化坐标。
+- ⚠️⚠️ **qmllint 给假安全感**——唯一可靠出口是运行时探针。被控端无 QtQuick.Controls/Shapes⇒G2 只能 Canvas。
+- ⚠️⚠️ **`#ifdef Q_OS_WIN` 在纯 Win32 文件里是陷阱**：不 include Qt 头⇒Q_OS_WIN 恒假⇒静默编占位实现。纯 Win32 用 `_WIN32`。
+- ⚠️ **心跳必须保证带宽**：帧洪流灌满上行⇒心跳迟到 28s+⇒云端 30s 踢线。帧必须过同一条背压闸（积压>1MB 丢批+每秒配额，帧可丢心跳不可丢）。
+- ⚠️ **QTcpSocket 每次 close+deleteLater 会崩**⇒长生命周期桥接 socket 改终身单例（cleanup 只 abort()）。
+- ⚠️ **libvncserver win32 threads 无 join**：`rfbRunEventLoop(TRUE)` 每客户端 spawn 线程，shutdown 时 UAF⇒自管 QThread 循环 `rfbProcessEvents`，stop 先 wait 再销毁。
+- ⚠️ **崩溃取证不必等 WinDbg**：WER「错误偏移」对 x64 即 RVA，PE 导出表反解函数名。先装 WER LocalDumps 指到 D 盘。
+- ⚠️ **cl 链接步绝不带 /TP**；Git Bash 把 `/EHsc` 当路径⇒cl 参数走 Python subprocess（list）。
+- ⚠️ **状态文件「成功不清错误」=长期误导**：`lastResult=ok`+`failCount=0` 才是真相。同一条状态必须同源写。
+- ⚠️ **云端"逐帧事件"是事件表杀手**：帧路径只累计，会话边界/15s 窗口聚合入账。
+- ⚠️ 历史陷阱：WebRTC/libdatachannel 已彻底移除（2026-10-18 清道夫），勿复辟。
+- 其他：带 `elide` 的 Text 用 `TextMetrics.advanceWidth`；`setProperty` 后 QML 绑定异步重算（同帧读得 `<invalid>`，注入留 ≥500ms）；WM_DEVICECHANGE 要 SendMessage 到 Qt 顶层窗口；QObject 子对象按添加顺序析构。
+
+## 7 远控 VNC 线（in-agent，进行中）
+- **架构**：被控端 `VncServer`（libvncserver）只绑 `127.0.0.1` loopback；RFB 字节走**主 WS `vnc-data` 二进制帧**经云端中继（`vncDataToAgent/Viewer` 按 uid 双向，谁订阅投谁）；viewer `VncClient` 回环 `127.0.0.1:0`+QTcpServer+QThread 跑 rfbInitClient。
+- **编码/帧率**：720p 内接 + HexTile（`encodingsString="hextile copyrect raw"`，hextile 必须第一）；fps 链路 viewer→`VncServer::start(0,want)`→抓屏间隔 clamp 33..1000ms；VNC up 帧过背压闸（200KB/s 配额+<1KB 豁免，`main.cpp:7337`）；远控期间停发 JPEG。
+- ⚠️⚠️ **本机装着 GameViewer（网易远程）虚拟显示器**（`GameViewer Virtual Display Adapter` + GameViewerService 等 4 进程常驻）：其虚拟屏激活/退出会**搅乱显示拓扑**——DXGI「含原点输出」选择随之翻版（实测 dup 尺寸 1280x720↔2560x1440↔1024x768 横跳，每次横跳=ACCESS_LOST+丢帧+等首帧）。远控测试前建议先退 GameViewer；根治=输出选择改「取最大模式/与 GetSystemMetrics 对齐」。
+- ⚠️⚠️ **200KB/s VNC 配额会吞掉全屏首帧 ⇒ viewer 全空白**（2026-10-19 实测根因）：1280x720 首帧 275KB>200KB 配额被丢（`main.cpp:7337`），且丢帧发生在 bridge 已读走本地 TCP 字节之后，**libvncserver 认为已发送不会重发** ⇒ viewer 永远拿不到基础图。修法：首帧免配额或配额上调（心跳已稳定 10s）。
+- ⚠️ **远控会话会泄漏**：viewer 直接离开（不发 remote_control_stop）⇒ agent 侧 g_remoteControl 永真、岛冻结、VNC server 空转。需 bridge 空闲/viewer 断开自动停。
+- **库级铁律**：①`rfbGetScreen` 不分配 frameBuffer⇒自己 malloc+`rfbNewFramebuffer`（BGRX 字段须在其后设；cleanup 会 free）；②libvncclient Raw/ultra 都走 `GotBitmap`⇒GotBitmap/GotFillRect/GotCopyRect 三件套 all-or-none，缺了恒黑；③客户端主循环 `WaitForMessage`+`HandleRFBServerMessage`；④`rfbInitClient` 失败库已自行释放，勿 double free；⑤密码走 `GetPassword` 回调；⑥`SendKeyEvent(client,key,down)` 顺序；⑦无 zlib 构建下每帧 FU 第一个像素 rect 的 buf 恒带 12B 前缀（左上 3 像素脏，待深修）。
+- **✅ 新客户端安全（源码实证）**：libvncclient 握手后首请求=非增量全屏（vncviewer.c:467）；服务端非增量请求把请求区 union 进 `cl->modifiedRegion`（rfbserver.c:2719）⇒ 脏区模式下新客户端仍拿全屏首帧。
+- **✅ DXGI 化（2026-10-19 已部署生产，sha256 字节核对一致）**：`screen_capture.h`=Grabber 基类+GdiGrabber+DxgiGrabber 门面（init 优先 DXGI 失败回落 GDI，`backend()` 暴露实际后端）；DxgiGrabber=staging B8G8R8A8 直拷 BGRX、非阻塞 AcquireNextFrame（无新帧⇒不推）、脏区+MoveRects 保守超集映射缩放到输出、ACCESS_LOST 限流 1s 重建、输出选 DesktopCoordinates 含原点者；vnc_server worker **逐脏区拷贝+逐块 mark**（⚠️ DXGI 后禁止整屏 memcpy——脏区外是旧内容会抹好数据）。真机探针：backend=dxgi、首帧 100% 脏区、与 GDI 逐点 49/49 一致、静态画面 10/10 跳过 0.15ms/帧。
+- ⚠️⚠️ **DXGI 首帧恒黑（2026-10-19 真机实证，库行为）**：DuplicateOutput 后**第一个帧必全黑**（LastPresentTime=0，合成器未 present），第 2 帧起才有内容（本机 present 约 1s/次，岛时钟驱动）。对策：DxgiGrabber 黑帧跳过+2s 预算（预算耗尽仍黑⇒桌面真黑，如实交付）；vnc_server 起服 memset 帧缓冲为黑（跳过期间连上的客户端看到黑不是垃圾）。⚠️ 教训：老 dxgi_probe 只数帧没验内容⇒漏过此问题；**抓屏类探针必须做内容差分（DXGI vs GDI 同时刻逐点比）**。
+- **✅ 换生产标准时序（2026-10-19 实证）**：`Disable-ScheduledTask StelarithAgentGuard`+`StelarithAgentQt` → Stop-Process → 重命名备份 → cp 新 exe → sha256 核对 → `Enable`+`Start-ScheduledTask`。⚠️ 只 Stop-ScheduledTask 不 Disable 会被任务自动重拉（2s 内新 PID）。⚠️ 生产 qml/ 是 10-17 旧快照而 exe 是 10-18 构建（上轮只换 exe 的既有混版，UiRegistry 等契约文件一致故无感）——本批只动 C++ 与 QML 契约零交集，继续只换 exe；要修混版得单独点单。
