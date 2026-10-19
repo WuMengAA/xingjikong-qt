@@ -176,12 +176,22 @@ Item {
 
     Repeater {
         model: ctx.window.filteredDevices
+        // ── 2026-10-18 MD3 色阶重排（保留 36 高紧凑布局与状态点）──
+        // 设备行信息密度高（可能 30+ 台），不换 56 高的 Md3ListItem（会撑长整栏）；
+        // 改用 MD3 容器色阶表达状态，与上方班级网格/筛选 chip 同语言：
+        //   cur（当前查看）= secondaryContainer 底
+        //   picked（多选）= secondary 描边 + 淡 secondaryContainer 底
+        //   设备名 cOnSurface / 元信息 cOnSurfaceVar / 离线 cOutline
         delegate: Rectangle {
             width: 168
             height: 36
             radius: 9
             property bool cur: (modelData.uid === ctx.window.currentUid)
-            color: cur ? th.cream : (devHover.containsMouse ? th.hover2 : "transparent")
+            property bool picked: (ctx.window.picked.indexOf(modelData.uid) >= 0)
+            // picked 优先于 cur 显示（多选态是最明确的反馈）
+            readonly property bool md3Active: picked || cur
+            color: md3Active ? th.cSecondaryCont : (devHover.containsMouse ? th.cContLow : "transparent")
+            Behavior on color { ColorAnimation { duration: th ? th.durShort : 200 } }
 
             // 状态点：在线亮、离线暗。以前这一颗恒亮，掉线的机器也画成"在线"，
             // 老师按着它发指令，等半天没回音 —— 先把真假摆出来。
@@ -204,9 +214,9 @@ Item {
                     // 2026-10-08：优先显示设备名（云端 register 带上来），没有才回退 uid
                     text: (modelData.name !== undefined && modelData.name !== null && modelData.name !== "")
                           ? modelData.name : modelData.uid
-                    color: cur ? th.fg : (devOnline ? th.op : th.fg4)
+                    color: md3Active ? th.cOnSecondaryCont : (devOnline ? th.cOnSurface : th.cOutline)
                     font.pixelSize: 14
-                    font.weight: cur ? Font.Medium : Font.Normal
+                    font.weight: (md3Active || picked) ? Font.Medium : Font.Normal
                     elide: Text.ElideRight
                     // 右侧那行小字要留位置，别让长机器名压上去
                     width: Math.max(60, 168 - 10 - 5 - 9 - devMeta.width - 16)
@@ -228,18 +238,18 @@ Item {
                          : "离线")
                       : (modelData.version !== undefined && modelData.version !== ""
                          ? modelData.version : "")
-                color: th.fg4
+                color: md3Active ? th.cOnSecondaryCont : th.cOnSurfaceVar
                 font.pixelSize: 12
             }
 
-            // ∠ 选中态（4.4）：选中的那台描边反白 + 右端一个小勾，
-            //   不加这个反馈就等于让老师猜"到底选上没"。
-            property bool picked: (ctx.window.picked.indexOf(modelData.uid) >= 0)
+            // ∠ 选中态（4.4）：picked 那台描边强调——"选了哪台"是当前最明确的反馈。
+            // 底色已用 secondaryContainer 表达，这里补一条 secondary 描边区分
+            //  cur（当前看）与 picked（已选中）两件事。
             Rectangle {
                 anchors.fill: parent
                 radius: 9
-                color: picked ? th.cream : "transparent"
-                border.color: picked ? th.fg4 : "transparent"
+                color: "transparent"
+                border.color: picked ? th.cSecondary : "transparent"
                 border.width: picked ? 1 : 0
             }
             MouseArea {
