@@ -64,3 +64,11 @@ U1–U5+D 档（共享 ui 基座/14 面板声明化/44 动作单一真源/被控
 - **✅ DXGI 化（2026-10-19 已部署生产，sha256 字节核对一致）**：`screen_capture.h`=Grabber 基类+GdiGrabber+DxgiGrabber 门面（init 优先 DXGI 失败回落 GDI，`backend()` 暴露实际后端）；DxgiGrabber=staging B8G8R8A8 直拷 BGRX、非阻塞 AcquireNextFrame（无新帧⇒不推）、脏区+MoveRects 保守超集映射缩放到输出、ACCESS_LOST 限流 1s 重建、输出选 DesktopCoordinates 含原点者；vnc_server worker **逐脏区拷贝+逐块 mark**（⚠️ DXGI 后禁止整屏 memcpy——脏区外是旧内容会抹好数据）。真机探针：backend=dxgi、首帧 100% 脏区、与 GDI 逐点 49/49 一致、静态画面 10/10 跳过 0.15ms/帧。
 - ⚠️⚠️ **DXGI 首帧恒黑（2026-10-19 真机实证，库行为）**：DuplicateOutput 后**第一个帧必全黑**（LastPresentTime=0，合成器未 present），第 2 帧起才有内容（本机 present 约 1s/次，岛时钟驱动）。对策：DxgiGrabber 黑帧跳过+2s 预算（预算耗尽仍黑⇒桌面真黑，如实交付）；vnc_server 起服 memset 帧缓冲为黑（跳过期间连上的客户端看到黑不是垃圾）。⚠️ 教训：老 dxgi_probe 只数帧没验内容⇒漏过此问题；**抓屏类探针必须做内容差分（DXGI vs GDI 同时刻逐点比）**。
 - **✅ 换生产标准时序（2026-10-19 实证）**：`Disable-ScheduledTask StelarithAgentGuard`+`StelarithAgentQt` → Stop-Process → 重命名备份 → cp 新 exe → sha256 核对 → `Enable`+`Start-ScheduledTask`。⚠️ 只 Stop-ScheduledTask 不 Disable 会被任务自动重拉（2s 内新 PID）。⚠️ 生产 qml/ 是 10-17 旧快照而 exe 是 10-18 构建（上轮只换 exe 的既有混版，UiRegistry 等契约文件一致故无感）——本批只动 C++ 与 QML 契约零交集，继续只换 exe；要修混版得单独点单。
+
+## 8 UDP 闪传线（2026-10-20 起 · U1 云端侧已落地 eb05080）
+- 架构：云端 `Stelarith-cloud/src/udp-relay.js`（dgram 8789 帧中继——按帧头 session 路由、热路径零解密；HELLO 验令牌/PING 打时间戳才亲自解）；会话密钥经 WS `udp-session` 消息协商（服务端随机 32B，双端 base64 下发，不固化二进制）；`UDP_RELAY_TOKEN` 空=不启动（fail-closed，生产 .env 已配）。viewer/agent WS 断开⇒会话自动收口（防泄漏）。
+- 帧：`SU`|ver|type|session(4)|seq(8)|sendTs(8)|len(2)|tag(16)|payload；AEAD=ChaCha20-Poly1305（RFC 7539，nonce=session||seq，AAD=整个帧头）；type：HELLO/HELLO_ACK/DATA/ACK/NACK/PARITY/PING/PONG/CLOSE。
+- ⚠️⚠️ **seq 空间划分（nonce 重用=泄令牌）**：端→中继帧 seq<2^63；中继自发帧（HELLO_ACK/PONG）seq=2^63+会话内计数，越界拒收。中继**不做** seq 单调闸门（会挡 U2 选择重传的合法重传）——重放防护在两端。
+- 测试：`cd Stelarith-cloud && npm run test:udp`（31）+ `npm run test:udp-session`（15，隔离实例 18096/18097+临时 DB 三件套）。⚠️ 8096/8097 被 cims-eval 的 python 占着；`curl -s -o /dev/null` 对 403 也返 0，就绪判断须看 HTTP code+进程存活；v1 注册回包=`registered`。
+- 拓扑硬约束：cloudflared 只转 TCP ⇒ 公网 UDP 不可达；落地=回环/局域网直连，公网回落=UDP-over-WS 封装（未做）。
+- 待做：Qt 两端 C++ ChaCha20-Poly1305+QUdpSocket（U1 余部）；U2 累计 ACK+SACK 位图+选择重传+FEC(8+1 XOR)+乱序缓冲+AIMD+RTT/自适应抖动缓冲/统计；U3 远控 RFB over UDP（绕 200KB/s 背压闸，用户痛点验收靶点）；U4 文件传输 over UDP+file-relay 60s 缓存+断线续传+应急中转 HTTP+Psql（pg+DATABASE_URL 双写降级）。
