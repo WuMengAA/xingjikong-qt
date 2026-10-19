@@ -678,5 +678,59 @@ int main(int argc, char *argv[])
         logf("[viewer] WARN 系统托盘不可用（Session0？）—— 收流不受影响，但没有可见入口");
     }
 
+    // ── 周期自动检查更新（2026-10-20 · 盘点结论 V2）────────────────────────
+    // 为什么必须有：管理端常驻托盘，老师不会主动进设置页点「检查更新」——
+    // 没有周期检查，新版本（尤其强制/灰度版）只能等老师偶然点进去才发现，
+    // 那往往是几个星期后的事。启动 30s 后首查、默认每 4h 复查。
+    // 仍然**不自动安装**：老师可能正在投屏/监控，更新要重启进程，必须人点
+    // （Updater 只把状态推到 available，下载安装永远由「立即更新」按钮触发）。
+    {
+        // 间隔（秒）：默认 4h；STE_VIEWER_UPDATE_CHECK_SEC=0 显式关闭自动检查
+        // （设置页的手动检查不受影响）。
+        int checkSecs = 4 * 60 * 60;
+        const QByteArray envSecs = qgetenv("STE_VIEWER_UPDATE_CHECK_SEC").trimmed();
+        if (!envSecs.isEmpty()) {
+            bool ok = false;
+            const int v = envSecs.toInt(&ok);
+            if (ok && v >= 0) {
+                checkSecs = v;
+            } else {
+                logf("[viewer] STE_VIEWER_UPDATE_CHECK_SEC=%s 不是合法秒数 → 用默认 14400",
+                     envSecs.constData());
+            }
+        }
+        if (checkSecs > 0) {
+            updater.startAutoCheck(qMin(30 * 1000, checkSecs * 1000), checkSecs * 1000);
+        } else {
+            logf("[viewer] 自动检查更新已关闭（STE_VIEWER_UPDATE_CHECK_SEC=0）—— 设置页仍可手动检查");
+        }
+        // 自动检查发现新版本 → 托盘气泡。mandatory（强制更新）标题更醒、停留更久。
+        // 点气泡直接唤回主窗口：老师接着要去「设置 → 关于」点更新，少一步是一步。
+        QObject::connect(&updater, &Updater::newVersionFound, &app,
+                         [](const QString &ver, bool mandatory, const QString &notes) {
+            if (!g_notifyTray) return;
+            const QString title = mandatory
+                ? QStringLiteral("星集控 · 必须更新到 %1").arg(ver)
+                : QStringLiteral("星集控 · 发现新版本 %1").arg(ver);
+            QString body = mandatory
+                ? QStringLiteral("这是一个必须安装的版本。请打开「设置 → 关于」点「必须更新」。")
+                : QStringLiteral("请打开「设置 → 关于」点「立即更新」。");
+            if (!notes.isEmpty()) body += QStringLiteral("\n%1").arg(notes.left(120));
+            g_notifyTray->showMessage(title, body, QSystemTrayIcon::Information,
+                                      mandatory ? 12000 : 6000);
+        });
+        if (g_notifyTray) {
+            QObject::connect(g_notifyTray, &QSystemTrayIcon::messageClicked, &app, [&engine] {
+                auto *win = engine.rootObjects().isEmpty() ? nullptr
+                            : qobject_cast<QWindow *>(engine.rootObjects().first());
+                if (!win) return;
+                fitWindowToScreen(win);
+                win->show();
+                win->raise();
+                win->requestActivate();
+            });
+        }
+    }
+
     return app.exec();
 }

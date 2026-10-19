@@ -28,6 +28,16 @@
 //
 // 5. **编码**：批处理按系统 ANSI 读（中文机是 GBK），所以脚本内容用 toLocal8Bit()
 //    落盘（与全项目日志出口一致）。用 UTF-8 写会让含中文的安装路径在 cmd 里变乱码。
+//
+// 6. **更新通道（2026-10-20）**：检查带 `&channel=`（STE_VIEWER_CHANNEL，默认 stable）。
+//    灰度管理端（channel=gray）从云端 ota-gray.json 拿候选版 —— 此前这里永远只读
+//    stable，灰度设备拿得到 rc、管理端自己反而拿不到，灰度验证断了一条腿。
+//
+// 7. **周期自动检查 + 托盘气泡（2026-10-20）**：管理端常驻托盘，老师不会主动进
+//    设置页点「检查更新」——没有周期检查，新版本只能等老师偶然点进去才发现。
+//    启动 30s 后首查、默认每 4h 复查（STE_VIEWER_UPDATE_CHECK_SEC，0 = 关闭）。
+//    **只提示、不自动安装**：老师可能正在投屏/监控，更新要重启进程，必须人点。
+//    mandatory 版本用更醒的托盘气泡（见 newVersionFound 信号）。
 
 #ifndef STELARITH_UPDATER_H
 #define STELARITH_UPDATER_H
@@ -62,6 +72,8 @@ class Updater : public QObject
     Q_PROPERTY(bool mandatory READ mandatory NOTIFY changed)
     /** 本机当前版本（编译期注入，与「关于」页显示的是同一个真源）。 */
     Q_PROPERTY(QString currentVersion READ currentVersion CONSTANT)
+    /** 更新通道（STE_VIEWER_CHANNEL，默认 stable；gray = 灰度候选版）。 */
+    Q_PROPERTY(QString channel READ channel CONSTANT)
 
 public:
     /** @param wsUrl 云端的 WebSocket 地址（wss://host/ws/viewer），从中派生 http 基址。 */
@@ -76,22 +88,35 @@ public:
     int percent() const { return m_percent; }
     bool mandatory() const { return m_mandatory; }
     QString currentVersion() const;
+    QString channel() const { return m_channel; }
     /** 有活没干完（检查 / 下载 / 校验 / 解压），界面上按钮该禁掉。 */
     bool busy() const;
 
-    /** 检查更新：GET <cloud>/api/public/ota?product=viewer&current=<本机版本>。 */
+    /** 检查更新：GET <cloud>/api/public/ota?product=viewer&current=<本机版本>&channel=<通道>。 */
     Q_INVOKABLE void checkForUpdate();
     /** 一键更新：下载 → sha256 校验 → 解压到暂存 → 写替换脚本 → 退出自身。 */
     Q_INVOKABLE void installUpdate();
     /** 复位到 idle（重新检查前用；下载中不允许复位）。 */
     Q_INVOKABLE void reset();
+    /**
+     * 周期自动检查（2026-10-20）。firstDelayMs 后首查，之后每 intervalMs 复查；
+     * intervalMs ≤ 0 = 不启用。正在忙（检查/下载中）时到点跳过，不打断用户操作。
+     * 自动检查发现新版本会发 newVersionFound（由 main.cpp 弹托盘气泡）；
+     * 手动检查不发 —— 用户正看着设置页，再弹气泡是噪音。
+     */
+    void startAutoCheck(int firstDelayMs, int intervalMs);
+    void stopAutoCheck();
 
 signals:
     void changed();
+    /** 自动检查发现新版本。mandatory = 云端标记必须更新。 */
+    void newVersionFound(const QString &version, bool mandatory, const QString &notes);
 
 private:
     void setState(const QString &s, const QString &msg);
     void fail(const QString &why);
+    /** 真正干活的检查；autoCheck 决定发现新版本时要不要发 newVersionFound。 */
+    void runCheck(bool autoCheck);
     void onCheckFinished();
     void onDownloadReadyRead();
     void onDownloadFinished();
@@ -121,10 +146,14 @@ private:
     QString m_notes;
     QString m_url;                 // 新版本 zip 地址
     QString m_sha;                 // 新版本 sha256（64 位小写十六进制）
+    QString m_channel = QStringLiteral("stable");   // 更新通道（见头注释 6）
     qint64  m_size = 0;            // 声明体积
     qint64  m_got = 0;             // 已下载字节
     int     m_percent = 0;
     bool    m_mandatory = false;
+    bool    m_lastCheckAuto = false;   // 本次检查是不是周期自动检查（决定发不发气泡信号）
+    QString m_lastNotifiedVersion;     // 已经弹过气泡的版本（同一版本不重复烦用户）
+    QTimer *m_autoTimer = nullptr;    // 周期自动检查（见头注释 7）
 
     QString m_zipPath;             // 下载落盘的包（zip 或 exe 安装器）
     bool    m_isExe = false;       // 本次更新包是 exe 安装器（走 launchExeInstaller）

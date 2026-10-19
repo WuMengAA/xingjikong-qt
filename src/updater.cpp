@@ -32,6 +32,18 @@ Updater::Updater(const QString &wsUrl, QObject *parent)
     : QObject(parent), m_wsUrl(wsUrl)
 {
     m_nam = new QNetworkAccessManager(this);
+    // 更新通道（2026-10-20）：灰度管理端从云端 ota-<channel>.json 拿候选版。
+    // 与云端 ota.js loadManifest 同一道白名单 —— 客户端先自己收敛，别把垃圾发上去。
+    // 真实环境变量优先（viewer.env 已在 main 里读入进程环境），空 = stable。
+    m_channel = QString::fromLocal8Bit(qgetenv("STE_VIEWER_CHANNEL")).trimmed();
+    static const QRegularExpression chanRe(QStringLiteral("^[a-z0-9_-]{1,16}$"));
+    if (m_channel.isEmpty()) {
+        m_channel = QStringLiteral("stable");
+    } else if (!chanRe.match(m_channel).hasMatch()) {
+        logf("[update] STE_VIEWER_CHANNEL=%s 不合法（只允许小写字母/数字/_/-，1-16 位）→ 回落 stable",
+             m_channel.toUtf8().constData());
+        m_channel = QStringLiteral("stable");
+    }
     // 启动时清一次上次更新留下的残骸（zip / staging / 替换脚本）。
     // ⚠️ 放在这里而不是"更新完立刻删"：替换脚本正跑着的时候删它会被 Windows 拒（文件被占），
     //    最后总会剩一个几十 KB 的 .cmd —— 由下一次启动的这个调用收掉，永远不积。
@@ -40,6 +52,7 @@ Updater::Updater(const QString &wsUrl, QObject *parent)
 
 Updater::~Updater()
 {
+    stopAutoCheck();
     if (m_reply) { m_reply->abort(); m_reply = nullptr; }
     if (m_file) { m_file->close(); delete m_file; m_file = nullptr; }
     delete m_hash;
@@ -121,15 +134,26 @@ void Updater::cleanupOldDirs()
 // ──────────────────────────────────────────────────────────────────────
 void Updater::checkForUpdate()
 {
+    runCheck(false);
+}
+
+void Updater::runCheck(bool autoCheck)
+{
     if (busy()) return;
     if (m_reply) { m_reply->abort(); m_reply->deleteLater(); m_reply = nullptr; }
     if (m_state == QLatin1String("available")) reset();
+    m_lastCheckAuto = autoCheck;
 
     setState(QStringLiteral("checking"), QStringLiteral("正在检查更新…"));
     const QString cur = QString::fromLatin1(QUrl::toPercentEncoding(currentVersion()));
-    const QUrl u(httpBase() + QStringLiteral("/api/public/ota?product=viewer&current=") + cur);
-    logf("[update] 检查更新 → %s（本机 %s）", u.toString().toUtf8().constData(),
-         currentVersion().toUtf8().constData());
+    // channel（2026-10-20）：灰度管理端读 ota-gray.json；不带 = stable。
+    // 通道名已在构造函数收敛进白名单，编码只是防御性动作。
+    const QString ch = QString::fromLatin1(QUrl::toPercentEncoding(m_channel));
+    const QUrl u(httpBase() + QStringLiteral("/api/public/ota?product=viewer&current=")
+                 + cur + QStringLiteral("&channel=") + ch);
+    logf("[update] 检查更新 → %s（本机 %s，通道 %s，%s）", u.toString().toUtf8().constData(),
+         currentVersion().toUtf8().constData(), m_channel.toUtf8().constData(),
+         autoCheck ? "周期自动" : "手动");
 
     QNetworkRequest req(u);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
@@ -187,8 +211,62 @@ void Updater::onCheckFinished()
     }
     setState(QStringLiteral("available"),
              QStringLiteral("发现新版本 %1（当前 %2）").arg(ver, currentVersion()));
-    logf("[update] 发现新版本 %s（本机 %s），包 %lld 字节",
-         ver.toUtf8().constData(), currentVersion().toUtf8().constData(), (long long)m_size);
+    logf("[update] 发现新版本 %s（本机 %s%s），包 %lld 字节",
+         ver.toUtf8().constData(), currentVersion().toUtf8().constData(),
+         m_mandatory ? "，强制更新" : "", (long long)m_size);
+    // 只有**周期自动**检查才发气泡信号：手动检查时用户正看着设置页，
+    // 再弹托盘气泡是噪音（见头注释 7）。
+    // 同一版本只提示一次：老师可能几小时不处理这个更新，周期复查到点再弹一遍
+    // 就是骚扰；换成更新的版本号才值得再打扰。
+    if (m_lastCheckAuto) {
+        if (ver != m_lastNotifiedVersion) {
+            m_lastNotifiedVersion = ver;
+            emit newVersionFound(ver, m_mandatory, m_notes);
+        } else {
+            logf("[update] 新版本 %s 此前已提示过，本次不重复弹气泡", ver.toUtf8().constData());
+        }
+    }
+    m_lastCheckAuto = false;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 周期自动检查（2026-10-20）
+// ──────────────────────────────────────────────────────────────────────
+void Updater::startAutoCheck(int firstDelayMs, int intervalMs)
+{
+    stopAutoCheck();
+    if (intervalMs <= 0) {
+        logf("[update] 周期自动检查未启用（间隔 %d ms）", intervalMs);
+        return;
+    }
+    if (firstDelayMs < 0) firstDelayMs = 0;
+    m_autoTimer = new QTimer(this);
+    m_autoTimer->setInterval(intervalMs);
+    QObject::connect(m_autoTimer, &QTimer::timeout, this, [this] {
+        // 忙（检查/下载/安装中）就跳过这一轮：不打断用户操作，下一轮再来。
+        if (busy()) return;
+        runCheck(true);
+    });
+    // 首查用 singleShot 错开：刚启动那会儿云端可能还没就绪/网络还没稳，
+    // 立刻查失败一次会很吵。**首查之后再 start 周期定时器** —— 间隔从首查起算，
+    // 且别忘 start()：定时器建了不 start 就是"只有首查、永不复查"（2026-10-20
+    // 探针实测抓到的漏步，编译看不出来）。
+    QTimer::singleShot(firstDelayMs, this, [this] {
+        if (!m_autoTimer) return;          // 期间被 stop 了
+        if (!busy()) runCheck(true);
+        if (m_autoTimer) m_autoTimer->start();
+    });
+    logf("[update] 周期自动检查已启用：%d ms 后首查，每 %d ms 复查（通道 %s）",
+         firstDelayMs, intervalMs, m_channel.toUtf8().constData());
+}
+
+void Updater::stopAutoCheck()
+{
+    if (m_autoTimer) {
+        m_autoTimer->stop();
+        delete m_autoTimer;
+        m_autoTimer = nullptr;
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────
