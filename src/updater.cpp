@@ -11,6 +11,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
+#include "winlauncher.h"   // 2026-10-19 需求①：子进程静默启动（杜绝解压/自更新弹 cmd 窗）
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTimer>
@@ -473,6 +474,7 @@ bool Updater::extractZip(const QString &zip, const QString &dest, QString *why)
         p.setArguments({ QStringLiteral("-xf"), QDir::toNativeSeparators(zip),
                          QStringLiteral("-C"), QDir::toNativeSeparators(dest) });
         p.setProcessChannelMode(QProcess::MergedChannels);
+        stelarithHideChildConsole(p);   // #368 需求①：tar 解压静默，不弹控制台
         p.start();
         if (!p.waitForStarted(5000)) {
             detail = QStringLiteral("tar 起不来：%1").arg(p.errorString());
@@ -505,6 +507,7 @@ bool Updater::extractZip(const QString &zip, const QString &dest, QString *why)
                           QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"),
                           QStringLiteral("-Command"), ps });
         p2.setProcessChannelMode(QProcess::MergedChannels);
+        stelarithHideChildConsole(p2);   // #368 需求①：PowerShell 解压静默
         p2.start();
         if (!p2.waitForStarted(8000)) {
             *why = QStringLiteral("PowerShell 起不来：%1").arg(p2.errorString());
@@ -584,7 +587,8 @@ bool Updater::launchReplacer(const QString &staging, QString *why)
     }
 
     // detached 启动：本进程马上要退出，脚本必须活得比它久。
-    const bool started = QProcess::startDetached(QStringLiteral("cmd.exe"),
+    // #368 需求①：静默 detached 拉起自更新脚本，杜绝 cmd 黑窗
+    const bool started = stelarithStartHiddenDetached(QStringLiteral("cmd.exe"),
                                                  { QStringLiteral("/c"), QDir::toNativeSeparators(cmdPath) });
     if (!started) {
         *why = QStringLiteral("替换脚本启动失败（cmd.exe 没能拉起 %1）").arg(QDir::toNativeSeparators(cmdPath));
