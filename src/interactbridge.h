@@ -43,7 +43,10 @@ class InteractBridge : public QObject
     Q_PROPERTY(bool light       READ light       WRITE setLight    NOTIFY changed)
     Q_PROPERTY(bool idle        READ idle        NOTIFY changed)
     Q_PROPERTY(bool expanded    READ expanded    WRITE setExpanded NOTIFY changed)
-    Q_PROPERTY(bool interactive READ interactive NOTIFY changed)
+    // ⚠️ 2026-10-19 修复：interactive 此前只有 READ 没有 WRITE ⇒ QML
+    //    `bridge.setInteractive(true)` 找不到方法（静默警告 + 交互态永远没设上）。
+    //    setInteractive 实现一直在（见下方 98-99 行），只是没暴露给元对象系统。
+    Q_PROPERTY(bool interactive READ interactive WRITE setInteractive NOTIFY changed)
     Q_PROPERTY(QVariantList actions READ actions  NOTIFY changed)
     Q_PROPERTY(QVariantList states  READ states   NOTIFY changed)
     Q_PROPERTY(QString whaleBubble  READ whaleBubble  NOTIFY changed)
@@ -96,7 +99,11 @@ public:
     void setExpanded(bool v) { if (m_expanded == v) return; m_expanded = v; emit changed(); }
     // 管理端主界面接入后岛是**可交互**的（点击展开/收起）；审批面板预览仍设 false。
     bool interactive() const { return m_interactive; }
-    void setInteractive(bool v) { if (m_interactive == v) return; m_interactive = v; emit changed(); }
+    // ⚠️ 2026-10-19 修复续：Q_PROPERTY 的 WRITE **不会**给 QML 暴露 `setXxx()` 方法调用
+    //    （Qt 元系统里 WRITE 走属性赋值 qt_static_metacall，不注册进方法表）。
+    //    Main.qml `bridge.setInteractive(true)` 是**方法调用** ⇒ 必须显式 Q_INVOKABLE。
+    //    之前只加 WRITE ⇒ 警告「setInteractive is not a function」依旧（已两轮实测确认）。
+    Q_INVOKABLE void setInteractive(bool v) { if (m_interactive == v) return; m_interactive = v; emit changed(); }
     QVariantList actions() const { return {}; }
     QVariantList states() const { return m_states; }
     QString whaleBubble() const { return QString(); }
@@ -167,7 +174,9 @@ public:
     QString previewKind() const { return m_previewKind; }
 
     // 主题跟随管理端（QML 在主题变化时调）。预览岛的深浅色要和管理端一致。
-    void setDark(bool dark);
+    // ⚠️ 2026-10-19 同 setInteractive 根因：QML 方法调用需要 Q_INVOKABLE
+    //    （setDark 实现一直在 interactbridge.cpp，只是没暴露进方法表）。
+    Q_INVOKABLE void setDark(bool dark);
 
 signals:
     void changed();        // 岛桥面全量 NOTIFY（与被控端同范式）
