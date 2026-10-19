@@ -112,3 +112,22 @@ magic "SU"(2) | ver(1) | type(1) | session(4) | seq(8) | sendTs(8) | len(2) | ta
 3. JPEG / 音频可选 UDP+FEC（低延迟模式，允许丢帧）。
 - 兼容：协商失败（旧端无 UDP 字段）**自动回落 WS 既有路径**，旧端零改动可用。
 - 令牌红线：`CLOUD_WS_TOKEN` / `CLOUD_VIEWER_TOKEN` **不随改名动**（客户端成对，改名只动目录）。
+
+### 5.8 U1 落地纪实（2026-10-20 · 云端侧完成）
+
+| 文件 | 职责 |
+|---|---|
+| `src/udp-relay.js` | 帧编解码 + ChaCha20-Poly1305（node crypto 原生）+ 会话表 + dgram 中继 + HELLO/PING/CLOSE + 帧率闸门 + 空闲收口 + stats |
+| `src/config.js` | `UDP_RELAY_PORT`(8789) / `UDP_RELAY_HOST`(0.0.0.0) / `UDP_RELAY_TOKEN`（**空=不启动**，fail-closed）/ 帧率闸门 / 空闲 MS |
+| `src/index.js` | WS 消息 `udp-session`（open/close）：权限同「看画面」（canAccess），设备不在线直拒；`opened` 双端下发 `{sessionId, key(base64), udp:{host,port}}`；viewer/agent WS 断开 ⇒ `closeSessionsWhere` 收口（防泄漏） |
+| `tests/unit-udp-relay.mjs` | 31 断言：编解码/偏移/大值边界、AEAD 篡改、fail-closed、回环全链路、重传转发、seq 空间、闸门 |
+| `tests/regression-udp-session.mjs` | 15 断言（隔离实例联测）：WS 协商→双端同密钥→真 UDP 握手→DATA 原样→PONG→双关闭路径→断线防泄漏 |
+
+**实现期抓到的三个设计级 bug（已修，均有回归断言）**：
+1. 帧头偏移重叠——seq 写在 12/sendTs 写在 20 会啃掉 len 字段（应为 8/16/24）；
+2. HELLO_ACK 复用请求帧头 ⇒ payload 变长但 len 不变 ⇒ 对端 `bad-length` 拒收（ACK 必须新建帧头）；
+3. **nonce 重用（最严重）**——HELLO_ACK 若与 HELLO 同 seq=0 同密钥，ChaCha20 keystream 重用，XOR 两密文可还原 HELLO 里的**令牌**。定稿规则：**端→中继帧 seq < 2^63；中继自发帧 seq = 2^63 + 会话内计数**，越界拒收。
+另：中继**不做** seq 单调闸门（会把 U2 选择重传的合法重传挡掉）——重放防护在两端（AEAD nonce + 端侧单调校验）。
+
+**运行**：`.env` 配 `UDP_RELAY_TOKEN` 后重启云端即起（监听日志 `UDP 闪传中继已监听 host:port` 进 events.log）。
+**未做（后续批次）**：U2 可靠性/拥控/延迟层、U3 远控 RFB over UDP、U4 文件传输 over UDP + Psql；Qt 两端 C++ ChaCha20-Poly1305 + QUdpSocket 客户端。

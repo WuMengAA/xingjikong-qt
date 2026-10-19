@@ -159,3 +159,24 @@ export const OTA_MANIFEST_FILE = process.env.CLOUD_OTA_MANIFEST_FILE || 'ota.jso
  * 白名单只放 exe/msi/ps1/bat/zip/json/txt/sha256，见 provision.js 的 ASSET_ALLOW_EXT。
  * 子目录：assets/pkg/（教室机安装包 .exe）、assets/provision/（装机脚本 .ps1）。 */
 export const ASSETS_DIR = process.env.CLOUD_ASSETS_DIR || 'assets';
+
+/* ---------- UDP 闪传通道（2026-10-20 · U1 骨架，用户点单「新增 udp 协议快速加密传输」）----------
+ * 形态：云端在 UDP_RELAY_PORT 上开帧中继（dgram），两端（被控端/管理端）直连。
+ *   可达范围：回环 + 局域网直连。⚠️ cloudflared 隧道只转 TCP，公网 UDP 不可达 ——
+ *   公网场景走「UDP-over-WS 封装回退」（后续批次），本中继不假设公网。
+ * 加密：ChaCha20-Poly1305 端到端（RFC 7539），密钥经**已鉴权的 WS 通道**协商
+ *   （服务端随机 32B，不固化二进制）；UDP 帧头明文（中继要按 session 路由），
+ *   payload + 16B tag 加密，AAD = 整个帧头。nonce = session(4B) + seq(8B)，单调不重用。
+ * 鉴权：HELLO 帧 payload 内带 UDP_RELAY_TOKEN（同样过 AEAD），中继解密后 timingSafeEqual 校验。
+ * ⚠️ 令牌未配（UDP_RELAY_TOKEN 空）= 通道**不启动**并告警 —— 新攻击面不许 fail-open。
+ *   默认 0.0.0.0 的理由同 CLOUD_WS_HOST：教室机常在另一台机器，局域网直连要用；
+ *   只在本机联调就设 UDP_RELAY_HOST=127.0.0.1 收回回环。 */
+export const UDP_RELAY_PORT = Number(process.env.UDP_RELAY_PORT || 8789);
+export const UDP_RELAY_HOST = (process.env.UDP_RELAY_HOST || '0.0.0.0').trim();
+export const UDP_RELAY_TOKEN = (process.env.UDP_RELAY_TOKEN || '').trim();
+
+// 单会话帧率闸门（防一只端把中继打爆）：正常远控 30fps×2 端 + 文件分片远低于此。
+export const UDP_MAX_FPS_PER_SESSION = Number(process.env.UDP_MAX_FPS_PER_SESSION || 2000);
+
+// 会话空闲多久无帧即收口（秒）：远控停了/端掉线，中继侧不能永远挂着 peer 地址。
+export const UDP_SESSION_IDLE_MS = Number(process.env.UDP_SESSION_IDLE_MS || 60000);

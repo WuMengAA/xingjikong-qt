@@ -122,6 +122,9 @@ function restartCloudTask() {
 }
 import { verifyViewerTicket, mintViewerTicket, verifyAgentTicket } from './ticket.js';
 import { createTunnel } from './tunnel.js';   // 2026-10-18：远控隧道（RFB over WS，替代 WebRTC 主路）
+import { createUdpRelay } from './udp-relay.js';   // 2026-10-20：UDP 闪传帧中继（U1）
+import { UDP_RELAY_HOST, UDP_RELAY_PORT, UDP_RELAY_TOKEN,
+  UDP_MAX_FPS_PER_SESSION, UDP_SESSION_IDLE_MS } from './config.js';
 import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice, actionRanking } from './store.js';
 import { initInteract, interactReady, sweepInteract,
@@ -1257,6 +1260,17 @@ const tunnel = createTunnel({
   getDevice, sendToAgentMsg, pushEvent,
 });
 
+// 2026-10-20 · UDP 闪传通道（U1）：两端直连的 UDP 帧中继。
+// 密钥经本文件里的 WS「udp-session」消息协商（服务端随机 32B）；中继按帧头 session
+// 路由、原样转发，只亲自解 HELLO（验令牌）与 PING（打时间戳）。
+// ⚠️ 令牌未配 ⇒ configured=false，listen 回调里只告警不拉 socket（新攻击面 fail-closed）。
+// ⚠️ 可达范围仅回环/局域网：cloudflared 只转 TCP，公网 UDP 不可达（公网回落 = UDP-over-WS 封装，后续批次）。
+const udpRelay = createUdpRelay({
+  host: UDP_RELAY_HOST, port: UDP_RELAY_PORT, token: UDP_RELAY_TOKEN,
+  maxFps: UDP_MAX_FPS_PER_SESSION, idleMs: UDP_SESSION_IDLE_MS, pushEvent,
+});
+let udpBound = null;   // start() 成功后回填（host/port 可能因传 0 而变）
+
 server.on('upgrade', (req, socket, head) => {
   const u = new URL(req.url, 'http://127.0.0.1');
   if (u.pathname === '/ws/agent') {
@@ -1654,6 +1668,53 @@ viewerWss.on('connection', (ws) => {
         if (action === 'approve') broadcastBlessingDanmaku(r.item);
         return;
       }
+      // ── UDP 闪传通道（2026-10-20 · U1）：协商会话密钥 + 中继地址 ──
+      // 权限与「订阅画面/远控」同一口径（看得到这台才能跟它建快速通道）。
+      // 密钥只走这条已鉴权 WS（服务端随机 32B），UDP 帧道上不传任何长期秘密。
+      case 'udp-session': {
+        const action = p.payload?.action;
+        if (action === 'open') {
+          const uid = String(p.payload?.uid || '').trim();
+          if (!uid) { sndErr(ws, 'BAD_PARAMS', 'udp-session.open 缺 uid'); return; }
+          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid))) {
+            sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限与设备 ${uid} 建 UDP 会话`);
+            pushEvent('warn', 'udp-session 被拒（无权限远控该设备）', { uid });
+            return;
+          }
+          if (!udpRelay.configured) {
+            sndErr(ws, 'UDP_DISABLED', 'UDP 闪传通道未配置（UDP_RELAY_TOKEN 为空），请走 WS 通道');
+            return;
+          }
+          if (!udpBound) {
+            sndErr(ws, 'UDP_NOT_READY', 'UDP 中继尚未就绪，请稍候重试');
+            return;
+          }
+          const dev = getDevice(uid);
+          if (!dev || !dev.ws || dev.ws.readyState !== 1) {
+            sndErr(ws, 'DEVICE_OFFLINE', `设备 ${uid} 不在线`);
+            return;
+          }
+          const { sessionId, key } = udpRelay.createSession({
+            uid, viewerWs: ws,
+            sendToAgent: (m) => sendToAgentMsg(uid, 'udp-session', m),
+            sendToViewer: (m) => snd(ws, 'udp-session', m),
+          });
+          const udp = { host: udpBound.host, port: udpBound.port };
+          snd(ws, 'udp-session', { action: 'opened', sessionId, key: key.toString('base64'), role: 'viewer', udp });
+          sendToAgentMsg(uid, 'udp-session',
+            { action: 'opened', sessionId, key: key.toString('base64'), role: 'agent', udp });
+          pushEvent('info', `UDP 会话 #${sessionId} 已协商（管理端 → ${uid}）`, { uid, sessionId });
+          return;
+        }
+        if (action === 'close') {
+          const sid = Number(p.payload?.sessionId);
+          if (Number.isFinite(sid)) udpRelay.closeSession(sid, 'viewer-close');
+          snd(ws, 'udp-session', { action: 'closed', sessionId: sid, reason: 'viewer-close' });
+          return;
+        }
+        sndErr(ws, 'BAD_PARAMS', `未知 udp-session action: ${action}`);
+        return;
+      }
       default:
         // 未知类型**不关闭连接**：允许新客户端试探新能力（协议规范第十节）
         sndErr(ws, 'UNKNOWN_TYPE', p.type);
@@ -1664,6 +1725,8 @@ viewerWss.on('connection', (ws) => {
   ws.on('close', () => {
     clearTimeout(deadline);
     removeViewer(ws);
+    // 管理端走了 ⇒ 它经手的所有 UDP 会话收口（防会话泄漏：远控泄漏那次的同一病）
+    udpRelay.closeSessionsWhere((s) => s.viewerWs === ws);
     if (authed) pushEvent('info', '管理端断开', { viewers: viewerCount() });
   });
   ws.on('error', (e) => { pushEvent('error', '管理端连接出错', { error: e.message }); });
@@ -2002,11 +2065,29 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (p.type === 'udp-session') {
+      // 被控端对 UDP 闪传会话的回应（2026-10-20 · U1）：目前只支持主动关闭。
+      // （「已 HELLO / 链路就绪」由中继从 UDP 帧侧直接感知，不必再走 WS 回一趟。）
+      const action = p.payload?.action;
+      if (action === 'close') {
+        const sid = Number(p.payload?.sessionId);
+        if (Number.isFinite(sid)) udpRelay.closeSession(sid, 'agent-close');
+        return;
+      }
+      sndErr(ws, 'BAD_PARAMS', `未知 udp-session action: ${action}`);
+      return;
+    }
+
     // 未知类型**不关闭连接**：允许新客户端试探新能力（协议规范第十节）
     sndErr(ws, 'UNKNOWN_TYPE', p.type);
   });
 
-  ws.on('close', () => { finish(); if (registered) markDisconnected(ws); });
+  ws.on('close', () => {
+    finish();
+    if (registered) markDisconnected(ws);
+    // 设备走了 ⇒ 它参与的 UDP 会话全部收口（防中继侧会话/地址泄漏）
+    if (uid) udpRelay.closeSessionsWhere((s) => s.uid === uid);
+  });
 
   ws.on('error', (e) => {
     pushEvent('error', 'WS 连接出错', { uid: uid || '(未知)', error: e.message });
@@ -2015,6 +2096,15 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, HOST, () => {
   pushEvent('info', '云端已启动，等被控端接入', { host: HOST, port: PORT });
+  // 2026-10-20 · UDP 闪传中继：令牌配了才拉 socket（没配 = 通道关闭，只告警）。
+  // 失败不阻塞 WS 主通道——UDP 是加速项，不是生死项。
+  if (udpRelay.configured) {
+    udpRelay.start()
+      .then((b) => { udpBound = b; })
+      .catch((e) => pushEvent('error', 'UDP 中继启动失败（不影响 WS 通道）', { message: String(e?.message || e) }));
+  } else {
+    pushEvent('warn', 'UDP_RELAY_TOKEN 未配置：UDP 闪传通道不启动（WS 通道不受影响）');
+  }
   // 2026-10-11：启动时预打包 QML 补丁（手机热更用；失败不阻塞启动）
   try { const m = ensureQmlPatch(); if (m) console.log(`[cloud] qml-patch 就绪 v${m.version}（${m.files} 文件）`); }
   catch (e) { console.error(`[cloud] WARN qml-patch 预打包失败: ${e.message}`); }

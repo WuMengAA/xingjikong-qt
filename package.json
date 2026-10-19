@@ -9,6 +9,8 @@
     "start": "node src/index.js",
     "test": "npm run test:unit",
     "test:unit": "node tests/unit-ecodes.mjs",
+    "test:udp": "node tests/unit-udp-relay.mjs",
+    "test:udp-session": "node tests/regression-udp-session.mjs",
     "test:agent-ticket": "node tests/unit-agent-ticket.mjs",
     "test:confirm": "node tests/regression-confirm-receipt.cjs 8095",
     "test:recordings": "node tests/regression-recordings.cjs 8095",
