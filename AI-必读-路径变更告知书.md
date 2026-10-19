@@ -19,7 +19,7 @@
 | 配置 | `…\deploy\agent.env` | `…\deploy\agent.env`（内容已改） |
 | 容器根 | — | `D:\Stelarith` |
 
-> 同批迁移的还有 `Stelarith-viewer-qt`、`Stelarith-cloud-ws`。跨工程引用请一并更新。
+> 同批迁移的还有 `Stelarith-viewer-qt`、`Stelarith-cloud`。跨工程引用请一并更新。
 > 总册见 `D:\Stelarith\路径变更告知书-2026-10-04.md`。
 
 ---

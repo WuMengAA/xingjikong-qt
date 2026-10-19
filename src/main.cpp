@@ -665,7 +665,8 @@ void sendHeartbeat()
     if (n <= 0)
         qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 心跳发送失败（写了 %1 字节）—— 云端可能已断").arg(n);
     else
-        qInfo("[agent-qt] 💓 心跳 #%d", g_heartbeatSeq);
+        qInfo("[agent-qt] 💓 心跳 #%d（%lld ms，interval=%d ms）",
+              g_heartbeatSeq, QDateTime::currentMSecsSinceEpoch(), g_heartbeatMs);
 }
 
 // 真执行一个指令。返回 result＝"done" / "failed"（绝不许报 done 其实没做）。
@@ -7138,10 +7139,6 @@ int main(int argc, char *argv[])
     // Windows GUI 程序里 qInfo 默认走 OutputDebugString，重定向到文件就是空的——
     // 被控端没有日志等于瞎子。这里把 Qt 日志全部接管到 stdout/stderr。
 
-    // ⚠️ 这里原来有一行 qputenv("QTWEBENGINE_CHROMIUM_FLAGS", ...)，2026-10-05 挪进
-    //    ensureWebEngine() 了 —— 因为 Chromium 现在是**按需加载**（不是进程启动就起），
-    //    环境变量必须紧贴"拉起 Chromium"那一刻设，放进程开头反而可能与实际启动时机脱节。
-    //    那一行的作用（不关沙箱 → ICE 永远停在 "new"、黑屏且无报错）见那里的注释。
     qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &, const QString &msg) {
         FILE *out = (type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg)
                         ? stderr : stdout;
@@ -7410,7 +7407,6 @@ int main(int argc, char *argv[])
     QObject::connect(g_ws, &QWebSocket::connected, &app, [] {
         qInfo("[agent-qt] 已连上云端（等待 register 回执）");
         g_backoffMs = 1000;      // 连上了就重置退避
-        g_offlineSince = 0;      // 离线看门狗重新计
         sendRegister();
     });
 
@@ -7420,7 +7416,6 @@ int main(int argc, char *argv[])
         g_registered = false;
         // 采集页回收兜底的起点只认**第一次**断连：每退避重连失败一次就把起点刷新一次的话，
         // 倒计时会被无限往后推，看门狗永远走不到头（实测断线 26 秒、重连失败 3 次就没触发过）。
-        if (!g_offlineSince) g_offlineSince = QDateTime::currentMSecsSinceEpoch();
         // 未配置态：不改图标、不重试（连接本就没意义，别把"未配置"覆盖回"未连接（重试中）"）
         if (g_unconfigured) return;
         // 保存新配置后主动断开的这一跳：立刻用新配置重连，不排退避
