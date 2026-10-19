@@ -95,8 +95,14 @@ ApplicationWindow {
             onShutdownRequested: function (uid) { root.confirmTarget = uid; root.confirmAction = "shutdown"; confirmDialog.opened = true }
         }
 
-        // 页 2：监控（WebRTC 实时画面，自持接线）
-        MonitorPage { md3: md3Theme }
+        // 页 2：监控（实时屏 + 远控 VNC 双源，#370 重构）
+        MonitorPage {
+            md3: md3Theme
+            // 推文件：壳已持有 fileDlg，塞好目标机后开弹窗
+            onFilePushRequested: function (uid) { backend.currentUid = uid; fileDlg.open() }
+            // 轻提示透传（壳有 Md3Snackbar）
+            onToastMsg: function (s) { root.toast(s) }
+        }
 
         // 页 3：我的（账户/身份/外观/告警/录制/版本）
         SettingsPage {

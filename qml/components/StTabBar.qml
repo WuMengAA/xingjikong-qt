@@ -1,11 +1,13 @@
-// 星集控 · 通用标签栏（2026-10-12 · UI 评审一.2：监控中心拆标签页）
+// 星集控 · 通用标签栏（2026-10-19 · MD3 重构：实心药丸 → 标准下划线 Tab）
 //
 // 项目铁律：不用 Qt 原生 TabBar/TabButton（走系统调色板，暗色界面里变白）。
-// 这份用我们自己的令牌（th.*）画，选中的那档用反白（inv，黑白稿唯一强调手段），
-// 未选中用次文字（fg3），悬停用 hover 底——和 Btn 四态一个语言。
+// MD3 规格：文字 labelL(14)；选中 = 主色 + Medium + 底部 3px 主色指示器；
+// 未选中 = onSurfaceVar + Normal。**无底色、无边框、无药丸**——选中态只靠
+// 文字颜色 + 下划线指示器表达（用户 2026-10-19 明确拒绝黑色实心药丸）。
+// Tab 按内容宽度左对齐排布（MD3 规范），档间距 24。
 //
-// 用法：
-//   StTabBar { theme: th; width: parent.width; model: ["实时","录制回放","诊断"]; currentIndex: 0 }
+// 用法（API 与旧版完全一致，调用方零改动）：
+//   StTabBar { theme: th; width: parent.width; model: ["实时","录制回放"]; currentIndex: 0 }
 //   读 currentIndex；点选由组件内部改 currentIndex（父级 onCurrentIndexChanged 接）。
 //   ⚠️ 命名特意加 St 前缀：避免与 QtQuick.Controls 自带的 TabBar 冲突（后者无 model 属性，
 //     同名会导致 CameraCenter 里 model: 赋值报 "Cannot assign to non-existent property"）。
@@ -17,40 +19,41 @@ Rectangle {
     property var model: []
     property int currentIndex: 0
 
-    height: 32
+    height: 40
     color: "transparent"
 
-    // 等宽分栏：总宽扣掉间距后平分。
+    // 令牌便捷取值（theme 即 Md3 实例，深浅两套随 darkMode 切；缺键退回 MD3 基线）
+    readonly property color tAcc:    (tabbar.theme && tabbar.theme.cPrimary !== undefined) ? tabbar.theme.cPrimary : "#6750A4"
+    readonly property color tFg3:    (tabbar.theme && tabbar.theme.cOnSurfaceVar !== undefined) ? tabbar.theme.cOnSurfaceVar : "#49454F"
+    readonly property int  tLabelL:  (tabbar.theme && tabbar.theme.labelL !== undefined) ? tabbar.theme.labelL : 14
+
     Row {
-        id: row
         anchors.fill: parent
-        spacing: 4
+        spacing: 24
         Repeater {
             model: tabbar.model
-            delegate: Rectangle {
-                width: (tabbar.width - row.spacing * (tabbar.model.length - 1)) / tabbar.model.length
-                height: 28
-                radius: tabbar.theme.rCtrl !== undefined ? tabbar.theme.rCtrl : 8
-                color: (index === tabbar.currentIndex)
-                       ? (tabbar.theme.inv || "#F0F0F0")
-                       : (ma.containsMouse ? (tabbar.theme.hover || "#1E1E1E") : "transparent")
-                border.color: (index === tabbar.currentIndex)
-                              ? (tabbar.theme.inv || "#F0F0F0")
-                              : (tabbar.theme.stroke || "#2A2A2A")
-                border.width: 1
-
+            delegate: Item {
+                width: tabTx.implicitWidth + 24
+                height: parent.height
                 Text {
+                    id: tabTx
                     anchors.centerIn: parent
                     text: modelData
-                    // ⚠️ 反白态（选中）字必须反转成 win（近黑）；未选中用 fg3（次文字）。
-                    //    亮色下 inv 是近黑，字用 win 依旧成立——两套都用 win，不写死。
-                    color: (index === tabbar.currentIndex)
-                           ? (tabbar.theme.win || "#0A0A0A")
-                           : (tabbar.theme.fg3 || "#8A8A8A")
-                    font.pixelSize: 13
+                    color: (index === tabbar.currentIndex) ? tabbar.tAcc : tabbar.tFg3
+                    font.pixelSize: tabbar.tLabelL
+                    font.weight: (index === tabbar.currentIndex) ? Font.Medium : Font.Normal
+                }
+                // 下划线指示器（3px 主色，仅选中档）
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: tabTx.width
+                    height: 3
+                    radius: 1.5
+                    color: tabbar.tAcc
+                    visible: index === tabbar.currentIndex
                 }
                 MouseArea {
-                    id: ma
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor

@@ -1115,6 +1115,10 @@ ApplicationWindow {
     /** 设置页「课表编辑器」按钮用：`ScheduleEditor` 是窗口的子对象，外部访问不到。 */
     function openScheduleEditor() { schedEditor.show() }
 
+    /** 整屏页「返回/退出」用：页号是主界面的事，不让子组件猜（见下方 _pageCtx 注释）。
+     *  #370：监控页加显式「返回」按钮跳回集控（page=1），老师不必去点顶部标签。 */
+    function goPage(idx) { root.page = idx }
+
     // ══════════════ 弹窗互斥 ══════════════
     // 软件/日志/媒体/定时/文件 都是同一块居中 modal 弹窗，谁后开谁压在谁上面。
     // 原来的写法只防"重复 open"（if (!mediaDlg.opened) ...），结果点了媒体再点定时 →

@@ -7,8 +7,9 @@
 //
 // 本页是**监控中心**一页收拢：
 //   ① 设备选择（Md3Chip 横条，与手机端 MonitorPage 同一套心智）
-//   ② 主画面（实时帧流 image://frames/f + fps/链路徽标）
-//   ③ 操作栏（截图 / 摄像头 / 多班墙 / 远控 —— 全部复用现有后端动作）
+//   ② 主画面（实时帧流 image://frames/f + 远控 VNC 帧流 image://vnc/live
+//      + fps/链路徽标；#370 补 VNC 双源，点「远程控制」后本页直接出画面）
+//   ③ 操作栏（截图 / 摄像头 / 多班墙 / 远程控制 / 推文件 / 返回 / 停止）
 //
 // 契约（同 ControlPage/SettingsPage，见 UiPageHost 的 _ctx()）：
 //   ctx.window = 主界面 root；backend = C++ 上下文属性（本文件内可直接访问）
@@ -71,7 +72,7 @@ Item {
             }
         }
 
-        // ── ② 主画面（实时帧流）────────────────────────────────────────
+        // ── ② 主画面（实时帧 / 远控 VNC 双源）──────────────────────────
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -81,17 +82,35 @@ Item {
             border.width: 1
             clip: true
 
+            // 实时帧（订阅帧流 image://frames/f）
             Image {
                 id: frameImg
                 anchors.fill: parent
                 anchors.margins: 8
                 fillMode: Image.PreserveAspectFit
                 cache: false
+                visible: backend.frameSource !== "vnc"
                 property int tick: 0
-                source: ctx.window.frameReady ? ("image://frames/f?" + tick) : ""
+                source: (ctx.window.frameReady && backend.frameSource !== "vnc") ? ("image://frames/f?" + tick) : ""
                 Connections {
                     target: backend
                     function onFrameChanged() { frameImg.tick++ }
+                }
+            }
+
+            // 远控画面（VNC over WebSocket · libvncclient · #370 补：点「远程控制」后本页直接出画面）
+            Image {
+                id: vncImg
+                anchors.fill: parent
+                anchors.margins: 8
+                fillMode: Image.PreserveAspectFit
+                cache: false
+                visible: backend.frameSource === "vnc"
+                property int tick: 0
+                source: backend.frameSource === "vnc" ? ("image://vnc/live?" + tick) : ""
+                Connections {
+                    target: backend
+                    function onVncFrameReady(img) { vncImg.tick++ }
                 }
             }
 
@@ -99,6 +118,7 @@ Item {
             Text {
                 anchors.centerIn: parent
                 text: {
+                    if (backend.frameSource === "vnc") return ""
                     if (!backend.loggedIn) return "还没登录 —— 点右上角账户先登录"
                     if (backend.currentUid === "") return "先在顶部选一台设备看监控"
                     if (!ctx.window.frameReady) return "正在等该设备的画面…"
@@ -109,7 +129,7 @@ Item {
                 font.pixelSize: 14
             }
 
-            // 链路徽标（与控制页同一语义：实时/轮询/等待）
+            // 链路徽标（与控制页同一语义：实时/轮询/远控/等待）
             Rectangle {
                 visible: backend.currentUid !== ""
                 anchors.top: parent.top
@@ -117,17 +137,19 @@ Item {
                 anchors.margins: 10
                 height: 20
                 radius: 4
-                color: ctx.window.linkBusy ? (th ? th.todo : "#5B8CFF")
+                color: backend.frameSource === "vnc" ? (th ? th.inv : "#FFFFFF")
+                     : ctx.window.linkBusy ? (th ? th.todo : "#5B8CFF")
                      : (backend.frameSource === "jpeg" ? "transparent" : (th ? th.inv : "#FFFFFF"))
                 border.color: th ? th.stroke : "#3C3C3C"
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
-                    text: ctx.window.linkBusy ? "正在接通…"
+                    text: backend.frameSource === "vnc" ? "远控中"
+                        : ctx.window.linkBusy ? "正在接通…"
                         : backend.frameSource === "jpeg" ? "轮询"
                         : "实时"
-                    color: ctx.window.linkBusy
-                           ? (th ? th.win : "#FFFFFF")
+                    color: backend.frameSource === "vnc" ? (th ? th.win : "#000000")
+                           : ctx.window.linkBusy ? (th ? th.win : "#FFFFFF")
                            : (backend.frameSource === "jpeg" ? (th ? th.fg3 : "#C8C8C8") : (th ? th.win : "#000000"))
                     font.pixelSize: 11
                 }
@@ -135,7 +157,9 @@ Item {
         }
 
         // ── ③ 操作栏（全部复用现有后端动作，给监控场景的快捷操作）──────
-        Row {
+        //  #370：补「推文件」入口（走 file_push 面板）与「返回」（跳回集控页）。
+        //  用 Flow 包，窗口窄时自动换行，不挤成一团。
+        Flow {
             Layout.fillWidth: true
             spacing: 10
 
@@ -147,6 +171,10 @@ Item {
             }
             Md3Btn { md3: th; text: "多班墙"; variant: "tonal"; onClicked: ctx.window.openOnly("multiband") }
             Md3Btn { md3: th; text: "远程控制"; variant: "tonal"; onClicked: ctx.window.runActionById("remote-start") }
+            // #370：监控页直接推文件给当前看的这台（file_push 面板走 openOnly("file")）
+            Md3Btn { md3: th; text: "推文件"; variant: "tonal"; onClicked: ctx.window.runActionById("file_push") }
+            // #370：显式「返回」跳回集控（page=1），不必去点顶部标签
+            Md3Btn { md3: th; text: "← 返回"; variant: "text"; onClicked: ctx.window.goPage(1) }
 
             // 停止看当前设备（outlined 弱化；Md3Btn 无 error 变体色的 text 写法，
             // 用 outlined + 红色 icon 近似 —— 语义仍清楚）

@@ -23,23 +23,30 @@ Popup {
     property var theme: ctx ? ctx.window.th : null
 
     anchors.centerIn: parent
-    width: 560
-    height: 440
+    // 2026-10-19 MD3 重构：560×440 → 680×520（新布局信息密度更高，需要呼吸空间）
+    width: 680
+    height: 520
     modal: true
     padding: 0
     closePolicy: Popup.CloseOnEscape
+    // MD3 对话窗：surface 底 + rXL(28) 圆角；浮层允许脱离"无边框"规则，
+    // 但这里也用底色区分而非描边（层次靠色阶，不靠线）。
     background: Rectangle {
-        color: theme.panel
-        radius: theme.rCard
-        border.color: theme.card
-        border.width: 1
+        color: theme ? theme.cSurface : "#1C1B1F"
+        radius: theme ? theme.rXL : 28
     }
+    // ⚠️⚠️ 2026-10-19 实测坑：下面三行的右值**必须显式写 camCenterDlg.ctx**，不能写裸 ctx！
+    //   CameraCenter 内部若也声明 `ctx` 属性（曾因此中招：自引用 ⇒ theme/backend/ctx 全
+    //   undefined，面板能开但全死），裸 ctx 会解析到子组件自己的属性。显式限定宿主最稳。
+    //   （本组件现已改名叫 panelCtx，但显式写法保留，防的就是后来人再加 shadow 属性。）
     CameraCenter {
         id: camCenter
-        theme: ctx.window.th
-        backend: ctx.window.backendRef
+        theme: camCenterDlg.ctx.window.th
+        backend: camCenterDlg.ctx.window.backendRef
+        panelCtx: camCenterDlg.ctx
         anchors.fill: parent
-        anchors.margins: 12
+        // 网格对齐：面板左右外边距 spL(24)（MD3 重构⑥）
+        anchors.margins: 24
     }
 
     // ── 驱动转发（U3）────────────────────────────────────────────────────

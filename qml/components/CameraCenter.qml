@@ -1,31 +1,43 @@
-// 星集控 · 监控中心（2026-10-09 · 独立组件，补齐管理端监控管理面）
+// 星集控 · 监控中心（2026-10-19 · MD3 重构批）
 //
-// 整合被控端摄像头的**管理动作** + 录制回放，替代 Main.qml 里分散的
-// 「班级监控卡」位置（等 Main.qml 工作区解禁后挂载）：
-//   · 选设备（在线优先）→ 摄像头列表（camera_list）→ 绑定/选择设备
-//   · 抓拍一帧（camera_snapshot，device 参数）→ 回显 image://frames/<uid>
-//   · 开录/停录（camera_record_start/stop）→ 停后自动上传云端
-//   · 本机录制回放（backend.recordings 按 uid 分组）+ 多班缩略图墙
+// 本次按 MD3 规范重构（用户点单），彻底消除旧版"拼凑感"。规格对照：
+//   ① 净化边框：卡片/区域一律无 border 无阴影，用**背景色阶**区分层级——
+//      页面 cSurface → 卡片 cContLow → 嵌套/选中 cContHigh → 画面台 cContLowest；
+//      仅保留 1px 分隔线（cOutlineVar）作小节分隔；浮层（Popup）按 MD3 用最高色阶。
+//   ② 统一圆角：按钮/卡片/分段/徽标一律 rM（12px）；弹窗外壳是浮层，按 MD3 对话窗 rXL（28px）。
+//   ③ Tab：StTabBar 已重做成标准下划线 Tab（主色 3px 指示器），不再是实心药丸。
+//   ④ 精简文字：黑屏占位只剩「连接中...」/「暂无画面」并居中；长说明移到「诊断」页与 Tooltip。
+//   ⑤ 分层：顶栏只有标题 + 右侧无边框图标按钮（测试/抓拍/关闭），空间留给标题。
+//   ⑥ 网格对齐：面板左右外边距 spL(24)（弹窗给），组件间距 spM(16)，紧凑组内 spS(8)（令牌见 Md3.qml）。
 //
-// 数据源：
-//   backend.devices（设备表）→ backend.sendAction()（指令）→
-//   backend.recordings（录制列表）→ backend.subscribeThumbnails()（实时帧）
-// 绑定存储：Qt.labs.settings（cameraBind/<uid> = 设备名，与 CameraBindDialog 同key）
+// 功能零删减（逻辑函数全部原样保留）：设备下拉 / 摄像头枚举 / 绑定 / 自检 / 抓拍 /
+// 开录停录 / 录制回放 / 自习模式（噪音 + 异常自动录）/ 诊断（人话错误 + 重试）。
+// 行为变化仅两处：删死属性 recordingGroup（从未被引用）；新增 panelCtx 注入
+// （推文件要开 file 面板、返回/关闭要 closePanels，由 CameraCenterDialog 传入）。
 //
-// 用法（等 Main.qml 解禁后挂）：
-//   CameraCenter { theme: root.th; backend: root.backendRef; width: ...; height: ... }
-//   ⚠️ 别写 `backend: backend`（自绑定循环，见 Main.qml 里 backendRef 的说明）。
+// 数据源：backend.devices → backend.sendAction() → backend.recordings → backend.subscribeThumbnails()
+// 绑定存储：Qt.labs.settings → QtCore Settings（cameraBind/<uid> = 设备名，与 CameraBindDialog 同 key）
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 // ⚠️ 2026-10-10：Settings 自 Qt 6.5 起迁进 QtCore，Qt.labs.settings 已弃用（启动就刷 deprecation）。
 //   另外它的落点依赖 QCoreApplication 的 organizationName —— 团队已在 main.cpp 补设（见那里注释）。
 import QtCore
+import "../island"   // SvgIcon 唯一真源在共享岛目录（构建期拷到 qml/island/）
+import "md3"         // MD3 组件库（构建期由 Stelarith-shared-qml/ui/md3/ 拷入 components/md3/）
 
 Item {
     id: cc
 
     property var theme: ({})
     required property var backend
+    // ⚠️⚠️ 2026-10-19 实测坑（探针抓到，生产同中招）：**不能叫 `ctx`**！
+    //   CameraCenterDialog 里对本组件的赋值写的是 `theme: ctx.window.th` /
+    //   `backend: ctx.window.backendRef` / `ctx: ctx` —— 右值 `ctx` 在**本对象作用域**
+    //   优先解析到本组件自己的属性。本组件一旦也声明 `ctx`，这三行全部变成自引用：
+    //   theme/backend/ctx 恒为 undefined/null，面板看似能开实则全死（无令牌、无 backend）。
+    //   旧版本组件没有 ctx 属性所以无事；MD3 重构批新增注入时命名必须避开宿主 ctx 名。
+    property var panelCtx: null   // 宿主上下文（UiPanelHost 注入：window / open / closePanels）
 
     // 高度语义：Column 里直接放可用（Column 按 implicitHeight 排）。
     // 显式给高度（如嵌入固定卡）时以显式为准。
@@ -45,17 +57,15 @@ Item {
     property bool loadingCams: false
     property bool recording: false      // 本面板是否正在录制
     property string status: ""
-    property var recordingGroup: ({})
     property string boundDev: ""        // 被控端回执的当前绑定（权威；空 = 未绑定）
 
     // ── 四·双画面：布局模式 ──
     // 0=双画面（屏幕 60% + 摄像头 40%）；1=仅屏幕；2=仅摄像头。
-    // ⚠️ 当前 viewer 只有「屏幕」帧源（image://frames/<uid>），摄像头实时流（WebRTC 双路）
-    //   尚未接入 ⇒ 摄像头格显示诚实占位，后端接入后只把那格 source 指向真实流即可。
     property int layoutMode: 0
     // 摄像头第二轨状态（2026-10-12 · 方案 A：RTC second track "camera"）
     property string camStreamUid: ""   // 当前已请求推流的设备（""=未请求）
     property bool camHasFrame: false   // 是否已收到至少一帧（收到后隐藏占位）
+    property bool screenHasFrame: false // 屏幕帧是否到达（新增：占位文案判据，连接中/暂无画面）
 
     // ── 自习模式配置（2026-10-13）：噪音检测阈值 + 异常自动录制 ──
     property real studyThresholdDb: -45   // 噪音阈值（dB；教室安静≈-60，说话≈-35，越小越灵敏）
@@ -71,354 +81,475 @@ Item {
     property string lastAction: ""      // 「重试」要点名重发的动作
     property var    camerasInfo: []     // 摄像头明细（含 virtual 标记）；为空时回落到 cc.cameras
 
-    // ── 表头：第一行＝标题 + 设备选择；第二行＝动作按钮 ──
-    // ⚠️ 2026-10-09 重做：原来一行硬塞「标题 + 原生 ComboBox + 4 个原生 Button」，
-    //    ① 宽度必然溢出（520 的容器塞 ~575 的内容）—— 就是用户看到的"没放对位置"；
-    //    ② 原生 ComboBox/Button 走**系统调色板**，暗色界面里渲染成白底（"杂乱"的元凶）。
-    //    项目铁律：不用 Qt 原生 Button/ComboBox/TextField，一律走 Btn / 自绘。
-    Column {
-        id: head
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        spacing: 8
+    // ── MD3 令牌便捷取值 ──
+    // theme 即 Md3 实例（深浅两套随 darkMode 切）；缺键时退回 MD3 暗色基线，绝不崩。
+    readonly property color tSurface:    (theme && theme.cSurface !== undefined) ? theme.cSurface : "#1C1B1F"
+    readonly property color tCard:       (theme && theme.cContLow !== undefined) ? theme.cContLow : "#1D1B20"
+    readonly property color tCardHi:     (theme && theme.cContHigh !== undefined) ? theme.cContHigh : "#2B2930"
+    readonly property color tCardHighest:(theme && theme.cContHighest !== undefined) ? theme.cContHighest : "#36343B"
+    readonly property color tStage:      (theme && theme.cContLowest !== undefined) ? theme.cContLowest : "#0F0D13"
+    readonly property color tFg:         (theme && theme.cOnSurface !== undefined) ? theme.cOnSurface : "#E6E1E5"
+    readonly property color tFg3:        (theme && theme.cOnSurfaceVar !== undefined) ? theme.cOnSurfaceVar : "#CAC4D0"
+    readonly property color tFg4:        (theme && theme.cOutline !== undefined) ? theme.cOutline : "#938F99"
+    readonly property color tAcc:        (theme && theme.cPrimary !== undefined) ? theme.cPrimary : "#D0BCFF"
+    readonly property color tErr:        (theme && theme.cError !== undefined) ? theme.cError : "#F2B8B5"
+    readonly property color tSegBg:      (theme && theme.cSecondaryCont !== undefined) ? theme.cSecondaryCont : "#4A4458"
+    readonly property color tSegFg:      (theme && theme.cOnSecondaryCont !== undefined) ? theme.cOnSecondaryCont : "#EADDFF"
+    readonly property color tOutlineVar: (theme && theme.cOutlineVar !== undefined) ? theme.cOutlineVar : "#49454F"
+    readonly property int  tRM:    (theme && theme.rM !== undefined) ? theme.rM : 12
+    readonly property int  tSpXS:  (theme && theme.spXS !== undefined) ? theme.spXS : 4
+    readonly property int  tSpS:   (theme && theme.spS !== undefined) ? theme.spS : 8
+    readonly property int  tSpM:   (theme && theme.spM !== undefined) ? theme.spM : 16
+    readonly property int  tTitleM:(theme && theme.titleM !== undefined) ? theme.titleM : 16
+    readonly property int  tTitleS:(theme && theme.titleS !== undefined) ? theme.titleS : 14
+    readonly property int  tLabelL:(theme && theme.labelL !== undefined) ? theme.labelL : 14
+    readonly property int  tLabelM:(theme && theme.labelM !== undefined) ? theme.labelM : 12
+    readonly property int  tLabelS:(theme && theme.labelS !== undefined) ? theme.labelS : 11
 
-        // 第一行：标题（固定宽）+ 设备选择（吃掉剩余宽度）
-        Item {
-            width: parent.width
-            height: 30
-            Text {
-                id: headTitle
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: "监控中心"
-                color: cc.theme.fg || "#FAFAFA"
-                font.pixelSize: 14
-                font.weight: Font.Medium
-            }
-            // 设备选择：自绘（Btn 同款长相）+ Popup 下拉，避开原生 ComboBox
-            Rectangle {
-                id: devSel
-                anchors.left: headTitle.right
-                anchors.leftMargin: 10
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                height: 30
-                radius: cc.theme.rCtrl !== undefined ? cc.theme.rCtrl : 8
-                color: devMa.containsMouse ? (cc.theme.hover || "#1E1E1E") : "transparent"
-                border.color: cc.theme.stroke || "#2A2A2A"
-                border.width: 1
-
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 10
-                    anchors.right: caret.left
-                    anchors.rightMargin: 6
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: cc.selUid !== "" ? cc.selUid : (cc.deviceUids().length === 0 ? "（无在线设备）" : "请选择设备")
-                    color: cc.theme.fg || "#FAFAFA"
-                    font.pixelSize: 13
-                    elide: Text.ElideRight
-                }
-                Text {
-                    id: caret
-                    anchors.right: parent.right
-                    anchors.rightMargin: 10
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "▾"
-                    color: cc.theme.fg3 || "#8A8A8A"
-                    font.pixelSize: 12
-                }
-                MouseArea {
-                    id: devMa
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: devMenu.opened ? devMenu.close() : devMenu.open()
-                }
-                Popup {
-                    id: devMenu
-                    x: 0
-                    y: devSel.height + 4
-                    width: devSel.width
-                    padding: 4
-                    background: Rectangle {
-                        color: cc.theme.panel || "#181818"
-                        radius: cc.theme.rCtrl !== undefined ? cc.theme.rCtrl : 8
-                        border.color: cc.theme.stroke || "#2A2A2A"
-                        border.width: 1
-                    }
-                    contentItem: ListView {
-                        implicitHeight: Math.min(contentHeight, 220)
-                        clip: true
-                        model: cc.deviceUids()
-                        delegate: Rectangle {
-                            width: ListView.view.width
-                            height: 28
-                            radius: 4
-                            color: (cc.selUid === modelData)
-                                   ? (cc.theme.inv || "#F0F0F0")
-                                   : (devItemMa.containsMouse ? (cc.theme.hover || "#1E1E1E") : "transparent")
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: 8
-                                anchors.right: parent.right
-                                anchors.rightMargin: 8
-                                text: modelData
-                                color: (cc.selUid === modelData) ? (cc.theme.win || "#0A0A0A")
-                                                                 : (cc.theme.fg || "#FAFAFA")
-                                font.pixelSize: 12
-                                elide: Text.ElideRight
-                            }
-                            MouseArea {
-                                id: devItemMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    cc.selUid = modelData
-                                    devMenu.close()
-                                    cc.refreshCams()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    // ── 无边框图标按钮（IconButton）：顶栏/刷新用，状态层 8%/10%，无底无边 ──
+    component IconBtn: Rectangle {
+        id: iconBtn
+        property var th: ({})
+        property string icon: ""
+        property string tip: ""
+        property bool enabled: true
+        signal clicked()
+        width: 40
+        height: 40
+        radius: (th && th.rM !== undefined) ? th.rM : 12
+        color: "transparent"
+        opacity: iconBtn.enabled ? 1 : 0.38
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: (th && th.cPrimary !== undefined) ? th.cPrimary : "#D0BCFF"
+            opacity: ma.pressed ? 0.10 : (ma.containsMouse ? 0.08 : 0)
+            Behavior on opacity { NumberAnimation { duration: 120 } }
         }
-
-        // 第二行：动作按钮（全用 Btn，宽度加起来 88+56+56+56+80 + 4×8 = 368，稳稳放得下）
-        Row {
-            spacing: 8
-            Btn {
-                theme: cc.theme
-                width: 88
-                text: cc.loadingCams ? "枚举中…" : "摄像头列表"
-                disabled: cc.selUid === ""
-                onClicked: cc.refreshCams()
-            }
-            Btn {
-                theme: cc.theme
-                width: 56
-                text: "测试"
-                disabled: cc.selUid === ""
-                onClicked: cc.testCam()
-            }
-            Btn {
-                theme: cc.theme
-                width: 56
-                text: "抓拍"
-                disabled: cc.selUid === ""
-                onClicked: cc.snapshot()
-            }
-            Btn {
-                theme: cc.theme
-                width: 56
-                text: cc.recording ? "停录" : "开录"
-                disabled: cc.selUid === ""
-                onClicked: cc.recording ? cc.stopRec() : cc.startRec()
-            }
-            Btn {
-                theme: cc.theme
-                width: 80
-                text: "刷新回放"
-                onClicked: { cc.backend.fetchRecordings(); cc.status = "已刷新录制列表" }
-            }
+        SvgIcon {
+            anchors.centerIn: parent
+            name: iconBtn.icon
+            px: 20
+            tint: (iconBtn.th && iconBtn.th.cOnSurface !== undefined) ? iconBtn.th.cOnSurface : "#E6E1E5"
+        }
+        MouseArea {
+            id: ma
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: iconBtn.enabled
+            cursorShape: iconBtn.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: if (iconBtn.enabled) iconBtn.clicked()
+        }
+        ToolTip {
+            visible: ma.containsMouse && iconBtn.tip !== ""
+            delay: 450
+            text: iconBtn.tip
         }
     }
 
-    // ── 主体：TabBar（实时 / 录制回放 / 诊断）──
-    // 一.2 UI 评审（2026-10-12）：监控中心拆标签页。原来左＝绑定 / 右＝实时+回放 平铺一屏，
-    // 评审要求拆成「实时 / 录制回放 / 诊断」三档——默认看实时，回放与诊断不再挤在同一屏。
-    // 新增组件 qml/components/TabBar.qml（令牌化，不用 Qt 原生 TabBar）。
-    Column {
-        id: body
-        anchors.top: head.bottom
-        anchors.topMargin: 10
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: statusLine.top
-        anchors.bottomMargin: 6
-        spacing: 8
+    // ═══ 整体骨架：顶栏 / Tab / 页面 / 状态行 / 底栏（组件间距 spM=16） ═══
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: cc.tSpM
 
+        // ① 顶栏：标题吃剩余宽度，右侧无边框图标按钮（测试/抓拍/关闭）
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 40
+            Text {
+                id: headTitle
+                anchors.left: parent.left
+                anchors.right: headBtns.left
+                anchors.rightMargin: cc.tSpS
+                anchors.verticalCenter: parent.verticalCenter
+                text: "监控中心" + (cc.selUid !== "" ? " · " + cc.deviceName(cc.selUid) : "")
+                color: cc.tFg
+                font.pixelSize: cc.tTitleM
+                font.weight: Font.Medium
+                elide: Text.ElideRight
+            }
+            Row {
+                id: headBtns
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: cc.tSpXS
+                IconBtn {
+                    th: cc.theme
+                    icon: "circle-check"
+                    tip: "摄像头自检：发一条测试指令，看能不能出帧"
+                    enabled: cc.selUid !== ""
+                    onClicked: cc.testCam()
+                }
+                IconBtn {
+                    th: cc.theme
+                    icon: "video"
+                    tip: "抓拍一帧（camera_snapshot）"
+                    enabled: cc.selUid !== ""
+                    onClicked: cc.snapshot()
+                }
+                IconBtn {
+                    th: cc.theme
+                    icon: "x"
+                    tip: "关闭监控中心"
+                    onClicked: cc.closePanel()
+                }
+            }
+        }
+
+        // ② Tab：标准下划线 Tab（实时 / 录制回放 / 自习 / 诊断）
         StTabBar {
             id: tabs
             theme: cc.theme
-            width: parent.width
+            Layout.fillWidth: true
+            Layout.preferredHeight: 40
             model: ["实时", "录制回放", "自习", "诊断"]
             currentIndex: 0
         }
 
-        // 页面容器：三档互斥显示
+        // ③ 页面容器：四档互斥显示
         Item {
-            width: parent.width
-            height: parent.height - tabs.height - body.spacing
+            Layout.fillWidth: true
+            Layout.fillHeight: true
 
-            // ── 实时：左＝摄像头绑定 / 右＝实时画面 ──
+            // ── 实时：左＝摄像头列表 / 右＝实时画面 ──
             Row {
+                id: liveRow
                 visible: tabs.currentIndex === 0
                 anchors.fill: parent
-                spacing: 12
+                spacing: cc.tSpM
 
-                // 左：摄像头列表 + 绑定
+                // 左：摄像头列表卡（无边框，底色 cContLow 区分区域）
                 Rectangle {
+                    id: camCard
                     width: parent.width * 0.42
                     height: parent.height
-                    radius: cc.theme.rCard || 12
-                    color: cc.theme.panel || "#181818"
-                    border.color: cc.theme.stroke || "#2A2A2A"
-                    border.width: 1
+                    color: cc.tCard
+                    radius: cc.tRM
+
                     Column {
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 8
-                        Text {
-                            text: "摄像头 · " + cc.selUid
-                            color: cc.theme.fg3 || "#8A8A8A"
-                            font.pixelSize: 11
-                            elide: Text.ElideRight
+                        id: camTopCol
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.margins: cc.tSpM
+                        spacing: cc.tSpS
+
+                        // 设备选择（功能保留：自绘下拉；无边框，底色区分，MD3 12 圆角）
+                        Item {
                             width: parent.width
-                        }
-                        // 摄像头列表
-                        Rectangle {
-                            width: parent.width
-                            height: 120
-                            color: cc.theme.cream || "#141414"
-                            radius: 8
-                            border.color: cc.theme.stroke || "#2A2A2A"
-                            border.width: 1
-                            ListView {
-                                id: camList
-                                anchors.fill: parent
-                                anchors.margins: 2
-                                clip: true
-                                model: cc.cameras
-                                delegate: Item {
-                                    width: camList.width
-                                    height: 26
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: 4
-                                        color: camList.currentIndex === index
-                                                ? (cc.theme.inv || "#F0F0F0") : "transparent"
+                            height: 32
+                            Text {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "设备"
+                                color: cc.tFg3
+                                font.pixelSize: cc.tLabelM
+                            }
+                            Rectangle {
+                                id: devSel
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - 44
+                                height: 32
+                                radius: cc.tRM
+                                color: devMa.containsMouse ? cc.tCardHighest : cc.tCardHi
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: cc.tSpM
+                                    anchors.right: caret.left
+                                    anchors.rightMargin: cc.tSpS
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: cc.selUid !== "" ? cc.deviceName(cc.selUid)
+                                                         : (cc.deviceUids().length === 0 ? "（无在线设备）" : "请选择设备")
+                                    color: cc.tFg
+                                    font.pixelSize: cc.tLabelM
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    id: caret
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: cc.tSpS
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "▾"
+                                    color: cc.tFg3
+                                    font.pixelSize: cc.tLabelM
+                                }
+                                MouseArea {
+                                    id: devMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: devMenu.opened ? devMenu.close() : devMenu.open()
+                                }
+                                Popup {
+                                    id: devMenu
+                                    x: 0
+                                    y: devSel.height + 4
+                                    width: devSel.width
+                                    padding: 4
+                                    background: Rectangle {
+                                        color: cc.tCardHighest
+                                        radius: cc.tRM
                                     }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.left: parent.left
-                                        anchors.leftMargin: 8
-                                        text: cc.camLabel(index, modelData)
-                                        color: camList.currentIndex === index
-                                                ? (cc.theme.win || "#0A0A0A") : (cc.theme.fg || "#FAFAFA")
-                                        font.pixelSize: 11
-                                        elide: Text.ElideRight
-                                        width: parent.width - 16
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: camList.currentIndex = index
+                                    contentItem: ListView {
+                                        implicitHeight: Math.min(contentHeight, 220)
+                                        clip: true
+                                        model: cc.deviceUids()
+                                        delegate: Rectangle {
+                                            width: ListView.view.width
+                                            height: 28
+                                            radius: cc.tRM
+                                            color: (cc.selUid === modelData)
+                                                   ? cc.tSegBg
+                                                   : (devItemMa.containsMouse ? cc.tCardHi : "transparent")
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: cc.tSpS
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: cc.tSpS
+                                                text: modelData
+                                                color: (cc.selUid === modelData) ? cc.tSegFg : cc.tFg
+                                                font.pixelSize: cc.tLabelM
+                                                elide: Text.ElideRight
+                                            }
+                                            MouseArea {
+                                                id: devItemMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    cc.selUid = modelData
+                                                    devMenu.close()
+                                                    cc.refreshCams()
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
-                        Text {
-                            text: cc.loadingCams ? "正在枚举…"
-                                 : (cc.cameras.length === 0 ? "（无摄像头或未枚举：点「摄像头列表」）" : cc.cameras.length + " 个摄像头")
-                            color: cc.theme.fg4 || "#707070"
-                            font.pixelSize: 10
-                        }
-                        Text {
-                            text: "当前绑定：" + (cc.boundDev !== "" ? cc.boundDev
-                                                : (cc.currentDev() !== "" ? cc.currentDev() + "（本地缓存）" : "（未绑定，默认 video0）"))
-                            color: cc.theme.fg3 || "#8A8A8A"
-                            font.pixelSize: 11
-                            elide: Text.ElideRight
+
+                        // 小节标题行：摄像头列表 + 右侧刷新（图标按钮）
+                        Item {
                             width: parent.width
-                        }
-                        Btn {
-                            theme: cc.theme
-                            width: parent.width
-                            text: "绑定选中的摄像头"
-                            disabled: camList.currentIndex < 0
-                            onClicked: {
-                                if (cc.selUid === "" || camList.currentIndex < 0) return
-                                var dev = cc.cameras[camList.currentIndex]
-                                var map = store.bindings || {}
-                                map[cc.selUid] = dev
-                                store.bindings = map
-                                cc.backend.sendAction("camera_bind", { device: dev })
-                                cc.status = "正在绑定 " + dev + " …"
+                            height: 24
+                            Text {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "摄像头列表"
+                                color: cc.tFg3
+                                font.pixelSize: cc.tLabelM
+                                font.weight: Font.Medium
                             }
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 28
+                                height: 28
+                                radius: cc.tRM
+                                color: refMa.containsMouse ? cc.tCardHi : "transparent"
+                                SvgIcon {
+                                    anchors.centerIn: parent
+                                    name: "refresh-cw"
+                                    px: 16
+                                    tint: cc.tFg3
+                                }
+                                MouseArea {
+                                    id: refMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: cc.refreshCams()
+                                }
+                                ToolTip {
+                                    visible: refMa.containsMouse
+                                    delay: 400
+                                    text: "重新枚举摄像头"
+                                }
+                            }
+                        }
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            color: cc.tOutlineVar
+                        }
+                        // 计数短文案（长说明移「诊断」页）
+                        Text {
+                            width: parent.width
+                            text: cc.loadingCams ? "枚举中…"
+                                 : (cc.cameras.length === 0 ? "未枚举" : cc.cameras.length + " 个摄像头")
+                            color: cc.tFg4
+                            font.pixelSize: cc.tLabelS
+                            elide: Text.ElideRight
+                            ToolTip {
+                                id: camCountTip
+                                delay: 400
+                                visible: camCountTip.text !== ""
+                                text: cc.loadingCams ? ""
+                                     : (cc.cameras.length === 0
+                                        ? "点右上角刷新重新枚举；或确认摄像头已插好、没被其它程序占用"
+                                        : "")
+                            }
+                        }
+                    }
+
+                    // 列表区（填满卡片中部）
+                    Rectangle {
+                        anchors.top: camTopCol.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: bindBtn.top
+                        anchors.topMargin: cc.tSpS
+                        anchors.leftMargin: cc.tSpM
+                        anchors.rightMargin: cc.tSpM
+                        anchors.bottomMargin: cc.tSpS
+                        color: "transparent"
+                        ListView {
+                            id: camList
+                            anchors.fill: parent
+                            clip: true
+                            model: cc.cameras
+                            delegate: Item {
+                                width: camList.width
+                                height: 30
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: cc.tRM
+                                    color: camList.currentIndex === index
+                                           ? cc.tSegBg
+                                           : (rowMa.containsMouse ? cc.tCardHi : "transparent")
+                                }
+                                SvgIcon {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    name: "video"
+                                    px: 14
+                                    tint: camList.currentIndex === index ? cc.tSegFg : cc.tFg3
+                                }
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 32
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: cc.camLabel(index, modelData)
+                                    color: camList.currentIndex === index ? cc.tSegFg : cc.tFg
+                                    font.pixelSize: cc.tLabelM
+                                    elide: Text.ElideRight
+                                }
+                                MouseArea {
+                                    id: rowMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: camList.currentIndex = index
+                                }
+                            }
+                        }
+                    }
+
+                    // 绑定选中的摄像头（主操作，filled，统一 12 圆角）
+                    Md3Btn {
+                        id: bindBtn
+                        md3: cc.theme
+                        radius: cc.tRM
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.margins: cc.tSpM
+                        variant: "filled"
+                        text: "＋ 绑定选中"
+                        enabled: camList.currentIndex >= 0
+                        tip: "把选中的摄像头设为该设备的采集源（camera_bind）"
+                        onClicked: {
+                            if (cc.selUid === "" || camList.currentIndex < 0) return
+                            var dev = cc.cameras[camList.currentIndex]
+                            var map = store.bindings || {}
+                            map[cc.selUid] = dev
+                            store.bindings = map
+                            cc.backend.sendAction("camera_bind", { device: dev })
+                            cc.status = "正在绑定 " + dev + " …"
                         }
                     }
                 }
 
-                // 右：实时画面（四·双画面：屏幕 + 摄像头 左右分屏 + 三模式切换）
-                // ⚠️ 当前 viewer 只有「屏幕」帧源（image://frames/<uid>）；摄像头实时流
-                //    （WebRTC 双路）尚未接入 ⇒ 摄像头格显示诚实占位，待后端接入后只改 source。
+                // 右：实时画面卡（无边框，底色 cContLow）
                 Rectangle {
-                    width: parent.width * 0.58
+                    id: liveCard
+                    width: parent.width - camCard.width - parent.spacing
                     height: parent.height
-                    radius: cc.theme.rCard || 12
-                    color: cc.theme.panel || "#181818"
-                    border.color: cc.theme.stroke || "#2A2A2A"
-                    border.width: 1
+                    color: cc.tCard
+                    radius: cc.tRM
                     Column {
                         anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 8
-                        // 顶行：标题 + 三模式切换（双画面 / 仅屏幕 / 仅摄像头）
+                        anchors.margins: cc.tSpM
+                        spacing: cc.tSpS
+
+                        // 模式切换：MD3 SegmentedButton（底色区分选中，无边框无药丸）
                         Row {
-                            width: parent.width
-                            height: 28
-                            spacing: 8
-                            Text {
-                                text: "实时画面"
-                                color: cc.theme.fg3 || "#8A8A8A"
-                                font.pixelSize: 11
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            Item { width: 6; height: 1 }
-                            // 分段切换（自绘，避开原生 Button；选中走 theme.inv）
+                            id: segRow
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            height: 32
+                            spacing: cc.tSpXS
                             Repeater {
-                                model: ["双画面", "仅屏幕", "仅摄像头"]
+                                model: [
+                                    { icon: "monitor",     label: "仅屏幕",   mode: 1, tip: "只看被控端屏幕" },
+                                    { icon: "layout-grid", label: "",         mode: 0, tip: "双画面：屏幕 + 摄像头" },
+                                    { icon: "video",       label: "仅摄像头", mode: 2, tip: "只看摄像头实时流" }
+                                ]
                                 delegate: Rectangle {
-                                    height: 24
-                                    width: Math.max(56, segTxt.width + 18)
-                                    radius: 6
-                                    color: cc.layoutMode === index
-                                           ? (cc.theme.inv || "#F0F0F0")
-                                           : (segMa.containsMouse ? (cc.theme.hover2 || "#232323") : "transparent")
-                                    border.color: cc.theme.stroke || "#2A2A2A"
-                                    border.width: 1
-                                    Text {
-                                        id: segTxt
+                                    height: 32
+                                    // 文字段 = 图标 + 文字 + 左右各 12 内边距；纯图标段定宽 44
+                                    width: modelData.label !== ""
+                                           ? (16 + 6 + segTx.implicitWidth + 24)
+                                           : 44
+                                    radius: cc.tRM
+                                    color: cc.layoutMode === modelData.mode
+                                           ? cc.tSegBg
+                                           : (segMa.containsMouse ? cc.tCardHi : "transparent")
+                                    Row {
                                         anchors.centerIn: parent
-                                        text: modelData
-                                        color: cc.layoutMode === index
-                                               ? (cc.theme.win || "#0A0A0A")
-                                               : (cc.theme.fg || "#FAFAFA")
-                                        font.pixelSize: 12
+                                        spacing: 6
+                                        SvgIcon {
+                                            id: segIcon
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            name: modelData.icon
+                                            px: 16
+                                            tint: cc.layoutMode === modelData.mode ? cc.tSegFg : cc.tFg3
+                                        }
+                                        Text {
+                                            id: segTx
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: modelData.label !== ""
+                                            text: modelData.label
+                                            color: cc.layoutMode === modelData.mode ? cc.tSegFg : cc.tFg3
+                                            font.pixelSize: cc.tLabelM
+                                        }
                                     }
                                     MouseArea {
                                         id: segMa
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: cc.layoutMode = index
+                                        onClicked: cc.layoutMode = modelData.mode
+                                    }
+                                    ToolTip {
+                                        visible: segMa.containsMouse
+                                        delay: 400
+                                        text: modelData.tip
                                     }
                                 }
                             }
                         }
-                        // 画面区：屏幕 + 摄像头 左右分屏（双画面 60/40；单模式占满）
+
+                        // 画面台（最深底色，像一块"屏幕"）
                         Rectangle {
-                            id: paneBox
+                            id: stage
                             width: parent.width
-                            height: parent.height - 44
-                            radius: 8
-                            color: cc.theme.cream || "#141414"
-                            border.color: cc.theme.stroke || "#2A2A2A"
-                            border.width: 1
+                            height: parent.height - segRow.height - parent.spacing
+                            color: cc.tStage
+                            radius: cc.tRM
                             clip: true
                             Row {
                                 id: paneRow
@@ -435,6 +566,7 @@ Item {
                                     color: "transparent"
                                     clip: true
                                     Image {
+                                        id: screenImg
                                         anchors.fill: parent
                                         anchors.margins: 2
                                         fillMode: Image.PreserveAspectFit
@@ -444,15 +576,27 @@ Item {
                                         Connections {
                                             target: cc.backend
                                             function onThumbnailChanged(uid) {
-                                                if (uid === cc.selUid || uid === "") parent.tick++
+                                                screenImg.tick++
+                                                if (uid === cc.selUid || uid === "") cc.screenHasFrame = true
                                             }
                                         }
                                     }
                                     Text {
                                         anchors.centerIn: parent
-                                        text: cc.selUid === "" ? "（选左侧设备看实时画面）" : ""
-                                        color: cc.theme.fg4 || "#707070"
-                                        font.pixelSize: 11
+                                        width: parent.width - 24
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: cc.selUid === "" ? "暂无画面" : (cc.screenHasFrame ? "" : "连接中...")
+                                        color: cc.tFg3
+                                        font.pixelSize: cc.tLabelM
+                                        ToolTip {
+                                            id: scrTip
+                                            delay: 400
+                                            visible: scrTip.text !== ""
+                                            text: cc.selUid === ""
+                                                  ? "先在左侧「设备」里选一台教室机"
+                                                  : (cc.screenHasFrame ? ""
+                                                     : "已请求画面，还没收到首帧；被控端不在线时会一直连不上")
+                                        }
                                     }
                                 }
                                 // 摄像头画面（2026-10-12 · 四·双画面 · 方案 A：RTC second track）
@@ -486,17 +630,20 @@ Item {
                                     }
                                     Text {
                                         anchors.centerIn: parent
-                                        width: parent.width - 16
+                                        width: parent.width - 24
                                         horizontalAlignment: Text.AlignHCenter
-                                        wrapMode: Text.WrapAnywhere
-                                        visible: !cc.camHasFrame
-                                        text: cc.selUid === ""
-                                              ? "（选左侧设备看摄像头画面）"
-                                              : (cc.camStreamUid !== ""
-                                                 ? "摄像头画面连接中…\n（首次可能要等 1-2 秒；\n被控端无摄像头/被占用则无画面）"
-                                                 : "双画面 · 摄像头实时画面\n（打开此格即按需推流）")
-                                        color: cc.theme.fg4 || "#707070"
-                                        font.pixelSize: 11
+                                        text: cc.camStreamUid === "" ? "暂无画面" : (cc.camHasFrame ? "" : "连接中...")
+                                        color: cc.tFg3
+                                        font.pixelSize: cc.tLabelM
+                                        ToolTip {
+                                            id: camTip
+                                            delay: 400
+                                            visible: camTip.text !== ""
+                                            text: cc.camStreamUid === ""
+                                                  ? "切到「双画面 / 仅摄像头」即按需请被控端推流（不看不采）"
+                                                  : (cc.camHasFrame ? ""
+                                                     : "已请求推流，还没收到首帧；被控端无摄像头/被占用时会一直无画面")
+                                        }
                                     }
                                     // 可见性变化（切标签/切单屏/切双画面）→ 同步推流状态
                                     onVisibleChanged: cc.camSync()
@@ -512,61 +659,126 @@ Item {
             Rectangle {
                 visible: tabs.currentIndex === 1
                 anchors.fill: parent
-                radius: cc.theme.rCard || 12
-                color: cc.theme.panel || "#181818"
-                border.color: cc.theme.stroke || "#2A2A2A"
-                border.width: 1
+                color: cc.tCard
+                radius: cc.tRM
                 Column {
                     anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 8
-                    Text {
-                        text: "录制回放（本机）"
-                        color: cc.theme.fg3 || "#8A8A8A"
-                        font.pixelSize: 11
+                    anchors.margins: cc.tSpM
+                    spacing: cc.tSpS
+                    // 标题行：录制回放（本机） + 开录/停录 + 刷新
+                    Item {
+                        width: parent.width
+                        height: 32
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "录制回放（本机）"
+                            color: cc.tFg3
+                            font.pixelSize: cc.tLabelM
+                            font.weight: Font.Medium
+                        }
+                        Row {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: cc.tSpS
+                            Md3Btn {
+                                md3: cc.theme
+                                radius: cc.tRM
+                                variant: cc.recording ? "outlined" : "filled"
+                                text: cc.recording ? "停录" : "开录"
+                                enabled: cc.selUid !== ""
+                                tip: cc.selUid === "" ? "先在「实时」页选一台设备"
+                                                      : "让被控端录一段摄像头，停录后自动上传云端"
+                                onClicked: cc.recording ? cc.stopRec() : cc.startRec()
+                            }
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 32
+                                height: 32
+                                radius: cc.tRM
+                                color: recRefMa.containsMouse ? cc.tCardHi : "transparent"
+                                SvgIcon {
+                                    anchors.centerIn: parent
+                                    name: "refresh-cw"
+                                    px: 16
+                                    tint: cc.tFg3
+                                }
+                                MouseArea {
+                                    id: recRefMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: { cc.backend.fetchRecordings(); cc.status = "已刷新录制列表" }
+                                }
+                                ToolTip {
+                                    visible: recRefMa.containsMouse
+                                    delay: 400
+                                    text: "刷新录制列表"
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: cc.tOutlineVar
                     }
                     // 回放列表（按 uid 分组）
                     Flickable {
                         width: parent.width
-                        height: parent.height - 40
+                        height: parent.height - 32 - 1 - 2 * cc.tSpS
                         clip: true
                         contentHeight: recCol.height
                         Column {
                             id: recCol
                             width: parent.width
-                            spacing: 6
+                            spacing: cc.tSpS
                             Repeater {
                                 model: Object.keys(cc.backend.recordings || {}).sort()
                                 delegate: Rectangle {
                                     width: parent.width
-                                    height: 30
-                                    radius: 6
-                                    color: cc.theme.cream || "#141414"
-                                    Row {
-                                        anchors.verticalCenter: parent.verticalCenter
+                                    height: 32
+                                    radius: cc.tRM
+                                    color: cc.tCardHi
+                                    SvgIcon {
                                         anchors.left: parent.left
                                         anchors.leftMargin: 10
-                                        spacing: 8
-                                        Text {
-                                            text: modelData + " · "
-                                            color: cc.theme.fg || "#FAFAFA"
-                                            font.pixelSize: 11
-                                            width: 130
-                                            elide: Text.ElideRight
-                                        }
-                                        Text {
-                                            text: ((cc.backend.recordings[modelData] || []).length || 0) + " 段"
-                                            color: cc.theme.fg3 || "#8A8A8A"
-                                            font.pixelSize: 11
-                                        }
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        name: "video"
+                                        px: 14
+                                        tint: cc.tFg3
+                                    }
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 32
+                                        anchors.right: recCountTx.left
+                                        anchors.rightMargin: cc.tSpS
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: cc.deviceName(modelData)
+                                        color: cc.tFg
+                                        font.pixelSize: cc.tLabelM
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        id: recCountTx
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: ((cc.backend.recordings[modelData] || []).length || 0) + " 段"
+                                        color: cc.tFg3
+                                        font.pixelSize: cc.tLabelM
                                     }
                                 }
                             }
                             Text {
                                 visible: Object.keys(cc.backend.recordings || {}).length === 0
-                                text: "暂无回放（点「开录」让被控端录一段并自动上传）"
-                                color: cc.theme.fg4 || "#707070"
-                                font.pixelSize: 10
+                                text: "暂无回放"
+                                color: cc.tFg4
+                                font.pixelSize: cc.tLabelM
+                                ToolTip {
+                                    delay: 400
+                                    text: "在本页点「开录」让被控端录一段，停录后自动上传云端，再点刷新"
+                                }
                             }
                         }
                     }
@@ -579,61 +791,62 @@ Item {
             Rectangle {
                 visible: tabs.currentIndex === 2
                 anchors.fill: parent
-                radius: cc.theme.rCard || 12
-                color: cc.theme.panel || "#181818"
-                border.color: cc.theme.stroke || "#2A2A2A"
-                border.width: 1
+                color: cc.tCard
+                radius: cc.tRM
 
                 Column {
                     id: studyTop
                     anchors.top: parent.top
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.topMargin: 12
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    spacing: 10
+                    anchors.topMargin: cc.tSpM
+                    anchors.leftMargin: cc.tSpM
+                    anchors.rightMargin: cc.tSpM
+                    spacing: cc.tSpM
 
                     // ① 标题 + 状态 + 开关
                     Item {
                         width: parent.width
-                        height: 30
+                        height: 36
                         Row {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 8
+                            spacing: cc.tSpS
                             Text {
                                 text: "自习模式"
-                                color: cc.theme.fg || "#FAFAFA"
-                                font.pixelSize: 14; font.bold: true
+                                color: cc.tFg
+                                font.pixelSize: cc.tTitleS
+                                font.weight: Font.Medium
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Rectangle {
-                                width: 52; height: 20; radius: 10
-                                color: cc.backend.studyActive ? (cc.theme.cream || "#141414") : "transparent"
-                                border.color: cc.theme.stroke || "#2A2A2A"; border.width: 1
+                                width: 52
+                                height: 20
+                                radius: cc.tRM
+                                color: cc.backend.studyActive ? cc.tSegBg : cc.tCardHi
                                 anchors.verticalCenter: parent.verticalCenter
                                 Text {
                                     anchors.centerIn: parent
                                     text: cc.backend.studyActive ? "监测中" : "未开启"
-                                    color: cc.backend.studyActive ? (cc.theme.fg || "#FAFAFA") : (cc.theme.fg4 || "#707070")
-                                    font.pixelSize: 10
+                                    color: cc.backend.studyActive ? cc.tSegFg : cc.tFg3
+                                    font.pixelSize: cc.tLabelS
                                 }
                             }
                             Text {
-                                text: cc.selUid === "" ? "（先在「实时」页选设备）" : "· " + cc.selUid
-                                color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 11
+                                text: cc.selUid === "" ? "（先在「实时」页选设备）" : "· " + cc.deviceName(cc.selUid)
+                                color: cc.tFg3
+                                font.pixelSize: cc.tLabelM
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                         }
-                        Btn {
+                        Md3Btn {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            width: 88
-                            theme: cc.theme
+                            md3: cc.theme
+                            radius: cc.tRM
+                            variant: cc.backend.studyActive ? "outlined" : "filled"
                             text: cc.backend.studyActive ? "关闭自习" : "开启自习"
-                            strong: !cc.backend.studyActive
-                            disabled: cc.selUid === ""
+                            enabled: cc.selUid !== ""
                             tip: cc.selUid === "" ? "先在「实时」页选一台设备"
                                                   : "周期测教室噪音；连续超阈自动录一段摄像头并上传"
                             onClicked: {
@@ -653,8 +866,8 @@ Item {
 
                     // ② 配置行：阈值 / 连续拍数 / 录制时长
                     Row {
-                        spacing: 8
-                        Text { text: "阈值"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                        spacing: cc.tSpS
+                        Text { text: "阈值"; color: cc.tFg3; font.pixelSize: cc.tLabelM; anchors.verticalCenter: parent.verticalCenter }
                         InputField {
                             id: thIn
                             th: cc.theme
@@ -667,8 +880,8 @@ Item {
                                 else thIn.text = String(cc.studyThresholdDb)
                             }
                         }
-                        Text { text: "dB"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-                        Text { text: "连续"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: "dB"; color: cc.tFg4; font.pixelSize: cc.tLabelM; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: "连续"; color: cc.tFg3; font.pixelSize: cc.tLabelM; anchors.verticalCenter: parent.verticalCenter }
                         InputField {
                             id: stIn
                             th: cc.theme
@@ -681,7 +894,7 @@ Item {
                                 else stIn.text = String(cc.studyStreakNeed)
                             }
                         }
-                        Text { text: "拍后录"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: "拍后录"; color: cc.tFg4; font.pixelSize: cc.tLabelM; anchors.verticalCenter: parent.verticalCenter }
                         InputField {
                             id: rsIn
                             th: cc.theme
@@ -694,63 +907,64 @@ Item {
                                 else rsIn.text = String(cc.studyRecordSec)
                             }
                         }
-                        Text { text: "秒"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: "秒"; color: cc.tFg4; font.pixelSize: cc.tLabelM; anchors.verticalCenter: parent.verticalCenter }
                     }
 
                     // ③ 当前噪音：大字 dB + 电平条（白线=阈值）
                     Rectangle {
                         width: parent.width; height: 56
-                        radius: 8
-                        color: cc.theme.cream || "#141414"
-                        border.color: cc.theme.stroke || "#2A2A2A"; border.width: 1
+                        radius: cc.tRM
+                        color: cc.tStage
                         Row {
-                            anchors.left: parent.left; anchors.leftMargin: 12
+                            anchors.left: parent.left
+                            anchors.leftMargin: cc.tSpM
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 8
+                            spacing: cc.tSpS
                             Text {
                                 text: cc.backend.noiseCaptureOk
                                       ? (cc.backend.noiseDb <= -90 ? "静" : cc.backend.noiseDb.toFixed(1))
                                       : "—"
-                                color: cc.theme.fg || "#FAFAFA"
+                                color: cc.tFg
                                 font.pixelSize: 20
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
-                                text: "dB"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 11
+                                text: "dB"; color: cc.tFg3; font.pixelSize: cc.tLabelM
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
                                 text: !cc.backend.noiseCaptureOk ? "采不到（无麦或被语音占用）"
                                     : (cc.backend.noiseActive ? "偏高" : "正常")
-                                color: cc.backend.noiseActive ? (cc.theme.rCtrl || "#E5534B") : (cc.theme.fg3 || "#8A8A8A")
-                                font.pixelSize: 11
+                                color: cc.backend.noiseActive ? cc.tErr : cc.tFg3
+                                font.pixelSize: cc.tLabelM
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                         }
                         Item {
-                            anchors.right: parent.right; anchors.rightMargin: 12
+                            anchors.right: parent.right
+                            anchors.rightMargin: cc.tSpM
                             anchors.verticalCenter: parent.verticalCenter
                             width: parent.width * 0.40; height: 10
                             Rectangle {
                                 anchors.fill: parent; radius: 5
-                                color: cc.theme.stroke || "#2A2A2A"
+                                color: cc.tOutlineVar
                             }
                             Rectangle {
                                 height: parent.height; radius: 5
                                 width: parent.width * Math.max(0, Math.min(1, (cc.backend.noiseDb + 96) / 96))
-                                color: cc.backend.noiseActive ? (cc.theme.rCtrl || "#E5534B") : (cc.theme.fg3 || "#8A8A8A")
+                                color: cc.backend.noiseActive ? cc.tErr : cc.tAcc
                             }
                             Rectangle {
                                 x: parent.width * Math.max(0, Math.min(1, (cc.studyThresholdDb + 96) / 96)) - 1
                                 width: 2; height: parent.height + 6; y: -3
-                                color: cc.theme.fg || "#FAFAFA"
+                                color: cc.tFg
                                 opacity: 0.75
                             }
                         }
                     }
 
                     // ④ 最近噪音样本条带
-                    Text { text: "最近噪音（每拍一柱，白线=阈值）"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 10 }
+                    Text { text: "最近噪音（每拍一柱，白线=阈值）"; color: cc.tFg4; font.pixelSize: cc.tLabelS }
                     Row {
                         width: parent.width
                         height: 38
@@ -764,7 +978,7 @@ Item {
                                     anchors.bottom: parent.bottom
                                     width: parent.width
                                     height: parent.height * Math.max(0, Math.min(1, (modelData.db + 96) / 96))
-                                    color: modelData.active ? (cc.theme.rCtrl || "#E5534B") : (cc.theme.fg3 || "#8A8A8A")
+                                    color: modelData.active ? cc.tErr : cc.tAcc
                                     opacity: 0.85
                                 }
                             }
@@ -772,64 +986,67 @@ Item {
                         Text {
                             visible: (cc.backend.noiseSamples.length || 0) === 0
                             text: "（开启自习模式后才有数据）"
-                            color: cc.theme.fg4 || "#707070"; font.pixelSize: 10
+                            color: cc.tFg4; font.pixelSize: cc.tLabelS
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
 
-                    Text { text: "异常记录"; color: cc.theme.fg4 || "#707070"; font.pixelSize: 10 }
+                    Text { text: "异常记录"; color: cc.tFg4; font.pixelSize: cc.tLabelS }
                 }
 
                 // ⑤ 异常记录列表（占满剩余高度）
                 Flickable {
                     anchors.top: studyTop.bottom
-                    anchors.topMargin: 6
+                    anchors.topMargin: cc.tSpS
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    anchors.bottomMargin: 12
+                    anchors.leftMargin: cc.tSpM
+                    anchors.rightMargin: cc.tSpM
+                    anchors.bottomMargin: cc.tSpM
                     clip: true
                     contentHeight: altCol.height
                     Column {
                         id: altCol
                         width: parent.width
-                        spacing: 4
+                        spacing: cc.tSpXS
                         Repeater {
                             model: cc.backend.noiseAlerts
                             delegate: Rectangle {
                                 width: altCol.width
                                 height: 26
-                                radius: 6
-                                color: cc.theme.cream || "#141414"
-                                Row {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 10; anchors.rightMargin: 10
-                                    spacing: 8
-                                    Text {
-                                        text: Qt.formatTime(new Date(modelData.t), "hh:mm:ss")
-                                        color: cc.theme.fg4 || "#707070"; font.pixelSize: 10
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    Text {
-                                        text: modelData.event === "record_start"
-                                              ? "检测到噪音异常 · 开始录制"
-                                              : (modelData.ok ? "录制完成（" + Math.round((modelData.bytes || 0) / 1024) + " KB，已上传）"
-                                                              : "录制失败：" + (modelData.reason || "未知"))
-                                        color: (modelData.event === "record_stop" && modelData.ok === false)
-                                               ? (cc.theme.rCtrl || "#E5534B") : (cc.theme.fg || "#FAFAFA")
-                                        font.pixelSize: 11
-                                        elide: Text.ElideRight
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
+                                radius: cc.tRM
+                                color: cc.tCardHi
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 10
+                                    anchors.right: altMsgTx.left
+                                    anchors.rightMargin: cc.tSpS
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: Qt.formatTime(new Date(modelData.t), "hh:mm:ss")
+                                    color: cc.tFg4; font.pixelSize: cc.tLabelS
+                                }
+                                Text {
+                                    id: altMsgTx
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: Math.min(implicitWidth, parent.width - 110)
+                                    text: modelData.event === "record_start"
+                                          ? "检测到噪音异常 · 开始录制"
+                                          : (modelData.ok ? "录制完成（" + Math.round((modelData.bytes || 0) / 1024) + " KB，已上传）"
+                                                          : "录制失败：" + (modelData.reason || "未知"))
+                                    color: (modelData.event === "record_stop" && modelData.ok === false)
+                                           ? cc.tErr : cc.tFg
+                                    font.pixelSize: cc.tLabelS
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
                         Text {
                             visible: (cc.backend.noiseAlerts.length || 0) === 0
                             text: "暂无异常（噪音连续超阈会自动录一段并记在这里）"
-                            color: cc.theme.fg4 || "#707070"; font.pixelSize: 10
+                            color: cc.tFg4; font.pixelSize: cc.tLabelS
                         }
                     }
                 }
@@ -838,96 +1055,182 @@ Item {
             // ── 诊断 ──
             // 把"设备连接状态 / 绑定 / 摄像头枚举 / 最近错误（人话）+ 错误码 / 重试"聚到一屏，
             // 老师排障时不用在动作区翻找（UI 评审一.2：诊断独立成档）。
+            // MD3 重构④：实时页删掉的长说明统一挪到这里（画面占位两种态是什么意思、虚拟摄像头等）。
             Rectangle {
                 visible: tabs.currentIndex === 3
                 anchors.fill: parent
-                radius: cc.theme.rCard || 12
-                color: cc.theme.panel || "#181818"
-                border.color: cc.theme.stroke || "#2A2A2A"
-                border.width: 1
+                color: cc.tCard
+                radius: cc.tRM
                 Flickable {
                     anchors.fill: parent
-                    anchors.margins: 12
+                    anchors.margins: cc.tSpM
                     contentHeight: diagCol.height
                     clip: true
                     Column {
                         id: diagCol
                         width: parent.width
-                        spacing: 10
-                        Row { spacing: 8
-                            Text { text: "选中设备"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
-                            Text { text: cc.selUid !== "" ? cc.selUid : "（未选设备）"; color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12 }
+                        spacing: cc.tSpM
+                        Row { spacing: cc.tSpS
+                            Text { text: "选中设备"; color: cc.tFg3; font.pixelSize: cc.tLabelM }
+                            Text { text: cc.selUid !== "" ? cc.deviceName(cc.selUid) : "（未选设备）"; color: cc.tFg; font.pixelSize: cc.tLabelM }
                         }
-                        Row { spacing: 8
-                            Text { text: "当前绑定"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
+                        Row { spacing: cc.tSpS
+                            Text { text: "当前绑定"; color: cc.tFg3; font.pixelSize: cc.tLabelM }
                             Text { text: cc.boundDevice() !== "" ? cc.boundDevice()
                                         : (cc.currentDev() !== "" ? cc.currentDev() + "（本地缓存）" : "（未绑定，默认 video0）")
-                                   color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12; elide: Text.ElideRight; width: parent.width - 120 }
+                                   color: cc.tFg; font.pixelSize: cc.tLabelM; elide: Text.ElideRight; width: parent.width - 120 }
                         }
-                        Row { spacing: 8
-                            Text { text: "摄像头"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
-                            Text { text: cc.loadingCams ? "枚举中…" : (cc.cameras.length + " 个"); color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12 }
+                        Row { spacing: cc.tSpS
+                            Text { text: "摄像头"; color: cc.tFg3; font.pixelSize: cc.tLabelM }
+                            Text { text: cc.loadingCams ? "枚举中…" : (cc.cameras.length + " 个"); color: cc.tFg; font.pixelSize: cc.tLabelM }
                         }
                         Column { spacing: 2
-                            Text { text: "最近状态"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
+                            Text { text: "最近状态"; color: cc.tFg3; font.pixelSize: cc.tLabelM }
                             Text { text: cc.status !== "" ? cc.status : "（无）"
-                                   color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12; width: parent.width; wrapMode: Text.WrapAnywhere }
+                                   color: cc.tFg; font.pixelSize: cc.tLabelM; width: parent.width; wrapMode: Text.WrapAnywhere }
                         }
                         Row { visible: cc.errCode !== ""
-                            spacing: 8
-                            Text { text: "错误码"; color: cc.theme.fg3 || "#8A8A8A"; font.pixelSize: 12 }
-                            Text { text: cc.errCode; color: cc.theme.fg || "#FAFAFA"; font.pixelSize: 12 }
+                            spacing: cc.tSpS
+                            Text { text: "错误码"; color: cc.tFg3; font.pixelSize: cc.tLabelM }
+                            Text { text: cc.errCode; color: cc.tFg; font.pixelSize: cc.tLabelM }
                         }
-                        Btn {
+                        Md3Btn {
                             visible: cc.canRetry
-                            theme: cc.theme
-                            width: 80
+                            md3: cc.theme
+                            radius: cc.tRM
+                            variant: "tonal"
                             text: "重试"
                             tip: "再试一次刚才没成功的操作"
                             onClicked: cc.retryLast()
+                        }
+
+                        // ── 画面说明（MD3 重构④：从实时页移来的长文字）──
+                        Rectangle { width: parent.width; height: 1; color: cc.tOutlineVar }
+                        Text { text: "画面说明"; color: cc.tFg3; font.pixelSize: cc.tLabelM; font.weight: Font.Medium }
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WrapAnywhere
+                            color: cc.tFg3
+                            font.pixelSize: cc.tLabelS
+                            text: "· 「实时」页两个画面格：左侧是被控端**屏幕**帧，右侧是**摄像头**实时流。\n"
+                                  + "· 占位「连接中...」= 已经请求、还没收到首帧；「暂无画面」= 没选设备 / 没请求流 / 被控端没有摄像头。\n"
+                                  + "· 摄像头格可见时会按需请被控端推流，不可见自动停（隐私红线：不看不采）。\n"
+                                  + "· 虚拟摄像头（OBS / Iriun 之类）能列出来但采不到画面，列表里会标「（虚拟·无画面）」。\n"
+                                  + "· 自检/抓拍/开录都会优先用「当前绑定」的摄像头；没绑定时由被控端自己回落 video0。"
                         }
                     }
                 }
             }
         }
-    }
-    // ── 状态行 ──
-    // 2026-10-12 · UI 评审第 4 条：状态只显示**人话**结论，可恢复的错误旁边给一个「重试」。
-    // FFmpeg 原生输出已在 noteError() 里被拦下（只进 console），绝不会走到这一行。
-    Text {
-        id: statusLine
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.right: retryBtn.visible ? retryBtn.left : parent.right
-        anchors.rightMargin: retryBtn.visible ? 8 : 0
-        height: retryBtn.visible ? 26 : implicitHeight
-        text: cc.status
-        color: cc.theme.fg4 || "#707070"
-        font.pixelSize: 10
-        elide: Text.ElideRight
-        verticalAlignment: Text.AlignVCenter
-    }
-    Btn {
-        id: retryBtn
-        anchors.bottom: parent.bottom
-        anchors.right: parent.right
-        visible: cc.canRetry
-        width: 64
-        height: 26
-        theme: cc.theme
-        text: "重试"
-        tip: "再试一次刚才没成功的操作"
-        onClicked: cc.retryLast()
+
+        // ④ 状态行（人话结论；可恢复的错误旁边给「重试」）
+        // 2026-10-12 · UI 评审第 4 条：状态只显示**人话**结论，可恢复的错误旁边给一个「重试」。
+        // FFmpeg 原生输出已在 noteError() 里被拦下（只进 console），绝不会走到这一行。
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 20
+            Text {
+                id: statusLine
+                anchors.left: parent.left
+                anchors.right: retryTxt.visible ? retryTxt.left : parent.right
+                anchors.rightMargin: retryTxt.visible ? cc.tSpS : 0
+                anchors.verticalCenter: parent.verticalCenter
+                text: cc.status
+                color: cc.tFg4
+                font.pixelSize: cc.tLabelS
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+            }
+            Text {
+                id: retryTxt
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                visible: cc.canRetry
+                text: "重试"
+                color: cc.tAcc
+                font.pixelSize: cc.tLabelS
+                font.weight: Font.Medium
+                font.underline: retryMa.containsMouse
+                MouseArea {
+                    id: retryMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: cc.retryLast()
+                }
+            }
+        }
+
+        // ⑤ 底栏：左＝截图/推文件，右＝停止/返回（MD3 按钮，统一 12 圆角）
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 40
+            Row {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: cc.tSpS
+                Md3Btn {
+                    md3: cc.theme
+                    radius: cc.tRM
+                    variant: "tonal"
+                    text: "截图"
+                    enabled: cc.selUid !== ""
+                    tip: "对被控端屏幕截图（screenshot）"
+                    onClicked: cc.screenShot()
+                }
+                Md3Btn {
+                    md3: cc.theme
+                    radius: cc.tRM
+                    variant: "filled"
+                    text: "推文件"
+                    enabled: cc.selUid !== ""
+                    tip: "把本机一个文件推给这台教室机"
+                    onClicked: cc.pushFile()
+                }
+            }
+            Row {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: cc.tSpS
+                Md3Btn {
+                    md3: cc.theme
+                    radius: cc.tRM
+                    variant: "outlined"
+                    text: "停止"
+                    enabled: cc.recording || cc.camStreamUid !== ""
+                    tip: "一键收口：停录 + 停摄像头推流"
+                    onClicked: cc.stopAll()
+                }
+                Md3Btn {
+                    md3: cc.theme
+                    radius: cc.tRM
+                    variant: "text"
+                    text: "返回"
+                    tip: "关闭监控中心"
+                    onClicked: cc.closePanel()
+                }
+            }
+        }
     }
 
     // ── 逻辑 ──
-    /** 可选设备（在线清单里的 uid）。原来直接喂给原生 ComboBox；现在喂自绘下拉。 */
+    /** 可选设备（在线清单里的 uid）。喂给自绘下拉。 */
     function deviceUids() {
         var out = []
         var devs = cc.backend.devices || []
         for (var i = 0; i < devs.length; ++i)
             if (devs[i] && devs[i].uid) out.push(devs[i].uid)
         return out
+    }
+    /** 设备显示名：有 name 用 name，没有回落 uid（标题/诊断/回放列表共用）。 */
+    function deviceName(uid) {
+        if (uid === "") return ""
+        var devs = cc.backend.devices || []
+        for (var i = 0; i < devs.length; ++i) {
+            var d = devs[i]
+            if (d && d.uid === uid && d.name) return d.name
+        }
+        return uid
     }
     /** 本地缓存的绑定（镜像；权威在被控端 cc.boundDev）。 */
     function currentDev() {
@@ -992,7 +1295,7 @@ Item {
         cc.camerasInfo = []
         cc.errCode = ""; cc.canRetry = false
         cc.lastAction = "camera_list"
-        cc.status = "正在枚举 " + cc.selUid + " 的摄像头…"
+        cc.status = "正在枚举 " + cc.deviceName(cc.selUid) + " 的摄像头…"
         cc.backend.sendAction("camera_list", {})
         // 回执由接线层调 cc.onCams()（Main.qml 现有回执处理转发）
     }
@@ -1012,7 +1315,7 @@ Item {
                      + (cc.boundDev !== "" ? "，已绑定 " + cc.boundDev : "（尚未绑定）")
         } else {
             cc.cameras = []
-            cc.status = "没找到摄像头。请确认摄像头已插好、没被其它程序占用，然后点「摄像头列表」重新枚举"
+            cc.status = "没找到摄像头。请确认摄像头已插好、没被其它程序占用，然后点右上角刷新重新枚举"
             cc.errCode = "no_devices"; cc.canRetry = true
         }
     }
@@ -1046,19 +1349,19 @@ Item {
     function snapshot() {
         cc.lastAction = "camera_snapshot"
         cc.errCode = ""; cc.canRetry = false
-        cc.status = "抓拍 " + cc.selUid + (cc.useDev() !== "" ? "（device=" + cc.useDev() + "）" : "") + "…"
+        cc.status = "抓拍 " + cc.deviceName(cc.selUid) + (cc.useDev() !== "" ? "（device=" + cc.useDev() + "）" : "") + "…"
         cc.backend.sendAction("camera_snapshot", cc.paramsWithDev())
     }
     function testCam() {
         cc.lastAction = "camera_test"
         cc.errCode = ""; cc.canRetry = false
-        cc.status = "正在自检 " + cc.selUid + "…"
+        cc.status = "正在自检 " + cc.deviceName(cc.selUid) + "…"
         cc.backend.sendAction("camera_test", cc.paramsWithDev())
     }
     function startRec() {
         cc.lastAction = "camera_record_start"
         cc.errCode = ""; cc.canRetry = false
-        cc.status = "正在开录 " + cc.selUid + "…"
+        cc.status = "正在开录 " + cc.deviceName(cc.selUid) + "…"
         cc.backend.sendAction("camera_record_start", cc.paramsWithDev())
         cc.recording = true
         cc.backend.subscribeThumbnails([cc.selUid])   // 开启到帧刷新
@@ -1067,6 +1370,36 @@ Item {
         cc.status = "已停录，稍后可云端回放"
         cc.backend.sendAction("camera_record_stop", {})
         cc.recording = false
+    }
+
+    // ── 底栏新动作（MD3 重构批）──
+    /** 屏幕截图（screenshot）：与抓拍（camera_snapshot）是两回事——这个截整屏。 */
+    function screenShot() {
+        if (cc.selUid === "") return
+        cc.lastAction = ""; cc.errCode = ""; cc.canRetry = false
+        cc.status = "正在截图 " + cc.deviceName(cc.selUid) + "…"
+        cc.backend.sendAction("screenshot", {})
+    }
+    /** 推文件：把当前设备设为 backend.currentUid（file 面板按它选目标），再开 file 面板。 */
+    function pushFile() {
+        if (cc.selUid === "") { cc.status = "先选一台设备"; return }
+        if (cc.backend.currentUid !== cc.selUid) cc.backend.currentUid = cc.selUid
+        if (cc.panelCtx && typeof cc.panelCtx.open === "function") cc.panelCtx.open("file")
+        else cc.status = "当前宿主不支持在此打开发文件面板"
+    }
+    /** 一键收口：停录 + 停摄像头推流。 */
+    function stopAll() {
+        if (cc.recording) cc.stopRec()
+        if (cc.camStreamUid !== "") {
+            cc.backend.sendAction("camera_stream_stop", {})
+            cc.camStreamUid = ""
+            cc.camHasFrame = false
+        }
+        cc.status = "已停止（录制 / 推流均已收口）"
+    }
+    /** 关闭面板（宿主上下文注入的 closePanels；老宿主没有时不崩，只没反应）。 */
+    function closePanel() {
+        if (cc.panelCtx && typeof cc.panelCtx.closePanels === "function") cc.panelCtx.closePanels()
     }
 
     // ── 摄像头实时画面（2026-10-12 · 四·双画面 · 方案 A：RTC second track）──
@@ -1084,5 +1417,5 @@ Item {
             cc.status = "正在开摄像头（" + want + "）…"
         }
     }
-    onSelUidChanged: cc.camSync()
+    onSelUidChanged: { cc.camSync(); cc.screenHasFrame = false }
 }
