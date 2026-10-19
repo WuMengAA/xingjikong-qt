@@ -368,6 +368,10 @@ static void reapFileRecvIfStale()
     g_fileRecvNext = 0;
     g_fileRecvBytes = 0;
     g_fileRecvLastMs = 0;
+    // #369：超时清理与 file_done 的成功/取消/字节不符三条路径一致 —— 把常驻「文件传输」
+    // 进度卡撤掉。否则半截文件清了、卡却没清，学生机那张灵动岛卡永久残留（"长时间占用通知
+    // 资源"的根因：接收会话 120s 没动静被回收，但岛卡无人收口）。
+    IslandOverlay::instance()->clearFileTransfer();
 }
 
 // ── 配置/连接可见性状态（2026-10-04）──
