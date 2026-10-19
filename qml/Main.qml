@@ -96,11 +96,12 @@ ApplicationWindow {
     // 2026-10-11：「批量管控」页已删，多班墙改由「多班墙」弹窗显式订阅（见 multiThumbDlg），
     // 不再跟随页签自动拉 —— 否则每次切页都在后台偷偷订阅一遍。
     onPageChanged: {
-        backend.setScreenActive(root.page === 1)   // 单台大画面只在集控（带画面主页）拉
+        // 2026-10-19：监控页（page=3）与集控页（page=1）都要单台帧流
+        backend.setScreenActive(root.page === 1 || root.page === 3)   // 单台大画面只在集控/监控拉
         if (!panelHost.isOpen("multiband")) backend.subscribeThumbnails([])
     }
     function syncPageLive() {
-        backend.setScreenActive(root.page === 1)
+        backend.setScreenActive(root.page === 1 || root.page === 3)
         if (!panelHost.isOpen("multiband")) backend.subscribeThumbnails([])
     }
     property int volumeValue: 30
@@ -879,6 +880,11 @@ ApplicationWindow {
             // 稿 03：pad + 两列卡片（账户 / 连接 / 提醒 / 外观）+ 通栏「关于」。
             // 现在只有「连接」「外观」两张是真的：前者读运行时状态，后者深浅切换确实做了。
             SettingsPage { ctx: root._pageCtx }
+
+            // ══ 3 监控 ══（2026-10-19 · 用户反馈「监控没有独立界面和操作 UI」）
+            // 此前监控散落：摄像头弹窗 / 多班墙弹窗 / 画面在集控页中栏。
+            // 新增独立整页：设备选择 + 主画面 + 操作栏（截图/摄像头/多班墙/远控）。
+            MonitorPage { ctx: root._pageCtx }
         }
 
         // ── 底部标签（与手机端同一套心智）──
@@ -899,7 +905,8 @@ ApplicationWindow {
                     // 与「集控」页割裂 —— 老师要在两个页面之间来回跳才能管完一台机器。
                     // 按「一站式」需求：那一页**删掉**，卡片改成集控页右栏按钮点开的弹窗，
                     // 于是底部只剩三个标签：0 概览 / 1 集控 / 2 设置。
-                    model: [ "概览", "集控", "设置" ]
+                    // 2026-10-19：加「监控」——监控从散落弹窗收成独立整页（0 概览 / 1 集控 / 2 设置 / 3 监控）。
+                    model: [ "概览", "集控", "设置", "监控" ]
                     delegate: Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
