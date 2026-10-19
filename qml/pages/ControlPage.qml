@@ -137,10 +137,15 @@ Item {
                 }
                 return arr
             })()
+            // ── 2026-10-18 MD3 色阶重排（保留 2 列网格与"班名+台数"双行信息）──
+            // 班级筛选是"双行信息密度"场景，Md3Chip 单行放不下"班名+台数"；
+            // 用 MD3 容器色阶表达选中/未选：选中 secondaryContainer、
+            // 未选 cContLow 底 + cOutlineVar 细边。班名 cOnSurface、台数 cOnSurfaceVar。
+            // 与左侧"分组筛选 Md3Chip"、上方统计卡同语言，整栏不再三套色调。
             delegate: Rectangle {
-                width: 73; height: 38; radius: th.rCtrl
-                color: (backend.currentClass === modelData.code) ? th.inv : th.hover2
-                border.color: (backend.currentClass === modelData.code) ? th.inv : th.stroke
+                width: 73; height: 38; radius: 8
+                color: (backend.currentClass === modelData.code) ? th.cSecondaryCont : th.cContLow
+                border.color: (backend.currentClass === modelData.code) ? "transparent" : th.cOutlineVar
                 border.width: 1
                 Column {
                     anchors.centerIn: parent
@@ -148,7 +153,7 @@ Item {
                     Text {
                         width: 65; elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter
                         text: modelData.name
-                        color: (backend.currentClass === modelData.code) ? th.win : th.fg3
+                        color: (backend.currentClass === modelData.code) ? th.cOnSecondaryCont : th.cOnSurface
                         font.pixelSize: 11
                         font.weight: (backend.currentClass === modelData.code)
                                      ? Font.DemiBold : Font.Normal
@@ -156,7 +161,7 @@ Item {
                     Text {
                         width: 65; horizontalAlignment: Text.AlignHCenter
                         text: (modelData.cnt !== undefined ? modelData.cnt : 0) + " 台"
-                        color: (backend.currentClass === modelData.code) ? th.win : th.fg4
+                        color: (backend.currentClass === modelData.code) ? th.cOnSecondaryCont : th.cOnSurfaceVar
                         font.pixelSize: 10
                     }
                 }
