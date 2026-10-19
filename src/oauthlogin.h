@@ -44,6 +44,20 @@ class QWidget;      // 内嵌登录窗：只在 .cpp 里 include WebEngine，头
 class QUrl;
 
 /**
+ * 打开一个外部 URL / 本地目录（系统浏览器或资源管理器），**提权安全**。
+ *
+ * 背景（2026-10-18 真机截图实证）：管理端以管理员身份运行时，
+ * QDesktopServices::openUrl 会让浏览器**继承高完整性级别**——桌面上本来跑着
+ * 普通权限的 Edge，两个实例互不相认，Windows 弹
+ * 「Microsoft Edge 未响应，因为有实例正在以提升的权限运行…」，登录流程卡死。
+ *
+ * 规避：检测到本进程已提权时改经 explorer.exe（中完整性代开，子进程不继承我们的
+ * 提权）；未提权时行为与 QDesktopServices::openUrl 完全一致。
+ * 支持普通 http(s)/自定义 scheme 与 file://（本地目录）。
+ */
+bool steOpenUrlExternal(const QUrl &url);
+
+/**
  * 一次「网站账号登录」的完整往返。
  *
  * 只负责一件事：**把登录完的结果拿回来**（网站会话令牌）。

@@ -30,12 +30,38 @@
 #include <cstdlib>
 #include <ctime>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
 #include "viewerbackend.h"   // 只为 logf（全局日志，与界面共用一份落盘日志）
 
 namespace {
 
 /** 站点会话令牌的兜底有效期（秒）。站点给 30 天，这里只做兜底 display 用。 */
 constexpr qint64 kDefaultSessionSec = 30 * 24 * 60 * 60;
+
+#ifdef _WIN32
+/**
+ * 本进程是否以提升权限（管理员）运行。
+ * 只查自身令牌的 TokenElevation，不做任何提权/降权动作，失败一律按"未提权"兜底
+ * （查不出来就退回原 openUrl 行为，不会比修之前更糟）。
+ */
+bool steIsProcessElevated()
+{
+    BOOL ok = FALSE;
+    HANDLE tok = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok))
+        return false;
+    DWORD retLen = 0;
+    TOKEN_ELEVATION elev{};
+    if (GetTokenInformation(tok, TokenElevation, &elev, sizeof(elev), &retLen))
+        ok = elev.TokenIsElevated;
+    CloseHandle(tok);
+    return ok != FALSE;
+}
+#endif
 
 /** 登录成功后，内嵌窗口停留多久再自动关（让人看一眼"登录成功"）。 */
 constexpr int kCloseAfterSuccessMs = 1200;
@@ -68,6 +94,37 @@ QString randomHex(int bytes)
 }
 
 } // namespace
+
+bool steOpenUrlExternal(const QUrl &url)
+{
+#ifdef _WIN32
+    // ⚠️ 提权进程里 QDesktopServices::openUrl（ShellExecute）会把目标程序拉到
+    // 高完整性级别：桌面上普通权限的 Edge 实例对新实例"看得见够不着"，
+    // Windows 弹「Edge 未响应…是否要用普通权限重启现有实例？」，登录直接卡死。
+    // 经 explorer.exe 代开：explorer 自己是中完整性，子进程（默认浏览器/资源管理器）
+    // 不继承我们的提权 —— 这是 Windows 官方认可的降权启动手法。
+    if (steIsProcessElevated()) {
+        // file://（开日志目录那种）要给 explorer 原生路径，http(s) 给原串。
+        // 整体加引号：URL 一旦带空格/特殊字符，explorer 会按参数劈开弹「找不到文件」。
+        const QString raw = url.isLocalFile() ? url.toLocalFile() : url.toString();
+        const QString target = QStringLiteral("\"%1\"").arg(raw);
+        const wchar_t *param = reinterpret_cast<const wchar_t *>(target.utf16());
+        const HINSTANCE rc = ShellExecuteW(nullptr, L"open", L"explorer.exe",
+                                           param, nullptr, SW_SHOWNORMAL);
+        const INT_PTR code = reinterpret_cast<INT_PTR>(rc);
+        const bool ok = code > 32;   // ShellExecute 约定：≤32 是错误码
+        if (ok) {
+            logf("[url] 本进程已提权，经 explorer.exe 降权打开：%s",
+                 target.toUtf8().constData());
+        } else {
+            logf("[url] explorer.exe 代开失败（错误码 %d），回落 openUrl", int(code));
+        }
+        if (ok) return true;
+        // 代开失败（极少见）就退回原路径，宁可弹那个对话框也别让 URL 彻底开不出去
+    }
+#endif
+    return QDesktopServices::openUrl(url);
+}
 
 OAuthLogin::OAuthLogin(QObject *parent) : QObject(parent)
 {
@@ -186,7 +243,10 @@ void OAuthLogin::begin()
         q.addQueryItem(QStringLiteral("response_type"), QStringLiteral("code"));
         q.addQueryItem(QStringLiteral("state"), m_state);
         q.addQueryItem(QStringLiteral("scope"), QStringLiteral("cims profile"));
-        authUrl.setQuery(q);
+        // ⚠️ 2026-10-18 修：必须用 FullyEncoded 形式落 query。直接 setQuery(QUrlQuery) 时
+        //    scope 值里的空格会原样留在 URL 里（"scope=cims profile"），提权代开路径把这串
+        //    喂给 explorer.exe 时被按空格劈成两个参数 → 弹「找不到文件」→ 浏览器根本没开。
+        authUrl.setQuery(q.toString(QUrl::FullyEncoded));
     }
 
     QObject::connect(m_server, &QTcpServer::newConnection, this, &OAuthLogin::onNewConnection);
@@ -214,8 +274,8 @@ bool OAuthLogin::openAuthUrl(const QUrl &authUrl)
         logf("[oauth] 已用内嵌登录窗口打开授权页");
         return true;
     }
-    // ② 回落系统浏览器
-    if (QDesktopServices::openUrl(authUrl)) {
+    // ② 回落系统浏览器（经 steOpenUrlExternal：提权时降权，别让 Edge 卡"未响应"）
+    if (steOpenUrlExternal(authUrl)) {
         logf("[oauth] 已用系统浏览器打开授权页");
         return true;
     }

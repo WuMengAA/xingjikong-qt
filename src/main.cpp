@@ -9,6 +9,7 @@
 
 #include "singleinstance.h"
 #include "viewerbackend.h"
+#include "oauthlogin.h"       // steOpenUrlExternal（提权安全开 URL，2026-10-18）
 #include "interactbridge.h"    // 2026-10-15 组件6 配套：互动审批桥（面板 + 共享岛）
 #include "updater.h"
 
@@ -646,7 +647,7 @@ int main(int argc, char *argv[])
         menu->addSeparator();
         auto *actLog = menu->addAction(QStringLiteral("打开日志目录"));
         QObject::connect(actLog, &QAction::triggered, &app, [] {
-            QDesktopServices::openUrl(
+            steOpenUrlExternal(   // 提权安全（oauthlogin.h）
                 QUrl::fromLocalFile(QFileInfo(logFilePath()).absolutePath()));
         });
         // 诊断与反馈（2026-10-12）：GUI 子系统后没有控制台，出错要靠界面看/反馈。
