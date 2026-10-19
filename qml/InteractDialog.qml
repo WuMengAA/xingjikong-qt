@@ -66,9 +66,20 @@ Popup {
 
     onOpened: {
         dlg.selIndex = -1
-        if (dlg.br) { dlg.br.light = dlg.theme ? !dlg.theme.dark : false; dlg.br.reload() }
+        if (dlg.br) {
+            dlg.br.light = dlg.theme ? !dlg.theme.dark : false
+            // ⚠️ 2026-10-19 修复：审批面板打开时，右侧岛是**只读预览**（scale 0.5），
+            //    IslandRoot 的交互性读 bridgeRef.interactive —— 不锁 false 则预览岛可点击
+            //    展开/收起（无意义且可能误操作）。原注释「审批面板预览态才设 false」
+            //    一直没实现（全库搜无 setInteractive(false) 调用）。这里补上：
+            //    打开锁 false（预览锁定），关闭恢复 true（主界面岛恢复可交互）。
+            dlg.br.setInteractive(false)
+            dlg.br.reload()
+        }
     }
-    onClosed: if (dlg.br) dlg.br.clearPreview()
+    onClosed: {
+        if (dlg.br) { dlg.br.clearPreview(); dlg.br.setInteractive(true) }
+    }
 
     function stateLabel(s) {
         if (s === "pending")   return "待审"
