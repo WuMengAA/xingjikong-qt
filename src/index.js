@@ -125,6 +125,9 @@ import { createTunnel } from './tunnel.js';   // 2026-10-18：远控隧道（RFB
 import { createUdpRelay } from './udp-relay.js';   // 2026-10-20：UDP 闪传帧中继（U1）
 import { UDP_RELAY_HOST, UDP_RELAY_PORT, UDP_RELAY_TOKEN,
   UDP_MAX_FPS_PER_SESSION, UDP_SESSION_IDLE_MS } from './config.js';
+import { createTcpRelay } from './tcp-relay.js';   // 2026-10-20：TCP 闪传帧中继（公网主路，用户定「那就 tcp」）
+import { TCP_RELAY_HOST, TCP_RELAY_PORT, TCP_RELAY_TOKEN,
+  TCP_SESSION_IDLE_MS, TCP_HELLO_GRACE_MS } from './config.js';
 import { createAdminOAuthServer, currentRedirectUri, beginAuthorization } from './adminoauth.js';
 import { initStore, sweepQueue, storeReady, receiptsByNotice, actionRanking } from './store.js';
 import { initInteract, interactReady, sweepInteract,
@@ -1264,12 +1267,23 @@ const tunnel = createTunnel({
 // 密钥经本文件里的 WS「udp-session」消息协商（服务端随机 32B）；中继按帧头 session
 // 路由、原样转发，只亲自解 HELLO（验令牌）与 PING（打时间戳）。
 // ⚠️ 令牌未配 ⇒ configured=false，listen 回调里只告警不拉 socket（新攻击面 fail-closed）。
-// ⚠️ 可达范围仅回环/局域网：cloudflared 只转 TCP，公网 UDP 不可达（公网回落 = UDP-over-WS 封装，后续批次）。
+// ⚠️ 可达范围仅回环/局域网：cloudflared 只转 TCP，公网 UDP 不可达。
 const udpRelay = createUdpRelay({
   host: UDP_RELAY_HOST, port: UDP_RELAY_PORT, token: UDP_RELAY_TOKEN,
   maxFps: UDP_MAX_FPS_PER_SESSION, idleMs: UDP_SESSION_IDLE_MS, pushEvent,
 });
 let udpBound = null;   // start() 成功后回填（host/port 可能因传 0 而变）
+
+// 2026-10-20 · TCP 闪传通道（公网主路，用户定「那就 tcp」）：与 UDP 同一套帧/加密/
+// 会话存储（flash-core.js），换 TCP 管道。为什么它是主路：cloudflared 只转 TCP；
+// 且专用连接把「实时/大批数据」与 WS 控制+心跳彻底分离——200KB/s 背压闸（保心跳的
+// 粗暴手段，却把远控全屏首帧丢光）和文件传输停等协议的病根一起去掉。
+// 严格单调闸门 + 一端断即收口 + 背压暂停源读取（不丢帧），详见 tcp-relay.js 文件头。
+const tcpRelay = createTcpRelay({
+  host: TCP_RELAY_HOST, port: TCP_RELAY_PORT, token: TCP_RELAY_TOKEN,
+  idleMs: TCP_SESSION_IDLE_MS, helloGraceMs: TCP_HELLO_GRACE_MS, pushEvent,
+});
+let tcpBound = null;   // start() 成功后回填
 
 server.on('upgrade', (req, socket, head) => {
   const u = new URL(req.url, 'http://127.0.0.1');
@@ -1715,6 +1729,52 @@ viewerWss.on('connection', (ws) => {
         sndErr(ws, 'BAD_PARAMS', `未知 udp-session action: ${action}`);
         return;
       }
+      // ── TCP 闪传通道（2026-10-20 · 公网主路）：与 udp-session 同一套协商，换 TCP 管道 ──
+      // 权限口径一致（看得到这台才能跟它建快速通道）；密钥同样只走已鉴权 WS。
+      case 'tcp-session': {
+        const action = p.payload?.action;
+        if (action === 'open') {
+          const uid = String(p.payload?.uid || '').trim();
+          if (!uid) { sndErr(ws, 'BAD_PARAMS', 'tcp-session.open 缺 uid'); return; }
+          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid))) {
+            sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限与设备 ${uid} 建 TCP 会话`);
+            pushEvent('warn', 'tcp-session 被拒（无权限远控该设备）', { uid });
+            return;
+          }
+          if (!tcpRelay.configured) {
+            sndErr(ws, 'TCP_DISABLED', 'TCP 闪传通道未配置（TCP_RELAY_TOKEN 为空），请走 WS 通道');
+            return;
+          }
+          if (!tcpBound) {
+            sndErr(ws, 'TCP_NOT_READY', 'TCP 中继尚未就绪，请稍候重试');
+            return;
+          }
+          const dev = getDevice(uid);
+          if (!dev || !dev.ws || dev.ws.readyState !== 1) {
+            sndErr(ws, 'DEVICE_OFFLINE', `设备 ${uid} 不在线`);
+            return;
+          }
+          const { sessionId, key } = tcpRelay.createSession({
+            uid, viewerWs: ws,
+            sendToAgent: (m) => sendToAgentMsg(uid, 'tcp-session', m),
+            sendToViewer: (m) => snd(ws, 'tcp-session', m),
+          });
+          const tcp = { host: tcpBound.host, port: tcpBound.port };
+          snd(ws, 'tcp-session', { action: 'opened', sessionId, key: key.toString('base64'), role: 'viewer', tcp });
+          sendToAgentMsg(uid, 'tcp-session',
+            { action: 'opened', sessionId, key: key.toString('base64'), role: 'agent', tcp });
+          pushEvent('info', `TCP 会话 #${sessionId} 已协商（管理端 → ${uid}）`, { uid, sessionId });
+          return;
+        }
+        if (action === 'close') {
+          const sid = Number(p.payload?.sessionId);
+          if (Number.isFinite(sid)) tcpRelay.closeSession(sid, 'viewer-close');
+          snd(ws, 'tcp-session', { action: 'closed', sessionId: sid, reason: 'viewer-close' });
+          return;
+        }
+        sndErr(ws, 'BAD_PARAMS', `未知 tcp-session action: ${action}`);
+        return;
+      }
       default:
         // 未知类型**不关闭连接**：允许新客户端试探新能力（协议规范第十节）
         sndErr(ws, 'UNKNOWN_TYPE', p.type);
@@ -1725,8 +1785,9 @@ viewerWss.on('connection', (ws) => {
   ws.on('close', () => {
     clearTimeout(deadline);
     removeViewer(ws);
-    // 管理端走了 ⇒ 它经手的所有 UDP 会话收口（防会话泄漏：远控泄漏那次的同一病）
+    // 管理端走了 ⇒ 它经手的所有闪传会话收口（防会话泄漏：远控泄漏那次的同一病）
     udpRelay.closeSessionsWhere((s) => s.viewerWs === ws);
+    tcpRelay.closeSessionsWhere((s) => s.viewerWs === ws);
     if (authed) pushEvent('info', '管理端断开', { viewers: viewerCount() });
   });
   ws.on('error', (e) => { pushEvent('error', '管理端连接出错', { error: e.message }); });
@@ -2078,6 +2139,18 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (p.type === 'tcp-session') {
+      // 被控端对 TCP 闪传会话的回应（2026-10-20）：只支持主动关闭；链路就绪由中继侧感知。
+      const action = p.payload?.action;
+      if (action === 'close') {
+        const sid = Number(p.payload?.sessionId);
+        if (Number.isFinite(sid)) tcpRelay.closeSession(sid, 'agent-close');
+        return;
+      }
+      sndErr(ws, 'BAD_PARAMS', `未知 tcp-session action: ${action}`);
+      return;
+    }
+
     // 未知类型**不关闭连接**：允许新客户端试探新能力（协议规范第十节）
     sndErr(ws, 'UNKNOWN_TYPE', p.type);
   });
@@ -2085,8 +2158,11 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     finish();
     if (registered) markDisconnected(ws);
-    // 设备走了 ⇒ 它参与的 UDP 会话全部收口（防中继侧会话/地址泄漏）
-    if (uid) udpRelay.closeSessionsWhere((s) => s.uid === uid);
+    // 设备走了 ⇒ 它参与的闪传会话全部收口（防中继侧会话/连接泄漏）
+    if (uid) {
+      udpRelay.closeSessionsWhere((s) => s.uid === uid);
+      tcpRelay.closeSessionsWhere((s) => s.uid === uid);
+    }
   });
 
   ws.on('error', (e) => {
@@ -2097,13 +2173,21 @@ wss.on('connection', (ws) => {
 server.listen(PORT, HOST, () => {
   pushEvent('info', '云端已启动，等被控端接入', { host: HOST, port: PORT });
   // 2026-10-20 · UDP 闪传中继：令牌配了才拉 socket（没配 = 通道关闭，只告警）。
-  // 失败不阻塞 WS 主通道——UDP 是加速项，不是生死项。
+  // 失败不阻塞 WS 主通道——闪传是加速项，不是生死项。
   if (udpRelay.configured) {
     udpRelay.start()
       .then((b) => { udpBound = b; })
       .catch((e) => pushEvent('error', 'UDP 中继启动失败（不影响 WS 通道）', { message: String(e?.message || e) }));
   } else {
     pushEvent('warn', 'UDP_RELAY_TOKEN 未配置：UDP 闪传通道不启动（WS 通道不受影响）');
+  }
+  // 2026-10-20 · TCP 闪传中继（公网主路）：同样 fail-closed、同样不阻塞主通道。
+  if (tcpRelay.configured) {
+    tcpRelay.start()
+      .then((b) => { tcpBound = b; })
+      .catch((e) => pushEvent('error', 'TCP 中继启动失败（不影响 WS 通道）', { message: String(e?.message || e) }));
+  } else {
+    pushEvent('warn', 'TCP_RELAY_TOKEN 未配置：TCP 闪传通道不启动（WS 通道不受影响）');
   }
   // 2026-10-11：启动时预打包 QML 补丁（手机热更用；失败不阻塞启动）
   try { const m = ensureQmlPatch(); if (m) console.log(`[cloud] qml-patch 就绪 v${m.version}（${m.files} 文件）`); }

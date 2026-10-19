@@ -163,7 +163,8 @@ export const ASSETS_DIR = process.env.CLOUD_ASSETS_DIR || 'assets';
 /* ---------- UDP 闪传通道（2026-10-20 · U1 骨架，用户点单「新增 udp 协议快速加密传输」）----------
  * 形态：云端在 UDP_RELAY_PORT 上开帧中继（dgram），两端（被控端/管理端）直连。
  *   可达范围：回环 + 局域网直连。⚠️ cloudflared 隧道只转 TCP，公网 UDP 不可达 ——
- *   公网场景走「UDP-over-WS 封装回退」（后续批次），本中继不假设公网。
+ *   2026-10-20 用户定「那就 tcp」后，**公网主路改为 TCP 专用连接**（见下节），
+ *   UDP 中继保留作回环/局域网加速项（同一套帧与加密，flash-core.js 共用）。
  * 加密：ChaCha20-Poly1305 端到端（RFC 7539），密钥经**已鉴权的 WS 通道**协商
  *   （服务端随机 32B，不固化二进制）；UDP 帧头明文（中继要按 session 路由），
  *   payload + 16B tag 加密，AAD = 整个帧头。nonce = session(4B) + seq(8B)，单调不重用。
@@ -180,3 +181,27 @@ export const UDP_MAX_FPS_PER_SESSION = Number(process.env.UDP_MAX_FPS_PER_SESSIO
 
 // 会话空闲多久无帧即收口（秒）：远控停了/端掉线，中继侧不能永远挂着 peer 地址。
 export const UDP_SESSION_IDLE_MS = Number(process.env.UDP_SESSION_IDLE_MS || 60000);
+
+/* ---------- TCP 闪传通道（2026-10-20 · 公网主路，用户定「那就 tcp」）----------
+ * 形态：云端在 TCP_RELAY_PORT 上开帧中继（node:net），两端各拉一条**专用 TCP 连接**，
+ *   经 WS「tcp-session」消息协商同一把会话密钥（flash-core.js 与 UDP 完全同一套帧/AEAD）。
+ * 为什么 TCP 是公网主路（而不是 UDP-over-WS 封装那类回退）：
+ *   ① cloudflared 隧道只转 TCP，公网 UDP 不可达——这是硬约束；
+ *   ② 专用连接把「实时/大批数据」与「WS 控制+心跳」彻底分离：被控端 200KB/s 背压闸
+ *      （保心跳的粗暴手段，却把远控全屏首帧丢光 ⇒ viewer 全白）和文件传输停等协议
+ *      （64KB 一片一回执）的病根一起去掉；
+ *   ③ TCP 自有流控+有序可靠，中继侧反而更简单：严格单调 seq（重放即拒，兼守 nonce
+ *      不重用）、背压时暂停源读取（不丢帧）、一端断即收口会话。
+ * 公网落地：cloudflared ingress 加一条主机名 → tcp://127.0.0.1:8790（客户端 TLS 到边缘，
+ *   隧道内明文；帧本身已有 AEAD，双保险）。回环/局域网联调可直连 127.0.0.1:8790。
+ * 鉴权/安全面同 UDP：HELLO 带 TCP_RELAY_TOKEN；空 = 不启动（fail-closed）；
+ *   久不 HELLO 的连接按宽限断开；连接数封顶；会话空闲收口。 */
+export const TCP_RELAY_PORT = Number(process.env.TCP_RELAY_PORT || 8790);
+export const TCP_RELAY_HOST = (process.env.TCP_RELAY_HOST || '0.0.0.0').trim();
+export const TCP_RELAY_TOKEN = (process.env.TCP_RELAY_TOKEN || '').trim();
+
+// 会话空闲多久无帧即收口（ms）：与 UDP 同值。远控有帧流自然不会收；停了就收，防半死会话。
+export const TCP_SESSION_IDLE_MS = Number(process.env.TCP_SESSION_IDLE_MS || 60000);
+
+// 连上多久不发 HELLO 即断开（ms）：防裸连接堆积（扫描/探测类流量）。
+export const TCP_HELLO_GRACE_MS = Number(process.env.TCP_HELLO_GRACE_MS || 15000);
