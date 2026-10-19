@@ -12,13 +12,19 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+# ── in-agent VNC Server（libvncserver，2026-10-18）──
+# 默认 OFF：未放置第三方预编译库时不影响现有构建。开启需 third_party/libvncserver/{include,lib}。
+# 链接方式假设静态 .lib + /MD（与 Qt 6.12 msvc2022 同 CRT）；若你的库是 /MT 或动态 .dll，
+# 见下方链接块注释调整。
+option(STE_USE_LIBVNCSERVER "启用被控端 in-agent VNC Server（需 third_party/libvncserver 预编译库）" OFF)
+
 # D1: Core+Gui（抓屏/JPEG）｜D2: +WebSockets（连云端发帧）｜D5: +Widgets（托盘常驻，见下）
 # 2026-10-04 +Network：OOBE 绑定界面要 POST 站点消费班级接入码（/api/device/activate）
 # 2026-10-11 +Quick/QuickWidgets：灵动岛视觉层改 QML（用户裁决），QQuickWidget 承载。
 #   只加 QuickWidgets 不够 —— QML 运行时（QtQml/QtQuick 的 DLL + qml/ 插件目录）
 #   必须随包走，否则装到干净机器上"岛白屏"（本机有 Qt 环境所以看不出来）。
-# 注：WebEngine 的按需加载不需要额外组件 —— 不加 WebEngineQuick（它在动态构建下会死锁，见
-#     src/main.cpp 的 ensureWebEngine 注释），只要不在 main 里提前 new QWebEngineView 即可。
+# 注：WebEngine 已彻底移除（2026-10-18 清道夫），不再依赖 QWebEngineView / WebEngineQuick。
+#   远程桌面改走 in-agent VNC Server（libvncserver，见 src/vnc_server.*），不引入任何浏览器引擎。
 # 2026-10-13 审计 #25：与 viewer-qt 对齐 Qt ≥ 6.12（项目两端共用一个 Qt 6.12 安装，
 # 声明一致避免"配置阶段两端行为不同"——此前 viewer 声明 6.5、control 无版本声明）。
 find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg Qml Quick QuickWidgets)
@@ -155,12 +161,17 @@ add_executable(stelarith-agent-qt
   src/edge_tts.h
   src/microphone.cpp
   src/microphone.h
-  # ── WebRTC 推流（2026-10-09：libdatachannel 换 other webrtc，探针全绿）──
-  src/ldc_streamer.cpp
-  src/ldc_streamer.h
   # ── 远控隧道（2026-10-18 · RFB over WS）：agent 第二条 WS + 本地 VNC 纯字节桥 ──
-  src/tunnel_agent.cpp
-  src/tunnel_agent.h
+  src/vnc_bridge.cpp
+  src/vnc_bridge.h
+  # ── in-agent VNC Server 底层（2026-10-18）：抓屏 + 输入注入（不依赖 libvncserver，常编）──
+  src/screen_capture.cpp
+  src/screen_capture.h
+  # ── DXGI Desktop Duplication 抓屏（2026-10-19）：主后端，init 失败回落 GDI ──
+  src/screen_capture_dxgi.cpp
+  src/screen_capture_dxgi.h
+  src/input_inject.cpp
+  src/input_inject.h
   # ── 系统主音量（2026-10-11 Core Audio/WASAPI，独立编译单元隔离 SDK 头）──
   src/system_volume.cpp
   src/system_volume.h
@@ -173,50 +184,36 @@ add_executable(stelarith-agent-qt
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Svg)
 # 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
 target_link_libraries(stelarith-agent-qt PRIVATE winmm)
+# 2026-10-18：in-agent VNC Server 底层（screen_capture 用 GDI BitBlt/CreateDIBSection；input_inject 用 SendInput）
+target_link_libraries(stelarith-agent-qt PRIVATE gdi32 user32)
+# 2026-10-19：DXGI Desktop Duplication 抓屏（screen_capture_dxgi.cpp 用 D3D11/DXGI/COM）
+if(WIN32)
+  target_link_libraries(stelarith-agent-qt PRIVATE d3d11 dxgi ole32)
+endif()
 # 2026-10-11：灵动岛 QML（QQuickWidget 承载 qml/island/IslandRoot.qml）
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Qml Qt6::Quick Qt6::QuickWidgets)
-# ── 2026-10-09 WebRTC 去 WebEngine 底层：libdatachannel 静态链（并行方案，
-#    STE_USE_LDC_RTC=1 默认走 ldc，=0 回退 WebEngine）────────────────────
-# 库：_probe/ldc_libs（重建产物，命名 datachannel.lib/juice.lib）+ OpenSSL
-# 头：_probe/libdatachannel-master/include（rtc/rtc.hpp）
-# 2026-10-13 审计 #26：OpenSSL 路径可覆盖（STE_OPENSSL_ROOT；默认 PG17 兼容现有机器）
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib")
-  set(STE_OPENSSL_ROOT "$ENV{STE_OPENSSL_ROOT}" CACHE PATH "OpenSSL lib 目录（含 libssl.lib/libcrypto.lib）")
-  if(NOT STE_OPENSSL_ROOT)
-    set(STE_OPENSSL_ROOT "C:/Program Files/PostgreSQL/17/lib" CACHE PATH "" FORCE)
-  endif()
-  target_include_directories(stelarith-agent-qt PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/libdatachannel-master/include")
-  target_link_libraries(stelarith-agent-qt PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/datachannel.lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/srtp2.lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/juice.lib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../_probe/ldc_libs/usrsctp.lib"
-    "${STE_OPENSSL_ROOT}/libssl.lib"
-    "${STE_OPENSSL_ROOT}/libcrypto.lib"
-    ws2_32 bcrypt crypt32 userenv secur32)
-  target_compile_definitions(stelarith-agent-qt PRIVATE RTC_STATIC)
-  message(STATUS "[agent] libdatachannel 已链入（RTC_STATIC）")
-else()
-  # ── 2026-10-18 · 库缺失时的**真保护**（用户裁决：方案 A / 可逆摘除）──────────
-  # 原先这里只打一条 WARNING，但 ldc_streamer.cpp 仍在源文件列表里、也没有任何
-  # #if 保护 ⇒「不链接库」并不等于「不编译它」，结果是找不到 rtc/rtc.hpp 直接编不过。
-  # 这种"看着有保护、实际没有"的分支比不写更糟：会让人以为缺库能正常降级。
-  #
-  # 现在：不定义 RTC_STATIC ⇒ ldc_streamer.cpp 走文件末尾的 #else 空实现分支，
-  #      对外接口保持一致 ⇒ main.cpp 零改动。WebRTC 推流不可用，画面走 JPEG 帧路径
-  #      （JPEG 是独立路径，见 makeFrameBytes，不受影响）。
-  # 还原：把 datachannel.lib / srtp2.lib / juice.lib / usrsctp.lib 放回 _probe/ldc_libs/
-  #      （外加 _probe/libdatachannel-master/include），重新 configure 即自动回到
-  #      RTC_STATIC 分支，**源码一个字都不用改**。
-  message(WARNING
-    "[agent] libdatachannel 缺失（_probe/ldc_libs/datachannel.lib 不存在）"
-    " ⇒ 本次构建不含 WebRTC 推流：ldc_streamer 编译为空实现，画面监控走 JPEG 帧。"
-    " 需要推流时把库放回 _probe/ldc_libs/ 并重新 configure。")
-endif()
 
 # GUI 子系统：常驻托盘程序不该挂着控制台黑窗（日志已落盘到 agent-qt.log，不靠 stdout）
 set_target_properties(stelarith-agent-qt PROPERTIES WIN32_EXECUTABLE ON)
+
+# ── in-agent VNC Server 链接（2026-10-18）────────────────────────────────────
+# 仅 STE_USE_LIBVNCSERVER=ON 时介入。要求 third_party/libvncserver/{include/rfb/rfb.h, lib/LibVNCServer.lib}。
+# 依赖假设（与 Qt 6.12 msvc2022_64 同 ABI）：x64 / msvc2022 / /MD（动态 CRT）/ 静态 .lib。
+#   · 若你的库是 /MT：把下方 target_link_libraries 的库换成对应 /MT 构建的 .lib 即可（CRT 须一致，否则 LNK2038）。
+#   · 若你的库带 zlib/lzo/jpeg 等依赖未静态编入：在此追加对应 .lib（如 zlib.lib）。
+#   · 若为动态库（.dll）：链接 LibVNCServer.lib（导入库），并把 .dll 随安装包部署到 exe 旁。
+if(STE_USE_LIBVNCSERVER)
+  set(_lvncs "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libvncserver")
+  if(NOT EXISTS "${_lvncs}/include/rfb/rfb.h")
+    message(FATAL_ERROR "STE_USE_LIBVNCSERVER=ON 但找不到 ${_lvncs}/include/rfb/rfb.h，请先放置预编译 libvncserver")
+  endif()
+  target_include_directories(stelarith-agent-qt PRIVATE "${_lvncs}/include")
+  # ws2_32：libvncserver 直接用 winsock（socket/bind/select）。Qt6::Network 虽会间接带，
+  # 但库是独立静态件，依赖不靠 Qt 的传递性保证 —— 显式链上，避免 LNK2019。
+  target_link_libraries(stelarith-agent-qt PRIVATE "${_lvncs}/lib/LibVNCServer.lib" ws2_32)
+  target_compile_definitions(stelarith-agent-qt PRIVATE STE_USE_LIBVNCSERVER)
+  target_sources(stelarith-agent-qt PRIVATE src/vnc_server.cpp) # 依赖 rfb.h，仅开启时编入
+endif()
 
 # 2026-10-08 引入 lucide（morphicons 同款 24×24 stroke 风格，ISC）SVG 图标，
 # 编译进 exe（qrc 前缀 /icons），部署不带额外文件、颜色运行时按主题染。

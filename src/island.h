@@ -59,6 +59,16 @@ public:
     // 单例：被控端全局唯一（同时间只显示一个灵动岛，新状态顶掉旧的）
     static IslandOverlay *instance();
 
+    // ── 2026-10-19 远控期冻结（P0 崩溃规避）──────────────────────────────
+    // 真机三份 dump 实证：远控开始后 agent 必崩于 QQuickRepeater::setModel → clear →
+    // 对已销毁 delegate 调 d_func（Qt6Core+0x38c0，rcx=0）。岛的 model 数据（任务表/
+    // 历史/状态行）全是**整表替换**，每次通知都会让 Repeater 清空并重建 delegate，
+    // 一旦某个 delegate 已进入销毁流程就踩空。远控会话期间把岛整体冻结（不再写任何
+    // QML 数据），通知改走托盘气泡：既保学生知情，也不给这条崩溃链任何触发机会。
+    // 根治方案（下一批）：岛 QML 的 Repeater 换 ListModel 增量更新，届时解除冻结。
+    static void setSuppressed(bool on);
+    static bool suppressed();
+
     // Idle = 空闲时的矮胶囊（2026-10-07 用户要求"无任务、通知则收回顶部，显示半胶囊+横杠箭头"）。
     // 空闲态不隐藏、不消失：收成顶部一条常驻的半胶囊，中间一根横杠+箭头，
     // 点一下 / 往下一拉（触屏）就展开看最近那条活动。

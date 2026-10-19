@@ -224,9 +224,21 @@ public:
      *  （窗口已存在时直接给它的 engine 补设 context property）。 */
     static void setVoicehub(QObject *m)
     {
-        s_voicehub = m;
+        s_voicehub = m;   // QPointer：模块先于 shell 销毁时，这里的判断自然为假
         if (s_live)
             s_live->engine()->rootContext()->setContextProperty(QStringLiteral("voicehub"), m);
+        // ── 2026-10-19 远控崩溃同源修复（见 island.cpp setQmlObjectProperty）──
+        // context property 同样是**裸指针**：模块销毁后 QML 侧仍持有野指针，任何绑定重算
+        // 都会踩它（真机 dump：Qt6Core+0x38c0 / QQuickRepeater::setModel）。
+        // 对象销毁瞬间把 context property 置 null，让重算读到空值（QML 侧有 null 守卫）。
+        if (m && s_live) {
+            AgentShell *live = s_live;
+            QObject::connect(m, &QObject::destroyed, live, [live]() {
+                if (live && live->engine())
+                    live->engine()->rootContext()->setContextProperty(
+                        QStringLiteral("voicehub"), QVariant());
+            });
+        }
     }
 
 private:

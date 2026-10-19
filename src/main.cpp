@@ -50,13 +50,15 @@
 #include <QTextEdit>    // P3：长期记录对话框（QTextEdit 不在 QWidgets 总含头里）
 #include <QCheckBox>    // P3：播放时段配置对话框
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
-#include "tunnel_agent.h"       // 2026-10-18：远控隧道第二条 WS（RFB over WS，纯字节桥）
+#include "vnc_bridge.h"       // 2026-10-18：远控桥（主 WS vnc-data ↔ 本地 VNC，纯字节）
+#ifdef STE_USE_LIBVNCSERVER
+#include "vnc_server.h"         // 2026-10-18：in-agent VNC Server（libvncserver 封装，方案 A）
+#endif
 #include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
 #include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
 #include "proc_guard.h"        // 2026-10-13：进程终止安全闸门（与 exam_mode 共用同一道门）
 #include "audio_player.h"      // 2026-10-07：语音对讲播放（waveOut）
 #include "broadcast_view.h"    // 2026-10-07：屏幕广播全屏显示
-#include "ldc_streamer.h"      // 2026-10-09：WebRTC 去 WebEngine 底层（libdatachannel 推流）
 // ── 通知体系新组件（2026-10-09 接线 · DeepSeek Harness 造）──
 #include "danmaku.h"           // §1.2 弹幕：字幕式横向滚动
 #include "loop_reminder.h"     // §1.2 loopRemind：未确认循环提醒
@@ -315,6 +317,10 @@ static QTimer *g_mediaAutoStop = nullptr;  // P3：超播放时段窗口自动�
 static bool g_mediaStopping = false;
 bool g_remoteControl = false;      // remote_control_start/stop 的真实会话状态
 int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
+// ── 远控上行治理配套旗标（2026-10-19 修复①③，见下方背压闸与看门狗）──────────
+qint64 g_vncSessionStartMs = 0;    // 本次远控会话起服时刻（首帧宽限 + 看门狗起步宽限都用它）
+qint64 g_lastVncDownMs = 0;        // 最近一次收到管理端 vnc-data down 字节（键鼠/请求/5s 保活）
+bool g_vncMegaDone = false;        // 本会话是否已豁免过一个 ≥200KB 整屏帧（一次性）
 int g_frameDiffMs = -1;            // 上一帧耗时（毫秒），动态帧率控制器用它判断画面是否稳定
 
 // A6（2026-10-11）：噪音检测采集器。懒加载单例 —— 没收到 noise_monitor_start 前不 new，
@@ -443,6 +449,33 @@ QByteArray makeFrameBytes(const QString &uid, int seq, const QByteArray &jpeg)
     out.append(char(header.size() & 0xFF));
     out.append(header);
     out.append(jpeg);
+    return out;
+}
+
+// 远控 vnc-data 上行帧（2026-10-18 · 统一方案 A）：本地 VNC 产出的 RFB 字节 → 云端。
+// 与画面帧同 v1 信封，区别：type=vnc-data / mime=application/vnc / direction=up / seq 自增
+// （云端按 uid 原样中继到订阅该设备的管理端，不重写信封）。
+static quint64 g_vncUpSeq = 0;
+QByteArray makeVncFrameBytes(const QByteArray &rfb)
+{
+    QJsonObject h;
+    h.insert(QStringLiteral("v"), kProtocolVersion);
+    h.insert(QStringLiteral("type"), QStringLiteral("vnc-data"));
+    h.insert(QStringLiteral("uid"), g_uid);
+    h.insert(QStringLiteral("seq"), QJsonValue(static_cast<qint64>(++g_vncUpSeq)));
+    h.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
+    h.insert(QStringLiteral("mime"), QStringLiteral("application/vnc"));
+    h.insert(QStringLiteral("direction"), QStringLiteral("up"));
+    h.insert(QStringLiteral("bytes"), rfb.size());
+    const QByteArray header = QJsonDocument(h).toJson(QJsonDocument::Compact);
+
+    QByteArray out;
+    out.reserve(3 + header.size() + rfb.size());
+    out.append(char(kProtocolVersion));                 // 1B 版本
+    out.append(char((header.size() >> 8) & 0xFF));      // 2B 大端 headerLen
+    out.append(char(header.size() & 0xFF));
+    out.append(header);
+    out.append(rfb);
     return out;
 }
 
@@ -1119,7 +1152,15 @@ void appendLogFile(const QString &line)
 {
     if (g_logPath.isEmpty()) return;
     QFile f(g_logPath);
-    if (f.size() > 2 * 1024 * 1024) QFile::remove(g_logPath);
+    // ⚠️ 2026-10-19 改为**轮转**（原来超过 2MB 直接 QFile::remove 整个日志）：
+    //   旧实现的后果是真机排查时日志被整段清空 —— 本次远控崩溃前「抓屏后端=dxgi」
+    //   「DuplicateOutput OK」「抓屏线程退出」等关键行全部失踪，只能靠 WER dump 反推。
+    //   现在保留 1 份历史（agent-qt.log.1），排查窗口翻倍且不会一次全丢。
+    if (f.size() > 2 * 1024 * 1024) {
+        const QString prev = g_logPath + QStringLiteral(".1");
+        QFile::remove(prev);
+        QFile::rename(g_logPath, prev);
+    }
     if (f.open(QIODevice::Append | QIODevice::Text)) {
         f.write(line.toUtf8());
         f.write("\n");
@@ -3367,6 +3408,27 @@ static void islandShow(const QString &title, const QString &desc = QString(),
                        IslandOverlay::Form form = IslandOverlay::Form::Capsule,
                        bool fromAdmin = false)   // 2026-10-13：管理端下发（历史置顶用）
 {
+    // ── 2026-10-19 远控期崩溃规避（P0 生产事故）──────────────────────────
+    // 真机三份 WER 全内存 dump 实证：远程控制开始后约 4-26s，agent 进程 0xC0000005，
+    // 出错模块 Qt6Core.dll+0x38c0（QObject::d_func，rcx=0）。栈是纯 QML 路径：
+    //   QObject::d_func ← QQmlDelegateModelItem::destroyObjectLater
+    //   ← QQmlDelegateModelPrivate::destroyCacheItem ← QQmlDelegateModel::release
+    //   ← QQuickRepeater::clear ← QQuickRepeater::setModel ← QQmlBinding 重算
+    //   ← QQmlData::destroyed ← QObject::~QObject
+    // 即：某对象析构 → QML 绑定重算 → 某个 Repeater 的 model 被整表替换 →
+    //     Repeater 清空 delegate 时，缓存里已有"object 已销毁"的 delegate ⇒ 对 null 调
+    //     d_func。岛（island）是唯一每帧都在更新 model 的 QML 视图，showIsland 每次都会
+    //     upsertTask（任务表整表替换）+ 8s 后 dismiss→enterIdle→archiveToHistory，
+    //     正好是这条链的入口。GDI 时代的两份 dump（10-18 22:56 / 23:29）崩溃点完全相同
+    //     ⇒ 与 DXGI 抓屏无关，是岛 QML 的既有结构性缺陷，远控只是把它踩出来。
+    // 处置：远控会话期间岛一律不写（改走托盘气泡，学生知情边界不破），
+    //       待岛 QML 侧换成 ListModel 增量更新（Repeater → ListModel 单批改造）后再放开。
+    if (g_remoteControl) {
+        if (g_tray)
+            g_tray->showMessage(title, desc.isEmpty() ? title : desc,
+                                QSystemTrayIcon::Information, ms > 0 ? ms : 5000);
+        return;
+    }
     IslandOverlay *isl = IslandOverlay::instance();
     if (openPath.isEmpty()) isl->clearOpenPath();
     else                    isl->setOpenPath(openPath);
@@ -4357,6 +4419,11 @@ static void stopMediaSession()
     g_mediaStopping = false;
     if (IslandOverlay::instance()) IslandOverlay::instance()->clearMediaSession();
 }
+
+// 修复③（2026-10-19）：定义在 6082 起，被 executeAction 的 remote_control_stop
+// 分支先用到 ⇒ 此处前向声明（同 TU 静态函数，声明后可后定义）。
+static void stopRemoteControlSession(const QString &reason);
+static void reapRemoteControlIfStale();
 
 ExecOut executeAction(const QString &action, const QJsonObject &params)
 {
@@ -5618,20 +5685,57 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     // stop：恢复默认帧率
     if (action == QStringLiteral("remote_control_start")) {
         if (g_remoteControl) {
-            out.result = QStringLiteral("done");
-            out.data.insert(QStringLiteral("alreadyActive"), true);
-            out.data.insert(QStringLiteral("fps"), g_currentFps);
-            return out;
+            // ⚠️ 2026-10-18 深夜实证修复（"没有画面"根因之一）：**不能静默复用旧会话**。
+            //    RFB 是有状态握手：旧客户端若半途而废（管理端崩溃/换机/上次会话没走完），
+            //    server 已在旧连接上发过 ProtocolVersion、永远等不到下一步 —— 新客户端
+            //    连上来只会在死握手上干等，画面全黑且两端都无报错。
+            //    唯一正确姿势：幂等重启 —— 干净停掉旧 server+bridge，再全新拉起，
+            //    让新客户端拿到全新握手。
+#ifdef STE_USE_LIBVNCSERVER
+            qInfo("[agent-qt] remote_control_start：已有会话，重启 VNC（旧握手作废，对新客户端透明）");
+            VncBridge::instance().stop();
+            VncServer::instance().stop();
+#endif
+            g_remoteControl = false;   // 落回未启动态，走下面的全新起服路径
         }
         g_remoteControl = true;
+        // 修复①③（2026-10-19）：新会话起点。首帧宽限/整屏帧一次性豁免要一个
+        // 干净的起点；vnc-data down 保活时间戳清零，看门狗从新会话重新起算。
+        g_vncSessionStartMs = QDateTime::currentMSecsSinceEpoch();
+        g_lastVncDownMs = 0;
+        g_vncMegaDone = false;
         const int want = qBound(1, params.value(QStringLiteral("fps")).toInt(20), 60);
         const int oldFps = g_currentFps;
         g_currentFps = want;
+        // 2026-10-19：远控期冻结灵动岛（P0 崩溃规避，见 island.h setSuppressed）。
+        // 必须在下面 islandShow 之前置位——否则远控提示本身就会触发 QML Repeater 重算。
+        IslandOverlay::setSuppressed(true);
+#ifdef STE_USE_LIBVNCSERVER
+        // 统一方案 A（2026-10-18）：起服点在这里（对齐原 spec「remote_control_start
+        // 启动 VncServer」）。VncServer 自动选 loopback 端口，VncBridge 连它把 RFB
+        // 字节打成 vnc-data 帧走主 WS —— 不再需要云端下发 sid/key/port。
+        if (!VncServer::instance().isRunning()) {
+            const quint16 p = VncServer::instance().start(0, want);
+            if (p == 0) {
+                qWarning("[agent-qt] FAIL remote_control_start：VncServer 起服失败，回滚会话");
+                g_remoteControl = false;
+                g_currentFps = oldFps;
+                // 修复③顺带（同一生命周期路径）：上面已把灵动岛冻结，
+                // 起服失败不回滚这个冻结 ⇒ 岛将永久冻结（与泄漏同型的静默故障）。
+                IslandOverlay::setSuppressed(false);
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("VNC 服务起服失败");
+                return out;
+            }
+            qInfo("[agent-qt] 已在 127.0.0.1:%u 起 in-agent VNC Server（远控开始）", (unsigned)p);
+        }
+        VncBridge::instance().start(VncServer::instance().port());
+#endif
         // 学生端知情（设计文档 6.5 隐私边界）：远控=屏幕正被老师查看，学生必须知道。
-        // 灵动岛形态非打扰式提示（#98：统一走灵动岛），不遮操作。
+        // 灵动岛形态非打扰式提示（#98：统一走灵动岛，禁原生 QMessageBox），不遮操作。
         // 时长给的比原来的 3 秒长一些：远控一整节课都在，学生错过前 3 秒就再没提示了。
-        islandShow(QStringLiteral("屏幕正在被查看"),
-                   QStringLiteral("老师正在远程查看这台电脑"), QStringLiteral("eye"), 8000);
+        islandShow(QStringLiteral("老师正在远程控制你的屏幕"),
+                   QStringLiteral("屏幕画面正实时传给老师端"), QStringLiteral("eye"), 8000);
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("active"), true);
         out.data.insert(QStringLiteral("fps"), want);
@@ -5648,8 +5752,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             return out;
         }
         const int was = g_currentFps;
-        g_remoteControl = false;
-        g_currentFps = 5;   // 恢复默认
+        // 修复③（2026-10-19）：清理逻辑抽到 stopRemoteControlSession（与泄漏
+        // 看门狗共用一段，避免两条路径各写一半、日后改漏）。
+        stopRemoteControlSession(QStringLiteral("管理端指令"));
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("active"), false);
         out.data.insert(QStringLiteral("fps"), g_currentFps);
@@ -6062,6 +6167,49 @@ static void openTerminal(const QString &id, const QJsonObject &params)
                       QStringLiteral("本机已允许，终端会话已开"));
 }
 
+// ── 远控会话收口（2026-10-19 修复③）────────────────────────────────────────
+// remote_control_stop 动作与泄漏看门狗共用同一段清理：置位、解冻灵动岛、
+// 停桥、停服、恢复帧率。抽成函数是因为以前"停会话"只此一条路径（管理端
+// 自觉发 stop），而管理端直接离开（关窗/切页/进程崩/网络分区）时没有任何
+// 人调它 ⇒ g_remoteControl 永真、灵动岛长期冻结、VNC server 空转烧 CPU
+// （2026-10-19 实证：泄漏近 30 分钟，只能重启 agent 收口）。
+// 幂等：无会话时早退（stop 动作据此仍要返回 failed，见调用方）。
+static void stopRemoteControlSession(const QString &reason)
+{
+    if (!g_remoteControl) return;
+    const int was = g_currentFps;
+    g_remoteControl = false;
+    IslandOverlay::setSuppressed(false);   // 2026-10-19：解除岛冻结（远控结束）
+#ifdef STE_USE_LIBVNCSERVER
+    // 统一方案 A：停整条桥再销毁 in-agent VNC Server（RFB 源）。
+    VncBridge::instance().stop();
+    VncServer::instance().stop();
+#endif
+    g_currentFps = 5;   // 恢复默认
+    qInfo("[agent-qt] 🟢 远控会话关闭（%s），抓屏帧率恢复 5 fps（原 %d）",
+          qPrintable(reason), was);
+}
+
+// ── 远控会话泄漏看门狗（2026-10-19 修复③）──────────────────────────────────
+// 判据：管理端 VncClient 每 5s 经 RFB 发一个 1x1 增量 FramebufferUpdateRequest
+//   （无害探活），字节经 vnc-data down 到达本端即刷新 g_lastVncDownMs；
+//   老师纯观看不碰键鼠时也有这个流量，所以"在看"与"已离开"可区分。
+// 口径：会话起步 30s 内不判（留给 DXGI 首帧 2s 黑帧预算 + RFB 握手 +
+//   首个保活）；之后超过 25s（保活周期 5s 的 5 倍）没收过任何 down 字节
+//   ⇒ 判管理端已离开，自动收口。
+// 误杀代价可控（老师重新选中设备即重建会话）；漏杀代价是灵动岛永久冻结
+//   + VNC server 空转，不可接受。搭心跳车执行，零新定时器。
+static void reapRemoteControlIfStale()
+{
+    if (!g_remoteControl) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (g_vncSessionStartMs > 0 && now - g_vncSessionStartMs < 30000) return;   // 起步宽限
+    if (g_lastVncDownMs > 0 && now - g_lastVncDownMs <= 25000) return;          // 保活正常
+    qWarning("[agent-qt] [vnc] ⚠️ 远控会话管理端保活超时（down %s）—— 判定已离开，自动收口",
+             g_lastVncDownMs > 0 ? "超过 25s 未到" : "从未收到（会话起步 30s 后仍无）");
+    stopRemoteControlSession(QStringLiteral("泄漏看门狗"));
+}
+
 void handleControlText(const QString &text)
 {
     const QByteArray raw = text.toUtf8();
@@ -6133,86 +6281,26 @@ void handleControlText(const QString &text)
         return;
     }
 
-    if (type == QStringLiteral("rtc-start")) {
-        qInfo("[rtc] 云端要开推流（有人在看）"); rtcStart();
-        return;
-    }
-    if (type == QStringLiteral("rtc-stop")) {
-        qInfo("[rtc] 云端要停推流（没人看了）"); rtcStop(QStringLiteral("云端 rtc-stop"));
-        return;
-    }
-    // 云端把本端信令的投递结果回给本端（ok/to/detail）：这是唯一能证明"信令到底送没送到"的信号。
-    // 以前接到就丢，offer 被云端丢了也就没人知道 —— 只能靠猜。
-    if (type == QStringLiteral("rtc-relayed")) {
-        const bool ok = pay.value(QStringLiteral("ok")).toBool();
-        const QString rtype = pay.value(QStringLiteral("type")).toString();
-        if (!ok) {
-            qWarning("[rtc] FAIL 云端回执：%s 没送到（%s）→ 下个 tick 重发 offer",
-                     rtype.toUtf8().constData(),
-                     pay.value(QStringLiteral("detail")).toString().toUtf8().constData());
-            g_rtcForceReoffer = true;
-        } else {
-            // ⚠️ 2026-10-11 修：`to` 是**数字**（云端 registry 返回 { ok, to: hits }），
-            //    而 QJsonValue::toString() 对数字恒返回**空串** ⇒ 以前打成
-            //    「已投给  个对端」（数字空白），成功和 0 命中看起来一模一样，
-            //    把 #7 的排障带偏了一轮。这里按类型分别取，数字走 toInt。
-            const QJsonValue tv = pay.value(QStringLiteral("to"));
-            const QString toStr = tv.isDouble() ? QString::number(tv.toInt()) : tv.toString();
-            qInfo("[rtc] 云端回执：%s 已投给 %s 个对端",
-                  rtype.toUtf8().constData(), toStr.toUtf8().constData());
-        }
-        return;
-    }
-    // ── 远控隧道（2026-10-18 · RFB over WS）──────────────────────────────────
-    // 云端要开一条「老师端 ↔ 本机 VNC」的字节隧道：下发一次性 sid/key/port。
-    // 本机拨出第二条 WS（/ws/tunnel-agent，无需鉴权），attach 后云端把两端配对，
-    // 之后 TunnelAgent 在 WS 与 127.0.0.1:5900 之间纯搬字节（不解析 RFB）。
-    // 安全边界：本地 TCP 只连 loopback，云端拿不到真实 host:port。
+    // ── 远控（2026-10-18 · 统一方案 A · vnc-data 走主 WS）──────────────────────
+    // 起服入口已移到 remote_control_start（VncServer 自动选 loopback 端口、VncBridge
+    // 连它把 RFB 字节打成 vnc-data 帧走主 WS）。此分支保留只为兼容老云端：收到即幂等补起。
+    // sid/key/port 不再需要（主 WS 已鉴权；端口由 VncServer 自行决定）。
     if (type == QStringLiteral("tunnel.open")) {
-        const QString sid = pay.value(QStringLiteral("sid")).toString();
-        const QString key = pay.value(QStringLiteral("key")).toString();
-        const quint16 port = (quint16)qBound(1, pay.value(QStringLiteral("port")).toInt(5900), 65535);
-        const QString baseUrl = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
-        qInfo("[agent-qt] 云端要开远控隧道 sid=%s port=%d", qPrintable(sid), port);
-        if (sid.isEmpty() || key.isEmpty()) {
-            qWarning("[agent-qt] FAIL tunnel.open 缺 sid/key，忽略");
-        } else {
-            TunnelAgent::instance().start(baseUrl, sid, key, port);
+#ifdef STE_USE_LIBVNCSERVER
+        if (!VncServer::instance().isRunning()) {
+            const quint16 p = VncServer::instance().start(0, 0);   // 兼容路径无 fps 参数，默认 10fps
+            if (p == 0) {
+                qWarning("[agent-qt] FAIL tunnel.open：VncServer 起服失败，忽略");
+                return;
+            }
+            qInfo("[agent-qt] 已在 127.0.0.1:%u 起 in-agent VNC Server（tunnel.open 兼容路径）", (unsigned)p);
+            qInfo("[agent-qt] 已在 127.0.0.1:%u 起 in-agent VNC Server（tunnel.open 兼容路径）", (unsigned)p);
         }
-        return;
-    }
-    if (type == QStringLiteral("rtc-offer")) {
-        // 2026-10-10 去 WebEngine：agent 是 offer 发起方，正常不会收到 rtc-offer；
-        // 若收到（云端转发异常），ldc 路喂 onSignal，回退路已无 WebEngine 丢弃。
-        if (qgetenv("STE_USE_LDC_RTC") != "0") {
-            LdcStreamer::instance().onSignal(QStringLiteral("offer"),
-                                             pay.value(QStringLiteral("sdp")).toString().toUtf8());
-        } else {
-            qWarning("[rtc] 收到 rtc-offer 但 WebEngine 已移除，丢弃");
-        }
-        return;
-    }
-    if (type == QStringLiteral("rtc-answer")) {
-        // 2026-10-09 ldc 路：answer 喂 libdatachannel（非 ldc 路走旧 rtcFeedSignal）
-        if (qgetenv("STE_USE_LDC_RTC") != "0") {
-            qWarning("[rtc] 分发 rtc-answer 给 ldc（sdp=%d 字节，uid=%s）",
-                     pay.value(QStringLiteral("sdp")).toString().size(),
-                     qPrintable(pay.value(QStringLiteral("uid")).toString()));
-            LdcStreamer::instance().onSignal(QStringLiteral("answer"),
-                                             pay.value(QStringLiteral("sdp")).toString().toUtf8());
-        } else {
-            qWarning("[rtc] 收到 rtc-answer 但 WebEngine 已移除，丢弃");
-        }
-        return;
-    }
-    if (type == QStringLiteral("rtc-ice")) {
-        // 2026-10-09 ldc 路：candidate 喂 libdatachannel
-        if (qgetenv("STE_USE_LDC_RTC") != "0") {
-            LdcStreamer::instance().onSignal(QStringLiteral("candidate"),
-                                             pay.value(QStringLiteral("candidate")).toString().toUtf8());
-        } else {
-            qWarning("[rtc] 收到 rtc-ice 但 WebEngine 已移除，丢弃");
-        }
+        VncBridge::instance().start(VncServer::instance().port());
+        qInfo("[agent-qt] tunnel.open 兼容处理完成（统一方案 A 下起服点是 remote_control_start）");
+#else
+        qWarning("[agent-qt] tunnel.open 收到但未启用 STE_USE_LIBVNCSERVER，忽略");
+#endif
         return;
     }
     if (type == QStringLiteral("error")) {
@@ -6490,8 +6578,42 @@ void captureAndSend(const QString &outDir)
     }
 
     // 走到这里一定是 online（离线分支已在函数开头提前返回）。
+    // ⚠️ 远控期间停发（2026-10-18 深夜实证）：画面已改走 VNC up 帧，JPEG 广播帧在这条
+    //    劣化上行上纯属抢带宽——两路一起发，谁都会把心跳挤到迟到。 viewer 侧 m_vncActive
+    //    本来就让 JPEG 帧靠行，这里源头直接不发，省下的配额全给 VNC。
+    if (g_remoteControl) return;
     // v1 二进制帧：[1B 版本][2B 大端 headerLen][header JSON][JPEG]，带 seq —— 旧裸帧没有序号，
     // 将来按需拉流、断帧重传、测 fps 全靠它。
+    //
+    // ⚠️ WS 发送积压背压（2026-10-18 实证修复）：~1.2MB/s 的 JPEG 洪流会把 QWebSocket
+    //    发送队列灌满，10s 一条的小心跳文本帧排在队尾迟到 30s+ ⇒ 云端判"心跳超时"踢人，
+    //    设备每 30-60s 重连一次（当天 342 次）。帧可以丢，心跳不能丢 —— 积压超 1MB 就
+    //    跳过本帧（画面晚 200ms 没人察觉，掉线全班都看得见）。
+    if (g_ws->bytesToWrite() > 1024 * 1024) {
+        static int skipped = 0;
+        if (++skipped % 20 == 1)
+            qWarning("[agent-qt] WS 发送积压 %lld KB 超 1MB，跳过本帧保心跳（已跳 %d 帧）",
+                     g_ws->bytesToWrite() / 1024, skipped);
+        return;
+    }
+    // ⚠️ 带宽令牌桶（2026-10-18 实证修复）：帧洪流（~1.2MB/s）灌满上行链路后，
+    //    10s 一条的小心跳在队列里被推到 28s 后才到 ⇒ 云端 30s 判超时踢人（当日 342 次）。
+    //    实测当天 CF 隧道上行仅 ~250KB/s（正常时段数 MB/s，环境劣化）——
+    //    帧配额定 150KB/s（留 40% 余量给心跳/信令）；链路恢复后此帽只是降帧率上限，
+    //    可按需上调。画面损失：最坏 ~0.5-1fps@278KB，肉眼可感但在线稳定压倒一切。
+    {
+        static qint64 winStart = 0;
+        static qint64 winBytes = 0;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - winStart >= 1000) { winStart = now; winBytes = 0; }
+        if (winBytes + jpeg.size() > 150 * 1024) {
+            static int bwSkipped = 0;
+            if (++bwSkipped % 50 == 1)
+                qWarning("[agent-qt] 本秒帧流量已到 150KB 配额，跳帧保心跳（累计跳 %d）", bwSkipped);
+            return;
+        }
+        winBytes += jpeg.size();
+    }
     const QByteArray frame = makeFrameBytes(g_uid, g_frameSeq + 1, jpeg);
     const qint64 n = g_ws->sendBinaryMessage(frame);
     g_frameSeq++;
@@ -7331,8 +7453,71 @@ int main(int argc, char *argv[])
     QObject::connect(g_ws, &QWebSocket::textMessageReceived, &app, [](const QString &msg) {
         handleControlText(msg);
     });
+    // 远控统一 A（2026-10-18）：VncBridge 出向字节 → 打包 vnc-data 帧（direction=up）发主 WS。
+    QObject::connect(&VncBridge::instance(), &VncBridge::outBytes, &app, [](const QByteArray &data) {
+        if (data.isEmpty()) return;
+        if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) {
+            qInfo("[vnc-probe] up 丢弃 %d 字节（WS 未连）", data.size());
+            return;
+        }
+        // ⚠️ 背压治理（2026-10-18 深夜实证修复）：Raw 增量帧（2560x1440 一批 ~40-400KB）
+        //    此前**不过闸直发**，在劣化隧道（~250KB/s）上瞬间灌满上行 ⇒ 心跳迟到 ⇒
+        //    云端 30s 踢线 ⇒ 设备掉线画面定格（真机：4 帧后就断）。与 JPEG 帧同一套规矩：
+        //    积压超 1MB 丢帧 + 每秒带宽配额，帧可以丢，心跳不能丢。
+        if (g_ws->bytesToWrite() > 1024 * 1024) {
+            static int vncSkipped = 0;
+            if (++vncSkipped % 20 == 1)
+                qWarning("[agent-qt] [vnc] WS 积压 %lld KB 超 1MB，丢弃本批 up 字节保心跳（已丢 %d 批）",
+                         g_ws->bytesToWrite() / 1024, vncSkipped);
+            return;
+        }
+        // 每秒 200KB 配额窗口（整条链路共用一组记账）
+        static qint64 vWinStart = 0;
+        static qint64 vWinBytes = 0;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - vWinStart >= 1000) { vWinStart = now; vWinBytes = 0; }
+        // 小帧（<1KB，握手/键鼠回执类）不占配额直放，避免被大帧挤死协议字节
+        if (data.size() < 1024) {
+            g_ws->sendBinaryMessage(makeVncFrameBytes(data));
+            qInfo("[vnc-probe] up 已发 %d 字节（小帧免配额）", data.size());
+            return;
+        }
+        // ── 修复①（2026-10-19）：整屏基础图免配额 ────────────────────────────
+        // 根因：720p 档全屏首帧 hextile 编码后 ≈275KB，**单批即超** 200KB/s 配额
+        //   （vWinBytes=0 时 0+275KB>200KB 也成立）⇒ 被下方配额检查整批丢弃；
+        //   而丢帧发生在 bridge 已读走字节之后 ⇒ libvncserver 认为已发送、
+        //   **不重发** ⇒ 管理端永远拿不到基础图 ⇒ 全屏空白；静态桌面再无第二帧，
+        //   空白是**永久性**的（真机实证：日志有"桥出向 275433 字节"、无"up 已发"，
+        //   只剩配额丢弃告警；#358「没有画面」的真根因）。
+        // 口径（两条都只为"基础图必须到"，不放松稳态背压）：
+        //   · 会话起步 3s 宽限：覆盖 DXGI 首帧 2s 黑帧预算 + RFB 握手，首帧
+        //     不管拆成几批都放得过去（仍过上方 1MB 积压闸）；
+        //   · 之后仍放行**一个** ≥200KB 的整屏帧（DXGI 首帧踩点到达等边角
+        //     情形）——720p hextile 全屏 ≈275KB，增量脏区帧远小于此，≥200KB
+        //     基本只可能是整屏帧；一次性（g_vncMegaDone 本会话只豁免一个），
+        //     之后的整屏量级帧回到配额（帧可丢的规矩不破）。
+        const bool grace = (g_vncSessionStartMs > 0 && now - g_vncSessionStartMs < 3000);
+        if (grace || (data.size() >= 200 * 1024 && !g_vncMegaDone)) {
+            if (!grace) g_vncMegaDone = true;   // 宽限期内不消耗一次性豁免
+            vWinBytes += data.size();           // 这一秒的配额确实被它占了，照常记账
+            g_ws->sendBinaryMessage(makeVncFrameBytes(data));
+            qInfo("[vnc-probe] up 已发 %d 字节（%s）", data.size(),
+                  grace ? "会话起步宽限" : "整屏基础图一次性豁免");
+            return;
+        }
+        if (vWinBytes + data.size() > 200 * 1024) {
+            static int vBwSkipped = 0;
+            if (++vBwSkipped % 50 == 1)
+                qWarning("[agent-qt] [vnc] 本秒 up 流量已到 200KB 配额，丢弃本批保心跳（累计丢 %d 批）", vBwSkipped);
+            return;
+        }
+        vWinBytes += data.size();
+        g_ws->sendBinaryMessage(makeVncFrameBytes(data));
+        qInfo("[vnc-probe] up 已发 %d 字节", data.size());
+    });
     // 语音对讲（2026-10-07）：云端转发来的音频帧（v1 二进制帧，mime=audio/pcm）。
     // 与画面帧区分：画面帧是 agent→云端→viewer 的单向（被控端不接收）；这里只收 audio。
+    // 远控统一 A（2026-10-18）：主 WS 还会收到 vnc-data（管理端键鼠/更新请求，direction=down）。
     QObject::connect(g_ws, &QWebSocket::binaryMessageReceived, &app, [](const QByteArray &msg) {
         // v1 帧：[1B 版本][2B headerLen][header JSON][payload]；header.mime 标 audio/pcm
         if (msg.size() < 4 || (uchar)msg[0] != 1) return; // 非 v1 帧忽略
@@ -7341,8 +7526,20 @@ int main(int argc, char *argv[])
         const QByteArray head = msg.mid(3, hLen);
         const QJsonDocument doc = QJsonDocument::fromJson(head);
         if (!doc.isObject()) return;
+        const QString type = doc.object().value(QStringLiteral("type")).toString();
         const QString mime = doc.object().value(QStringLiteral("mime")).toString();
         const QByteArray payload = msg.mid(3 + hLen);
+        if (type == QLatin1String("vnc-data")) {
+            // 修复③（2026-10-19）：管理端任何 down 字节（键鼠/更新请求/5s 保活）
+            // 都刷新"管理端还在"的时刻，泄漏看门狗（reapRemoteControlIfStale）据此
+            // 区分"老师在看"与"老师已离开"。保活由管理端 VncClient 每 5s 发一个
+            // 1x1 增量 FramebufferUpdateRequest 产生，纯观看不碰键鼠也有流量。
+            g_lastVncDownMs = QDateTime::currentMSecsSinceEpoch();
+            // 远控统一 A：管理端键鼠/更新请求（direction=down）→ 喂本地 VNC 桥。
+            qInfo("[vnc-probe] down 收到 %d 字节", payload.size());
+            VncBridge::instance().feedDown(payload);
+            return;
+        }
         if (mime == QLatin1String("audio/pcm")) {
             // 语音对讲（设计文档 3.3.6）：老师讲话学生可见（每会话一次，不刷屏）
             if (!g_audioHintShown) {
@@ -7408,6 +7605,7 @@ int main(int argc, char *argv[])
     QObject::connect(g_hbTimer, &QTimer::timeout, &app, [] {
         sendHeartbeat();
         reapFileRecvIfStale();
+        reapRemoteControlIfStale();   // 修复③：远控会话泄漏看门狗（搭心跳车，零新定时器）
     });
     g_hbTimer->start(g_heartbeatMs);
     qInfo("[agent-qt] 心跳间隔 %d ms（等云端 registered 下发 heartbeatMs 后以其为准；本机当前按 %d ms 无心跳即判离线）",

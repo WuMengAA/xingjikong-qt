@@ -48,6 +48,7 @@
 #include <QProcess>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QPointer>        // 2026-10-19：setQmlObjectProperty 销毁时清空 QML 属性（防悬空 var）
 #include <QQuickItem>      // setQmlObjectProperty：rootObject() 返回 QQuickItem*，转 QObject* 需要完整定义
 #include <QQuickWidget>
 #include <QScreen>
@@ -120,6 +121,26 @@ IslandOverlay *IslandOverlay::instance()
         g_island = new IslandOverlay();
     return g_island;
 }
+
+// ── 2026-10-19 远控期冻结（P0 崩溃规避，说明见 island.h）─────────────────
+// 冻结时会立刻收起岛并停掉自动收起定时器：冻结期间不允许任何 QML 数据写入，
+// 否则 Repeater 的整表替换照样会踩已销毁 delegate。
+static bool s_islandSuppressed = false;
+
+void IslandOverlay::setSuppressed(bool on)
+{
+    if (s_islandSuppressed == on) return;
+    s_islandSuppressed = on;
+    qInfo("[island] 抑制模式 %s（远控期防 QML Repeater 崩溃）",
+          on ? "开启：岛停写，通知走托盘" : "关闭：岛恢复");
+    if (on && g_island) {
+        g_island->m_autoClose->stop();
+        g_island->m_dismissGuard->stop();
+        g_island->hide();
+    }
+}
+
+bool IslandOverlay::suppressed() { return s_islandSuppressed; }
 
 IslandOverlay::IslandOverlay(QWidget *parent)
     : QWidget(parent)
@@ -945,6 +966,9 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
                                const QString &icon, int durationMs, Form form,
                                bool fromAdmin)
 {
+    // 2026-10-19：远控期冻结（见 setSuppressed）——任何写入都可能触发 Repeater 重算，
+    // 而触发的那一刻正是 delegate 处于销毁窗口，必崩。
+    if (s_islandSuppressed) return;
     // ── 历史归档：上一条有内容的通知在被顶掉时进历史 ──
     // 判据：m_contentActive && m_title 非空（活动中的真通知被顶掉）
     // 2026-10-15 组件1：再加 !m_mediaPresenting —— 上一条是"正在播放"时不归档
@@ -1695,8 +1719,31 @@ void IslandOverlay::setQmlObjectProperty(const QString &name, QObject *obj)
                  qUtf16Printable(name));
         return;
     }
-    root->setProperty(name.toUtf8().constData(),
-                      QVariant::fromValue<QObject *>(obj));
+    const QByteArray key = name.toUtf8();
+    root->setProperty(key.constData(), QVariant::fromValue<QObject *>(obj));
+
+    // ── 2026-10-19 远控崩溃修复（真机 dump 三方实证）────────────────────
+    // 现象：远程控制开始后约 26s，agent 进程 0xC0000005，出错模块 Qt6Core.dll+0x38c0
+    //       （QObject::d_func / QBindingStorage 读取，rcx=0）。栈：
+    //       QObject::d_func ← QQmlDelegateModelItem::destroyObjectLater
+    //       ← QQuickRepeater::setModel ← QQmlBinding 重算 ← QQmlData::destroyed
+    //       ← QObject::~QObject（某个被 QML 引用的 C++ 对象正在销毁）
+    // 机制：`property var` 承接 C++ QObject 时，QML 只存**裸指针**（QVariant<QObject*>），
+    //       对象销毁后属性里仍是野指针。引擎在对象析构时会把依赖它的绑定全部重算一次，
+    //       重算链里一旦有 Repeater.model 重赋值，Repeater 会清空 delegate —— 而此时
+    //       部分 delegate 的 object 已被销毁（为 null），Qt6.12 内部对 null 调 d_func → 崩。
+    //       `voicehubObj` 是**运行期可被替换/销毁**的模块对象（其他 context property
+    //       都是常驻单例），正是这条链的入口。
+    // 修法：对象销毁的**那一刻**把 QML 属性清成 null（QML 侧已有 vhRef null 守卫），
+    //       让随后的绑定重算读到 null 而不是野指针。root 用 QPointer 兜住，
+    //       避免岛/引擎先于模块销毁时 lambda 里再踩一次野指针。
+    if (obj) {
+        QPointer<QObject> rootGuard(root);
+        connect(obj, &QObject::destroyed, root, [rootGuard, key]() {
+            if (!rootGuard) return;
+            rootGuard->setProperty(key.constData(), QVariant());
+        });
+    }
 }
 
 void IslandOverlay::dismiss()
