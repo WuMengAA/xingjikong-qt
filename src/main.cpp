@@ -107,6 +107,12 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include "plugin/pluginhost.h"   // P2：插件宿主（进程外插件 ABI）
+// 2026-10-20：首次启动引导（OOBE Wizard）——QML 向导 + 绑定数据面（详见 oobe_wizard.h）。
+#include "oobe_wizard.h"
+#include <QQuickWidget>          // 向导宿主（与 AgentShell 同款：QQuickWidget 顶格承载 QML）
+#include <QPointer>              // 向导窗口单例（窗口被关掉后指针自动置空）
+#include <QQmlContext>
+#include <QQmlEngine>
 #include "modules/modulehost.h"  // 2026-10-16：内置模块层（编译进 agent 的官方模块，与进程外插件共用门控）
 #include "modules/usbmodule.h"
 #include "modules/voicehubmodule.h"  // 2026-10-17：VoiceHub 联动（只读展示权威广播状态）
@@ -1677,6 +1683,119 @@ static void applyClassBinding(const QString &rawCode, const QString &wsUrl, cons
     consumeActivationCodeAsync(siteBase, code, u);
 }
 
+/* ══════════ 首次启动引导（OOBE Wizard）（2026-10-20） ══════════
+ * 用户要求：首次打开走一遍「欢迎 → 选绑定方式 → 扫码/输码 → 确认班级」，全程只出现
+ * 「班级 / 绑定码 / 扫码」这类词；任何一步失败都要有友好提示（不崩、不白屏）；
+ * 必须能「稍后配置」——跳过后进未绑定/离线主界面，且**不再反复打扰**。
+ *
+ * 分工（单一真源）：
+ *   · 界面与状态机：qml/oobe/（StackView 四步）+ src/oobe_wizard.*（网络与状态）
+ *   · 落盘与重连：本文件 —— boundSucceeded → saveClassCode/saveClassName + 补发 register
+ *   · 「有没有问过用户」：数据目录 oobe_done.txt（bound / skipped 都算问过）
+ * ⚠️ 为什么不复用旧配置窗：那个是填云端地址/令牌的技术表单；向导只解决"绑班级"，
+ *    两件事的用户面完全不同（配置窗保留，托盘「配置…」仍可进）。
+ */
+
+/** 向导"已问过"标记：bound / skipped 都写，避免每次开机都弹一遍。 */
+QString oobeFlagPath()
+{
+    return QFileInfo(agentEnvPath()).path() + QStringLiteral("/oobe_done.txt");
+}
+
+bool oobeSettled()
+{
+    return QFileInfo::exists(oobeFlagPath());
+}
+
+void markOobeSettled(const char *how)
+{
+    QFile f(oobeFlagPath());
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        qWarning("[agent-qt] ⚠ 引导标记写不出（%s）—— 下次启动可能再弹一次",
+                 qPrintable(f.errorString()));
+        return;
+    }
+    f.write(QString::fromUtf8(how).toUtf8());
+    f.write("\n");
+    f.close();
+}
+
+// 单例：托盘连点 / 自动弹与手动点同时发生时不叠窗（与 AgentShell::openPanel 同款理由）。
+static QPointer<QDialog> s_oobeDlg;
+
+/**
+ * 打开首次启动引导。
+ *
+ * 为什么窗口里套 QQuickWidget 而不是 QQuickView：与 AgentShell 完全同款（同一套 QML
+ * 加载口径：从 exe 旁的 qml/ 读盘），且 QDialog 能拿到正常的标题栏/任务栏行为，
+ * 老师不会遇到"窗口跑到岛后面、点不到"这种 QQuickView 常见问题。
+ */
+void openOobeWizard()
+{
+    if (s_oobeDlg) { s_oobeDlg->raise(); s_oobeDlg->activateWindow(); return; }
+
+    auto *dlg = new QDialog(nullptr);
+    s_oobeDlg = dlg;
+    dlg->setWindowTitle(QStringLiteral("星集控 · 首次配置"));
+    QScreen *sc = QGuiApplication::primaryScreen();
+    const QRect av = sc ? sc->availableGeometry() : QRect(0, 0, 1024, 720);
+    const int w = qMin(900, qMax(620, int(av.width() * 0.8)));
+    const int h = qMin(680, qMax(540, int(av.height() * 0.88)));
+    dlg->resize(w, h);
+    dlg->move(av.x() + (av.width() - w) / 2, av.y() + (av.height() - h) / 2);
+
+    auto *lay = new QVBoxLayout(dlg);
+    lay->setContentsMargins(0, 0, 0, 0);
+
+    auto *wiz = new OobeWizard(dlg);
+    wiz->setMachineCode(g_uid);
+    wiz->setSiteBase(siteBaseFromWsUrl(qEnvironmentVariable("STE_QT_WS_URL")));
+
+    auto *view = new QQuickWidget(dlg);
+    view->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    view->engine()->rootContext()->setContextProperty(QStringLiteral("oobe"), wiz);
+    lay->addWidget(view);
+    // QML 出问题必须可见（fail-silent 是红线）：日志里留下 QML ERROR 原文。
+    QObject::connect(view, &QQuickWidget::statusChanged, view, [view](QQuickWidget::Status st) {
+        if (st != QQuickWidget::Error) return;
+        for (const QQmlError &e : view->errors())
+            qWarning("[oobe] QML ERROR: %s", qPrintable(e.toString()));
+    });
+    view->setSource(QUrl::fromLocalFile(QCoreApplication::applicationDirPath()
+                                        + QStringLiteral("/qml/oobe/OobeWizard.qml")));
+
+    // 绑定成功：落盘 + 让云端**立刻**按班归组（不等下次重连）。
+    QObject::connect(wiz, &OobeWizard::boundSucceeded, dlg,
+                     [](const QString &classCode, const QString &className) {
+        if (!classCode.isEmpty()) saveClassCode(classCode);
+        if (!className.isEmpty()) saveClassName(className);
+        markOobeSettled("bound");
+        if (g_ws && g_ws->state() == QAbstractSocket::ConnectedState) {
+            sendRegister();
+            qInfo("[oobe] 已补发 register（带上班级码/名）");
+        } else {
+            g_backoffMs = 1000;
+            connectNow();      // 绑了班但云端不知道 = 白绑，立刻按新配置连一次
+        }
+    });
+    // 向导结束（完成 / 跳过）：关窗。跳过的机器进「未绑定/离线」主界面，不阻断启动。
+    // ⚠️ 关窗前必须**先卸 QML**：QML 里的绑定持有 oobe 指针，若它与 OobeWizard 同时销毁，
+    //    销毁顺序会让绑定在已析构对象上求值（探针实测：关窗刷一屏 TypeError ... of null）。
+    QObject::connect(wiz, &OobeWizard::wizardFinished, dlg, [dlg, view](bool bound) {
+        if (!bound) markOobeSettled("skipped");
+        qInfo("[oobe] 引导结束（%s）", bound ? "已绑定" : "用户选择稍后配置");
+        view->setSource(QUrl());                       // 断掉所有对 oobe 的绑定
+        dlg->close();
+        dlg->deleteLater();                            // 下次「绑定引导…」重建（带最新配置）
+    });
+    QObject::connect(dlg, &QObject::destroyed, [] { s_oobeDlg = nullptr; });
+
+    dlg->show();
+    dlg->raise();
+    dlg->activateWindow();
+    qInfo("[oobe] 已打开首次启动引导（qml/oobe/OobeWizard.qml）");
+}
+
 // 打开"配置向导"。首运行（未配置）自动调一次；托盘菜单「配置…」也走它。
 // 保存成功 → 立即用新配置重连；点「以后再说」→ 原样保持未配置态（不丢可见告警）。
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1691,8 +1810,7 @@ static void applyClassBinding(const QString &rawCode, const QString &wsUrl, cons
  *   重启助手 → 静默安装），不另写第二套升级逻辑。
  * ══════════════════════════════════════════════════════════════════════════ */
 
-QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;
-bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
+QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
 bool g_updateMandatory = false;     // 2026-10-06：云端 ota.json 的 mandatory（true=强制自动升级）
 // 2026-10-17：已主动提示过的版本（周期性复查会反复读到同一版本，只提示一次）
 static QString g_otaPromptedVer;
@@ -7209,6 +7327,10 @@ int main(int argc, char *argv[])
         // 首次运行配置窗的入口：老师在界面里填云端地址/令牌/设备名，写回数据目录的 agent.env。
         auto *actConfig = menu->addAction(QStringLiteral("配置…"));
         QObject::connect(actConfig, &QAction::triggered, &app, [] { openConfigDialog(); });
+        // 首次启动引导（2026-10-20）：欢迎 → 选绑定方式 → 扫码/输码 → 确认班级。
+        // 首运行会自动弹一次；这里留手动入口（跳过的机器想补绑、或换班级时用）。
+        auto *actOobe = menu->addAction(QStringLiteral("绑定引导…"));
+        QObject::connect(actOobe, &QAction::triggered, &app, [] { openOobeWizard(); });
         // 设置与信息（2026-10-06）：一眼看清 版本 / uid / 云端地址 / 连接状态 / 能不能升级
         auto *actInfo = menu->addAction(QStringLiteral("设置与信息…"));
         QObject::connect(actInfo, &QAction::triggered, &app, [] { openInfoDialog(); });
@@ -7706,6 +7828,23 @@ int main(int argc, char *argv[])
     if (g_unconfigured && g_tray) {
         qInfo().noquote() << QStringLiteral("[agent-qt] 检测到未配置，稍后自动打开配置向导（可点「以后再说」跳过）");
         QTimer::singleShot(700, &app, [] { runSelfCheck(); });   // P0-2：首运行先自检（含一键修复入口）
+    }
+
+    // ── 首次启动引导（OOBE Wizard）（2026-10-20 · 用户点单）──────────────────
+    // ⚠️ 必须放在上面那个 if 的**外面**：向导不依赖"未配置"，也不依赖托盘
+    //   （离屏/无托盘场景照样要能跑 —— 探针就是靠这一点验证的）。
+    // 触发条件：**从没走过向导** 且 **还没绑班级**。
+    //   · 跳过一次就写 oobe_done.txt ⇒ 之后开机不再弹（"稍后配置"是活路，不是骚扰）；
+    //   · 已绑班的机器不弹（升级上来的老机器不该被拦在向导里）。
+    // STE_OOBE_FORCE=1：演示/探针强制拉起（与 STE_QT_SHELL_AUTOOPEN 同款约定）。
+    // 延迟 3s：等岛/托盘先就位，避免两个窗口同时抢焦点。
+    {
+        const bool force = qEnvironmentVariable("STE_OOBE_FORCE") == QStringLiteral("1");
+        if (force || (!oobeSettled() && g_classCode.isEmpty())) {
+            QTimer::singleShot(3000, &app, [force] {
+                if (force || (!oobeSettled() && g_classCode.isEmpty())) openOobeWizard();
+            });
+        }
     }
 
     // ── P2：插件宿主启动（进程外插件 ABI）──

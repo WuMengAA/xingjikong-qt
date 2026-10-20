@@ -1,0 +1,122 @@
+// 星集控被控端 · 首次启动引导（OOBE Wizard）界面壳（2026-10-20）
+//
+// 结构：StackView 单向四步（欢迎 → 选方式 → 扫码/输码 → 确认班级）。
+//   · 单向：只能往前走 + 从「选方式」退回欢迎；不能跳到后面的步骤。
+//   · 状态真源在 C++（`oobe` = OobeWizard）：bindingState 变了这里才动页面，
+//     QML 自己不猜绑定结果（扫码页/输码页共用同一处跳转判断）。
+//   · 失败一律弹 AppDialog（友好文案来自 C++），**绝不白屏/不动死**。
+//
+// ⚠️ 命名纪律：令牌实例 id 用 `tok`（`md3` 与子组件属性同名会自引用，项目已踩过）。
+// ⚠️ 依赖：QtQuick.Controls 的 StackView。被控端自 0.6.46 起由 windeployqt 部署
+//    QtQuick/Controls + Qt6QuickControls2.dll（见 CMakeLists 的模块完整性断言）。
+import QtQuick
+import QtQuick.Controls
+import "../components"
+import "steps"
+
+Rectangle {
+    id: wizardRoot
+    color: tok.cSurface
+
+    Md3 { id: tok; dark: false }
+
+    // 状态常量（与 OobeWizard::BindingState 对齐；写死数值是为了 QML 侧不依赖类型注册）
+    readonly property int stIdle: 0
+    readonly property int stWaiting: 1
+    readonly property int stSuccess: 2
+    readonly property int stFailed: 3
+
+    property int step: 0
+    // 错误提示是否正在显示（对外可观察：探针 / e2e 用它判断有没有弹出来）
+    readonly property bool errorDialogOpen: errDlg.opened
+
+    // ── 导航（供各步按钮与探针调用）─────────────────────────────
+    function gotoStep(n) {
+        var comp = n === 0 ? welcomeComp
+                 : n === 1 ? chooseComp
+                 : n === 2 ? scanComp
+                 : n === 3 ? codeComp
+                 : doneComp;
+        step = n;
+        stack.replace(null, comp, { tk: tok, wizard: wizardRoot });
+    }
+    function chooseQr()   { gotoStep(2); oobe.startScan(); }
+    function chooseCode() { gotoStep(3); }
+    function skipNow()    { oobe.skipWizard(); }
+    function completeNow(){ oobe.finishWizard(); }
+
+    StackView {
+        id: stack
+        anchors.fill: parent
+        initialItem: Item { }
+
+        pushEnter: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: tok.durMedium; easing.bezierCurve: tok.easeEmph }
+            NumberAnimation { property: "x"; from: 24; to: 0; duration: tok.durMedium; easing.bezierCurve: tok.easeEmph }
+        }
+        pushExit: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: tok.durShort }
+        }
+        popEnter: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: tok.durMedium }
+        }
+        popExit: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: tok.durShort }
+        }
+    }
+
+    // ── 步骤指示点（4 步；纯装饰，不提供跳转入口）────────────────
+    Row {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 32
+        spacing: 8
+        visible: wizardRoot.step < 4
+        Repeater {
+            model: 4
+            delegate: Rectangle {
+                required property int index
+                width: index === wizardRoot.step ? 20 : 8
+                height: 8
+                radius: 4
+                color: index <= wizardRoot.step ? tok.cPrimary : tok.cOutlineVar
+                Behavior on width { NumberAnimation { duration: tok.durShort } }
+            }
+        }
+    }
+
+    // ── C++ 状态 → 页面跳转 / 错误提示 ──────────────────────────
+    Connections {
+        target: oobe
+        function onBindingStateChanged() {
+            if (oobe.bindingState === wizardRoot.stSuccess && wizardRoot.step !== 4) {
+                wizardRoot.gotoStep(4);
+            }
+        }
+        // 错误提示的开关**只以 errorText 为准**（C++ 是唯一真源）：
+        //   · 有文案 ⇒ 弹；文案被清掉（用户点「我知道了」，或别处把状态复位）⇒ 收。
+        // 为什么不在 bindingStateChanged 里开：那样「别处清错」时对话框会挂在屏幕上关不掉
+        //（探针实测：直接调 dismissError 后对话框仍显示）。
+        function onErrorTextChanged() {
+            if (oobe.errorText.length > 0) errDlg.opened = true;
+            else errDlg.opened = false;
+        }
+    }
+
+    AppDialog {
+        id: errDlg
+        objectName: "oobeErrorDialog"   // 探针按名字找它（验证失败时对话框真的弹出来）
+        anchors.fill: parent
+        tk: tok
+        text: oobe.errorText
+        onDismissed: oobe.dismissError()
+    }
+
+    Component { id: welcomeComp; StepWelcome  { } }
+    Component { id: chooseComp;  StepChooseMethod { } }
+    Component { id: scanComp;    StepScan     { } }
+    Component { id: codeComp;    StepCode     { } }
+    Component { id: doneComp;    StepDone     { } }
+
+    Component.onCompleted: gotoStep(0)
+}

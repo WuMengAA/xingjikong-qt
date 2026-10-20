@@ -127,6 +127,10 @@ add_executable(stelarith-agent-qt
   # ── 星璃账号绑定（2026-10-06 加：OAuth + 设备票，零手填接入）──
   src/oauthbind.cpp
   src/oauthbind.h
+  # 2026-10-20：首次启动引导（OOBE Wizard）数据面。界面在 qml/oobe/（StackView 四步）。
+  # Q_OBJECT 类必须显式列入源列表，AUTOMOC 才会为它生成 moc（只被 main.cpp include 不可靠）。
+  src/oobe_wizard.cpp
+  src/oobe_wizard.h
   # ── 考试模式（2026-10-06 加：全屏拦截 + 白名单轮询 + 计时，设计文档 3.7 第一版）──
   src/exam_mode.cpp
   src/exam_mode.h
@@ -293,6 +297,27 @@ add_custom_command(TARGET stelarith-agent-qt POST_BUILD
           "-DSUBSET=ON"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
   COMMENT "[agent] 拷贝 qml/ + 共享 island/ + 共享 ui/ → 构建输出目录（灵动岛视觉层）")
+
+# ── QML 同步（每次构建都跑，2026-10-20 补）─────────────────────────────
+# 【为什么需要】上面那条是 POST_BUILD：**只有链接时才执行**。于是「只改 QML、没改 C++」
+#   的构建（ninja: no work to do）会让 build/qml 停在旧版本 —— 探针测到旧件、出包打旧件，
+#   两者都静默（2026-10-20 立项时实测：改了 oobe 的 QML，ninja 说 no work to do，
+#   build/qml 里还是老文件）。这类"改了不生效"最容易在出包那天才被发现。
+# 【代价】copy_directory 走 copy-if-different 语义，几十个小文件，忽略不计。
+add_custom_target(agent_qml_sync ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+          "$<TARGET_FILE_DIR:stelarith-agent-qt>/qml"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${STE_SHARED_ISLAND_DIR}"
+          "$<TARGET_FILE_DIR:stelarith-agent-qt>/qml/island"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${STE_SHARED_UI_DIR}"
+          "$<TARGET_FILE_DIR:stelarith-agent-qt>/qml/components"
+  COMMENT "[agent] 同步 qml/ + 共享 island/ + 共享 ui/（每次构建，防「改了 QML 不生效」）"
+  VERBATIM)
+# 让 exe 依赖它：保证任何一次构建（哪怕只是 ninja 全量默认目标）都先同步过 QML。
+add_dependencies(stelarith-agent-qt agent_qml_sync)
 
 # ── Qt 运行时部署（windeployqt + 部署完整性断言，2026-10-20 补）───────────────
 # 【为什么必须有】出包现场实证：本工程从无 windeployqt 规则 ⇒ build/qml 下**只有**我们自己

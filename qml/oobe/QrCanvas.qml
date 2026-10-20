@@ -1,0 +1,40 @@
+// 首次启动引导 · 二维码画布（2026-10-20）
+// 只负责「把 C++ 给的矩阵画出来」：matrix 是每行一个 "0101…" 字符串的数组。
+// ⚠️ 本机不生成二维码：没有编码器就不该画 —— 后端给矩阵才画，给不了就走输入绑定码。
+import QtQuick
+
+Canvas {
+    id: root
+    property var matrix: []
+    property var tk: ({})
+    property int cellPad: 16          // 静区（QR 规范要求 4 模块，这里按像素留更宽松）
+
+    onMatrixChanged: requestPaint()
+    onTkChanged: requestPaint()
+    onWidthChanged: requestPaint()
+    onHeightChanged: requestPaint()
+
+    onPaint: {
+        var ctx = getContext("2d");
+        ctx.reset();
+        // 底：白（二维码必须高对比，深色主题下也一样 —— 扫码器按黑白读）
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, width, height);
+
+        var n = matrix ? matrix.length : 0;
+        if (n <= 0) return;
+
+        var side = Math.min(width, height) - cellPad * 2;
+        if (side <= 0) return;
+        var cell = side / n;
+        ctx.fillStyle = "#000000";
+        for (var r = 0; r < n; r++) {
+            var row = matrix[r];
+            for (var c = 0; c < row.length; c++) {
+                if (row.charAt(c) !== "1") continue;
+                // +0.5 抹掉亚像素缝隙（否则缩放到非整数格会出现浅灰竖线，影响识别）
+                ctx.fillRect(cellPad + c * cell, cellPad + r * cell, cell + 0.5, cell + 0.5);
+            }
+        }
+    }
+}
