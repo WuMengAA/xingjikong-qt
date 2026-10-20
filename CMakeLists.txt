@@ -39,7 +39,7 @@ find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Sv
 # 命名同为 DeepSeek Harness 同款：正式 X.Y.Z / 内测 X.Y.Z-alpha.N / 候选 X.Y.Z-rc.N
 # （阶段序 alpha < rc < 正式；号同核心递增、换核心归零、转正即剥离后缀）。
 # 成熟度标记不进版本号，归 ota.json 的 mandatory / notes 管。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
-set(AGENT_VERSION "0.6.45")
+set(AGENT_VERSION "0.6.46")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" _agent_src)
 if(_agent_src MATCHES "kAppVersion[ \t\r\n]*=[ \t\r\n]*\"([^\"]+)\"")
   set(_src_agent_version "${CMAKE_MATCH_1}")
@@ -293,4 +293,67 @@ add_custom_command(TARGET stelarith-agent-qt POST_BUILD
           "-DSUBSET=ON"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
   COMMENT "[agent] 拷贝 qml/ + 共享 island/ + 共享 ui/ → 构建输出目录（灵动岛视觉层）")
+
+# ── Qt 运行时部署（windeployqt + 部署完整性断言，2026-10-20 补）───────────────
+# 【为什么必须有】出包现场实证：本工程从无 windeployqt 规则 ⇒ build/qml 下**只有**我们自己
+#   拷的 app QML；Qt 的 QML 模块目录要么没有、要么是空目录（`build/qml/QtQuick/Controls`
+#   实测 0 文件），exe 旁也没有 Qt6QuickControls2.dll。而共享 Md3Btn 自 2026-10-19 起
+#   `import QtQuick.Controls`，被 5 个设置页 import ⇒ 换 qml 到生产后，面板一打开就
+#   `qtquickcontrols2plugin.dll 找不到指定的模块`。声明合法、编译零警告、主日志只剩一行，
+#   与 2026-10-16 真机事故同一类 —— 这类缺件必须由构建自己兜住。
+# 【为什么 --qmldir 不可省】windeployqt 靠**扫 QML 源码的 import** 决定部署哪些模块；
+#   不传 --qmldir 时它只能看到 exe，扫不到 qml/ 里的模块依赖 —— 这正是
+#   "QtQuick/Controls 目录存在但空洞"的来源（目录是别的模块顺带建的）。
+#   这里把 app qml + 共享 island + 共享 ui 三处源码目录都指上。
+# 【为什么还要断言】windeployqt 静默失败（工具版本/路径不对）时构建照样 exit 0；
+#   于是加一道部署后校验：源码 import 的每个 Qt 模块必须真有实现，缺一个就 FAIL。
+find_program(STE_WINDEPLOYQT_EXECUTABLE
+             NAMES windeployqt windeployqt6
+             HINTS "$ENV{QTDIR}/bin"
+                   "D:/QTqwq/6.12.0/msvc2022_64/bin")
+if(NOT STE_WINDEPLOYQT_EXECUTABLE)
+  message(WARNING
+    "[agent] 没找到 windeployqt：Qt 运行时与 QML 模块不会自动部署。\n"
+    "  后果：装到干净机器上会「岛白屏 / 面板 is not a type」。\n"
+    "  手工补：windeployqt.exe --no-translations --qmldir qml stelarith-agent-qt.exe")
+else()
+  # 扫「源码里实际 import 的 Qt 模块」——写成配置期计算、构建期校验，随 QML 变化自动跟随。
+  file(GLOB_RECURSE STE_AGENT_QML_SOURCES CONFIGURE_DEPENDS
+       "${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml"
+       "${STE_SHARED_ISLAND_DIR}/*.qml"
+       "${STE_SHARED_UI_DIR}/*.qml")
+  set(STE_REQUIRED_QML_MODULES "")
+  foreach(_qml ${STE_AGENT_QML_SOURCES})
+    file(STRINGS "${_qml}" _imports REGEX "^[ \t]*import[ \t]+Qt")
+    foreach(_line ${_imports})
+      string(REGEX REPLACE "^[ \t]*import[ \t]+([A-Za-z0-9_.]+).*$" "\\1" _mod "${_line}")
+      # 只收带点的（QtQuick.Controls / QtQuick.Layouts…）；裸 QtQuick、QtQml 是核心模块，
+      # windeployqt 必部署，且个别版本在 qml/ 下无独立目录，不纳入断言以免误报。
+      if(_mod MATCHES "^Qt[A-Za-z0-9_]+\\.[A-Za-z0-9_.]+$")
+        list(APPEND STE_REQUIRED_QML_MODULES "${_mod}")
+      endif()
+    endforeach()
+  endforeach()
+  if(STE_REQUIRED_QML_MODULES)
+    list(REMOVE_DUPLICATES STE_REQUIRED_QML_MODULES)
+    list(SORT STE_REQUIRED_QML_MODULES)
+  endif()
+  message(STATUS "[agent] QML 依赖模块（构建后校验部署完整性）：${STE_REQUIRED_QML_MODULES}")
+
+  add_custom_command(TARGET stelarith-agent-qt POST_BUILD
+    COMMAND "${STE_WINDEPLOYQT_EXECUTABLE}" "$<TARGET_FILE:stelarith-agent-qt>"
+            --no-translations
+            --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+            --qmldir "${STE_SHARED_ISLAND_DIR}"
+            --qmldir "${STE_SHARED_UI_DIR}"
+    COMMENT "[agent] windeployqt：部署 Qt 运行时 + QML 模块（qml/ 下）"
+    VERBATIM)
+  add_custom_command(TARGET stelarith-agent-qt POST_BUILD
+    COMMAND "${CMAKE_COMMAND}"
+            "-DDEPLOY_QML=$<TARGET_FILE_DIR:stelarith-agent-qt>/qml"
+            "-DREQUIRED_MODULES=${STE_REQUIRED_QML_MODULES}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-qml-modules-deployed.cmake"
+    COMMENT "[agent] 校验部署的 QML 模块完整性（缺件即 FAIL）"
+    VERBATIM)
+endif()
 
