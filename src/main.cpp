@@ -2248,15 +2248,19 @@ static void otaRollback()
     qWarning("[agent-qt] 🔙 回滚：用 %s 覆盖 %s，再把它拉起来", qPrintable(prev), qPrintable(exe));
     // 覆盖自己正在跑的 exe 一定失败（文件被占），所以交出一个独立 cmd 去干：
     // 杀进程 → 等 3 秒（自己也退干净）→ 拷回旧版 → 清 pending → 拉起旧版。
+    // 2026-10-21（审查 #10）：taskkill 的 /IM 原来是硬编码 stelarith-agent-qt.exe ——
+    //   exe 被重命名（学校定制/重打包）时 taskkill 失败 ⇒ && 链断 ⇒ 后续 copy/start
+    //   全不执行，回滚静默失效。改为从 applicationFilePath() 取当前进程的文件名拼。
+    const QString exeName = QFileInfo(exe).fileName();
     const QString cmd = QStringLiteral(
-        "taskkill /F /IM stelarith-agent-qt.exe >nul 2>&1 && "
+        "taskkill /F /IM \"%1\" >nul 2>&1 && "
         "ping -n 4 127.0.0.1 >nul && "
-        "copy /Y \"%1\" \"%2\" >nul && "
-        "del /f /q \"%3\" && "
-        "start \"\" \"%2\"");
+        "copy /Y \"%2\" \"%3\" >nul && "
+        "del /f /q \"%4\" && "
+        "start \"\" \"%3\"");
     // #368 需求①：用静默 detached 拉起，杜绝回滚脚本弹出 cmd 黑窗
     stelarithStartHiddenDetached(QStringLiteral("cmd.exe"),
-                                 {QStringLiteral("/c"), cmd.arg(prev, exe, otaPendingPath())});
+                                 {QStringLiteral("/c"), cmd.arg(exeName, prev, exe, otaPendingPath())});
     otaNoteFailure(QStringLiteral("新版本未能在 %d 秒内连上云端，已回滚").arg(kOtaRollbackMs / 1000));
     QTimer::singleShot(1500, [] { QCoreApplication::quit(); });   // 让位给刚拉起来的旧版
 }
@@ -3289,7 +3293,7 @@ void openConfigDialog()
     nameEdit->setPlaceholderText(QHostInfo::localHostName());
     form->addRow(QStringLiteral("设备显示名（可选）"), nameEdit);
     auto *nameHint = new QLabel(QStringLiteral(
-        "管理面板里看到的这台设备的名字（如「一班讲台机」）。留空就用设备本名。");
+        "管理面板里看到的这台设备的名字（如「一班讲台机」）。留空就用设备本名。"));
     nameHint->setWordWrap(true);
     nameHint->setStyleSheet(hintStyle);
     form->addRow(QString(), nameHint);
@@ -3551,6 +3555,13 @@ static void speakText(const QString &text)
     g_ttsCurToken = tok;
     g_ttsCurText  = say;
 
+    // ── 2026-10-21（审查 #4）：音量超时兜底 ──────────────────────────────
+    // Edge TTS 走公网 WS，弱网/挂起时 finished/failed 两个信号都可能永远不来 ⇒
+    // 系统主音量永久停在 75%（下一节课件/视频全被这个残留音量影响，没人会把它和
+    // "两小时前一条通知"联系起来）。单次 QTimer：60s 后仍没收到收尾信号就强制恢复
+    // 50。ttsRestoreVolume 内部有 token 校验 —— 被新一条顶掉时拒绝收，由新一条负责。
+    QTimer::singleShot(60 * 1000, qApp, [tok] { ttsRestoreVolume(tok); });
+
     // ── 播报前先把系统主音量抬到 75%（需求：先调音量，再播）──
     {
         QString verr;
@@ -3647,11 +3658,15 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
     const QString content = params.value(QStringLiteral("content")).toString();
     // ── 考试模式门控（2026-10-09 接线 · §6.2）：考试激活期间一切通知静默丢弃 ──
     // 不弹、不响、不记 error —— 学生机在考试中收到任何通知都应像没收到一样。
+    // 2026-10-21（审查 #7）：返回 "skipped:" 前缀 = 门控静默丢弃。调用方识别该前缀
+    //   转 **skipped** 回执（云端已有该语义，重复下发保护就在用）—— 原来返回普通
+    //   错误串被当成 failed，管理端会看到一条失败并可能重试/报警，和"像没收到
+    //   一样"正好相反。
     const bool gated = !g_notifGate.allow(
         kind == QLatin1String("danmaku") ? NotificationGate::Danmaku
         : kind == QLatin1String("loop") ? NotificationGate::LoopRemind
         : NotificationGate::Island);
-    if (gated) return QStringLiteral("exam-active-gated");
+    if (gated) return QStringLiteral("skipped:exam-active-gated");
     // P0-1（2026-10-14）：本地「通知与弹窗」开关关了就整体静默（考试门控优先，已在上方处理）。
     if (!AgentSettings::notifyEnabled()) return QStringLiteral("notify-disabled-by-local-setting");
     const int seconds = params.value(QStringLiteral("seconds")).toInt(0);
@@ -4488,6 +4503,24 @@ static void appendJsonl(const QString &subdir, const QJsonObject &o)
 {
     const QString dir = dataRoot() + QLatin1Char('/') + subdir;
     QDir().mkpath(dir);
+    // 2026-10-21（审查 #13）：按天文件从不清理 —— 500ms 采样一天 ~13MB、一学期 2GB+，
+    //   而查看端（openNoiseLogDialog/buildNoiseLogText）是把**所有文件全读进内存**再
+    //   统计的，学期末点开必卡。每天**首次写入**时清掉 7 天前的旧文件（只清 jsonl，
+    //   不碰当天/近几天；一天一次，不增加高频写路径的开销）。
+    {
+        static QDate lastPruned;
+        const QDate today = QDate::currentDate();
+        if (lastPruned != today) {
+            lastPruned = today;
+            const QFileInfoList entries =
+                QDir(dir).entryInfoList({ QStringLiteral("*.jsonl") }, QDir::Files);
+            const QDate cutoff = today.addDays(-7);
+            for (const QFileInfo &fi : entries) {
+                const QDate d = QDate::fromString(fi.completeBaseName(), QStringLiteral("yyyy-MM-dd"));
+                if (d.isValid() && d < cutoff) QFile::remove(fi.absoluteFilePath());
+            }
+        }
+    }
     const QString file = dir + QLatin1Char('/') + QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")) + QStringLiteral(".jsonl");
     QFile f(file);
     if (f.open(QIODevice::Append | QIODevice::Text)) {
@@ -6245,6 +6278,13 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     // 可配 TTS 朗读。站点广播（broadcast.ts）改走云端 WS 指令通道后，教室大屏不再依赖 CIMS。
     if (action == QStringLiteral("notify")) {
         const QString err = notifyFromParams(params);
+        // 2026-10-21（审查 #7）："skipped:" 前缀 = 门控静默丢弃（考试中），不是失败
+        //   —— 管理端不该看到一条 failed 去重试/报警。
+        if (err.startsWith(QLatin1String("skipped:"))) {
+            out.result = QStringLiteral("skipped");
+            out.error = err.mid(8);
+            return out;
+        }
         if (!err.isEmpty()) {
             out.result = QStringLiteral("failed");
             out.error = err;
@@ -6351,7 +6391,12 @@ static void stopRemoteControlSession(const QString &reason)
     if (!g_remoteControl) return;
     const int was = g_currentFps;
     g_remoteControl = false;
+    // 2026-10-21（审查 #5）：setSuppressed(false) 只清标志不恢复岛 —— 远控开始时
+    //   hide() 掉了岛，结束不补 ensureIdle() 的话顶部空闲半胶囊就丢了（要等下一次
+    //   通知才回来）。ensureIdle 内部受 m_idleEnabled 约束 + isVisible 判据（岛上
+    //   正显示内容时不会把内容顶成空闲）。
     IslandOverlay::setSuppressed(false);   // 2026-10-19：解除岛冻结（远控结束）
+    IslandOverlay::instance()->ensureIdle();
 #ifdef STE_USE_LIBVNCSERVER
     // 统一方案 A：停整条桥再销毁 in-agent VNC Server（RFB 源）。
     VncBridge::instance().stop();
@@ -6465,7 +6510,8 @@ void handleControlText(const QString &text)
                 qWarning("[agent-qt] FAIL tunnel.open：VncServer 起服失败，忽略");
                 return;
             }
-            qInfo("[agent-qt] 已在 127.0.0.1:%u 起 in-agent VNC Server（tunnel.open 兼容路径）", (unsigned)p);
+            // 2026-10-21（审查 #8）：下面这条日志原来**一字不差打了两遍**，排障时
+            // 像起了两个 server —— 只留一条。
             qInfo("[agent-qt] 已在 127.0.0.1:%u 起 in-agent VNC Server（tunnel.open 兼容路径）", (unsigned)p);
         }
         VncBridge::instance().start(VncServer::instance().port());
@@ -6605,7 +6651,10 @@ void handleControlText(const QString &text)
         // 学生点「确认」或快捷回复时发二次回执（confirmed + reply）给云端。
         if (action == QStringLiteral("notify")) {
             const QString err = notifyFromParams(params, id);
-            if (!err.isEmpty()) sendActionReceipt(id, action, QStringLiteral("failed"), err);
+            // 2026-10-21（审查 #7）：门控命中 = 静默丢弃，回执 skipped 而非 failed（同上处）
+            if (err.startsWith(QLatin1String("skipped:")))
+                sendActionReceipt(id, action, QStringLiteral("skipped"), err.mid(8));
+            else if (!err.isEmpty()) sendActionReceipt(id, action, QStringLiteral("failed"), err);
             else sendActionReceipt(id, action, QStringLiteral("done"));
             return;
         }
@@ -6704,6 +6753,10 @@ void captureAndSend(const QString &outDir)
             qInfo("[agent-qt] 云端不在，跳过抓屏（累计跳过 %d 次）", skipped);
         return;
     }
+    // 2026-10-21（审查 #2）：远控期间 VNC（DXGI）本来就在抓屏，这里再 grabWindow +
+    //   JPEG 编码纯属白烧 CPU —— 而远控恰恰是最吃 CPU 的场景。判断提到抓屏**之前**
+    //   （原判据在 JPEG 编码后、发送前，白抓白编了 2 秒）。
+    if (g_remoteControl) return;
     // 2026-10-12 用户命令「去掉轮询，只保留截图」：周期性抓屏 → WS 单帧推送停用
     //（当时前提是 RTC 实时流可用、看单帧用截图指令）。
     // ⚠️ 2026-10-16 生产兜底改造：RTC 链路未完全打通时，这路 WS 帧就是**唯一画面路**，
@@ -6750,10 +6803,10 @@ void captureAndSend(const QString &outDir)
     }
 
     // 走到这里一定是 online（离线分支已在函数开头提前返回）。
-    // ⚠️ 远控期间停发（2026-10-18 深夜实证）：画面已改走 VNC up 帧，JPEG 广播帧在这条
-    //    劣化上行上纯属抢带宽——两路一起发，谁都会把心跳挤到迟到。 viewer 侧 m_vncActive
-    //    本来就让 JPEG 帧靠行，这里源头直接不发，省下的配额全给 VNC。
-    if (g_remoteControl) return;
+    // ⚠️ 远控期间停发（2026-10-18 深夜实证 + 2026-10-21 上移）：画面已改走 VNC up 帧，
+    //    JPEG 广播帧在这条劣化上行上纯属抢带宽——两路一起发，谁都会把心跳挤到迟到。
+    //    viewer 侧 m_vncActive 本来就让 JPEG 帧靠行，这里源头直接不发，省下的配额全给 VNC。
+    //    （判据本身已提前到 grabWindow 之前，见函数开头 —— 这里保留原注释说明语义。）
     // v1 二进制帧：[1B 版本][2B 大端 headerLen][header JSON][JPEG]，带 seq —— 旧裸帧没有序号，
     // 将来按需拉流、断帧重传、测 fps 全靠它。
     //
@@ -6773,18 +6826,31 @@ void captureAndSend(const QString &outDir)
     //    实测当天 CF 隧道上行仅 ~250KB/s（正常时段数 MB/s，环境劣化）——
     //    帧配额定 150KB/s（留 40% 余量给心跳/信令）；链路恢复后此帽只是降帧率上限，
     //    可按需上调。画面损失：最坏 ~0.5-1fps@278KB，肉眼可感但在线稳定压倒一切。
+    //    ⚠️ 2026-10-21（审查 #14）：本桶（JPEG 150KB/s）与 VNC up 桶（200KB/s）、
+    //       bytesToWrite 积压闸（1MB）是**三套独立记账** —— 它们不叠加的前提是
+    //       JPEG 与 VNC 互斥（远控激活时 captureAndSend 提前 return，本文件开头），
+    //       非远控时 VNC 无上行（server 只在远控激活）⇒ 任意时刻最多一个桶在淌。
     {
         static qint64 winStart = 0;
         static qint64 winBytes = 0;
+        static qint64 winFrames = 0;        // 2026-10-21：本秒已推帧数（单帧豁免判定用）
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        if (now - winStart >= 1000) { winStart = now; winBytes = 0; }
-        if (winBytes + jpeg.size() > 150 * 1024) {
+        if (now - winStart >= 1000) { winStart = now; winBytes = 0; winFrames = 0; }
+        // 2026-10-21（审查 #1）：原来 `winBytes + size > 150KB` 从 0 起算 —— 单帧本身
+        //   超 150KB 时**每一帧**都满足条件，永远推不出去（1080p@60 复杂桌面常见
+        //   150-250KB，4K 必超），大屏机器非远控时画面流全空白而日志只刷"限流"。
+        //   加"单帧一次性豁免"：本秒第一帧不占配额检查直接推（对照 VNC up 路同款
+        //   grace 写法，L~7676），从第二帧起恢复 150KB/s 配额 —— 最坏多一帧流量，
+        //   保证画面流至少能走起来。
+        const bool grace = (winFrames == 0);
+        if (!grace && winBytes + jpeg.size() > 150 * 1024) {
             static int bwSkipped = 0;
             if (++bwSkipped % 50 == 1)
                 qWarning("[agent-qt] 本秒帧流量已到 150KB 配额，跳帧保心跳（累计跳 %d）", bwSkipped);
             return;
         }
         winBytes += jpeg.size();
+        winFrames++;
     }
     const QByteArray frame = makeFrameBytes(g_uid, g_frameSeq + 1, jpeg);
     const qint64 n = g_ws->sendBinaryMessage(frame);
@@ -7260,7 +7326,10 @@ int main(int argc, char *argv[])
     // 截图目录默认**不再**落在当前工作目录 —— 装机后 cwd 是哪全看启动器，落在那儿等于丢了。
     const QString dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
     QDir().mkpath(dataDir);
-    g_shotDir = qEnvironmentVariable("STE_QT_SHOT_DIR", dataDir + QStringLiteral("/shots"));
+    // 2026-10-21（审查 #11）：原来用 qEnvironmentVariable(key, default) —— 变量存在但
+    // 为空字符串时返回空（不是 default），部署脚本写了 `set STE_QT_SHOT_DIR=` 就会把
+    // 截图路径顶成空、图写到盘根。与本文件其他目录统一走 envOr（空串回落默认值）。
+    g_shotDir = envOr("STE_QT_SHOT_DIR", dataDir + QStringLiteral("/shots"));
     if (!g_shotDir.isEmpty()) QDir().mkpath(g_shotDir);
     g_logPath = qEnvironmentVariable("STE_QT_LOG", dataDir + QStringLiteral("/agent-qt.log"));
 

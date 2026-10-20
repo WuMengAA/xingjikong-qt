@@ -168,6 +168,11 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     auto *eff = new QGraphicsOpacityEffect(this);
     eff->setOpacity(1.0);
     setGraphicsEffect(eff);
+    // ⚠️ 2026-10-21（审查 #12）：此淡入淡出依赖 **QQuickWidget 的离屏 FBO blit 渲染
+    //    路径** —— m_quick（QML 引擎）是子 QWidget，理论上子部件不继承父的
+    //    QGraphicsOpacityEffect；实测生效是因为 QQuickWidget 把整帧 blit 进父窗口
+    //    的合成路径上。哪天换成 QQuickView / 改渲染后端，这条会悄悄失效 ——
+    //    改渲染相关代码时先回来看这里。
     m_fadeAnim = new QPropertyAnimation(eff, "opacity", this);
     m_fadeAnim->setDuration(220);
     // ⚠️ finished 只连**一次**，而且是成员函数槽（不是 lambda）：
@@ -319,11 +324,13 @@ IslandOverlay::~IslandOverlay()
     m_bridge = nullptr;
 }
 
-// 空闲半胶囊的位置：比活动态更贴顶（y=10）、更小（120×36），真正"收回顶部"。
+// 空闲半胶囊的位置：比活动态更贴顶（y=10）、更小（132×44），真正"收回顶部"。
+// 2026-10-21（审查 #9）：无屏回退的宽度原来是 120，与 kIdleW(132) 不一致 ——
+// 离屏探针/Session0 拿到的几何和实际路径对不上号会白浪费时间，统一用 kIdleW。
 QRect IslandOverlay::geometryForIdle() const
 {
     QScreen *screen = QGuiApplication::primaryScreen();
-    if (!screen) return QRect(0, 0, 120, int(Idle));
+    if (!screen) return QRect(0, 0, kIdleW, int(Idle));
     const QRect sg = screen->geometry();
     return QRect(sg.x() + (sg.width() - kIdleW) / 2, sg.y() + 10, kIdleW, int(Idle));
 }
@@ -1140,6 +1147,12 @@ void IslandOverlay::setFileTransfer(const QString &name, qint64 bytes, qint64 to
 void IslandOverlay::clearFileTransfer()
 {
     if (!m_ftActive && m_ftName.isEmpty()) return;
+    // 2026-10-21（审查 #3）：先记"当前岛是否还显示着传输卡"。取消/失败/超时三条
+    //   路径只调本函数收场，而传输卡是 duration=0（永不自收）—— 不主动 dismiss
+    //   会一直挂到下一条通知。成功路径靠 file_done 的 islandShow("收到文件") 顶掉，
+    //   这里只处理"岛还停在传输卡"的情况（已被别的通知顶掉时 title 不是传输卡，
+    //   不误伤那条通知）。判据用卡标题前缀（setFileTransfer 内部生成，可控）。
+    const bool wasShowingFileCard = m_title.startsWith(QStringLiteral("正在接收"));
     m_ftActive = false;
     m_ftName.clear();
     m_ftBytes = 0;
@@ -1148,6 +1161,7 @@ void IslandOverlay::clearFileTransfer()
     for (auto &t : m_tasks)
         if (t.tag == QStringLiteral("file")) { t.state = 2; t.sticky = false; t.progress = 1.0; }
     if (m_bridge) m_bridge->sync();
+    if (wasShowingFileCard) dismiss();   // 2026-10-21：传输卡还在岛上 ⇒ 主动收掉
     update();
 }
 
