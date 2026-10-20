@@ -1575,6 +1575,38 @@ static bool isPrivateHost(const QString &host)
            || host.startsWith(QLatin1String("172."));
 }
 
+/** 向导（二维码/绑定码）打哪儿？
+ *
+ * 与 siteBaseFromWsUrl（站点，教程/激活码）区分开：**绑定这座桥的两端都在云端**——
+ *   GET /api/device/bind-qr、bind-status、POST /api/device/activate 全部由云端实现
+ *   （2026-10-20 新建，见 Stelarith-cloud/src/bind-qr.js + index.js）。
+ * 所以向导必须打「与 WS 同源」的地址，否则会打到站点上（那里没有这几个端点，
+ * 向导只能一路降级到"输入绑定码"）。
+ *
+ * 判定顺序：
+ *   ① STE_QT_BIND_URL 显式覆盖（把绑定接口挪去站点/别的服务时用）
+ *   ② 从 STE_QT_WS_URL 推同源地址（ws→http / wss→https，端口沿用）：公网与内网都对
+ *   ③ 都没有才退回生产站点常量（此时向导会降级到输码，至少不是白屏）
+ */
+QString bindBaseFromWsUrl(const QString &wsUrl)
+{
+    const QString explicitBase = qEnvironmentVariable("STE_QT_BIND_URL").trimmed();
+    if (!explicitBase.isEmpty()) return explicitBase;
+
+    const QUrl u(wsUrl.trimmed());
+    if (u.isValid() && !u.host().isEmpty()) {
+        const QString scheme = (u.scheme().compare(QStringLiteral("wss"), Qt::CaseInsensitive) == 0)
+                                   ? QStringLiteral("https") : QStringLiteral("http");
+        const int port = u.port();
+        const bool defaultPort = (port <= 0)
+            || (scheme == QLatin1String("https") && port == 443)
+            || (scheme == QLatin1String("http") && port == 80);
+        return defaultPort ? QStringLiteral("%1://%2").arg(scheme, u.host())
+                           : QStringLiteral("%1://%2:%3").arg(scheme, u.host()).arg(port);
+    }
+    return QString::fromUtf8(kDefaultSiteUrl);
+}
+
 QString siteBaseFromWsUrl(const QString &wsUrl)
 {
     // ① 显式配置优先（自建站点 / 本机联调）
@@ -1749,7 +1781,11 @@ void openOobeWizard()
 
     auto *wiz = new OobeWizard(dlg);
     wiz->setMachineCode(g_uid);
-    wiz->setSiteBase(siteBaseFromWsUrl(qEnvironmentVariable("STE_QT_WS_URL")));
+    // 向导走"与云端同源"（二维码/绑定端点都在云端），见 bindBaseFromWsUrl
+    const QString bindBase = bindBaseFromWsUrl(qEnvironmentVariable("STE_QT_WS_URL"));
+    wiz->setSiteBase(bindBase);
+    // 现场排障必须看得见"打的是谁"：二维码扫不出来时，第一个要问的就是这个地址
+    qInfo().noquote() << QStringLiteral("[oobe] 绑定服务地址：%1").arg(bindBase);
 
     auto *view = new QQuickWidget(dlg);
     view->setResizeMode(QQuickWidget::SizeRootObjectToView);
