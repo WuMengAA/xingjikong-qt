@@ -40,11 +40,13 @@
 - **加强 OTA 三批次**（cloud `ccea463` / viewer `0d19abc` / control `fd7fcba`）：管理台可发 rc/alpha+灰度 channel（`manifestFileFor` 单一真源）+ 发布后端点自验；管理端检查带 channel + 周期自动检查（`STE_VIEWER_UPDATE_CHECK_SEC` 默认 4h）+ mandatory 气泡（只提示不装）；被控端 `otaReportHealth`（变化才发、lastAt 不参与比对）+ guard 删 gray 硬编码。归档 `加减归档-加强ota和维护功能-2026-10-20.md`。
 - **0.6.45 全链发版**（10 个在途提交入库、双端+APK、GitHub `release-0.6.45`、本机生产切换）。归档 `加减归档-0.6.45-2026-10-20.md`。
 - **0.6.46 构建链修复**（control `9f44ee3` / viewer `a5e9775`）：windeployqt + QML 模块断言（治面板 Controls 缺件）、OpenSSL 拷贝规则恢复、channel.txt 切 stable、双端重发 + GitHub `release-0.6.46`。
+- **首次启动引导 OOBE Wizard**（control `e67ea3a`）：`qml/oobe/` StackView 单向四步（欢迎/选方式/扫码或输码/确认班级）+ `src/oobe_wizard.*`（bindingState 枚举、submitBindingCode、skipWizard、qrMatrix）；首次启动未绑班自动弹、跳过写 `oobe_done.txt` 不再打扰、托盘「绑定引导…」可补绑。归档 `加减归档-OOBE引导向导-2026-10-20.md`。
 
 ## 5 待点单（只报清单，等点头）
-1. `permOk("admin")` 恒真越权。2. `check-circle` 图标名错配。3. viewerbackend 5 处 URL 派生未收敛。4. 站点 `/api/device/activate` 不回 classCode。5. `Md3Btn.qml:11` 自定义 `enabled` 盖掉 `Item.enabled`。6. 管理端下发 `kind=banner|mini` 入口。7. **安卓打包版本真源**：APK 仍走 Qt 默认模板（package/versionCode=1）⇒ 需补 android 模板结构或 build.gradle 覆盖，并 badging 复核。8. `release-0.6.45`（缺件包）是否打 prerelease/加标记。9. **M3 设备健康看板**：ota_health 已进 events.log，但无按设备查健康的面板。10. admin.html 灰度通道选择器浏览器实点。11. 远控 VNC 收口剩余项：首帧免配额/配额上调（200KB/s 吞全屏首帧）、DXGI 输出选择加固（GameViewer 虚拟屏横跳）、会话泄漏收口。12. test-agent-qml-deps 门禁扩到共享 ui 组件。
+1. `permOk("admin")` 恒真越权。2. `check-circle` 图标名错配。3. viewerbackend 5 处 URL 派生未收敛。4. 站点 `/api/device/activate` 不回 classCode。5. `Md3Btn.qml:11` 自定义 `enabled` 盖掉 `Item.enabled`。6. 管理端下发 `kind=banner|mini` 入口。7. **站点绑定接口缺位**：OOBE 扫码路依赖 `GET /api/device/bind-qr`（回 code+matrix）与 `GET /api/device/bind-status`，当前站点没有 ⇒ 只能走「改用输码」；本机不内置 QR 编码器（不做手写纠错）。8. **安卓打包版本真源**：APK 仍走 Qt 默认模板（package/versionCode=1）⇒ 需补 android 模板结构或 build.gradle 覆盖，并 badging 复核。8. `release-0.6.45`（缺件包）是否打 prerelease/加标记。9. **M3 设备健康看板**：ota_health 已进 events.log，但无按设备查健康的面板。10. admin.html 灰度通道选择器浏览器实点。11. 远控 VNC 收口剩余项：首帧免配额/配额上调（200KB/s 吞全屏首帧）、DXGI 输出选择加固（GameViewer 虚拟屏横跳）、会话泄漏收口。12. test-agent-qml-deps 门禁扩到共享 ui 组件。
 
 ## 6 踩坑实证（按"还会再踩"排序）
+- ⚠️⚠️ **只改 QML、没改 C++ 时 `build/qml` 不会更新**（POST_BUILD 仅在链接时跑）：`ninja` 报 no work to do，探针测旧件、出包打旧件，全程静默。2026-10-20 起 control 有 `agent_qml_sync`（ALL + add_dependencies）每次构建同步；改完 QML 若没看到同步日志，先怀疑这条。
 - 其他小条目（elide 用 TextMetrics.advanceWidth、setProperty 后绑定异步、WM_DEVICECHANGE 走 Qt 顶层窗口、WER 错误偏移=RVA）见 2026-10-1x 日志。
 - ⚠️⚠️ **换 qml/装包前的缺件判据**：模块目录非空 + 该模块依赖的 `Qt6*.dll` 可达（app 目录→System32→PATH）。2026-10-20：#Controls 空目录 + 缺 Qt6QuickControls2.dll ⇒ 被控端 5 个页面全挂，编译/主日志零症状。
 - ⚠️⚠️ **`windeployqt` 靠源码 import 决定部署范围**：不传 `--qmldir` 就只给核心模块；共享组件新增一个 import = 给所有消费端加隐性部署依赖。
