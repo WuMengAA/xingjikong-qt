@@ -32,7 +32,7 @@ endif()
 # 完整标准见 docs/版本号命名规范-2026-10-07.md。
 # 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
 # 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
-set(VIEWER_VERSION "0.6.45")
+set(VIEWER_VERSION "0.6.46")
 add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
 
 # 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补；2026-10-07 正则收严到 X.Y.Z[-rc.N]）。
@@ -300,6 +300,46 @@ add_custom_command(TARGET viewer-qt POST_BUILD
   VERBATIM)
 
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg)
+
+# ── OpenSSL 运行时 DLL 拷进 build/（2026-10-20 恢复 720bd8d 的规则）──────────
+# 历史：0.6.33 的 `720bd8d` 加过这条规则（作者当时的实证：干净重建后 makensis 报
+#   "File ..\build\libssl-3-x64.dll -> no files found"）。2026-10-20 排查发现它**整段不见了**
+#   —— 远控 VNC 线重写本文件时被带走 ⇒ 0.6.45 出包现场又回到"手工拷 DLL 才出得来"。
+# 规律（值得记）：凡是**打包清单显式 File 引用、而 windeployqt 不认识**的非 Qt 运行时件
+#   （OpenSSL 是典型：Qt6Network 的 openssl TLS 后端按需 load，不是静态导入），
+#   都必须由构建自己拷；否则"干净构建一次缺一次"，只有出包那一步才会炸。
+# 来源：STE_OPENSSL_ROOT（env 可覆盖，取 <root>/bin 或 <root>/../bin）+ PostgreSQL 默认安装。
+if(NOT STE_IS_ANDROID)
+  set(_ste_ossl_hints "")
+  if(DEFINED ENV{STE_OPENSSL_ROOT} AND NOT "$ENV{STE_OPENSSL_ROOT}" STREQUAL "")
+    list(APPEND _ste_ossl_hints
+         "$ENV{STE_OPENSSL_ROOT}/bin" "$ENV{STE_OPENSSL_ROOT}/../bin")
+  endif()
+  if(DEFINED STE_OPENSSL_ROOT AND NOT "${STE_OPENSSL_ROOT}" STREQUAL "")
+    list(APPEND _ste_ossl_hints
+         "${STE_OPENSSL_ROOT}/bin" "${STE_OPENSSL_ROOT}/../bin")
+  endif()
+  list(APPEND _ste_ossl_hints
+       "C:/Program Files/PostgreSQL/17/bin"
+       "C:/Program Files/PostgreSQL/16/bin")
+  find_file(STE_LIBSSL_DLL NAMES libssl-3-x64.dll HINTS ${_ste_ossl_hints})
+  find_file(STE_LIBCRYPTO_DLL NAMES libcrypto-3-x64.dll HINTS ${_ste_ossl_hints})
+  if(STE_LIBSSL_DLL AND STE_LIBCRYPTO_DLL)
+    foreach(_ossl "${STE_LIBSSL_DLL}" "${STE_LIBCRYPTO_DLL}")
+      get_filename_component(_ossl_name "${_ossl}" NAME)
+      add_custom_command(TARGET viewer-qt POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_ossl}" "$<TARGET_FILE_DIR:viewer-qt>"
+        COMMENT "[viewer] 拷贝 ${_ossl_name} → 构建输出目录（OpenSSL 运行时）" VERBATIM)
+    endforeach()
+    message(STATUS "[viewer] OpenSSL 运行时将随构建部署：${STE_LIBSSL_DLL}")
+  else()
+    message(WARNING
+      "[viewer] 没找到 libssl-3-x64.dll / libcrypto-3-x64.dll —— makensis 打 viewer 包会失败。\n"
+      "  处置：设 STE_OPENSSL_ROOT=<PostgreSQL 安装根>/lib 后重新 configure，或手工把两个 DLL 拷进 build/。")
+  endif()
+endif()
+
 # 2026-10-11：Android 麦克风用 NDK AAudio（纯 C++、无 Multimedia 依赖——两 kit 都没装）；
 # sysroot 默认 API 21 库目录没有 libaaudio.so，显式找 API 26+（AAudio 最低要求）的系统库。
 # 桌面仍走 winmm waveIn（无需额外链接）。
