@@ -370,6 +370,11 @@ public:
      *             或集控页用的 "broadcast"。没在这张表里的一律算"所有人都能做"。
      */
     Q_INVOKABLE bool mayDo(const QString &perm) const;
+    /**
+     * 2026-10-20（RBAC 第二批）：服务端身份落地 —— auth-ok 收到受限 identity 时，
+     * 由 roles 推导并锁定本端角色（setRole 在锁定期间拒绝切换）；全权连接时解锁。
+     */
+    void applyServerRole(const QStringList &roles);
 
     // ── 提醒开关 ──
     bool notifyOnDone() const { return m_notifyOnDone; }
@@ -835,6 +840,8 @@ private:
 
     // ── 身份 / 提醒偏好（落在 QSettings，界面改完重启也还在）──
     QString m_role = QStringLiteral("admin");   // "admin" / "teacher"，默认管理员（单机自用）
+    bool m_roleLocked = false;      // 2026-10-20（RBAC 第二批）：服务端下发受限身份期间，
+                                    // 本地 setRole 拒绝切换（防止「老师身份+本地切 admin」绕开门控）
     bool m_firstRunDone = false;                // 首启引导是否已完成（QSettings prefs/firstRunDone）
     bool m_notifyOnDone = true;
     bool m_notifyOnOffline = true;

@@ -421,6 +421,12 @@ bool ViewerBackend::mayDo(const QString &perm) const
 }
 bool ViewerBackend::setRole(const QString &role)
 {
+    // 2026-10-20（RBAC 第二批）：服务端下发受限身份期间，本地不可切回 admin ——
+    // 否则「老师身份 + 本地切一下」就把服务端门控绕过去了。全权连接不锁（行为=今天）。
+    if (m_roleLocked) {
+        logf("[viewer] 身份切换被拒：当前身份由服务端下发（锁定的）");
+        return false;
+    }
     const QString r = role.trimmed().toLower();
     const bool ok = (r == QStringLiteral("admin") || r == QStringLiteral("teacher"));
     if (!ok) return false;
@@ -434,6 +440,28 @@ bool ViewerBackend::setRole(const QString &role)
          r.toUtf8().constData());
     refreshGateState();
     return true;
+}
+/**
+ * 2026-10-20（RBAC 第二批）：服务端身份落地 —— 受限身份由 roles 推导并锁定本端角色。
+ * platform_admin / admin ⇒ admin；其余（teacher/assistant/未知）⇒ teacher
+ * （mayDo 已把 adminOnlyActions 里的危险动作从非 admin 身份拦掉，无需第三档）。
+ */
+void ViewerBackend::applyServerRole(const QStringList &roles)
+{
+    m_roleLocked = true;   // 锁定：setRole 在此后拒绝切换，防本地切回 admin 绕门控
+    const QString wanted = (roles.contains(QStringLiteral("platform_admin"))
+                            || roles.contains(QStringLiteral("admin")))
+                               ? QStringLiteral("admin")
+                               : QStringLiteral("teacher");
+    if (m_role == wanted) {
+        refreshGateState();   // 幂等：通知 QML 徽标/门控刷新
+        return;
+    }
+    m_role = wanted;
+    QSettings s;
+    s.setValue(QStringLiteral("account/role"), wanted);
+    logf("[viewer] 身份由服务端下发并锁定：%s", wanted.toUtf8().constData());
+    refreshGateState();
 }
 void ViewerBackend::openRegisterPage()
 {
@@ -1140,23 +1168,32 @@ void ViewerBackend::onTextMessage(const QString &text)
         emit authedChanged();
         logf("[viewer] ✅ 云端鉴权通过（mode=%s）",
              pay.value(QStringLiteral("mode")).toString().toUtf8().constData());
-        // RBAC（2026-10-20）：把云端下发的 identity 注入前端权限镜像层。
-        // 云端 auth-ok 带 identity ⇒ 按票里的 roles/scopes 裁剪；不带（旧票/静态令牌）⇒ 全权（mask 不生效，兼容现状）。
+        // RBAC（2026-10-20 第二批）：云端 auth-ok 现在带 identity（{uid, schoolId, roles, scopes}）。
+        //   · scopes 是数组 ⇒ 受限身份（票带 claims / 云端按 uid 回填）→ setIdentity + 服务端角色锁定；
+        //   · scopes 是 null（静态全权令牌 / 无 claims 旧票）或 identity 缺失 ⇒ 全权
+        //     → setFullAccess()，且解锁手动角色切换（行为与接入 RBAC 前完全一致）。
+        // ⚠️ 回归坑（第二批现场修的）：原实现 ident.value("scopes").toArray() 对 JSON null 也
+        //    返回空数组 ⇒ 全权身份被当成「空 scopes 受限身份」⇒ 设备列表全拒、管理端黑屏。
+        //    必须先判 isArray() 再取，null 走全权分支。
         if (m_perms) {
             const QJsonObject ident = pay.value(QStringLiteral("identity")).toObject();
-            if (!ident.isEmpty()) {
+            const QJsonValue scp = ident.value(QStringLiteral("scopes"));
+            if (!ident.isEmpty() && scp.isArray()) {
                 const QString uid = ident.value(QStringLiteral("uid")).toString();
                 const QJsonValue sid = ident.value(QStringLiteral("schoolId"));
                 const QString schoolId = (sid.isNull() || sid.isUndefined()) ? QString() : sid.toString();
                 QStringList roles;
                 for (const QJsonValue &r : ident.value(QStringLiteral("roles")).toArray())
                     roles.append(r.toString());
-                m_perms->setIdentity(uid, schoolId, roles, ident.value(QStringLiteral("scopes")).toArray());
-                logf("[viewer] RBAC identity 注入：roles=%s scopes=%d",
+                m_perms->setIdentity(uid, schoolId, roles, scp.toArray());
+                applyServerRole(roles);   // 服务端角色落地 + 锁定本地切换
+                logf("[viewer] RBAC identity 注入（受限）：roles=%s scopes=%d",
                      roles.join(QLatin1Char(',')).toUtf8().constData(),
-                     ident.value(QStringLiteral("scopes")).toArray().size());
+                     scp.toArray().size());
             } else {
-                m_perms->setFullAccess();   // 向后兼容：无 identity ⇒ 全权（不脱敏）
+                m_perms->setFullAccess();   // scopes=null / 缺 identity ⇒ 全权（不脱敏，兼容现状）
+                m_roleLocked = false;       // 解锁手动角色切换（全权连接，行为=今天）
+                logf("[viewer] RBAC identity 注入（全权）：scopes=null 或无 identity");
             }
         }
         setStatus(QStringLiteral("已连上云端，等教室机推画面…"), false);

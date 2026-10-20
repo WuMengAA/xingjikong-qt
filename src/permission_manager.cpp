@@ -105,6 +105,8 @@ const QHash<QString, QStringList> &PermissionManager::roleCaps() {
             QStringLiteral("device:intercom"), QStringLiteral("device:file-push"),
             QStringLiteral("device:notify"), QStringLiteral("device:remote"),
             QStringLiteral("class:manage"),
+            // RBAC 首切（2026-10-20）：操作日志属阅读类，老师可看；assistant 不列（不可看）。
+            QStringLiteral("system:logs"),
         }},
         { QStringLiteral("assistant"), {
             QStringLiteral("device:monitor"), QStringLiteral("device:notify"),

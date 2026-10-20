@@ -412,7 +412,7 @@ ApplicationWindow {
                                     if (!backend.loggedIn && !backend.accountBusy)
                                         backend.loginWithSite()
                                     else
-                                        root.page = 2
+                                        goPage(2)   // RBAC 首切：受限身份会被 goPage 拦下
                                 }
                             }
                         }
@@ -872,7 +872,7 @@ ApplicationWindow {
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
                                                 backend.currentUid = modelData.uid
-                                                root.page = 1   // 点一台就跳到控制页看它
+                                                goPage(1)   // 点一台就跳到控制页看它
                                             }
                                         }
                                     }
@@ -1029,7 +1029,7 @@ ApplicationWindow {
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: root.page = index
+                            onClicked: goPage(index)   // 底部标签栏：RBAC 首切统一走 goPage（受限身份点不到设置）
                         }
                     }
                 }
@@ -1223,8 +1223,14 @@ ApplicationWindow {
     function openScheduleEditor() { schedEditor.show() }
 
     /** 整屏页「返回/退出」用：页号是主界面的事，不让子组件猜（见下方 _pageCtx 注释）。
-     *  #370：监控页加显式「返回」按钮跳回集控（page=1），老师不必去点顶部标签。 */
-    function goPage(idx) { root.page = idx }
+     *  #370：监控页加显式「返回」按钮跳回集控（page=1），老师不必去点顶部标签。
+     *  ⚠️ 所有跳页必须走这里（不要直接写 root.page = …）：RBAC 首切（2026-10-20）
+     *     在这里拦「系统设置」—— 受限身份（老师/助教）进不了 page 2；
+     *     全权/平台超管 can("system:settings")===true，行为与今天完全一致。 */
+    function goPage(idx) {
+        if (idx === 2 && !perms.can("system:settings")) return   // RBAC：无权限不跳也不提示
+        root.page = idx
+    }
 
     // ══════════════ 弹窗互斥 ══════════════
     // 软件/日志/媒体/定时/文件 都是同一块居中 modal 弹窗，谁后开谁压在谁上面。
@@ -1315,9 +1321,9 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+K"; onActivated: { pal.open() } }
     Shortcut { sequence: "Ctrl+F"; onActivated: { pal.open() } }
     Shortcut { sequence: "F5";     onActivated: { backend.requestDevices() } }
-    Shortcut { sequence: "Ctrl+1"; onActivated: { root.page = 0 } }
-    Shortcut { sequence: "Ctrl+2"; onActivated: { root.page = 1 } }
-    Shortcut { sequence: "Ctrl+3"; onActivated: { root.page = 2 } }
+    Shortcut { sequence: "Ctrl+1"; onActivated: { goPage(0) } }
+    Shortcut { sequence: "Ctrl+2"; onActivated: { goPage(1) } }
+    Shortcut { sequence: "Ctrl+3"; onActivated: { goPage(2) } }
 
     // 选择类（4.7）：锁屏是最高频也最容易误伤的操作，给它两个键不加面板；
     // Ctrl+L 的单键形态和 Ctrl+Shift+L 的全量形态分开，避免"我本来只想锁一台"。
@@ -1328,7 +1334,7 @@ ApplicationWindow {
 
     Component.onCompleted: {
         syncPageLive()   // 2026-10-08：启动即按当前页归一化拉流（默认 page=1，缩略图墙不预订阅）
-        acctMenu.goSettings = function () { root.page = 2 }
+        acctMenu.goSettings = function () { goPage(2) }
         // U4：命令面板条目同样从声明派生（surfaces 含 "command" 的那些）。
         // 每条回指声明 id，点击时统一走 root.runActionById —— 与右栏按钮、快捷行
         // **同一条路**，所以权限 / 能力 / 危险确认这三道再也绕不过去。
@@ -1487,7 +1493,7 @@ ApplicationWindow {
         const miss = uiReg.capMissing(p)
         if (miss.length > 0) { backend.reportUnsupported(label, miss.join(" / ")); return false }
 
-        if (p.page >= 0) root.page = p.page
+        if (p.page >= 0) goPage(p.page)
         if (p.danger) { root.askDanger(p.action, 1, [], backend.currentUid); return true }
 
         if (p.kind === "send") { backend.sendAction(p.action, {}); return true }
@@ -1499,7 +1505,7 @@ ApplicationWindow {
 
     /** app 类（本地命令，不下发设备）。分支只有这 5 个 —— 声明里的 app 字段已校验。 */
     function runApp(p) {
-        if (p.app === "page")     { root.page = parseInt(p.payload, 10) || 0; return true }
+        if (p.app === "page")     { goPage(parseInt(p.payload, 10) || 0); return true }
         if (p.app === "theme")    { backend.themeMode = parseInt(p.payload, 10) || 0; return true }
         if (p.app === "role")     { backend.setRole(p.payload); return true }
         if (p.app === "login")    { backend.loginWithSite(); return true }
