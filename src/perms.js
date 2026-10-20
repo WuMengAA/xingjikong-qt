@@ -73,3 +73,29 @@ export function filterDevices(ident, devices, getClass) {
   const gc = getClass || ((d) => (d && typeof d.classCode === 'string' ? d.classCode : null));
   return devices.filter((d) => canAccess(ident, gc(d)));
 }
+
+/**
+ * 字段脱敏（2026-10-20 · RBAC 第二批）：受限身份（老师/助教）剥离 ip/mac 系敏感字段。
+ * 平台超管 / 全权（scopes===null）不脱敏。
+ *
+ * ⚠️ 现状勘误：listDevices() 当前根本不含这些字段（被控端注册不上报 ip/mac），
+ * 所以这里的脱敏是**防御性守卫**——字段一旦将来进入设备模型，低权限连接自动剥掉，
+ * 不会出现"某天注册带上 ip/mac 忘了加守卫"直接漏给老师的回归。
+ * 与 viewer 端 PermissionManager::sensitiveDeviceFields() 字段表逐字一致。
+ */
+const SENSITIVE_DEVICE_FIELDS = ['ip', 'mac', 'lanIp', 'wanIp', 'localIp', 'macAddr', 'ipAddr', 'ipv4', 'hardwareAddr'];
+
+/** 单台脱敏（返回新对象，不改原设备）。 */
+export function maskDevice(ident, d) {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return d;
+  if (!ident || ident.scopes === null || isPlatform(ident)) return d;
+  const out = { ...d };
+  for (const k of SENSITIVE_DEVICE_FIELDS) if (k in out) delete out[k];
+  return out;
+}
+
+/** 列表脱敏。 */
+export function maskDevices(ident, devices) {
+  if (!Array.isArray(devices)) return devices;
+  return devices.map((d) => maskDevice(ident, d));
+}

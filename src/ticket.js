@@ -20,14 +20,28 @@ const b64u = (b) => Buffer.from(b).toString('base64url');
 /**
  * 签一张管理端票据。云端自己用不上（签发方是站点），留在这里是为了
  * ① 格式只有一处定义，两边不会写歪；② 自测能验证"签得出来也验得过"。
+ *
  * @param {string} uid 签发对象（站点侧登录用户名，用于审计）
  * @param {number} ttlMs 有效期，缺省取 CLOUD_VIEWER_TICKET_TTL_MS
+ * @param {object|null} claims 可选（2026-10-20 · RBAC 第二批）：权限 claims
+ *   {schoolId?, roles, scopes}。传入时第 3 段编 base64url(JSON{...claims, uid})，
+ *   verifyViewerTicket 会把它当 claims 读出来（roles/scopes 直接进 identity，权限生效）；
+ *   不传时保持旧票（第 3 段纯 uid），云端鉴权时按 uid 从 user-claims 存储回填（见 user-claims.js）。
+ *   注意：claims.uid 一律以参数 uid 为准，防止调用方两处不一致（票据身份必须唯一）。
  */
-export function mintViewerTicket(uid, ttlMs = VIEWER_TICKET_TTL_MS) {
+export function mintViewerTicket(uid, ttlMs = VIEWER_TICKET_TTL_MS, claims = null) {
   if (!VIEWER_SECRET) return { ok: false, reason: '未配置 CLOUD_VIEWER_SECRET，无法签票' };
   const exp = Date.now() + Number(ttlMs || VIEWER_TICKET_TTL_MS);
   const nonce = crypto.randomBytes(8).toString('hex');
-  const payload = `v1.${exp}.${b64u(Buffer.from(String(uid || ''), 'utf8'))}.${nonce}`;
+  let seg;
+  if (claims && typeof claims === 'object') {
+    // 新票：第 3 段 = base64url(JSON claims)。uid 强制与参数一致。
+    const packed = { ...claims, uid: String(uid || '') };
+    seg = b64u(Buffer.from(JSON.stringify(packed), 'utf8'));
+  } else {
+    seg = b64u(Buffer.from(String(uid || ''), 'utf8'));   // 旧票：纯 uid
+  }
+  const payload = `v1.${exp}.${seg}.${nonce}`;
   const sig = b64u(crypto.createHmac('sha256', VIEWER_SECRET).update(payload).digest());
   return { ok: true, ticket: `${payload}.${sig}`, exp };
 }

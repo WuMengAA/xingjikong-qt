@@ -260,7 +260,9 @@ import { initClassDir, resolveClassCode, registerExternalCode, listClassDir, cla
 // 设备报修（2026-10-07，《设备报修-第一版设计》落地）：内存表 + repairs.json 落盘
 import { loadRepairs, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
 // 权限消费层（2026-10-15 · 契约《多校多身份-scope契约草案》§4.3：云端是唯一权限入口）
-import { identityFromAuth, canAccess, filterDevices } from './perms.js';
+import { identityFromAuth, canAccess, filterDevices, maskDevices } from './perms.js';
+// 用户 claims 存储（2026-10-20 · RBAC 第二批）：票无 claims 时按 uid 回填身份，权限真正流动
+import { initUserClaims, applyStoredClaims, setUserClaims, deleteUserClaims, listUserClaims } from './user-claims.js';
 // CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
 import { onDeviceOnline as cimsOnDeviceOnline, startCimsScheduler, syncDevice as cimsSyncDevice,
   syncAll as cimsSyncAll, cimsStatus } from './cims.js';
@@ -310,6 +312,12 @@ loadRepairs();               // 打开设备报修表（repairs.json），重启
 }
 initInteract();              // 打开互动库（点歌/反馈/祝福三张表，2026-10-15 组件6）
 if (!interactReady()) pushEvent('error', '互动数据不可持久化：点歌/点赞/祝福提交将如实回 STORE_UNAVAILABLE');
+// 用户 claims 存储（2026-10-20 · RBAC 第二批）：站点签的票是 bare-uid，鉴权时按
+// uid 从本存储回填 roles/scopes，权限才真正流动；存储为空时行为=今天（全权，零回归）。
+{
+  const r = initUserClaims();
+  console.log(`[cloud] user-claims：已加载 ${r.loaded} 条（${r.file}）`);
+}
 
 // 启动先清一次：把上轮残留的过期未回执/已回执行处理掉，再开始收新指令
 {
@@ -557,7 +565,9 @@ const server = http.createServer((req, res) => {
     // ⚠️ 用 startsWith 覆盖全部子路由（同上方 provision 的教训：精确相等会漏掉子路由）。
     u.pathname.startsWith('/api/admin/songkeys') ||
     // 2026-10-20 · 班级绑定码：能开码 = 能把任一台设备领进某个班，必须管理面鉴权
-    u.pathname.startsWith('/api/admin/bindcode');
+    u.pathname.startsWith('/api/admin/bindcode') ||
+    // 2026-10-20 · RBAC 第二批·用户权限（user-claims）：能改=能给别人提权，必须管理面鉴权
+    u.pathname.startsWith('/api/admin/user-claims');
   const isManageApi =
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
@@ -588,6 +598,9 @@ const server = http.createServer((req, res) => {
     if (isTicket) req.__ticketUid = tver.uid;
     // 2026-10-15（权限契约）：鉴权结果挂到 req，REST 的「返回设备 / 下发指令」路径按 scopes 过滤
     req.__auth = isStatic ? { ok: true, mode: 'token', uid: null } : tver;
+    // 2026-10-20（RBAC 第二批）：票无 claims 时按 uid 从云端存储回填，权限真正流动；
+    //   存储为空 → 不回填 ⇒ scopes=null ⇒ 全权（行为=今天，零回归）。
+    applyStoredClaims(req.__auth);
 
   // ── 2026-10-18 · 班级点歌凭据管理（管理面鉴权，见上 isAdminApi）──────────
   // GET  /api/admin/songkeys            → 清单（**只有 tail，无明文**）
@@ -693,7 +706,61 @@ const server = http.createServer((req, res) => {
     // 2026-10-15（权限契约 §4.3）：列表按本请求 scopes 过滤，不吐全班/全校给没权限的人。
     const ident = identityFromAuth(req.__auth);
     const visible = filterDevices(ident, listDevices());
-    return send(200, { ok: true, count: visible.length, devices: visible });
+    // 2026-10-20（RBAC 第二批）：字段脱敏 —— 受限身份一律剥 ip/mac 系字段
+    // （老师/助教不拿敏感字段；当前 listDevices 本就不含 ip/mac，此为防御性守卫）。
+    return send(200, { ok: true, count: visible.length, devices: maskDevices(ident, visible) });
+  }
+
+  // ── 2026-10-20 · RBAC 第二批：用户 claims 管理（云端回填存储的运维面）────────
+  // 权限真源在站点；这里只是「站点签不了 claims 票期间的云端回填存储」。
+  // GET    /api/admin/user-claims        → 全量清单（管理台对账 / 展示用）
+  // PUT    /api/admin/user-claims        → { uid, schoolId?, roles?, scopes? } 写入/覆盖
+  // DELETE /api/admin/user-claims?uid=x  → 删除（删除后回到「无 claims ⇒ 全权」）
+  // ⚠️ 权限：仅「平台超管」或「全权身份」（scopes===null：静态令牌/无 claims 旧票）可写；
+  //    受限身份（teacher/assistant 的 scopes 数组票）一律 403 —— 能改 claims = 能给别人提权。
+  if (u.pathname === '/api/admin/user-claims') {
+    const uident = identityFromAuth(req.__auth);
+    const canAdmin = uident && (isPlatformIdent(uident) || uident.scopes === null);
+    if (!canAdmin) {
+      return send(403, { ok: false, code: 'PERMISSION_DENIED', error: '仅平台超管可管理用户权限' });
+    }
+    if (req.method === 'GET') {
+      const users = listUserClaims();
+      return send(200, { ok: true, count: users.length, users });
+    }
+    if (req.method === 'PUT') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+      req.on('end', () => {
+        let p;
+        try { p = JSON.parse(body || '{}'); }
+        catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+        const uid = String(p.uid || '').trim();
+        if (!uid) return send(400, { ok: false, error: '缺少 uid（给谁设权限）' });
+        if (p.roles !== undefined && !Array.isArray(p.roles)) return send(400, { ok: false, error: 'roles 必须是数组' });
+        if (p.scopes !== undefined && !Array.isArray(p.scopes)) {
+          return send(400, { ok: false, error: 'scopes 必须是数组（空数组 = 显式零权限，与无 claims 的全权严格区分）' });
+        }
+        const who = req.__auth?.uid ?? req.__auth?.mode ?? '?';
+        const r = setUserClaims(uid, { schoolId: p.schoolId, roles: p.roles, scopes: p.scopes }, who);
+        // 日志只记尾/条数，不记完整 scopes（对齐「最小化回显」纪律）
+        pushEvent('info', '用户权限已更新（user-claims）', {
+          uid, who, roleCount: (r.saved?.roles || []).length, scopeCount: (r.saved?.scopes || []).length,
+          persisted: r.persisted,
+        });
+        return send(200, { ok: true, user: r.saved });
+      });
+      return undefined;
+    }
+    if (req.method === 'DELETE') {
+      const uid = String(u.searchParams.get('uid') || '').trim();
+      if (!uid) return send(400, { ok: false, error: '缺少 uid 参数（?uid=…）' });
+      const r = deleteUserClaims(uid);
+      const who = req.__auth?.uid ?? req.__auth?.mode ?? '?';
+      pushEvent('info', '用户权限已删除（user-claims）', { uid, existed: r.existed, who });
+      return send(200, { ok: true, existed: r.existed });
+    }
+    return send(405, { ok: false, error: '仅支持 GET / PUT / DELETE' });
   }
 
   if (req.method === 'GET' && u.pathname === '/api/events') {
@@ -771,6 +838,8 @@ const server = http.createServer((req, res) => {
       return send(401, { ok: false, ecode: 'AU1001', code: 'TOKEN_INVALID', error: '未授权：需要管理端令牌或登录票据' });
     }
     req.__auth = vStatic ? { ok: true, mode: 'token', uid: null } : vTicket;
+    // 2026-10-20（RBAC 第二批）：同 isManageApi 一家的回填 —— 票无 claims 按 uid 从存储取。
+    applyStoredClaims(req.__auth);
   }
   if (req.method === 'GET' && u.pathname === '/api/storage') {
     return send(200, { ok: true, ...getStorageInfo() });
@@ -1712,7 +1781,8 @@ function onViewerAuthed(ws, who) {
     }
   }
   snd(ws, 'viewer-ready', { viewers: viewerCount() });
-  snd(ws, 'devices', { devices: visible, at: new Date().toISOString() });
+  // 2026-10-20（RBAC 第二批）：字段脱敏 —— 受限身份剥 ip/mac 系（当前模型本无此二字段，防御性守卫）。
+  snd(ws, 'devices', { devices: maskDevices(ident, visible), at: new Date().toISOString() });
 }
 
 /**
@@ -1856,9 +1926,19 @@ viewerWss.on('connection', (ws) => {
       }
       authed = true;
       clearTimeout(deadline);
+      // 2026-10-20（RBAC 第二批）：票没带 claims（站点现在签的 bare-uid 票）但云端
+      // user-claims 存储登记了该 uid ⇒ 回填进 r.claims，下面的 identityFromAuth 才能
+      // 拿到 roles/scopes。存储为空 ⇒ 不回填 ⇒ scopes=null ⇒ 全权（行为=今天，零回归）。
+      applyStoredClaims(r);
       ws.__who = r;   // 2026-10-15：鉴权结果挂到连接上，后面每个分支都用它做权限判断（perms.js）
+      // 2026-10-20（RBAC 第二批）：auth-ok 补发 identity —— viewer 端据此驱动前端权限镜像层
+      // （scopes=null ⇒ 全权；scopes=[] ⇒ 显式零权限；scopes=[...] ⇒ 按 scope 裁剪）。
+      const authedIdent = identityFromAuth(r);
       // 旧客户端认的是 auth-ok，v1 客户端收 authed（统一命名，旧名进兼容清单）
-      snd(ws, ws.__v1 === true ? 'authed' : 'auth-ok', { mode: r.mode, uid: r.uid ?? null });
+      snd(ws, ws.__v1 === true ? 'authed' : 'auth-ok', {
+        mode: r.mode, uid: r.uid ?? null,
+        identity: authedIdent ? Object.assign({}, authedIdent) : null,
+      });
       onViewerAuthed(ws, r);
       return;
     }
@@ -1907,7 +1987,8 @@ viewerWss.on('connection', (ws) => {
         // 2026-10-15（权限契约 §4.3）：设备列表按本连接 scopes 过滤，不把全班/全校吐给没权限的人。
         const ident = identityFromAuth(ws.__who);
         const visible = filterDevices(ident, listDevices());
-        snd(ws, 'devices', { devices: visible, at: new Date().toISOString() });
+        // 2026-10-20（RBAC 第二批）：字段脱敏（同上，防御性守卫）。
+        snd(ws, 'devices', { devices: maskDevices(ident, visible), at: new Date().toISOString() });
         return;
       }
       // 语音对讲（2026-10-07，设计文档 3.3）：老师开始/停止讲话。

@@ -85,18 +85,25 @@ async function exchangeCode(code, redirectUri) {
   return session;
 }
 
-/** 问站点这个会话是谁 —— 票据里带 uid 是为了审计"谁在管这台云端"，不能是unknown 也至少要有。 */
+/** 问站点这个会话是谁 —— 票据里带 uid 是为了审计"谁在管这台云端"，不能是unknown 也至少要有。
+ * 2026-10-20（RBAC 第二批）：顺带读 roles/scopes —— 站点 userinfo 若下发 claims 就带进票，
+ * 权限直接生效；不下发则保持 bare-uid 票，云端鉴权时按 uid 从 user-claims 存储回填（兜底通路）。 */
 async function sessionUser(session) {
   try {
     const r = await fetch(new URL('/oauth/userinfo', SITE_URL), {
       headers: { authorization: `Bearer ${session}` },
       signal: AbortSignal.timeout(8000),
     });
-    if (!r.ok) return 'unknown';
+    if (!r.ok) return { username: 'unknown' };
     const j = await r.json();
-    return j.username || j.preferred_username || 'unknown';
+    const username = j.username || j.preferred_username || 'unknown';
+    const roles = Array.isArray(j.roles) ? j.roles.filter((x) => typeof x === 'string') : undefined;
+    const scopes = Array.isArray(j.scopes)
+      ? j.scopes.filter((s) => s && typeof s === 'object' && typeof s.type === 'string' && typeof s.id === 'string')
+      : undefined;
+    return { username, roles, scopes };
   } catch {
-    return 'unknown';
+    return { username: 'unknown' };
   }
 }
 
@@ -175,7 +182,8 @@ export function createAdminOAuthServer(log) {
 
     try {
       const session = await exchangeCode(code, redirectUri);
-      const uid = await sessionUser(session);
+      const user = await sessionUser(session);
+      const uid = user.username;
       // 票据里带 uid 是为了审计"谁在管这台云端"。uid 为 unknown 说明用户身份没
       // 拿到（站点 /oauth/userinfo 挂了、超时、或返回体缺 username）—— 这种情况下
       // 不能签票，否则管理台会被一个"无人认领"的会话用着，出了事查不到是谁。
@@ -184,12 +192,16 @@ export function createAdminOAuthServer(log) {
         throw new Error('无法确认用户身份（站点 /oauth/userinfo 未返回用户名），请重试或检查站点日志');
       }
       const ttlMs = Math.min(Math.max(Number(ADMIN_TICKET_TTL_MS) || 0, 60 * 1000), ADMIN_TICKET_TTL_MAX_MS);
-      const r = mintViewerTicket(uid, ttlMs);
+      // RBAC 第二批：userinfo 带 roles/scopes → 签 claims 票（权限直接生效）；
+      // 不带 → bare-uid 票，云端鉴权时按 uid 从 user-claims 存储回填（零回归兜底）。
+      const hasClaims = Array.isArray(user.roles) || Array.isArray(user.scopes);
+      const r = mintViewerTicket(uid, ttlMs,
+        hasClaims ? { roles: user.roles ?? [], scopes: user.scopes ?? [] } : null);
       if (!r.ok) {
         res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' });
         return res.end(resultPage(false, { error: r.reason || '云端签票失败' }));
       }
-      log(`[admin-oauth] 管理台登录成功 uid=${uid} ttl=${Math.round(ttlMs / 3600000)}h`);
+      log(`[admin-oauth] 管理台登录成功 uid=${uid} ttl=${Math.round(ttlMs / 3600000)}h${hasClaims ? ' claims' : ''}`);
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       return res.end(resultPage(true, { ticket: r.ticket, exp: r.exp, user: uid }));
     } catch (e) {
