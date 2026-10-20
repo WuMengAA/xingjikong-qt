@@ -102,6 +102,21 @@ export const EVENTS_KEEP_FILES = Number(process.env.CLOUD_EVENTS_KEEP_FILES || 3
  */
 export const QUEUE_DB_FILE = process.env.CLOUD_QUEUE_DB_FILE || 'instruction-queue.db';
 
+/* 班级目录落盘（2026-10-20 · 班级身份统一）
+ * 班级码是设备归属、权限判定（perms.canAccess）、按班下发的**唯一键**，必须跨重启稳定。
+ * 在这之前它只活在 registry.js 的内存 Map 里 ⇒ 云端一重启，班级名与归属全丢，
+ * 再绑一次就派生出新码（"同一个班长出三套码"的根因之一）。
+ */
+export const CLASS_DIR_DB_FILE = process.env.CLOUD_CLASS_DIR_DB_FILE || 'class-dir.db';
+
+/* 站点基址（用于把站点签发的「接入码 XJK-…」兑换成班级身份）。
+ * 云端是设备侧的唯一入口；站点继续持有它自己的班级库，由云端代为兑换并归一，
+ * 设备端因此**只需要认识一个地址**。
+ * 留空 = 不启用兑换（此时 XJK 码会被明确拒绝，不静默）。
+ */
+export const SITE_BASE_URL = (process.env.STE_SITE_URL || 'https://www.245959623.xyz').replace(/\/+$/, '');
+export const SITE_ACTIVATE_TIMEOUT_MS = Number(process.env.STE_SITE_ACTIVATE_TIMEOUT_MS || 6000);
+
 // 未回执指令的存活上限（TTL）：超过就作废、不再补发。
 // 取 24 小时的理由：覆盖单次断电/断网/夜间维护这类"短暂离线"；再久的指令多半已经失效甚至有害
 // ——比如一条"关机/锁屏"隔了一两天、设备一重连就突然执行，那比丢掉更糟。宁可判过期，也不隔夜补刀。

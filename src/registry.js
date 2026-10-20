@@ -11,6 +11,9 @@ import { EV_LIMIT, KEEP_LAST_FRAME, EVENTS_FILE, HEARTBEAT_TIMEOUT_MS,
   EVENTS_MAX_BYTES, EVENTS_KEEP_FILES } from './config.js';
 import { wrapOutgoing, makeFrame } from './protocol.js';
 import { enqueueDispatch, dropDispatch, settle as settleQueue, pendingFor, listPendingAll, paramsOf } from './store.js';
+// 班级身份的唯一真源（2026-10-20）：码/名/别名的解析与落盘都在 class-dir.js。
+// 本文件只负责"设备在哪个班"的运行时索引 —— 两边职责不重叠。
+import { resolveClassCode, getClass, listClassDir } from './class-dir.js';
 
 /** 出向统一走协议层：对端是 v1 就发信封，是旧客户端就发旧扁平格式（过渡期不断链）。 */
 function sendTo(ws, type, payload, id = '') {
@@ -58,8 +61,22 @@ function pruneKnown() {
  * 分班制：classCode -> { code, name, devices:[uid] }。
  * 设备上线 / 绑定 / 解绑时维护；列表接口与「按班定向下发」都读它。
  * ⚠️ 这里只存「设备→班」的归属，不存设备自身的在线/帧数据（那些在一处真源 devices 里）。
+ * ⚠️ 本 Map 是**运行时索引**（谁在这班里），班级身份的真源在 class-dir.js（码/名/别名，落盘）。
+ *    这里 key 用的 classCode 必须已经是 class-dir 归一过的 canonical；重启后由
+ *    hydrateClassesFromDir() 把班级名灌回来，避免"重启后列表里只剩一个裸码"。
  */
 const classes = new Map();
+
+/** 把已落盘的班级目录灌进运行时索引（云端启动时调一次）。 */
+export function hydrateClassesFromDir() {
+  let n = 0;
+  for (const rec of listClassDir()) {
+    let c = classes.get(rec.code);
+    if (!c) { c = { code: rec.code, name: rec.name || rec.code, devices: [] }; classes.set(rec.code, c); n++; }
+    if (rec.name) c.name = rec.name;
+  }
+  return n;
+}
 
 /** 上次记进日志的"观看结论"（uid + 被看人数），用来决定要不要再记一行 —— 见 pushWatchToAgent 末尾。 */
 let lastWatchLogUid = null;
@@ -419,6 +436,14 @@ export function isClassCodeValid(code) {
  *  只有非空才覆盖 —— 否则后继一条不带名的 register 会把已显示的真名打回 class_01。 */
 function addToClassIndex(uid, code, name = '') {
   if (!code) return;
+  // 2026-10-20（班级真源统一）：设备 register 自报的 classCode 也要进**班级目录**。
+  // 只写内存 Map 的话，云端一重启这个班就从目录里消失 —— 那正是本次要修的洞。
+  // 顺带把自报码也过一遍归一：如果它是某个已登记班的别名，就写回 canonical。
+  const r = resolveClassCode({ code, name, source: 'register' });
+  if (r.ok) {
+    code = r.code;
+    if (!name && r.name) name = r.name;
+  }
   let c = classes.get(code);
   if (!c) { c = { code, name: name || code, devices: [] }; classes.set(code, c); }
   if (name) c.name = name;
@@ -428,16 +453,21 @@ function addToClassIndex(uid, code, name = '') {
   else known.classCode = code;
 }
 
-export function bindDeviceToClass(code, uid, className = '') {
+export function bindDeviceToClass(code, uid, className = '', source = 'cloud') {
   if (!isClassCodeValid(code)) return { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' };
-  const key = code;
+  // ⚠️ 2026-10-20：**所有**绑班路径都要过解析器归一，否则同一个班会按入口不同长出不同的码。
+  //   解析可能把本次的 code 合并成某个已登记班的 alias（返回 canonical），这是刻意的：
+  //   身份唯一 > 保留某个入口自己那串码。
+  const r = resolveClassCode({ code, name: className, source });
+  if (!r.ok) return { ok: false, error: r.error };
+  const key = r.code;
   let c = classes.get(key);
-  if (!c) { c = { code: key, name: className || key, devices: [] }; classes.set(key, c); }
-  if (className) c.name = className;
-  addToClassIndex(uid, key);
-  pushEvent('info', '设备已绑定班级', { uid, classCode: key, className: c.name });
+  if (!c) { c = { code: key, name: r.name || className || key, devices: [] }; classes.set(key, c); }
+  if (r.name) c.name = r.name;             // 规范名以 class-dir 为准（它是真源）
+  addToClassIndex(uid, key, className);
+  pushEvent('info', '设备已绑定班级', { uid, classCode: key, className: c.name, mergedFrom: key === code ? undefined : code });
   broadcastDevices();
-  return { ok: true, class: c };
+  return { ok: true, class: c, classCode: key, merged: !!r.merged || key !== code };
 }
 
 export function unbindDeviceFromClass(code, uid) {
@@ -450,15 +480,35 @@ export function unbindDeviceFromClass(code, uid) {
 }
 
 export function listClasses() {
-  return [...classes.values()].map((c) => ({
-    code: c.code,
-    name: c.name,
-    devices: c.devices.slice(),
-    onlineCount: c.devices.filter((u) => {
-      const d = devices.get(u);
-      return !!d && d.ws && d.ws.readyState === 1;
-    }).length,
-  }));
+  // 班级**身份**来自 class-dir（已落盘），设备**归属**来自 classes（运行时索引）。
+  // 两边合起来才是"这个班的现状"：重启后班级仍在（只是 onlineCount=0），
+  // 否则管理台一重启就"班级消失"，按班下发直接找不到目标。
+  const countOnline = (devs) => devs.filter((u) => {
+    const d = devices.get(u);
+    return !!d && d.ws && d.ws.readyState === 1;
+  }).length;
+
+  const out = [];
+  const seen = new Set();
+  for (const rec of listClassDir()) {
+    const c = classes.get(rec.code);
+    const devs = c ? c.devices.slice() : [];
+    out.push({
+      code: rec.code,
+      name: rec.name || (c && c.name) || rec.code,
+      devices: devs,
+      onlineCount: countOnline(devs),
+      aliases: rec.aliases.slice(),
+      source: rec.source,
+    });
+    seen.add(rec.code);
+  }
+  // 极端兜底：运行时索引里有、目录里没有的班（理论上不该出现，出现了也不能吞掉）
+  for (const c of classes.values()) {
+    if (seen.has(c.code)) continue;
+    out.push({ code: c.code, name: c.name, devices: c.devices.slice(), onlineCount: countOnline(c.devices), aliases: [], source: '' });
+  }
+  return out;
 }
 
 export function getDevicesOfClass(code) {
