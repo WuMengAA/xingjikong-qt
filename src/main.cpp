@@ -2234,7 +2234,7 @@ static void otaRollback()
     const QString prev = otaPrevPath();
     const QString exe  = QCoreApplication::applicationFilePath();
     if (!QFile::exists(prev)) {
-        qWarning("[agent-qt] ⚠ 回滚备份不在（%s）—— 只能让这台机器保持现状，等下次升级 retry", qPrintable(prev));
+        qWarning("[agent-qt] ⚠ 回滚备份不在（%s）—— 只能让这台设备保持现状，等下次升级 retry", qPrintable(prev));
         QFile::remove(otaPendingPath());
         otaNoteFailure(QStringLiteral("回滚备份不存在"));
         return;
@@ -2531,7 +2531,7 @@ void openInfoDialog()
 
         QString lastText;
         if (lastRes.isEmpty()) {
-            lastText = QStringLiteral("（这台机器还没自动升级过）");
+            lastText = QStringLiteral("（这台设备还没自动升级过）");
         } else if (lastRes == QLatin1String("ok")) {
             lastText = QStringLiteral("成功（已升到 v%1）").arg(st.value(QStringLiteral("lastVer")).toString());
         } else {
@@ -3132,9 +3132,9 @@ void openConfigDialog()
     auto *root = new QVBoxLayout(&dlg);
 
     auto *intro = new QLabel(QStringLiteral(
-        "这台电脑还没有接入学校的集控系统。\n\n"
+        "这台设备还没有接入学校的集控系统。\n\n"
         "最简单的方式：点下面的「用星璃账号绑定」——浏览器里登录你的星璃账号、点同意，"
-        "这台机器就自动接入，不用填任何东西。\n\n"
+        "这台设备就自动接入，不用填任何东西。\n\n"
         "如果你有管理员给的地址和令牌，也可以手动填下面三项。"));
     intro->setWordWrap(true);
     root->addWidget(intro);
@@ -3159,7 +3159,7 @@ void openConfigDialog()
     root->addWidget(bindBtn);
 
     auto *bindHint = new QLabel(QStringLiteral(
-        "点了之后会打开浏览器，登录你的星璃账号、点同意，这台机器就自动接入集控。"));
+        "点了之后会打开浏览器，登录你的星璃账号、点同意，这台设备就自动接入集控。"));
     bindHint->setWordWrap(true);
     bindHint->setStyleSheet(QStringLiteral("color:#888;"));
     root->addWidget(bindHint);
@@ -3266,7 +3266,7 @@ void openConfigDialog()
     tokenLay->addWidget(showCb);
     form->addRow(QStringLiteral("设备令牌"), tokenRow);
     auto *tokenHint = new QLabel(QStringLiteral(
-        "相当于这台电脑接入集控的\"门禁卡\"，一机一串，由管理员发放。"
+        "相当于这台设备接入集控的\"门禁卡\"，每台一串，由管理员发放。"
         "默认打码显示，勾「显示」可核对是否抄错。"));
     tokenHint->setWordWrap(true);
     tokenHint->setStyleSheet(hintStyle);
@@ -3277,7 +3277,7 @@ void openConfigDialog()
     uidEdit->setPlaceholderText(QHostInfo::localHostName());
     form->addRow(QStringLiteral("设备码（可选）"), uidEdit);
     auto *uidHint = new QLabel(QStringLiteral(
-        "这台电脑在集控里的唯一代号（用于按班归组等）。留空就用电脑本名，一般不用改。"));
+        "这台设备在集控里的唯一代号（用于按班归组等）。留空就用设备本名，一般不用改。"));
     uidHint->setWordWrap(true);
     uidHint->setStyleSheet(hintStyle);
     form->addRow(QString(), uidHint);
@@ -3289,7 +3289,7 @@ void openConfigDialog()
     nameEdit->setPlaceholderText(QHostInfo::localHostName());
     form->addRow(QStringLiteral("设备显示名（可选）"), nameEdit);
     auto *nameHint = new QLabel(QStringLiteral(
-        "管理面板里看到的这台电脑的名字（如「一班讲台机」）。留空就用电脑本名。"));
+        "管理面板里看到的这台设备的名字（如「一班讲台机」）。留空就用设备本名。");
     nameHint->setWordWrap(true);
     nameHint->setStyleSheet(hintStyle);
     form->addRow(QString(), nameHint);
@@ -4922,7 +4922,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         //    以前截完悄无声息，学生完全不知道自己被截了图。
         //    图标用 "eye"（与「屏幕正在被查看」同一枚，已在用、必然能渲染）。
         islandShow(QStringLiteral("屏幕已被截取"),
-                   QStringLiteral("老师远程截取了这台电脑的屏幕"),
+                   QStringLiteral("老师远程截取了这台设备的屏幕"),
                    QStringLiteral("eye"), 6000);
 
         // ② 缩略图回传：管理端以前拿到的 path 是**学生机上的绝对路径**，老师根本
@@ -6283,7 +6283,7 @@ static void openTerminal(const QString &id, const QJsonObject &params)
 
     if (t.hasSession()) {
         sendActionReceipt(id, QStringLiteral("terminal_open"), QStringLiteral("failed"),
-                          QStringLiteral("已经有终端会话开着，同一台机器同时只放一个"));
+                          QStringLiteral("已经有终端会话开着，同一台设备同时只放一个"));
         return;
     }
 
@@ -6313,7 +6313,7 @@ static void openTerminal(const QString &id, const QJsonObject &params)
     } else {
         QMessageBox box(QMessageBox::Question,
                         QStringLiteral("远程终端请求"),
-                        QStringLiteral("有人要从管理端连这台机器的命令行（可执行任意命令）。允许吗？"),
+                        QStringLiteral("有人要从管理端连这台设备的命令行（可执行任意命令）。允许吗？"),
                         QMessageBox::Yes | QMessageBox::No,
                         nullptr);
         box.setButtonText(QMessageBox::Yes, QStringLiteral("允许"));
@@ -6966,7 +6966,7 @@ void agentUiFill(AgentUi *ui)
         const QJsonObject st = otaLoadState();
         const QString lastRes = st.value(QStringLiteral("lastResult")).toString();
         if (lastRes.isEmpty())
-            ui->m_otaLastText = QStringLiteral("（这台机器还没自动升级过）");
+            ui->m_otaLastText = QStringLiteral("（这台设备还没自动升级过）");
         else if (lastRes == QLatin1String("ok"))
             ui->m_otaLastText = QStringLiteral("成功（已升到 v%1）")
                                     .arg(st.value(QStringLiteral("lastVer")).toString());

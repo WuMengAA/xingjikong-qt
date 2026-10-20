@@ -84,7 +84,7 @@ Item {
                     spacing: 2
 
                     Text {
-                        text: "这台机器"
+                        text: "这台设备"
                         font.pixelSize: 14
                         font.weight: Font.Medium
                         color: page.tok ? page.tok.cOnSurface : "#E6E1E5"

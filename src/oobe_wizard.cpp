@@ -44,7 +44,7 @@ QString friendlyNetworkError(QNetworkReply *reply)
 {
     switch (reply->error()) {
     case QNetworkReply::HostNotFoundError:
-        return QStringLiteral("连不上服务器，请检查这台电脑的网络后重试。");
+        return QStringLiteral("连不上服务器，请检查这台设备的网络后重试。");
     case QNetworkReply::TimeoutError:
     case QNetworkReply::OperationCanceledError:
         return QStringLiteral("等待服务器超时了，请稍后重试。");
@@ -52,7 +52,7 @@ QString friendlyNetworkError(QNetworkReply *reply)
     case QNetworkReply::RemoteHostClosedError:
         return QStringLiteral("服务器暂时没响应，请稍后重试。");
     case QNetworkReply::SslHandshakeFailedError:
-        return QStringLiteral("这台电脑的时间可能不准，校对时间后再试一次。");
+        return QStringLiteral("这台设备的时间可能不准，校对时间后再试一次。");
     default:
         return QStringLiteral("网络不太稳定，请重试；也可以先用「输入绑定码」。");
     }

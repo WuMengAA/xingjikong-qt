@@ -72,7 +72,7 @@ Item {
                 id: machineRow
                 anchors.centerIn: parent
                 spacing: 8
-                Text { text: "机器码"; font.pixelSize: 12; color: tk.cOnSurfaceVar; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: "设备码"; font.pixelSize: 12; color: tk.cOnSurfaceVar; anchors.verticalCenter: parent.verticalCenter }
                 Text {
                     text: oobe.machineCode
                     font.pixelSize: 14
