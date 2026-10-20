@@ -5,8 +5,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.stelarith.viewer"
     android:installLocation="auto"
-    android:versionCode="1"
-    android:versionName="0.6.25">
+    android:versionCode="645"
+    android:versionName="0.6.45">
     <!-- 网络：连云端 WS/HTTP（教室管理必需） -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
