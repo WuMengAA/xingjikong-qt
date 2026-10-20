@@ -150,7 +150,7 @@
   if (!code) {
     show('panel');
     el('title').textContent = '这个链接不完整';
-    el('subtitle').textContent = '请回到教室电脑上重新点「换一张」，再扫一次。';
+    el('subtitle').textContent = '请回到设备端上重新点「换一张」，再扫一次。';
     el('pickWrap').classList.add('hidden');
     el('confirmBtn').classList.add('hidden');
     return;
@@ -167,7 +167,7 @@
       if (!data || !data.ok) {
         show('panel');
         el('title').textContent = data && data.expired ? '绑定码已过期' : '这个绑定码不能用';
-        el('subtitle').textContent = (data && data.error) || '请回到教室电脑上刷新二维码后再扫一次。';
+        el('subtitle').textContent = (data && data.error) || '请回到设备端上刷新二维码后再扫一次。';
         el('pickWrap').classList.add('hidden');
         el('confirmBtn').classList.add('hidden');
         return;
@@ -182,7 +182,7 @@
       if (data.needsDeviceInput) {
         // 管理员按班生成的码：票里没有设备身份 ⇒ 手机端绑定不了，
         // 老老实实告诉老师"回大屏敲这 6 位"，绝不假装成功。
-        el('title').textContent = '请在教室电脑上输入这个绑定码';
+        el('title').textContent = '请在设备端上输入这个绑定码';
         el('subtitle').textContent = '这个码对应「' + (data.className || data.classCode) + '」';
         el('bigCode').textContent = data.code || '';
         el('bigCode').style.display = 'block';
@@ -222,7 +222,7 @@
     .catch(function () {
       show('panel');
       el('title').textContent = '网络不太顺畅';
-      el('subtitle').textContent = '请检查手机网络后，回到教室电脑上刷新二维码再扫一次。';
+      el('subtitle').textContent = '请检查手机网络后，回到设备端上刷新二维码再扫一次。';
       el('pickWrap').classList.add('hidden');
       el('confirmBtn').classList.add('hidden');
     });
