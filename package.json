@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "npm run test:unit",
-    "test:unit": "node tests/unit-ecodes.mjs",
+    "test:unit": "node tests/unit-ecodes.mjs && node tests/unit-bind-qr.mjs",
+    "test:bind-qr": "node tests/unit-bind-qr.mjs",
     "test:udp": "node tests/unit-udp-relay.mjs",
     "test:udp-session": "node tests/regression-udp-session.mjs",
     "test:tcp": "node tests/unit-tcp-relay.mjs",

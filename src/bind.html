@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>绑定班级 · 星集控</title>
+<!--
+  设备绑定落地页（手机扫码后打开）· 2026-10-20
+
+  设计纪律（与 OOBE 向导同一条）：
+    · 只出现「班级 / 绑定码 / 设备」，绝不出现 token / 接口 / uid 这类词；
+    · 老师只做一件事：确认或选一个班；
+    · 任何失败都给"下一步怎么办"，不留白屏。
+  为什么不做成 SPA：这是**扫完码 30 秒内要完成**的页面，越轻越好 —— 单文件、无框架、无外链。
+-->
+<style>
+  :root {
+    --primary: #4b5cf0;
+    --on-primary: #ffffff;
+    --surface: #ffffff;
+    --surface-var: #f4f5fb;
+    --outline: #d9dbe9;
+    --text: #1a1c22;
+    --text-var: #5b5f72;
+    --ok: #12805c;
+    --err: #b3261e;
+    --radius: 20px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background: linear-gradient(180deg, #eef0ff 0%, var(--surface-var) 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    color: var(--text);
+    display: flex; justify-content: center;
+    padding: 32px 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .card {
+    width: 100%; max-width: 420px; align-self: center;
+    background: var(--surface); border-radius: var(--radius);
+    box-shadow: 0 2px 6px rgba(20, 24, 60, .06), 0 12px 32px rgba(20, 24, 60, .08);
+    padding: 32px 24px;
+  }
+  .brand { font-size: 13px; letter-spacing: .08em; color: var(--text-var); text-align: center; margin-bottom: 20px; }
+  h1 { font-size: 24px; font-weight: 700; line-height: 1.35; margin: 0 0 8px; text-align: center; }
+  .sub { font-size: 15px; color: var(--text-var); text-align: center; margin: 0 0 24px; line-height: 1.6; }
+  .device {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: var(--surface-var); border-radius: 999px;
+    padding: 8px 16px; font-size: 13px; color: var(--text-var); margin: 0 auto 24px; width: fit-content;
+  }
+  .device b { color: var(--text); font-weight: 600; letter-spacing: .06em; }
+  .label { font-size: 13px; color: var(--text-var); margin: 0 0 10px; }
+  .classes { display: grid; gap: 10px; margin-bottom: 20px; max-height: 44vh; overflow: auto; }
+  .cls {
+    display: flex; align-items: center; gap: 12px;
+    border: 1.5px solid var(--outline); border-radius: 14px; padding: 14px 16px;
+    font-size: 16px; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .cls:active { background: var(--surface-var); }
+  .cls.sel { border-color: var(--primary); background: #f2f3ff; }
+  .cls .dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--outline); flex: none; }
+  .cls.sel .dot { border-color: var(--primary); background: radial-gradient(circle, var(--primary) 0 46%, #fff 48% 100%); }
+  .cls .n { flex: 1; }
+  .cls .meta { font-size: 12px; color: var(--text-var); }
+  input[type=text] {
+    width: 100%; border: 1.5px solid var(--outline); border-radius: 14px;
+    padding: 14px 16px; font-size: 16px; color: var(--text); background: #fff;
+    outline: none; transition: border-color .15s;
+  }
+  input[type=text]:focus { border-color: var(--primary); }
+  .divider { display: flex; align-items: center; gap: 12px; color: var(--text-var); font-size: 12px; margin: 20px 0; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--outline); }
+  button {
+    width: 100%; min-height: 52px; border: none; border-radius: 999px;
+    font-size: 16px; font-weight: 600; color: var(--on-primary); background: var(--primary);
+    cursor: pointer; transition: opacity .15s, transform .06s;
+  }
+  button:active { transform: scale(.99); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: transparent; color: var(--text-var); border: 1.5px solid var(--outline); }
+  .err { display: none; background: #fdf1f0; color: var(--err); border-radius: 14px; padding: 14px 16px; font-size: 14px; line-height: 1.6; margin-bottom: 16px; }
+  .err.on { display: block; }
+  .ok-wrap { text-align: center; }
+  .tick {
+    width: 96px; height: 96px; border-radius: 50%; background: #e7f6f0; color: var(--ok);
+    display: flex; align-items: center; justify-content: center; margin: 8px auto 24px; font-size: 48px;
+  }
+  .ok-wrap h1 { color: var(--ok); }
+  .big { font-size: 32px; font-weight: 700; margin: 0 0 8px; }
+  .hint { font-size: 14px; color: var(--text-var); line-height: 1.7; margin-top: 20px; }
+  .skeleton { height: 56px; border-radius: 14px; background: var(--surface-var); animation: pulse 1.2s infinite ease-in-out; }
+  @keyframes pulse { 0%,100% { opacity: .55 } 50% { opacity: .95 } }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="brand">星集控 · 设备绑定</div>
+  <div id="loading">
+    <h1>正在读取绑定信息…</h1>
+    <div class="skeleton" style="margin-top:24px"></div>
+  </div>
+
+  <div id="panel" class="hidden">
+    <h1 id="title"></h1>
+    <p class="sub" id="subtitle"></p>
+    <div class="device" id="deviceBox" style="display:none">
+      设备 <b id="deviceCode"></b>
+    </div>
+    <div class="err" id="errBox" role="alert"></div>
+    <p class="big" id="bigCode" style="display:none;text-align:center;letter-spacing:.18em;font-size:40px"></p>
+
+    <div id="pickWrap">
+      <p class="label">选择这台设备要归属的班级</p>
+      <div class="classes" id="classList"></div>
+      <div class="divider">或新建一个班</div>
+      <input type="text" id="newName" placeholder="输入班级名称，例如 高二8班" autocomplete="off" maxlength="20">
+    </div>
+
+    <div style="height:24px"></div>
+    <button id="confirmBtn">确认绑定</button>
+  </div>
+
+  <div id="done" class="ok-wrap hidden">
+    <div class="tick">✓</div>
+    <h1>绑定成功！</h1>
+    <p class="big" id="doneClass"></p>
+    <p class="sub">请回到教室大屏，点击「完成配置，进入系统」</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  var qs = new URLSearchParams(location.search);
+  var code = (qs.get('c') || '').trim().toUpperCase();
+  var state = { info: null, selected: '' };
+
+  function el(id) { return document.getElementById(id); }
+  function show(id) {
+    ['loading', 'panel', 'done'].forEach(function (k) { el(k).classList.add('hidden'); });
+    if (id) el(id).classList.remove('hidden');
+  }
+  function fail(msg) {
+    el('errBox').textContent = msg;
+    el('errBox').classList.add('on');
+  }
+
+  if (!code) {
+    show('panel');
+    el('title').textContent = '这个链接不完整';
+    el('subtitle').textContent = '请回到教室电脑上重新点「换一张」，再扫一次。';
+    el('pickWrap').classList.add('hidden');
+    el('confirmBtn').classList.add('hidden');
+    return;
+  }
+
+  fetch('/api/bind/info?c=' + encodeURIComponent(code))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data && data.ok && data.alreadyBound) {
+        show('done');
+        el('doneClass').textContent = data.className || data.classCode || '';
+        return;
+      }
+      if (!data || !data.ok) {
+        show('panel');
+        el('title').textContent = data && data.expired ? '绑定码已过期' : '这个绑定码不能用';
+        el('subtitle').textContent = (data && data.error) || '请回到教室电脑上刷新二维码后再扫一次。';
+        el('pickWrap').classList.add('hidden');
+        el('confirmBtn').classList.add('hidden');
+        return;
+      }
+      state.info = data;
+      show('panel');
+      if (data.deviceUid) {
+        el('deviceBox').style.display = 'flex';
+        el('deviceCode').textContent = data.deviceUid;
+      }
+
+      if (data.needsDeviceInput) {
+        // 管理员按班生成的码：票里没有设备身份 ⇒ 手机端绑定不了，
+        // 老老实实告诉老师"回大屏敲这 6 位"，绝不假装成功。
+        el('title').textContent = '请在教室电脑上输入这个绑定码';
+        el('subtitle').textContent = '这个码对应「' + (data.className || data.classCode) + '」';
+        el('bigCode').textContent = data.code || '';
+        el('bigCode').style.display = 'block';
+        el('pickWrap').classList.add('hidden');
+        el('confirmBtn').classList.add('hidden');
+      } else if (data.classCode) {
+        // 兼容：码里已带班级（未来若允许"设备码 + 预置班级"）
+        el('title').textContent = '确认绑定到「' + (data.className || data.classCode) + '」？';
+        el('subtitle').textContent = '确认后，这台设备就归这个班管理。';
+        el('pickWrap').classList.add('hidden');
+        state.selected = data.classCode;
+      } else {
+        el('title').textContent = '把这台设备绑定到哪个班？';
+        el('subtitle').textContent = '选一个已有的班，或者直接输入班级名称。';
+        var list = el('classList');
+        var classes = data.classes || [];
+        if (!classes.length) {
+          el('classList').innerHTML = '<div class="sub" style="text-align:left;margin:0">还没有建过班级，直接在下面输入班级名称即可。</div>';
+        }
+        classes.forEach(function (c) {
+          var node = document.createElement('div');
+          node.className = 'cls';
+          node.innerHTML = '<span class="dot"></span><span class="n"></span><span class="meta"></span>';
+          node.querySelector('.n').textContent = c.name || c.code;
+          node.querySelector('.meta').textContent = c.onlineCount ? '在线 ' + c.onlineCount : '';
+          node.addEventListener('click', function () {
+            Array.prototype.forEach.call(list.querySelectorAll('.cls'), function (x) { x.classList.remove('sel'); });
+            node.classList.add('sel');
+            state.selected = c.code;
+            el('newName').value = '';
+          });
+          list.appendChild(node);
+        });
+      }
+      el('confirmBtn').onclick = submit;
+    })
+    .catch(function () {
+      show('panel');
+      el('title').textContent = '网络不太顺畅';
+      el('subtitle').textContent = '请检查手机网络后，回到教室电脑上刷新二维码再扫一次。';
+      el('pickWrap').classList.add('hidden');
+      el('confirmBtn').classList.add('hidden');
+    });
+
+  function submit() {
+    var body = { code: code };
+    if (state.selected) {
+      body.classCode = state.selected;
+    } else {
+      var name = (el('newName').value || '').trim();
+      if (!name) { fail('请先选一个班级，或者输入班级名称。'); return; }
+      body.className = name;
+    }
+    var btn = el('confirmBtn');
+    btn.disabled = true;
+    btn.textContent = '正在绑定…';
+    el('errBox').classList.remove('on');
+
+    fetch('/api/bind/confirm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        btn.disabled = false;
+        btn.textContent = '确认绑定';
+        if (!data || !data.ok) { fail((data && data.error) || '绑定没成功，请再试一次。'); return; }
+        show('done');
+        el('doneClass').textContent = data.className || data.classCode || '';
+      })
+      .catch(function () {
+        btn.disabled = false;
+        btn.textContent = '确认绑定';
+        fail('网络不太顺畅，请再点一次「确认绑定」。');
+      });
+  }
+})();
+</script>
+</body>
+</html>

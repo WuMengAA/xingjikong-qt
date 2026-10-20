@@ -15,6 +15,7 @@
 //   互动数据：点歌/反馈/祝福三表落盘（见 interact.js，2026-10-15 组件6）
 
 import http from 'node:http';
+import { createHash } from 'node:crypto';   // 班级名 → 稳定班级码（见 deriveClassCode）
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';   // resolve：录制根目录支持 CLOUD_RECORDINGS_DIR 覆盖
 import { fileURLToPath } from 'node:url';
@@ -23,6 +24,8 @@ import { WebSocketServer } from 'ws';
 import { currentAgentPackage, currentViewerPackage, buildProvisionBat, recordProvision,
   recentProvision, resolveAsset, agentWsUrl, viewerWsUrl } from './provision.js';
 import { ensureQmlPatch, qmlPatchManifest, qmlPatchZipPath } from './qml-patch.js';
+// 设备绑定（2026-10-20）：二维码矩阵生成 + 一次性绑定票据（零依赖，自带单测）
+import { makeQrMatrix, issueDeviceBind, issueClassBind, getTicket, markBound, pollDeviceBind } from './bind-qr.js';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
@@ -31,6 +34,7 @@ import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEE
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENV_FILE = join(__dirname, '..', '.env');
 const ADMIN_HTML = join(__dirname, 'admin.html');
+const BIND_HTML = join(__dirname, 'bind.html');   // 手机扫码落地页（/bind?c=CODE）
 
 /** 管理台「用网站账号登录」的回跳 server（127.0.0.1 临时端口）。没配全站点就一直是 null。 */
 let adminOAuth = null;
@@ -485,7 +489,9 @@ const server = http.createServer((req, res) => {
     u.pathname.startsWith('/api/admin/cims') ||
     // 2026-10-18 · 班级点歌凭据：能写 Key 等于能冒用该班身份点歌，必须走管理面鉴权。
     // ⚠️ 用 startsWith 覆盖全部子路由（同上方 provision 的教训：精确相等会漏掉子路由）。
-    u.pathname.startsWith('/api/admin/songkeys');
+    u.pathname.startsWith('/api/admin/songkeys') ||
+    // 2026-10-20 · 班级绑定码：能开码 = 能把任一台设备领进某个班，必须管理面鉴权
+    u.pathname.startsWith('/api/admin/bindcode');
   const isManageApi =
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
@@ -726,6 +732,226 @@ const server = http.createServer((req, res) => {
       if (!isClassCodeValid(classCode)) return send(400, { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' });
       const r = bindDeviceToClass(classCode, uid, className);
       return send(r.ok ? 200 : 400, { ok: r.ok, ...r });
+    });
+    return;
+  }
+
+  // ── 设备绑定：二维码 + 绑定码（2026-10-20）────────────────────────────────
+  //
+  // 背景：OOBE 向导（被控端首次启动引导）有两条绑定路，**云端一条都没有** ——
+  //   ① 扫码路 GET /api/device/bind-qr 与 GET /api/device/bind-status
+  //   ② 输码路 POST /api/device/activate
+  //   于是向导只能降级到"输入绑定码"，而输码那条打的是站点（www.*），不在本服务内。
+  //   本段把两条路都建在云端：**设备侧与云端同一台机器**，少一跳、少一处口径。
+  //
+  // 两种票（见 bind-qr.js 头注释）：
+  //   kind='device'：设备自助开码（码里没班级，手机落地页选）—— 无人值守场景
+  //   kind='class' ：管理员按班开码（码里带班级，老师直接输/扫确认）—— 有管理员场景
+  //
+  // 鉴权口径：
+  //   · 设备侧三个端点**开放**（此时设备还没绑班、也没有管理端身份，只能开放）；
+  //     防滥用靠票的 TTL + 一次性 + 码表上限 + uid 绑定校验；
+  //   · /api/admin/bindcode 走管理面鉴权（见上方 isAdminApi 列表）。
+
+  // 扫出来的地址必须是**手机能访问**的公网地址。优先用请求自己的 Host（反代会带
+  // x-forwarded-proto），必要时用 STE_BIND_PUBLIC_ORIGIN 显式覆盖（自建/内网调试）。
+  function bindOrigin() {
+    const explicit = String(process.env.STE_BIND_PUBLIC_ORIGIN || '').trim();
+    if (explicit) return explicit.replace(/\/+$/, '');
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').trim();
+    if (!host) return '';
+    const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
+    return `${proto}://${host}`;
+  }
+
+  // 老师手输"班级名称"时，服务端要给它一个稳定的班级码：
+  // 先找同名班（复用），没有就按名字哈希派生 —— 同一个名字永远得到同一个码，
+  // 不会因为重复绑定长出一堆重名班级。
+  function deriveClassCode(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return '';
+    const exists = listClasses().find((c) => c.name === trimmed);
+    if (exists) return exists.code;
+    const digest = createHash('sha256').update(trimmed, 'utf8').digest('hex').slice(0, 10);
+    return `cls-${digest}`;
+  }
+
+  if (req.method === 'GET' && u.pathname === '/api/device/bind-qr') {
+    const uid = String(u.searchParams.get('uid') || '').trim();
+    const issued = issueDeviceBind(uid);
+    if (!issued.ok) return send(400, { ok: false, error: issued.error });
+    const origin = bindOrigin();
+    const scanUrl = origin ? `${origin}/bind?c=${issued.ticket.code}` : '';
+    let qr;
+    try {
+      // 内容就是落地页地址：扫码即打开手机页，不需要老师装任何 App。
+      // 拿不到 origin 时退化成一个短内容（只放码），保证矩阵仍能生成 —— 但这时
+      // 扫码打开不了落地页，所以同时把 scanUrl 留空让调用方知道降级了。
+      qr = makeQrMatrix(scanUrl || issued.ticket.code);
+    } catch (e) {
+      pushEvent('warn', '二维码生成失败', { uid, error: String(e.message || e) });
+      return send(500, { ok: false, error: '二维码没能生成出来，请稍后重试或改用「输入绑定码」' });
+    }
+    return send(200, {
+      ok: true,
+      code: issued.ticket.code,
+      matrix: qr.rows,
+      size: qr.size,
+      version: qr.version,
+      scanUrl,
+      expiresAt: issued.ticket.expireAt,
+      ttlSec: Math.round((issued.ticket.expireAt - Date.now()) / 1000),
+    });
+  }
+
+  if (req.method === 'GET' && u.pathname === '/api/device/bind-status') {
+    const code = String(u.searchParams.get('code') || '').trim();
+    const uid = String(u.searchParams.get('uid') || '').trim();
+    const r = pollDeviceBind(code, uid);
+    if (!r.ok) return send(410, { ok: false, bound: false, state: r.state, error: r.error });
+    return send(200, {
+      ok: true,
+      // ⚠️ 被控端 OOBE 只认 `bound`（见 oobe_wizard.cpp:242）—— 别改成只回 state
+      bound: r.state === 'bound',
+      state: r.state,
+      classCode: r.classCode || '',
+      className: r.className || '',
+    });
+  }
+
+  if (req.method === 'POST' && u.pathname === '/api/device/activate') {
+    // 输码路：老师把 6 位码敲到设备上。两种票都认 ——
+    //   · 管理员班级码（kind=class，码里带班级）⇒ 直接绑
+    //   · 设备自己的码（kind=device）且手机已确认 ⇒ 幂等回班级（重输不会报错）
+    const code = String(u.searchParams.get('code') || '').trim();
+    const uid = String(u.searchParams.get('uid') || '').trim();
+    if (!code) return send(400, { ok: false, error: '请输入 6 位绑定码' });
+    if (!uid) return send(400, { ok: false, error: '缺少设备标识' });
+    const t = getTicket(code);
+    if (!t) return send(400, { ok: false, error: '绑定码无效或已过期，请向管理员再要一个' });
+    if (t.state === 'bound') {
+      // 已经确认过（通常是扫码确认后老师又在设备上敲了一次）：直接回结果
+      if (t.uid && t.uid !== uid) return send(409, { ok: false, error: '这个绑定码已经用在别的设备上了' });
+      return send(200, { ok: true, classCode: t.classCode || '', className: t.className || '' });
+    }
+    if (!t.classCode) {
+      return send(409, {
+        ok: false,
+        error: '这个码需要在手机上扫码确认（或者请管理员在管理台按班级生成绑定码）',
+      });
+    }
+    if (t.uid && t.uid !== uid) return send(409, { ok: false, error: '这个绑定码属于另一台设备' });
+    const bind = bindDeviceToClass(t.classCode, uid, t.className);
+    if (!bind.ok) return send(400, { ok: false, error: bind.error });
+    markBound(code, { classCode: t.classCode, className: bind.class.name, uid });
+    return send(200, { ok: true, classCode: t.classCode, className: bind.class.name || t.className || '' });
+  }
+
+  // 手机落地页
+  if (req.method === 'GET' && u.pathname === '/bind') {
+    if (!existsSync(BIND_HTML)) return send(404, { ok: false, error: 'bind.html 不存在' });
+    const html = readFileSync(BIND_HTML, 'utf8');
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'content-length': Buffer.byteLength(html),
+      'cache-control': 'no-store',
+    });
+    return res.end(html);
+  }
+
+  if (req.method === 'GET' && u.pathname === '/api/bind/info') {
+    const code = String(u.searchParams.get('c') || '').trim();
+    const t = getTicket(code);
+    if (!t) {
+      return send(410, { ok: false, expired: true, error: '绑定码已过期，请回到教室电脑上刷新二维码' });
+    }
+    if (t.state === 'bound') {
+      return send(200, { ok: true, alreadyBound: true, classCode: t.classCode, className: t.className });
+    }
+    return send(200, {
+      ok: true,
+      code: t.code,
+      kind: t.kind,
+      classCode: t.classCode || '',
+      className: t.className || '',
+      deviceUid: t.kind === 'device' ? t.uid : '',
+      // 管理员码（kind=class）没有设备身份可用 ⇒ 手机页不提供"确认绑定"，
+      // 改为把 6 位码显示出来让老师回大屏敲（见 bind.html）。
+      needsDeviceInput: t.kind === 'class',
+      expiresAt: t.expireAt,
+      // 只回老师点名要选的东西：班级名与在线数，不回设备清单
+      classes: listClasses().map((c) => ({ code: c.code, name: c.name, onlineCount: c.onlineCount })),
+    });
+  }
+
+  if (req.method === 'POST' && u.pathname === '/api/bind/confirm') {
+    let raw = '';
+    req.on('data', (c) => { raw += c; if (raw.length > 4e3) req.destroy(); });
+    req.on('end', () => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch { /* 非法 JSON → 走 query */ }
+      const code = String(body.code ?? u.searchParams.get('c') ?? '').trim();
+      const t = getTicket(code);
+      if (!t) return send(410, { ok: false, error: '绑定码已过期，请回到教室电脑上刷新二维码' });
+      if (t.state === 'bound') {
+        return send(200, { ok: true, alreadys: true, classCode: t.classCode, className: t.className });
+      }
+      if (t.kind === 'class') {
+        // 管理员码是"给设备敲的"：手机扫它没有设备身份可用（票里没 uid），
+        // 所以这里**不能**假装绑定成功（那也是本文件反复禁止的假成功）。
+        // 手机页会直接显示这 6 位码，让老师回教室电脑上敲。
+        return send(400, {
+          ok: false,
+          error: '这个绑定码要在教室电脑上输入，请回到大屏按提示操作',
+        });
+      }
+      // kind='device'：班级由老师在手机上选/填
+      let classCode = String(body.classCode ?? '').trim();
+      const className = String(body.className ?? '').trim();
+      if (!classCode) {
+        classCode = deriveClassCode(className);
+        if (!classCode) return send(400, { ok: false, error: '请选择一个班级，或输入班级名称' });
+      }
+      if (!isClassCodeValid(classCode)) {
+        return send(400, { ok: false, error: '班级信息不合法，请重新选择' });
+      }
+      const bind = bindDeviceToClass(classCode, t.uid, className);
+      if (!bind.ok) return send(400, { ok: false, error: bind.error });
+      const finalName = bind.class.name || className || classCode;
+      markBound(code, { classCode, className: finalName });
+      return send(200, { ok: true, classCode, className: finalName });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && u.pathname === '/api/admin/bindcode') {
+    // 管理台：按班生成"含班级"的绑定码（老师直接输，或手机扫码点确认）
+    let raw = '';
+    req.on('data', (c) => { raw += c; if (raw.length > 4e3) req.destroy(); });
+    req.on('end', () => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch { /* 允许 query */ }
+      const classCode = String(body.classCode ?? u.searchParams.get('classCode') ?? '').trim();
+      const className = String(body.className ?? u.searchParams.get('className') ?? '').trim();
+      if (!isClassCodeValid(classCode)) {
+        return send(400, { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' });
+      }
+      const issued = issueClassBind(classCode, className);
+      if (!issued.ok) return send(400, { ok: false, error: issued.error });
+      const origin = bindOrigin();
+      const scanUrl = origin ? `${origin}/bind?c=${issued.ticket.code}` : '';
+      let matrix = [];
+      try { matrix = makeQrMatrix(scanUrl || issued.ticket.code).rows; } catch { matrix = []; }
+      pushEvent('info', '已生成班级绑定码', { classCode, className, code: issued.ticket.code });
+      return send(200, {
+        ok: true,
+        code: issued.ticket.code,
+        classCode,
+        className,
+        scanUrl,
+        matrix,
+        expiresAt: issued.ticket.expireAt,
+      });
     });
     return;
   }
