@@ -100,7 +100,7 @@ Popup {
                 leftPadding: 10
                 rightPadding: 8
                 verticalAlignment: Text.AlignVCenter
-                placeholderText: "搜命令（打首字母也行：gj → 关机教室机）"
+                placeholderText: "搜索命令（支持首字母：gj → 远程关机）"
                 font.pixelSize: 13
 
                 onTextChanged: { pal.refilter(text); pal.cur = 0 }

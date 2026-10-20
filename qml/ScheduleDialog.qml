@@ -166,7 +166,7 @@ Popup {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
-                text: "这条机器机器上的待执行（" + dlg.items.length + "）"
+                text: "本条设备上的待执行任务（" + dlg.items.length + "）"
                 color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
                 font.pixelSize: 11
             }
@@ -276,7 +276,7 @@ Popup {
                 x: 18
                 width: parent.width - 36
                 wrapMode: Text.WordWrap
-                text: "到期默认只提醒、不真关机（需在教室机设 STE_QT_ALLOW_SCHED_FIRE=1）"
+                text: "到期仅提醒、不自动执行关机（需在设备侧启用 STE_QT_ALLOW_SCHED_FIRE=1）"
                 color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
                 font.pixelSize: 11
             }

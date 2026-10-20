@@ -488,12 +488,12 @@ ColumnLayout {
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: ctx.window.currentUid === "" ? "还没选机器"
+                text: ctx.window.currentUid === "" ? "还没选设备"
                     : ctx.window.linkBusy ? "正在接通"
                     // 切设备时旧画面已经作废、新机器的第一帧还没到 ——
                     // 以前这里什么都不显示（frameCount 非 0 ⇒ 走不到空态），
                     // 屏幕上是上一台的残影，看着像"切了没用"。
-                    : backend.frameCount > 0 ? "正在接入这台机器"
+                    : backend.frameCount > 0 ? "正在接入这台设备"
                     : "等画面"
                 color: th.op
                 font.pixelSize: 13
@@ -503,7 +503,7 @@ ColumnLayout {
                 text: ctx.window.currentUid === "" ? "在左边选一台"
                     : ctx.window.linkBusy ? "连上就有画面"
                     : backend.frameCount > 0 ? "第一帧马上就到"
-                    : "这台机器还没发来第一帧"
+                    : "这台设备还没发来第一帧"
                 color: th.fg3
                 font.pixelSize: 12
             }
@@ -780,7 +780,7 @@ Flickable {
                 delay: 500
                 text: !permOk(d ? d.role : "") ? "要管理员身份才做得到（顶栏账户那里能切）"
                     : heavy ? "点了立刻执行，没法撤销"
-                    : ctx.window.currentUid === "" ? "先在左边选一台机器"
+                    : ctx.window.currentUid === "" ? "先在左边选一台设备"
                     : !capOkAll(d)
                       ? ("这台被控端不支持：它上报的能力里没有 " + ctx.registry.capMissing(d).join(" / "))
                     : ""

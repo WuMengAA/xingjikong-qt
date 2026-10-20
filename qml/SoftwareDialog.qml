@@ -1,4 +1,4 @@
-﻿// 软件弹窗：列出教室机上"有主窗口"的进程；选中一行可结束它。
+﻿// 软件弹窗：列出设备上"有主窗口"的进程；选中一行可结束它。
 // 受保护的（系统关键 / 安全软件 / 集控自身）由被控端拒绝，这里先置灰标出来。
 
 import QtQuick
@@ -87,7 +87,7 @@ Popup {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
-                text: "可打开 · 选自这台机器（" + dlg.candidates.length + "）"
+                text: "可启动 · 来自该设备（" + dlg.candidates.length + "）"
                 color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
                 font.pixelSize: 11
             }
@@ -147,7 +147,7 @@ Popup {
             Text {
                 anchors.centerIn: parent
                 visible: dlg.candidates.length === 0
-                text: "还没拿到候选（点「软件」时会向这台机器要）"
+                text: "尚未获取应用列表（打开「应用管理」时向该设备请求）"
                 color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
                 font.pixelSize: 11
             }
@@ -434,8 +434,8 @@ Popup {
                     enabled: backend.procBlacklist.length > 0
                     onClicked: {
                         var n = backend.killBlacklisted(dlg.items)
-                        if (n < 0) dlg.hint("还没选设备，不知道要关哪台机器上的")
-                        else if (n === 0) dlg.hint("名单里的软件这台机器现在都没开着")
+                        if (n < 0) dlg.hint("请先选择设备，以确定要结束哪个应用")
+                        else if (n === 0) dlg.hint("该设备当前未运行名单中的应用")
                         else dlg.hint("已下发 " + n + " 个关闭指令")
                     }
                 }

@@ -121,7 +121,7 @@ ApplicationWindow {
         {
             version: "2026.10.08", date: "2026-10-08",
             title: "分班制与离线设备可见",
-            highlight: "按班级筛选设备，离线机器不再消失。",
+            highlight: "按班级筛选设备，离线设备不再消失。",
             items: [
                 { kind: "feat", text: "设备列表按班级筛选" },
                 { kind: "feat", text: "离线设备常驻列表，状态由连接派生" },
@@ -143,7 +143,7 @@ ApplicationWindow {
         {
             version: "2026.10.06", date: "2026-10-06",
             title: "被控端自更新，官网下载中心",
-            highlight: "教室机可自行升级，下载页版本号自动同步。",
+            highlight: "设备可自行升级，下载页版本号自动同步。",
             items: [
                 { kind: "feat", text: "官网下载中心，版本与校验值读云端" },
                 { kind: "feat", text: "被控端 OTA 自更新" },
@@ -251,7 +251,7 @@ ApplicationWindow {
                         })
                         root.toast("截图已传回，见预览窗")
                     } else {
-                        root.toast("已截图（该设备未回传预览图）→ 教室机 " + uid + "：" + data.path
+                        root.toast("已截图（该设备未回传预览图）→ 设备 " + uid + "：" + data.path
                                    + "（" + (data.width || "?") + "×" + (data.height || "?")
                                    + "，" + Math.round((data.bytes || 0) / 1024) + " KB）")
                     }
@@ -894,7 +894,7 @@ ApplicationWindow {
                                         }
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "屏幕上的机器会自动出现"
+                                            text: "屏幕上的设备会自动出现"
                                             color: th.fg3; font.pixelSize: 12
                                         }
                                     }
@@ -1616,7 +1616,7 @@ ApplicationWindow {
     // 抽到这儿两边共用（顺序保持原样：权限 → 内容 → 有没有设备 → 逐台下发）。
     function broadcastAll(text) {
         if (!backend.mayDo("broadcast")) {
-            toast("广播要给所有机器发，要管理员身份");
+            toast("屏幕广播需向全部在线设备下发，需管理员身份");
             return
         }
         const content = (text || "").trim()

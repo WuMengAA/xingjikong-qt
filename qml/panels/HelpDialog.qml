@@ -38,11 +38,11 @@ Popup {
             Column {
                 spacing: 12
                 width: helpDlg.width - 36
-                Text { width: parent.width; wrapMode: Text.Wrap; text: "管理端统一管教室机。常用操作："; color: theme.fg3; font.pixelSize: 13 }
+                Text { width: parent.width; wrapMode: Text.Wrap; text: "管理端统一管设备。常用操作："; color: theme.fg3; font.pixelSize: 13 }
                 Repeater {
                     model: [
-                        { t: "看某台教室机画面", d: "控制页左边选设备。" },
-                        { t: "发通知 / 广播", d: "集控页发通知或广播。" },
+                        { t: "看某台设备画面", d: "控制页左边选设备。" },
+                        { t: "广播通知 / 屏幕广播", d: "在集控页广播通知，或将教师端画面同步至全部设备。" },
                         { t: "按班级筛选设备", d: "设备列表上方点「全部班级」切换。" },
                         { t: "锁屏 / 重启 / 关机", d: "控制页右侧「电源」，需管理员。" },
                         { t: "查看更新历史", d: "设置页「更新日志」。" },

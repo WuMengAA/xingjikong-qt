@@ -330,7 +330,7 @@ Popup {
             id: previewCap
             anchors.left: parent.left
             anchors.top: parent.top
-            text: "学生在教室机上会看到"
+            text: "学生在设备上会看到"
             color: dlg.cSub
             font.pixelSize: 12
         }
@@ -357,7 +357,7 @@ Popup {
             Text {
                 anchors.centerIn: parent
                 visible: !(dlg.br && dlg.br.previewKind)
-                text: "← 点左边的条目，看学生在教室机上看到的样子"
+                text: "← 点左边的条目，看学生在设备上看到的样子"
                 color: dlg.cSub
                 font.pixelSize: 12
             }

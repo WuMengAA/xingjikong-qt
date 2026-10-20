@@ -1,4 +1,4 @@
-﻿// 日志弹窗：教室机被控端日志的尾部（装机后没有 stdout，出故障只能靠它）。
+﻿// 日志弹窗：设备被控端日志的尾部（装机后没有 stdout，出故障只能靠它）。
 
 import QtQuick
 import QtQuick.Controls

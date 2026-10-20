@@ -107,7 +107,7 @@ Drawer {
                 md3: drawer.md3
                 width: parent.width
                 icon: "📄"
-                headline: "传文件"
+                headline: "文件分发"
                 divider: true
                 onClicked: {
                     // 先关抽屉再发信号：否则抽屉盖在弹窗上面，弹窗点不到

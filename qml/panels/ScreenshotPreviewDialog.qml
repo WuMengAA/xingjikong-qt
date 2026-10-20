@@ -134,8 +134,8 @@ Popup {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     text: shotDlg.payload && shotDlg.payload.path
-                          ? ("截图已保存在「教室机」上：\n" + shotDlg.payload.path
-                             + "\n（这是那台机器的本地路径，本机打不开；需升级被控端才会回传预览图）")
+                          ? ("截图已保存在「设备」上：\n" + shotDlg.payload.path
+                             + "\n（这是那台设备的本地路径，本机打不开；需升级被控端才会回传预览图）")
                           : ""
                     color: theme ? theme.fg3 : "#C8C8C8"
                     font.pixelSize: 12
@@ -150,7 +150,7 @@ Popup {
             spacing: 8
             Text {
                 Layout.fillWidth: true
-                text: shotDlg.payload && shotDlg.payload.path ? ("教室机路径：" + shotDlg.payload.path) : ""
+                text: shotDlg.payload && shotDlg.payload.path ? ("设备路径：" + shotDlg.payload.path) : ""
                 color: theme ? theme.fg3 : "#C8C8C8"
                 font.pixelSize: 11
                 elide: Text.ElideMiddle

@@ -231,7 +231,7 @@ Popup {
         // Pending 时直接把 C++ 那句原话顶上去（"等本机点头…" / "正在关…"），
         // 超时复位后那边会换成"…超时（本机没允许…）"，一并让用户看见 ——
         // 否则按钮自己变回「开终端」，人不知道刚才为什么没连上。
-        if (backend.termState === 1) return backend.termNote || "机器在问本机「允许吗」，等着就行"
+        if (backend.termState === 1) return backend.termNote || "设备正在请求本机授权，请稍候"
         if (backend.termState === 2)
             return "回车执行，30 秒无响应自动断开"
         // Idle：只有"上次没成"的时候才带原因（刚被拒绝 / 刚超时 / 刚被本机拒绝），

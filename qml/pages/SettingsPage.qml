@@ -102,9 +102,9 @@ Item {
                             width: parent.width
                             wrapMode: Text.Wrap
                             text: backend.accountBusy
-                                  ? "正在等浏览器里授权…（授权完会自动接上教室机）"
+                                  ? "正在等浏览器里授权…（授权完会自动接上设备）"
                                   : "还没登录。点登录会用星璃账号授权，" +
-                                    "之后这台机器自动拿到接入票，不用填密钥。"
+                                    "之后这台设备自动拿到接入票，不用填密钥。"
                             color: th.op; font.pixelSize: 13
                         }
                         RowLayout {
@@ -160,8 +160,8 @@ Item {
                             width: parent.width
                             wrapMode: Text.Wrap
                             text: backend.role === "admin"
-                                  ? "管理员：可看画面、操作教室机。灰着的按钮是权限之外的操作。"
-                                  : "教师：可看画面、发通知、推文件。操作类动作需管理员。"
+                                  ? "管理员：可看画面、操作设备。灰着的按钮是权限之外的操作。"
+                                  : "教师：可查看画面、广播通知与文件分发。操作类动作需管理员。"
                             color: th.fg3; font.pixelSize: 12
                         }
                         RowLayout {
@@ -289,7 +289,7 @@ Item {
                             width: parent.width
                             md3: th
                             text: "操作完成时提示"
-                            supporting: "机器上真的做完了才说一句（云端收下不算）"
+                            supporting: "设备上真的做完了才说一句（云端收下不算）"
                             checked: backend.notifyOnDone
                             onToggled: function (on) { backend.notifyOnDone = on }
                         }
@@ -489,9 +489,9 @@ Item {
                     Text {
                         width: parent.width
                         wrapMode: Text.Wrap
-                        text: "被控端装在教室机上（星集控被控端），" +
+                        text: "被控端安装在教室设备上（星集控被控端），" +
                               "登录同一账号后就会出现在这里。" +
-                              "要看某台机器，在控制页左边选。"
+                              "要看某台设备，在控制页左边选。"
                         color: th.fg3; font.pixelSize: 12
                     }
                     // 更新日志 / 帮助：把官网已有的「版本历史」与「帮助」能力搬进管理端（需求 #7）。

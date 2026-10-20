@@ -593,7 +593,7 @@ Item {
                                             delay: 400
                                             visible: scrTip.text !== ""
                                             text: cc.selUid === ""
-                                                  ? "先在左侧「设备」里选一台教室机"
+                                                  ? "请先在左侧列表中选择一台设备"
                                                   : (cc.screenHasFrame ? ""
                                                      : "已请求画面，还没收到首帧；被控端不在线时会一直连不上")
                                         }
@@ -1182,9 +1182,9 @@ Item {
                     md3: cc.theme
                     radius: cc.tRM
                     variant: "filled"
-                    text: "推文件"
+                    text: "文件分发"
                     enabled: cc.selUid !== ""
-                    tip: "把本机一个文件推给这台教室机"
+                    tip: "将本机文件分发到该设备"
                     onClicked: cc.pushFile()
                 }
             }

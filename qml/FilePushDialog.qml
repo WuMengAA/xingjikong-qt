@@ -100,7 +100,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 width: parent.width - 36
-                text: "选一个本机文件推给这台教室机，落到它的收件目录。"
+                text: "选择一个本机文件分发到该设备，保存至其收件目录。"
                 color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
