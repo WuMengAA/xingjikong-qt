@@ -35,6 +35,8 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 #include <QVariantList>
 #include <QVariantMap>
 
+class PermissionManager;   // RBAC（2026-10-20）：前端权限镜像层，仅持裸指针，不引入头依赖
+
 // ── 文件推送共享符号（2026-10-13 架构拆分）──
 // viewerbackend.cpp / viewerbackend_file.cpp 两个翻译单元共享：常量用 constexpr
 // （内联无 ODR 问题），humanBytes 用 inline。别改成非 inline 的非 constexpr 版本
@@ -249,6 +251,9 @@ public:
     Q_ENUM(TermState)
     explicit ViewerBackend(QObject *parent = nullptr);
     ~ViewerBackend() override;
+
+    // RBAC（2026-10-20）：注入前端权限镜像器；为空则设备表不脱敏（兼容旧行为）。
+    void setPermissionManager(PermissionManager *pm) { m_perms = pm; }
 
     /** 读环境变量（STE_VIEWER_URL / STE_VIEWER_TOKEN）并开始连接。 */
     void start();
@@ -859,6 +864,7 @@ private:
     QString m_frameSource = QStringLiteral("none");
 
     QJsonArray m_devices;
+    PermissionManager *m_perms = nullptr;   // RBAC（2026-10-20）：前端权限镜像层（裸指针，生命周期由 main 托管）
     QJsonArray m_classes;            // 2026-10-08 分班制：云端返回的全部班级
     QString m_currentClass;          // 2026-10-08 当前班级筛选（空=全部）
     QTimer *m_refreshTimer = nullptr; // 2026-10-08 设备表兜底轮询（15s，云端推送之外的保险）

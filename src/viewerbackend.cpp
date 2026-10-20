@@ -1,5 +1,6 @@
 // 星集控 · 管理端后端实现（从 main.cpp 原样搬过来，行为保持一致）
 #include "viewerbackend.h"
+#include "permission_manager.h"   // RBAC（2026-10-20）：前端权限镜像层
 #include "oauthlogin.h"
 #include "vnc_client.h"       // 2026-10-18：远控 VNC 客户端（libvncclient，RFB over WS）
 #include "vnc_image_provider.h" // 远控画面 → QML（image://vnc/live）
@@ -1139,6 +1140,25 @@ void ViewerBackend::onTextMessage(const QString &text)
         emit authedChanged();
         logf("[viewer] ✅ 云端鉴权通过（mode=%s）",
              pay.value(QStringLiteral("mode")).toString().toUtf8().constData());
+        // RBAC（2026-10-20）：把云端下发的 identity 注入前端权限镜像层。
+        // 云端 auth-ok 带 identity ⇒ 按票里的 roles/scopes 裁剪；不带（旧票/静态令牌）⇒ 全权（mask 不生效，兼容现状）。
+        if (m_perms) {
+            const QJsonObject ident = pay.value(QStringLiteral("identity")).toObject();
+            if (!ident.isEmpty()) {
+                const QString uid = ident.value(QStringLiteral("uid")).toString();
+                const QJsonValue sid = ident.value(QStringLiteral("schoolId"));
+                const QString schoolId = (sid.isNull() || sid.isUndefined()) ? QString() : sid.toString();
+                QStringList roles;
+                for (const QJsonValue &r : ident.value(QStringLiteral("roles")).toArray())
+                    roles.append(r.toString());
+                m_perms->setIdentity(uid, schoolId, roles, ident.value(QStringLiteral("scopes")).toArray());
+                logf("[viewer] RBAC identity 注入：roles=%s scopes=%d",
+                     roles.join(QLatin1Char(',')).toUtf8().constData(),
+                     ident.value(QStringLiteral("scopes")).toArray().size());
+            } else {
+                m_perms->setFullAccess();   // 向后兼容：无 identity ⇒ 全权（不脱敏）
+            }
+        }
         setStatus(QStringLiteral("已连上云端，等教室机推画面…"), false);
         requestDevices();   // 鉴权过后再拉设备表（之前是连上就拉，现在会被云端拒）
         requestClasses();  // 2026-10-08 拉班级列表
@@ -1526,7 +1546,9 @@ void ViewerBackend::refreshDevices(const QJsonArray &arr)
     const int onlineNow = arr.size();
     const int offlineNow = offline.size();
     const bool countChanged = (full.size() != m_devices.size());
-    m_devices = full;
+    // RBAC（2026-10-20）：体验层字段脱敏兜底——非平台超管/非全权时剥离敏感字段（ip/mac 系）。
+    // 最终以云端「字段脱敏」为准；m_devLedger 保留原始值供内部逻辑（按 uid 路由），仅展示数组脱敏。
+    m_devices = m_perms ? m_perms->maskDevices(full) : full;
     if (countChanged || offlineNow > 0) {
         logf("[viewer] 设备表更新：在线 %d 台，离线台账 %d 台（共 %d 条）",
              onlineNow, offlineNow, (int)full.size());

@@ -9,6 +9,7 @@
 
 #include "singleinstance.h"
 #include "viewerbackend.h"
+#include "permission_manager.h"   // RBAC（2026-10-20）：前端权限镜像层
 #include "oauthlogin.h"       // steOpenUrlExternal（提权安全开 URL，2026-10-18）
 #include "interactbridge.h"    // 2026-10-15 组件6 配套：互动审批桥（面板 + 共享岛）
 #include "updater.h"
@@ -428,7 +429,11 @@ int main(int argc, char *argv[])
     const int envN = loadEnvFile(QCoreApplication::applicationDirPath() + QStringLiteral("/viewer.env"));
     if (envN > 0) logf("[viewer] 已从 viewer.env 读入 %d 项配置（exe 同目录）", envN);
 
+    // RBAC（2026-10-20）：前端权限镜像层；QML 里以 `perms` 访问（组件级鉴权 / 字段脱敏）。
+    // 声明在 backend 之前 ⇒ 逆序析构时 perms 晚于 backend/engine 销毁，裸指针不悬垂。
+    PermissionManager perms;
     ViewerBackend backend;
+    backend.setPermissionManager(&perms);
     // 诊断与反馈：把本机日志路径注入 backend（它自己不知道；弹窗读尾部 + 开目录要用）。
     backend.setLogFilePath(logFilePath());
 
@@ -503,6 +508,8 @@ int main(int argc, char *argv[])
     // 2026-10-08 lucide(morphicons 同款) SVG 图标：image://svgicon/<name>?color=<tint>
     engine.addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider);
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    // RBAC（2026-10-20）：前端权限镜像层，QML 用 `perms.can("device:ip-view")` 等做组件级鉴权。
+    engine.rootContext()->setContextProperty(QStringLiteral("perms"), &perms);
     // 用户点单「管理端审批面板里的灵动岛用被控端一模一样的」⇒ 管理端也挂一个 `bridge`：
     // 共享 IslandRoot.qml 读的就是这个名字（被控端那份挂的是 IslandBridge，两端同形）。
     engine.rootContext()->setContextProperty(QStringLiteral("bridge"), &interactBridge);

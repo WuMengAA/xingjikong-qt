@@ -163,6 +163,9 @@ qt_add_executable(viewer-qt
   ${STE_SINGLEINSTANCE_SRC}
   src/oauthlogin.cpp
   src/oauthlogin.h
+  # ── RBAC（2026-10-20）：前端权限镜像层（镜像云端 perms.js，含字段脱敏 + 组件级鉴权）──
+  src/permission_manager.h
+  src/permission_manager.cpp
   # ── 自更新（2026-10-08）：检查 / 下载 / sha256 校验 / 解压 / 退出后替换重启 ──
   src/updater.cpp
   src/updater.h
@@ -486,4 +489,15 @@ if(STE_IS_ANDROID)
   # ③ Android 打包目录（QT_ANDROID_PACKAGE_SOURCE_DIR 已在 qt_add_executable 前设置）
 else()
   # 桌面：QML 磁盘拷贝保留（见上面的 add_custom_command post-build）
+endif()
+
+# ── RBAC（2026-10-20）：PermissionManager 独立单测 ──
+# 默认关闭，不污染主构建；需要时 `cmake -DSTE_BUILD_PERM_TEST=ON` 后编 perm_test 目标。
+# 也可直接用 scripts/_build_perm_test.py 走本工程既有 MSVC/Qt 工具链一键编跑。
+option(STE_BUILD_PERM_TEST "Build PermissionManager standalone unit test" OFF)
+if(STE_BUILD_PERM_TEST)
+  add_executable(perm_test
+    src/permission_manager_test.cpp
+    src/permission_manager.cpp)
+  target_link_libraries(perm_test PRIVATE Qt6::Core)
 endif()
