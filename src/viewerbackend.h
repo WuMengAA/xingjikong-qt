@@ -434,6 +434,10 @@ public:
     Q_INVOKABLE void requestClasses();   // 2026-10-08 拉班级列表
     Q_INVOKABLE void requestStorage();   // 2026-10-08 拉云端存储概况
     Q_INVOKABLE void sendAction(const QString &action, const QJsonObject &params = QJsonObject());
+    // 2026-10-21（审查 #3/#6）：显式指定目标 uid 下发 —— 与 sendAction 的区别是不
+    // 碰 currentUid（"看哪台"和"发给谁"彻底分开）。批量/广播/危险确认单台走这里，
+    // 避免确认框期间 currentUid 变化导致发错机器、以及批量逐台改 currentUid 主画面乱跳。
+    Q_INVOKABLE void sendActionTo(const QString &uid, const QString &action, const QJsonObject &params = QJsonObject());
 
     // ── 进程黑名单（2026-10-11 需求#6：「保存 → 指定软件一键关闭」）──
     // 老师真正想做的是：把"上课不许开的那几个软件"一次性存下来，以后一键全部关掉，

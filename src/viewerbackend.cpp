@@ -345,6 +345,11 @@ ViewerBackend::ViewerBackend(QObject *parent)
 }
 ViewerBackend::~ViewerBackend()
 {
+    // 2026-10-21（审查 #3）：engine 先于本对象析构 ⇒ image provider（vnc）已被
+    // engine 删除；这里只清裸指针不 delete（避免 double free）。退出阶段已无事件
+    // 循环、理论风险极低，但清掉后 update() 调用点的判空（m_vncProvider &&）才
+    // 在 engine 析构后真正生效。
+    m_vncProvider = nullptr;
     // 修复③（2026-10-19）：退出前把远控会话礼貌地收掉 —— 以前只停本地
     // VncClient，被控端侧 g_remoteControl 永真（灵动岛冻结 + server 空转），
     // 只能等被控端看门狗（25s 无保活）兜底，白冻 25s。send 后 flush 一把，
@@ -1723,9 +1728,20 @@ void ViewerBackend::sendAction(const QString &action, const QJsonObject &params)
         logf("[viewer] FAIL 没选设备就点 %s，不发出去", action.toUtf8().constData());
         return;
     }
-    setStatus(QStringLiteral("已把「%1」发给 %2，等云端回话…").arg(action).arg(m_currentUid), false);
+    sendActionTo(m_currentUid, action, params);
+}
+
+// 2026-10-21（审查 #3/#6）：显式指定目标 uid 下发，不碰 currentUid。
+void ViewerBackend::sendActionTo(const QString &uid, const QString &action, const QJsonObject &params)
+{
+    if (uid.isEmpty()) {
+        setStatus(QStringLiteral("目标设备为空，指令没发（不报错就是骗人）"), true);
+        logf("[viewer] FAIL sendActionTo 收到空 uid（%s），不发出去", action.toUtf8().constData());
+        return;
+    }
+    setStatus(QStringLiteral("已把「%1」发给 %2，等云端回话…").arg(action).arg(uid), false);
     QJsonObject p;
-    p.insert(QStringLiteral("uid"), m_currentUid);
+    p.insert(QStringLiteral("uid"), uid);
     p.insert(QStringLiteral("action"), action);
     if (!params.isEmpty()) p.insert(QStringLiteral("params"), params);
     sendEnvelope(QStringLiteral("instruction"), p);

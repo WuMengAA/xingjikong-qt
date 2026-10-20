@@ -58,10 +58,11 @@
 #include <QUrl>
 #include <cstdarg>
 #include <cstdio>
+#include <mutex>          // 2026-10-21：日志写路径互斥（logf/msg handler/工作线程共用）
 
-// ⚠️ 管理端应用版本号的**唯一真源**在下面 kViewerVersion 处（0.6.2，2026-10-06 并入集控页后统一）。
-// 合并前两份副本各有一份常量（外层 0.6.0 / 内层 0.5.0），同一文件里出现两次会
-// C2374 重定义 —— 现在只留下面那一份。改版本只改那处。
+// ⚠️ 管理端应用版本号的**唯一真源是 CMakeLists.txt 的 VIEWER_VERSION**，
+//    CMake 配置阶段会回读下方 kViewerVersion 常量做一致性校验，不一致直接
+//    FATAL_ERROR（完整故事见 kViewerVersion 处的注释）。本文件只留回落值。
 // ⚠️ MSI 那条路（msi/viewer-qt.wxs）里的 Version 还是 0.5.0、长期没跟着走 ——
 //    **当前发布走绿色 zip，不经过 MSI**；哪天要出 MSI 必须先补那个版本号。
 
@@ -79,11 +80,19 @@ static QString logFilePath()
 {
     const QString env = QString::fromLocal8Bit(qgetenv("STE_VIEWER_LOG")).trimmed();
     if (!env.isEmpty()) return env;
-    return QCoreApplication::applicationDirPath() + QStringLiteral("/viewer-run.log");
+    // 2026-10-21（审查 #8）：installMessageHandler 是 main 第一行就装的，理论上
+    // QCoreApplication 构造期间若有 qWarning，applicationDirPath() 还是空 —— 空时
+    // 回落当前工作目录，避免日志落到盘根/怪路径。
+    const QString dir = QCoreApplication::applicationDirPath();
+    return (dir.isEmpty() ? QDir::currentPath() : dir) + QStringLiteral("/viewer-run.log");
 }
 
 static FILE *g_log = nullptr;
 static bool g_logTried = false;
+// 2026-10-21：日志写路径互斥。logf / qInstallMessageHandler / 后台线程（VNC、更新检查）
+// 可能同时写同一 FILE* —— 用 recursive_mutex：logf→ensureLogOpen→writeLogBytes 会嵌套
+// 进入，普通 mutex 会自死锁。日志低频，锁的开销可忽略。
+static std::recursive_mutex g_logMutex;
 
 // ⚠️ 2026-10-07 修（真机级乱码）：日志以前是**原样把 UTF-8 字节写进文件**，
 // 而 Windows 控制台（代码页 936）和记事本都按本机 ANSI（GBK）去解 ⇒ 中文全变
@@ -94,6 +103,7 @@ static bool g_logTried = false;
 // 那边乱码才是真出事。
 static void writeLogBytes(const QByteArray &bytes)
 {
+    std::lock_guard<std::recursive_mutex> lk(g_logMutex);
     if (!g_log) return;
     fwrite(bytes.constData(), 1, bytes.size(), g_log);
     fputc('\n', g_log);
@@ -107,6 +117,7 @@ static void writeLogBytes(const QByteArray &bytes)
  *  都不写。抽成这里，所有日志出口先 ensureLogOpen() 再写。 */
 static void ensureLogOpen()
 {
+    std::lock_guard<std::recursive_mutex> lk(g_logMutex);
     if (g_log || g_logTried) return;
     g_logTried = true;
     // 路径必须本机编码：fopen 不吃 UTF-8
@@ -137,6 +148,7 @@ static void writeLog(const char *s)
 
 void logf(const char *fmt, ...)
 {
+    std::lock_guard<std::recursive_mutex> lk(g_logMutex);
     char buf[2048];
     va_list ap; va_start(ap, fmt);
     const int n = vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
@@ -169,6 +181,7 @@ static void installMessageHandler()
         }
         // QML 加载/绑定错误都会走这里，原样留着 —— 否则界面白屏时无从查起。
         // 直接走 QString 拼，出口统一转本机编码（不再手拼 UTF-8 的 char 数组）。
+        std::lock_guard<std::recursive_mutex> lk(g_logMutex);   // 2026-10-21：与 logf 共用同一把锁
         const QByteArray local =
             QStringLiteral("[viewer] %1: %2").arg(QLatin1String(tag), msg).toLocal8Bit();
         fwrite(local.constData(), 1, local.size(), stdout);
@@ -216,7 +229,12 @@ int loadEnvFile(const QString &path)
         line = line.trimmed();   // 顺带去掉行尾 \r
         if (line.isEmpty()) continue;
         if (line.startsWith(QLatin1Char('#'))) continue;
-        if (line.startsWith(QStringLiteral("rem"), Qt::CaseInsensitive)) continue;
+        // 2026-10-21：`rem` 必须是整词或后随空白 —— 原来 startsWith("rem") 会把
+        // reminder=、remote= 这类键当注释整行吞掉，配置静默失效。
+        if (line.compare(QStringLiteral("rem"), Qt::CaseInsensitive) == 0
+            || line.startsWith(QStringLiteral("rem "), Qt::CaseInsensitive)
+            || line.startsWith(QLatin1String("rem\t"), Qt::CaseInsensitive))
+            continue;
         if (line.startsWith(QStringLiteral("set "), Qt::CaseInsensitive)) line = line.mid(4).trimmed();
         // 与被控端 stelarith-control-qt 同一个 bug、同一处修法（2026-10-04）：
         // `set "KEY=VALUE"` 的引号包住的是整个 KEY=VALUE，不是只包 VALUE。不先剥这层整体引号，
@@ -248,7 +266,6 @@ public:
 
     QImage requestImage(const QString &id, QSize *size, const QSize &requested) override
     {
-        Q_UNUSED(requested);
         // id 形如 "f"（主画面）或 "<uid>"（多班缩略图）：去掉 query 部分（tick）
         const QString base = id.section(QLatin1Char('?'), 0, 0);
         QImage img;
@@ -385,6 +402,22 @@ int main(int argc, char *argv[])
     qputenv("QT_QUICK_BACKEND", "software");
     qputenv("QSG_RENDER_LOOP", "windows");
 #endif
+    // ── 控件风格＝FluentWinUI3（2026-10-10 · UI 更新：A 全量转 Fluent）──
+    // 之前钉成 Basic 是因为默认 Windows 风格不支持 background 覆写刷 warn，
+    // 而界面本身是黑白自绘的、用不上默认外观。
+    // 现在用户裁决「直接 A」：管理端全量转 Qt 6.12 官方 FluentWinUI3 风格
+    // （与手机端同步，同为 Fluent 观感）。标准控件（Button/Dialog/ComboBox/
+    // Slider）呈现 WinUI3 外观；自绘卡片/画面区（Rectangle+th 令牌）不受影响
+    // —— Fluent 管交互控件，自绘管视觉主区，二者共存。
+    // 写进程环境而非 QQuickStyle::setStyle：风格插件加载时读，越早设越好。
+    // 2026-10-21：qputenv 从 app 构造之后挪到之前 —— 风格插件可能在 app 构造
+    //    期间就被加载，注释原话"越早设越好"，那就最早。
+    qputenv("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3");
+    // 2026-10-12 审计 #19 记录：FluentWinUI3 是 Qt 6.12 才支持的风格，而 CMake
+    // 声明的最低版本是 6.5——落在 [6.5, 6.12) 的构建环境会被静默忽略（无报错）。
+    // 运行时核对（QQuickStyle::name()）需链接 QtQuickControls2 C++ 库，当前工程
+    // 是 QML 插件加载方式不直链它 → 放弃核对，留此注释：构建机务必用 Qt ≥ 6.12
+    // （本项目已固定 D:\QTqwq\6.12.0，故实际恒生效；换机时注意）。
     QApplication app(argc, argv);
     // 程序名必须显式定死：凭据（网站会话令牌 / 云端接入票）落在
     // AppLocalDataLocation，Windows 上就是 %LOCALAPPDATA%/<程序名>。
@@ -478,30 +511,23 @@ int main(int argc, char *argv[])
     ScheduleTodayProvider schedToday;
     schedToday.setProfilePath(schedRepo.defaultProfilePath());
 
-    // ── 控件风格＝FluentWinUI3（2026-10-10 · UI 更新：A 全量转 Fluent）──
-    // 之前钉成 Basic 是因为默认 Windows 风格不支持 background 覆写刷 warn，
-    // 而界面本身是黑白自绘的、用不上默认外观。
-    // 现在用户裁决「直接 A」：管理端全量转 Qt 6.12 官方 FluentWinUI3 风格
-    // （与手机端同步，同为 Fluent 观感）。标准控件（Button/Dialog/ComboBox/
-    // Slider）呈现 WinUI3 外观；自绘卡片/画面区（Rectangle+th 令牌）不受影响
-    // —— Fluent 管交互控件，自绘管视觉主区，二者共存。
-    // 写进程环境而非 QQuickStyle::setStyle：风格插件加载时读，越早设越好。
-    qputenv("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3");
-    // 2026-10-12 审计 #19 记录：FluentWinUI3 是 Qt 6.12 才支持的风格，而 CMake
-    // 声明的最低版本是 6.5——落在 [6.5, 6.12) 的构建环境会被静默忽略（无报错）。
-    // 运行时核对（QQuickStyle::name()）需链接 QtQuickControls2 C++ 库，当前工程
-    // 是 QML 插件加载方式不直链它 → 放弃核对，留此注释：构建机务必用 Qt ≥ 6.12
-    // （本项目已固定 D:\QTqwq\6.12.0，故实际恒生效；换机时注意）。
-
     // 2026-10-15 组件6 配套：互动审批桥（审批数据面 + 共享灵动岛的桥面）。
     // ⚠️ 必须声明在 engine **之前**：注册给 QML 的上下文属性是裸指针，QML 全程要用；
     //    局部对象逆序析构 ⇒ 若声明在 engine 后面，它会先于 engine 销毁（悬垂）。
     InteractBridge interactBridge(&backend);
 
+    // ⚠️ 与 interactBridge 同一条规则：注册给 QML 的上下文属性是裸指针，必须声明在
+    //    engine **之前** —— 局部对象逆序析构，声明在后面会先于 engine 销毁（悬垂）。
+    //    2026-10-21：fileDlgs 原先漏在 engine 之后（L~526），已挪回这里。
+    FileDialogs fileDlgs;
+
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
     // 2026-10-18 远控：QML 用 Image { source: "image://vnc/live?t=<tick>" } 渲染 VNC 画面。
     // 提供器归 engine 所有；把裸指针交给 backend，帧到达时直接 update（应用同生命周期）。
+    // ⚠️ 2026-10-21（审查 #3）：engine 先于 backend 析构 ⇒ provider 会先被 engine
+    //    删除。backend 析构时只清空该裸指针（不 delete，见 ~ViewerBackend），
+    //    使 update() 的判空在退出阶段真正生效。
     auto *vncProvider = new VncImageProvider;
     engine.addImageProvider(QStringLiteral("vnc"), vncProvider);
     backend.setVncImageProvider(vncProvider);
@@ -522,8 +548,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("undoManager"), &schedUndo);
     engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), schedRepo.defaultProfilePath());
     engine.rootContext()->setContextProperty(QStringLiteral("scheduleToday"), &schedToday);
-    // 课表编辑器文件选择对话框
-    FileDialogs fileDlgs;
+    // 课表编辑器文件选择对话框（fileDlgs 声明见 engine 之前 —— 裸指针先建后析构）
     engine.rootContext()->setContextProperty(QStringLiteral("fileDialogs"), &fileDlgs);
     // 2026-10-06：QML 从**磁盘**加载，不再从 exe 里的资源读。
     // 为什么改：QML 编进 exe（qt_add_qml_module 的 QML_FILES）意味着改一个按钮文案都要重出整包，

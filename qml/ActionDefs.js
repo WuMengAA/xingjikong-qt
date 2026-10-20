@@ -212,6 +212,12 @@ function manifest() {
           order: 93, surfaces: ["command"],
           keys: ["settings", "shezhi", "sz"], tip: "账户、连接、通知与外观" },
 
+        // 2026-10-20 V1.0 P1：MD3 页面级骨架（Expanded 宽屏：240 侧栏 + 顶栏 + 操作区 + 4 列网格 + 侧滑面板）。
+        // 只加导航声明，**不动现有 5 页** —— 骨架先并行验收，是否替换旧壳（底栏 4 标签）等点单。
+        { id: "page-md3shell", palOrder: 22, title: "前往新版界面", kind: "app", app: "page", payload: "6",
+          order: 95, surfaces: ["command"],
+          keys: ["md3", "xinban", "xb"], tip: "MD3 页面级骨架（侧栏 + 顶栏 + 设备网格）" },
+
         { id: "refresh-devices", palOrder: 31, title: "刷新设备列表", kind: "special",
           order: 94, surfaces: ["command"],
           keys: ["refresh", "shuaxin", "sx"], tip: "重新获取设备状态（F5）" },

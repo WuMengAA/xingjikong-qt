@@ -302,6 +302,28 @@ add_custom_command(TARGET viewer-qt POST_BUILD
           -P "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/scripts/check-island-parity.cmake"
   VERBATIM)
 
+# ── QML 同步（每次构建都跑 · 2026-10-20 补）─────────────────────────────
+# 【为什么需要】上面那条是 POST_BUILD：**只有链接时才执行**。于是「只改 QML、没改 C++」
+#   的构建（ninja: no work to do）会让 build/qml 停在旧版本 —— 探针测到旧件、
+#   出包打旧件，两者都静默。2026-10-20 P1 骨架实测撞到：新增 AdminDashboard /
+#   ClassDetailPage 后 ninja 报 no work to do，build/qml/Stelarith/pages 里只有
+#   旧三页，靠手动 cp + sha256 绕过 —— 这类"改了不生效"最容易在出包那天才被发现。
+# 【与 control 端的关系】stelarith-agent-qt 那边的 agent_qml_sync 是同一套路的
+#   先例（2026-10-20 补），这里照搬，保持两端构建行为一致：sync 只负责同步，
+#   parity 校验仍留在 POST_BUILD（只在链接后跑，够且便宜）。
+# 【代价】copy_directory 是 copy-if-different 语义，几十个小文件，忽略不计。
+add_custom_target(viewer_qml_sync ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_CURRENT_SOURCE_DIR}/qml" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${STE_SHARED_ISLAND_DIR}" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/island"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${STE_SHARED_UI_DIR}" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/components"
+  COMMENT "[viewer] 同步 qml/ + 共享 island/ + 共享 ui/（每次构建，防「改了 QML 不生效」）"
+  VERBATIM)
+# 让 exe 依赖它：保证任何一次构建（包括 ninja 默认目标）都先同步过 QML。
+add_dependencies(viewer-qt viewer_qml_sync)
+
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg)
 
 # ── OpenSSL 运行时 DLL 拷进 build/（2026-10-20 恢复 720bd8d 的规则）──────────

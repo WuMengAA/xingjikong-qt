@@ -88,20 +88,18 @@ ApplicationWindow {
     readonly property var th: darkMode ? darkTh : lightTh
 
     // 界面自身的状态（只跟显示有关的东西）
-    property int page: 1                 // 0 概览 / 1 集控（带画面主页面）/ 2 设置
+    property int page: 6                 // [TEMP-FT] 功能测试临时初始页，测完改回 1
 
     // 2026-10-08 修复「选中设备却不在带画面页 → 无限拉流」：
     // 切到其它页就退订当前设备画面 / 多班缩略图墙，云端按订阅发帧，退订即停流。
     // 回到对应页再恢复订阅。两个订阅互不干扰（退订缩略图会跳过当前选中那台）。
     // 2026-10-11：「批量管控」页已删，多班墙改由「多班墙」弹窗显式订阅（见 multiThumbDlg），
     // 不再跟随页签自动拉 —— 否则每次切页都在后台偷偷订阅一遍。
-    onPageChanged: {
+    // 2026-10-21（审查 P2）：与 syncPageLive 同一逻辑，直接委托，删重复体。
+    onPageChanged: { root.syncPageLive() }
+    function syncPageLive() {
         // 2026-10-19：监控页（page=3）与集控页（page=1）都要单台帧流
         backend.setScreenActive(root.page === 1 || root.page === 3)   // 单台大画面只在集控/监控拉
-        if (!panelHost.isOpen("multiband")) backend.subscribeThumbnails([])
-    }
-    function syncPageLive() {
-        backend.setScreenActive(root.page === 1 || root.page === 3)
         if (!panelHost.isOpen("multiband")) backend.subscribeThumbnails([])
     }
     property int volumeValue: 30
@@ -177,9 +175,13 @@ ApplicationWindow {
     property var islandStates: []      // [{ k, t, d, p }]，k ∈ offline/command/file/alert/monitor
     // 批量指令：下发 +1、回执 -1（4.5「进度可见」）。老师盯着数往上走，
     // 不让他对着一屋子设备猜"这会儿发到哪台了"。
-    property var batch: ({ label: "", total: 0, done: 0, ok: 0, fail: 0, active: false })
+    // rows = 明细行 [{ uid, st, why, late }]，每台一格，一台只落一次账（4.5 按设备记账）。
+    property var batch: ({ label: "", total: 0, done: 0, ok: 0, fail: 0, active: false, rows: [] })
     // 没处理的告警（4.3 场景四）：回执失败、文件没推成都算，攒起来给灵动岛。
     property var alerts: []
+    // 2026-10-21（审查 #8）：告警可清除 —— 批量收口时自动清掉本批攒的告警，
+    // 不让灵动岛永远挂着"N 条没处理"。手动"全部已处理"入口等岛交互扩展，本次不做。
+    function clearAlerts() { root.alerts = [] }
     // 多选的设备 uid（4.4）。和 currentUid 是两套东西：那个管"看哪台"，
     // 这个管"给哪些台发" —— 混在一处会互相踢（台数变了不知道该信哪个）。
     property var picked: []
@@ -356,6 +358,9 @@ ApplicationWindow {
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: 44
+            // 2026-10-20 P1：骨架页（page 6）有自己的 64px TopBar（标题 + 班级切换 + 头像），
+            // 旧的 44px 顶条再留一条就是两套顶栏（实测右侧"已登录/管理员"和骨架顶栏并排）⇒ 骨架页隐藏。
+            visible: root.page !== 6
 
             // 稿 .top 有条 border-bottom:#141414 —— 之前整条没画，顶条和主体糊在一起
             Rectangle {
@@ -992,6 +997,23 @@ ApplicationWindow {
             // 此前监控散落：摄像头弹窗 / 多班墙弹窗 / 画面在集控页中栏。
             // 新增独立整页：设备选择 + 主画面 + 操作栏（截图/摄像头/多班墙/远控）。
             MonitorPage { ctx: root._pageCtx }
+
+            // ══ 4 班级看板 ══（2026-10-20 · V1.0 P1）
+            // 多卡片式班级桌面（班名 / 在线比例 / 状态点阵 + 多选班级批量）。
+            // ⚠️ 千人千面不在本页判断：云端行级过滤已经把设备表按身份 scope 过滤过，
+            //    老师与管理员看到不同数量的卡片是**数据决定的**，不是页面分支。
+            AdminDashboard { ctx: root._pageCtx }
+
+            // ══ 5 班级详情 ══（看板点班级进入；页内「返回看板」回 page 4）
+            // 不进底部标签：它是看板的下一层（有明确返回路径），占一个标签只会让
+            // 老师在两个"看班级"的入口之间犹豫。
+            ClassDetailPage { ctx: root._pageCtx }
+
+            // ══ 6 MD3 页面级骨架 ══（2026-10-20 · V1.0 P1）
+            // 新版底座：240px 侧栏 + 64px 顶栏 + 操作区 + 4 列设备网格 + 400px 侧滑面板。
+            // ⚠️ 刻意**并存不动存量**：现有 5 页与底栏标签保持原样，
+            //    骨架验收通过后再决定是否迁移（不擅自推翻已交付的导航）。
+            Md3Shell { ctx: root._pageCtx }
         }
 
         // ── 底部标签（与手机端同一套心智）──
@@ -1000,6 +1022,10 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.preferredHeight: 42
             color: th.win
+            // 2026-10-20 P1：MD3 骨架页（page 6）自带 240px 侧栏导航，
+            // 再叠一条底标签就是**双重导航**（用户实测反馈"两套入口"）⇒ 骨架页隐藏底栏。
+            // 回经典界面按 Ctrl+2 / 命令面板即可。
+            visible: root.page !== 6
 
             Rectangle { width: parent.width; height: 1; color: th.sepline }
 
@@ -1013,7 +1039,10 @@ ApplicationWindow {
                     // 按「一站式」需求：那一页**删掉**，卡片改成集控页右栏按钮点开的弹窗，
                     // 于是底部只剩三个标签：0 概览 / 1 集控 / 2 设置。
                     // 2026-10-19：加「监控」——监控从散落弹窗收成独立整页（0 概览 / 1 集控 / 2 设置 / 3 监控）。
-                    model: [ "概览", "集控", "设置", "监控" ]
+                    // 2026-10-20 V1.0 P1：加「看板」（page 4）。
+                    // 班级详情（page 5）不进底栏 —— 它是从看板点班级进入的下一层，
+                    // 页内有「返回看板」按钮，不需要常驻标签。
+                    model: [ "概览", "集控", "设置", "监控", "看板" ]
                     delegate: Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -1228,7 +1257,9 @@ ApplicationWindow {
      *     在这里拦「系统设置」—— 受限身份（老师/助教）进不了 page 2；
      *     全权/平台超管 can("system:settings")===true，行为与今天完全一致。 */
     function goPage(idx) {
-        if (idx === 2 && !perms.can("system:settings")) return   // RBAC：无权限不跳也不提示
+        // 2026-10-21（审查 #11）：受限身份被拦时**要说一句** —— 原来静默 return，
+        // 用户视角是"点了没反应"（和未实现能力置灰是两条路，这里先用提示顶上）。
+        if (idx === 2 && !perms.can("system:settings")) { root.toast("当前身份不能进系统设置"); return }
         root.page = idx
     }
 
@@ -1263,6 +1294,9 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         width: island.width
         height: island.height
+        // 2026-10-20 P1：骨架页有自己的 64px TopBar，旧灵动岛浮层会**压住标题与网格**
+        // （用户实测反馈第一屏就被挡住）⇒ 骨架页不显示它。
+        visible: root.page !== 6
 
         // 不许让状态只走"记得手动刷一次"这条路：
         //  · 自动停（到点 / 断线）必须让老师看见 —— 按钮会自己变回"开始讲话"，
@@ -1318,19 +1352,25 @@ ApplicationWindow {
 
     // 快捷键（设计文档 4.7）：老师站在讲台前，一等一按就出事。
     // Ctrl+F 在原设计里是「集焦搜索框」，这版界面没有设备搜索框，命令面板就是那个入口。
-    Shortcut { sequence: "Ctrl+K"; onActivated: { pal.open() } }
-    Shortcut { sequence: "Ctrl+F"; onActivated: { pal.open() } }
-    Shortcut { sequence: "F5";     onActivated: { backend.requestDevices() } }
-    Shortcut { sequence: "Ctrl+1"; onActivated: { goPage(0) } }
-    Shortcut { sequence: "Ctrl+2"; onActivated: { goPage(1) } }
-    Shortcut { sequence: "Ctrl+3"; onActivated: { goPage(2) } }
+    // 2026-10-21（审查 #1 同源）：首启引导期间全部快捷键禁用 —— 否则老师一边看引导
+    // 一边按 Ctrl+L/Ctrl+A 就操作到了后台（引导层只挡鼠标，挡不住键盘）。
+    // Esc 额外要求 picked 非空（审查 #9）：弹窗开着时按 Esc 不应被全局吃掉、抢了
+    // Popup 的 CloseOnEscape。
+    Shortcut { sequence: "Ctrl+K"; enabled: backend.firstRunDone; onActivated: { pal.open() } }
+    Shortcut { sequence: "Ctrl+F"; enabled: backend.firstRunDone; onActivated: { pal.open() } }
+    Shortcut { sequence: "F5";     enabled: backend.firstRunDone; onActivated: { backend.requestDevices() } }
+    Shortcut { sequence: "Ctrl+1"; enabled: backend.firstRunDone; onActivated: { goPage(0) } }
+    Shortcut { sequence: "Ctrl+2"; enabled: backend.firstRunDone; onActivated: { goPage(1) } }
+    Shortcut { sequence: "Ctrl+3"; enabled: backend.firstRunDone; onActivated: { goPage(2) } }
+    // 2026-10-20 P1：Ctrl+6 = MD3 新版界面骨架（页号 6，与 Ctrl+1..3 同一套心智）
+    Shortcut { sequence: "Ctrl+6"; enabled: backend.firstRunDone; onActivated: { goPage(6) } }
 
     // 选择类（4.7）：锁屏是最高频也最容易误伤的操作，给它两个键不加面板；
     // Ctrl+L 的单键形态和 Ctrl+Shift+L 的全量形态分开，避免"我本来只想锁一台"。
-    Shortcut { sequence: "Ctrl+A";     onActivated: { root.selectAll() } }
-    Shortcut { sequence: "Esc";        onActivated: { root.clearPick() } }
-    Shortcut { sequence: "Ctrl+L";     onActivated: { root.runOnPicked("lock") } }
-    Shortcut { sequence: "Ctrl+Shift+L"; onActivated: { root.runOnPicked("") } }
+    Shortcut { sequence: "Ctrl+A";     enabled: backend.firstRunDone; onActivated: { root.selectAll() } }
+    Shortcut { sequence: "Esc";        enabled: backend.firstRunDone && root.picked.length > 0; onActivated: { root.clearPick() } }
+    Shortcut { sequence: "Ctrl+L";     enabled: backend.firstRunDone; onActivated: { root.runOnPicked("lock") } }
+    Shortcut { sequence: "Ctrl+Shift+L"; enabled: backend.firstRunDone; onActivated: { root.runOnPicked("") } }
 
     Component.onCompleted: {
         syncPageLive()   // 2026-10-08：启动即按当前页归一化拉流（默认 page=1，缩略图墙不预订阅）
@@ -1410,15 +1450,8 @@ ApplicationWindow {
         return !p || backend.mayDo(p);
     }
 
-    // 回执流水：打字这类"点下去就知道在办"的动作也给它一条。
-    // 等被控端回话要几百毫秒，界面上什么都不变，用户会以为没发出去。
-    // ⚠️ property var 只有在**整体重新赋值**时才重绘 —— 往数组里 push 是不触发的，必须 slice 出新数组。
-    function pushReceipt(label, ok) {
-        var next = [{ ok: ok, uid: root.currentUid, action: label }]
-        for (var i = 0; i < root.results.length && next.length < 20; ++i)
-            next.push(root.results[i])
-        root.results = next
-    }
+    // 回执流水：概览页的 results 由 onResultReceived 统一灌，这里不设第二个写口。
+    // （2026-10-21：原 pushReceipt 定义后全文件无调用，死代码，已删。）
 
     // ── 概览页快捷操作分发（4.7 效率功能，2026-10-07）──
     // ══ U4：动作的三个投影 + 唯一执行入口 ═══════════════════════════════
@@ -1494,7 +1527,12 @@ ApplicationWindow {
         if (miss.length > 0) { backend.reportUnsupported(label, miss.join(" / ")); return false }
 
         if (p.page >= 0) goPage(p.page)
-        if (p.danger) { root.askDanger(p.action, 1, [], backend.currentUid); return true }
+        if (p.danger) {
+            // 2026-10-21（审查 #3）：没选设备就别弹一个目标为空的确认框 —— 先明说。
+            if (backend.currentUid === "") { root.toast("先在控制页选中一台设备"); return true }
+            root.askDanger(p.action, 1, [], backend.currentUid)
+            return true
+        }
 
         if (p.kind === "send") { backend.sendAction(p.action, {}); return true }
         if (p.kind === "panel") { openOnly(p.panel); return true }
@@ -1600,7 +1638,10 @@ ApplicationWindow {
         root.dangerOne  = one || ""
         dangerDlg.open()
     }
-    /** 确认后真下发。批量走 doBatch（原来的循环原样搬过去），单台走 sendAction。 */
+    /** 确认后真下发。批量走 doBatch（原来的循环原样搬过去），单台走 sendActionTo。
+     *  2026-10-21（审查 #3）：原来单台分支 sendAction 用的是**当时的 currentUid**，
+     *  确认框开着期间用户切设备/后台同步变了 uid，就会发错机器而 toast 还骗人；
+     *  现在发给确认时快照的 dangerOne，目标变了就拒绝（不静默发错）。 */
     function execDanger() {
         const a = root.dangerAct
         const one = root.dangerOne
@@ -1612,8 +1653,9 @@ ApplicationWindow {
             root.dangerList = []
             root.doBatch(a, l)
         } else {
-            backend.sendAction(a, {})
-            toast("已下发「" + root.dangerLabel(a) + "」" + (one !== "" ? " → " + one : ""))
+            if (one === "") { toast("目标设备已变，请重新确认"); return }
+            backend.sendActionTo(one, a, {})
+            toast("已下发「" + root.dangerLabel(a) + "」 → " + one)
         }
     }
 
@@ -1629,9 +1671,10 @@ ApplicationWindow {
         if (content === "") { toast("先填广播内容"); return }
         const devs = backend.devices
         if (!devs || devs.length === 0) { toast("没有在线设备"); return }
+        // 2026-10-21（审查 #6）：sendActionTo 显式目标 —— 原来逐台改 currentUid，
+        // 广播完主画面被甩到最后一台；改成"发给谁"与"看哪台"分开。
         for (let i = 0; i < devs.length; ++i) {
-            backend.currentUid = devs[i].uid
-            backend.sendAction("notify", {
+            backend.sendActionTo(devs[i].uid, "notify", {
                 "title": "广播", "content": content,
                 "seconds": 10, "tts": false,
                 "flags": { "severity": "inform" }
@@ -1732,13 +1775,6 @@ ApplicationWindow {
         refreshIsland()
     }
 
-    // 取某台设备在这批里的明细行（找不到就补一个"非本批"行，绝不丢回馈）
-    function batchRowOf(uid) {
-        for (let i = 0; i < batch.rows.length; ++i)
-            if (batch.rows[i].uid === uid) return batch.rows[i]
-        return null
-    }
-
     // 某台设备现在在不在线（认云端给的 online；老云端不带这个键就按在线处理）
     function isDevOnline(uid) {
         for (let i = 0; i < root.devices.length; ++i)
@@ -1754,11 +1790,20 @@ ApplicationWindow {
     }
 
     // 二次回执（通知确认）：只写明细，不参与进度 —— 一台设备 = 一份回馈
+    // 2026-10-21（审查 #2）：property var 原地改不触发绑定，rows/计数统一整体重建赋值。
     function batchNote(uid) {
         if (!batch.active) return
-        let row = batchRowOf(uid)
-        if (!row) { row = { uid: uid, st: batch.done >= batch.total ? 1 : 0, why: "", late: false }; batch.rows.push(row) }
+        const rows = batch.rows.slice()
+        let row = null
+        for (let i = 0; i < rows.length; ++i)
+            if (rows[i].uid === uid) { row = rows[i]; break }
+        if (!row) {
+            row = { uid: uid, st: batch.done >= batch.total ? 1 : 0, why: "", late: false }
+            rows.push(row)
+        }
         row.late = true
+        root.batch = { label: batch.label, total: batch.total, done: batch.done, ok: batch.ok,
+                       fail: batch.fail, active: batch.active, rows: rows }
         refreshIsland()
     }
 
@@ -1766,11 +1811,15 @@ ApplicationWindow {
     function batchTimeoutClose() {
         if (!batch.active) return
         const left = Math.max(0, batch.total - batch.done)
-        batch.done = batch.total
-        batch.fail = batch.fail + left
-        for (let i = 0; i < batch.rows.length; ++i)
-            if (batch.rows[i].st === 0) batch.rows[i].st = 2
-        batch.active = false
+        // rows 里的行也重建（原地改 st 同样不触发绑定）
+        const rows = []
+        for (let i = 0; i < batch.rows.length; ++i) {
+            const r = batch.rows[i]
+            rows.push({ uid: r.uid, st: r.st === 0 ? 2 : r.st, why: r.why, late: r.late })
+        }
+        root.batch = { label: batch.label, total: batch.total, done: batch.total,
+                       ok: batch.ok, fail: batch.fail + left, active: false, rows: rows }
+        root.clearAlerts()   // 2026-10-21（审查 #8）：收口即清本批告警
         toast(batch.label + "：等超时了，" + batch.ok + " 台确认"
               + (left > 0 ? "，" + left + " 台没回话（多半是掉线）" : ""))
         refreshIsland()
@@ -1794,37 +1843,50 @@ ApplicationWindow {
         return s
     }
 
+    // 2026-10-21（审查 #2）：property var 原地改（batch.done++ / row.st=）不触发
+    // batchChanged，任何声明式绑定都不会刷新 —— 全部改为**整体重新赋值**（含 rows
+    // 里的行重建），过程里不碰旧 batch 对象任何字段。
     function batchStep(uid, ok, why) {
         if (!batch.active) return
-        let row = batchRowOf(uid)
+        const rows = batch.rows.slice()
+        let total = batch.total
+        let row = null
+        for (let i = 0; i < rows.length; ++i)
+            if (rows[i].uid === uid) { row = rows[i]; break }
         if (!row) {
             // 单台下发时这条回执可能先于批量名单落账 —— 补行并把它算进去，别让这台凭空消失
             row = { uid: uid, st: 0, why: "", late: false }
-            batch.rows.push(row)
-            batch.total = batch.total + 1
+            rows.push(row)
+            total = total + 1
         }
         if (row.st !== 0) {
             // 这台已经结过账（离线直判失败 / 已经报过成功），后面回来的都是同一台的二次回执。
             // 只把最新状态补进明细，绝不重复计数 —— 这是"按设备"而不是"按回执"的关键一句。
             row.late = true
             if (!ok) row.why = why || row.why
+            root.batch = { label: batch.label, total: total, done: batch.done, ok: batch.ok,
+                           fail: batch.fail, active: batch.active, rows: rows }
             refreshIsland()
             return
         }
         row.st = ok ? 1 : 2
         row.why = why || ""
         row.late = false
-        batch.done = batch.done + 1
-        if (ok) batch.ok = batch.ok + 1
-        else batch.fail = batch.fail + 1
+        const done = batch.done + 1
+        const okN = ok ? batch.ok + 1 : batch.ok
+        const failN = ok ? batch.fail : batch.fail + 1
         if (!ok) root.pushAlert(uid, batch.label, why || "")
-        if (batch.total > 0 && batch.done >= batch.total) {
+        if (total > 0 && done >= total) {
             // 全成了也得说一句（4.5）："没消息"不该被当成"都成了"
-            batch.active = false
             batchTimeout.stop()
+            root.batch = { label: batch.label, total: total, done: done, ok: okN,
+                           fail: failN, active: false, rows: rows }
+            root.clearAlerts()   // 2026-10-21（审查 #8）：全量收口即清本批告警
             toast(batchSummary())
         } else {
             batchTimeout.restart()      // 还有台在等，把超时往后推
+            root.batch = { label: batch.label, total: total, done: done, ok: okN,
+                           fail: failN, active: batch.active, rows: rows }
         }
         refreshIsland()
     }
@@ -1840,8 +1902,11 @@ ApplicationWindow {
                 root.picked = root.picked.concat([uid])
             root.pickAnchor = idx
         } else if (mods & Qt.ShiftModifier) {
-            // 范围选择走当前显示的过滤后列表（界面显示的就是它，anchor/索引才对齐）
-            const list = (root.deviceFilter !== "all") ? root.filteredDevices : root.devices
+            // 范围选择走当前显示的过滤后列表（界面显示的就是它，anchor/索引才对齐）。
+            // 2026-10-21（审查 #4）：原来 deviceFilter==="all" 时退回 root.devices ——
+            // 而 devices 混着其他班的设备（班级过滤只在 filteredDevices 里），
+            // pickAnchor/idx 与屏幕显示列表索引错位，Shift 会框到看不见的机器。
+            const list = root.filteredDevices
             if (root.pickAnchor < 0 || root.pickAnchor >= list.length) {
                 root.picked = [uid]
                 root.pickAnchor = idx
@@ -1858,11 +1923,14 @@ ApplicationWindow {
         }
     }
     function selectAll() {
-        // 只选**在线**的：设备表现在含离线台账（见 backend 的说明），把离线的一起选上，
-        // 批量下发会给它们记一串注定失败的账，看着像"发失败了"，其实是机器没开。
+        // 只选**当前显示列表**里在线的：设备表现在含离线台账（见 backend 的说明），
+        // 把离线的一起选上，批量下发会给它们记一串注定失败的账，看着像"发失败了"。
+        // 2026-10-21（审查 #5）：改用 filteredDevices —— 原来遍历 root.devices 不带
+        // 班级过滤，老师选了"高一(3)班"按 Ctrl+A 会把全校在线设备都选上。
+        const devs = root.filteredDevices
         const s2 = []
-        for (let i = 0; i < root.devices.length; ++i) {
-            if (root.devices[i].online !== false) s2.push(root.devices[i].uid)
+        for (let i = 0; i < devs.length; ++i) {
+            if (devs[i].online !== false) s2.push(devs[i].uid)
         }
         root.picked = s2
         root.pickAnchor = -1
@@ -1882,10 +1950,12 @@ ApplicationWindow {
         }
         const list = []
         if (a === "") {
-            // 「全部在线」就真的是全部在线：设备表含离线台账，把离线的一起发过去
-            // 只会换来一串注定失败的回执（机器没开），账面上像"下发失败"。
-            for (let i = 0; i < root.devices.length; ++i) {
-                if (root.devices[i].online !== false) list.push(root.devices[i].uid)
+            // 「全部在线」= 当前显示列表里在线的（filteredDevices 已含班级过滤）。
+            // 2026-10-21（审查 #5 同源）：原来遍历 root.devices，选班后 Ctrl+Shift+L
+            // 会把全校在线设备锁一遍。
+            const devs = root.filteredDevices
+            for (let i = 0; i < devs.length; ++i) {
+                if (devs[i].online !== false) list.push(devs[i].uid)
             }
         } else {
             for (let i = 0; i < root.picked.length; ++i) list.push(root.picked[i])
@@ -1915,8 +1985,9 @@ ApplicationWindow {
         for (let i = 0; i < list.length; ++i) {
             // 已经掉线的就别发了：发出去也没人回执，只会在灵动岛上挂成一个永不推进的 0/N
             if (!root.isDevOnline(list[i])) { dead.push(list[i]); continue }
-            backend.currentUid = list[i]
-            backend.sendAction(a, {})
+            // 2026-10-21（审查 #6）：sendActionTo 显式目标 —— 原来逐台改 currentUid，
+            // 批量越大主画面抖得越凶、最后一台被选中；"发给谁"与"看哪台"分开。
+            backend.sendActionTo(list[i], a, {})
             sent += 1
         }
         for (let j = 0; j < dead.length; ++j) root.batchStep(dead[j], false, "设备不在线")
@@ -2018,6 +2089,13 @@ ApplicationWindow {
         function finish() { backend.markFirstRunDone() }
 
         Rectangle { anchors.fill: parent; color: th.win }   // 整屏遮底：首启不让人看到后面空窗
+        // 2026-10-21（审查 #1）：引导层必须自己吃住鼠标 —— 遮底 Rectangle 和 Item
+        // 本身都不接收鼠标事件，点空白会穿透到下面的页面/标签（"引导还在，人已在
+        // 操作后台"）。声明在内容**之前**（z 最低），内部按钮照常可点。
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+        }
 
         Rectangle {
             anchors.centerIn: parent
