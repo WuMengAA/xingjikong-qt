@@ -1687,11 +1687,13 @@ void consumeActivationCodeAsync(const QString &siteBase, const QString &code, co
 // 一个输入框吃两种取值，不让用户去分辨自己手里是哪一种：
 //   · **班级码**（云端班级索引的键，6-16 位字母数字或 -_）→ 直接持久化，
 //     下次 register 带上 classCode → 云端按班归组（云端 registry.js 的班级索引）。
-//   · **接入码**（XJK-XXXX-XXX，管理员生成、一次性、带 TTL）→ 先持久化 + 调站点
-//     `/api/device/activate` 消费；站点回喂**权威班级码**（classCode = 真源 class_id）与
-//     班级名，回调里回存并补发 register，替掉先前那串一次性接入码。
-//     ⚠️ 站点 `stelarith_classes.code` 存的是**中文名**（如"1班"），不合云端键格式，
-//        所以权威键取 `class_id`（`class_01`），显示名走 className（2026-10-09 三端贯通）。
+//   · **接入码**（XJK-XXXX-XXX，管理员生成、一次性、带 TTL）→ 也打**云端**的
+//     `/api/device/activate`；云端代为向站点兑换，并把站点 `class_id` 纳进班级目录归一
+//     （2026-10-20 班级真源统一，见 Stelarith-cloud/src/class-dir.js）。
+//     ⚠️ 统一之前这里打的是站点（www.*），于是同一个班在云端记 `cls-xxxx`、在站点记
+//        `class_01` —— 两套码并存，重启后还能长出第三套。现在设备端只认识一个地址。
+//     ⚠️ 自建站点 / 站点直连（云端没升级）时，把 `STE_QT_BIND_URL` 显式指到站点即可，
+//        走的还是这条唯一的代码路径，不再有第二条分支。
 static void applyClassBinding(const QString &rawCode, const QString &wsUrl, const QString &uid)
 {
     const QString code = rawCode.trimmed();
@@ -1699,20 +1701,21 @@ static void applyClassBinding(const QString &rawCode, const QString &wsUrl, cons
 
     saveClassCode(code);   // 持久化 → 下一次 register 带上 classCode
 
-    // 只有接入码需要去站点消费；班级码没有可消费的东西（站点也不认识它）。
+    // 只有接入码需要去兑换；班级码没有可消费的东西。
     if (!code.startsWith(QStringLiteral("XJK-"), Qt::CaseInsensitive)) {
         qInfo().noquote() << QStringLiteral("[agent-qt] 已记录班级码 %1（register 时带给云端按班归组）").arg(code);
         return;
     }
 
-    const QString siteBase = siteBaseFromWsUrl(wsUrl);
-    if (siteBase.isEmpty()) {
-        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法从云端地址推导站点地址，跳过接入码消费（班级码已存，register 仍会带给云端）");
+    // 唯一入口：云端（含站点的兑换由云端代劳，见 exchangeSiteActivationCode）
+    const QString bindBase = bindBaseFromWsUrl(wsUrl);
+    if (bindBase.isEmpty()) {
+        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 没有可用的绑定服务地址，跳过接入码兑换（班级码已存，register 仍会带给云端）");
         return;
     }
     const QString u = uid.trimmed().isEmpty() ? QHostInfo::localHostName() : uid.trimmed();
-    qInfo().noquote() << QStringLiteral("[agent-qt] 绑定接入码 → %1/api/device/activate (uid=%2)").arg(siteBase, u);
-    consumeActivationCodeAsync(siteBase, code, u);
+    qInfo().noquote() << QStringLiteral("[agent-qt] 兑换接入码 → %1/api/device/activate (uid=%2)").arg(bindBase, u);
+    consumeActivationCodeAsync(bindBase, code, u);
 }
 
 /* ══════════ 首次启动引导（OOBE Wizard）（2026-10-20） ══════════

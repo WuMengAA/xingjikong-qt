@@ -1,6 +1,6 @@
 // Step 2B · 输入绑定码（2026-10-20）
-// 只收 6 位大写字母/数字；满 6 位「确认绑定」才亮（格式判定走 C++ 的 isCodeFormatValid，
-// 前后端同一份规则，避免 QML 里再抄一遍正则各自漂移）。
+// 两种码都收：6 位字母数字（云端按班开）与 `XJK-XXXX-XXX`（站点后台的班级接入码）。
+// 格式判定一律走 C++ 的 isCodeFormatValid —— 前后端同一份规则，避免 QML 里再抄一遍正则各自漂移。
 import QtQuick
 import ".."
 
@@ -9,7 +9,7 @@ Item {
     property var tk: ({})
     property var wizard: null
 
-    readonly property bool ready: codeField.text.length === 6 && oobe.isCodeFormatValid(codeField.text)
+    readonly property bool ready: codeField.text.length >= 6 && oobe.isCodeFormatValid(codeField.text)
 
     Column {
         anchors.centerIn: parent
@@ -28,7 +28,7 @@ Item {
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "6 位大写字母或数字，管理员发给你时通常长这样：A7X9Q2"
+            text: "管理员发给你的那串字符，比如 A7X9Q2"
             font.pixelSize: 13
             color: tk.cOnSurfaceVar
         }

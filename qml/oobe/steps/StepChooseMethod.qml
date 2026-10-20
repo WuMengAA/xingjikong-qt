@@ -50,7 +50,7 @@ Item {
             tk: page.tk
             glyph: "码"
             title: "输入绑定码"
-            subtitle: "输入管理员发给你的 6 位字符"
+            subtitle: "输入管理员发给你的绑定码"
             onClicked: page.wizard.chooseCode()
         }
 
