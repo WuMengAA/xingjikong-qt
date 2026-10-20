@@ -1,6 +1,10 @@
 // MD3 按钮：filled / tonal / elevated / outlined / text / error 六变体
 // 规范：高 40、全圆 20、左右内边距 24（text 12）、状态层 hover 8% / press 10%。
+// 2026-10-19：加 radius 覆写（默认 -1 = 跟随令牌 rFull 药丸，行为不变）；
+//             调用方要统一方角（如监控中心按用户要求全按钮 12px）时显式传 radius。
+//             同批加 tip（悬停说明）——需要 QtQuick.Controls 的 ToolTip。
 import QtQuick
+import QtQuick.Controls
 
 Item {
     id: root
@@ -9,6 +13,8 @@ Item {
     property string variant: "filled"
     property string icon: ""          // emoji 占位（Lucide 接入后换 SVG）
     property bool enabled: true
+    property real radius: -1          // <0 = 令牌 rFull；>=0 = 显式覆写圆角
+    property string tip: ""           // 悬停说明（2026-10-19 补：与 Btn.tip 同 API）
     signal clicked()
 
     implicitWidth: innerRow.implicitWidth + (variant === "text" ? 24 : 48)
@@ -32,7 +38,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: md3.rFull
+        radius: root.radius >= 0 ? root.radius : md3.rFull
         color: root.bgColor()
         border.width: variant === "outlined" ? 1 : 0
         border.color: md3.cOutline
@@ -69,5 +75,10 @@ Item {
         hoverEnabled: true
         enabled: root.enabled
         onClicked: root.clicked()
+    }
+    ToolTip {
+        visible: ma.containsMouse && root.tip !== ""
+        delay: 450
+        text: root.tip
     }
 }
