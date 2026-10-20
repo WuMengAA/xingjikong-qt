@@ -64,6 +64,12 @@ QtObject {
     property int rXL: 28     // 对话框 / 抽屉
     property int rFull: 999  // 按钮 / 开关 / pill（取值大于半高即全圆）
 
+    // ═══ 间距（布局网格 · 2026-10-19 补，原令牌集缺间距刻度） ═══
+    property int spXS: 4     // 紧凑组内（图标↔文字、分段之间）
+    property int spS: 8      // 组内元素
+    property int spM: 16     // 组件间距（默认）
+    property int spL: 24     // 面板左右外边距 / 大区块间距
+
     // ═══ 动效（MD3 motion） ═══
     property int durShort: 200    // 颜色 / 开关 / 指示器
     property int durMedium: 350   // 进入 / 退出
