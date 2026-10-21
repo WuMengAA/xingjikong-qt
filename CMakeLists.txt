@@ -193,6 +193,11 @@ add_executable(stelarith-agent-qt
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
+# ── 共享语音算法（P1，2026-10-21）：OpusCodec 一份实现，agent/viewer 同源 ──
+# Qt-free 的纯 C++（shared/audio），只依赖 libopus。放仓库根保证两端算法绝对一致。
+target_sources(stelarith-agent-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio/opus_codec.cpp")
+target_include_directories(stelarith-agent-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio")
+
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Svg opus)
 # 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
 target_link_libraries(stelarith-agent-qt PRIVATE winmm)

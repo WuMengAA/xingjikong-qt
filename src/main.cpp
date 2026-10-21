@@ -58,6 +58,7 @@
 #include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
 #include "proc_guard.h"        // 2026-10-13：进程终止安全闸门（与 exam_mode 共用同一道门）
 #include "audio_player.h"      // 2026-10-07：语音对讲播放（waveOut）
+#include "opus_codec.h"        // 2026-10-21（P1）：语音 Opus 编解码（shared/audio，两端同源）
 #include "broadcast_view.h"    // 2026-10-07：屏幕广播全屏显示
 // ── 通知体系新组件（2026-10-09 接线 · DeepSeek Harness 造）──
 #include "danmaku.h"           // §1.2 弹幕：字幕式横向滚动
@@ -275,6 +276,10 @@ bool g_everRegistered = false;
 AudioPlayer g_audioPlayer;
 bool g_audioHintShown = false;   // "老师正在讲话"提示是否已显示（每会话一次）
 int g_audioUpSeq = 0;            // 语音通话上行帧序号（2026-10-09）
+// P1（2026-10-21）：语音编解码实例。**惰性初始化**（首次用到才开）——没开过语音的机器
+// 不该白占两个 Opus 上下文；编码器 16 kbps 起步，与方案 §5 P1 的档位一致。
+static OpusCodec g_opusEnc;      // 学生 mic 上行编码
+static OpusCodec g_opusDec;      // 老师下行解码
 // ── 通知体系组件实例（2026-10-09 接线 · DeepSeek Harness）──
 // 弹幕（2026-10-15 组件5）：全局指针 g_danmaku 已删，改 danmaku.h 的单例访问器
 // danmakuWidget()/danmakuWidgetPeek() —— 通知路径（下方 kind=danmaku）与学生祝福
@@ -490,9 +495,12 @@ QByteArray makeVncFrameBytes(const QByteArray &rfb)
     return out;
 }
 
-// 语音通话上行帧（2026-10-09 · 语音通话设计 §4.1）：学生 mic PCM → 云端。
-// 与画面帧同 v1 结构，区别在 mime=audio/pcm（云端据此走 duplex 单播回老师）。
-QByteArray makeAudioFrameBytes(const QByteArray &pcm)
+// 语音通话上行帧（2026-10-09 · 语音通话设计 §4.1）：学生 mic → 云端。
+// 与画面帧同 v1 结构，区别在 mime（云端据此走 duplex 单播回老师）。
+// 2026-10-21（P1）：载荷从裸 PCM 换成 Opus 包 —— mime=audio/opus 标记编码类型。
+// ⚠️ 必须**按 mime 区分而不是按会话态猜**：滚动升级期间新旧端共存，
+//    旧管理端只认 audio/pcm（裸 PCM），新管理端两种都能解。
+QByteArray makeAudioFrameBytes(const QByteArray &payload, bool opus)
 {
     QJsonObject h;
     h.insert(QStringLiteral("v"), kProtocolVersion);
@@ -500,17 +508,19 @@ QByteArray makeAudioFrameBytes(const QByteArray &pcm)
     h.insert(QStringLiteral("uid"), g_uid);
     h.insert(QStringLiteral("seq"), ++g_audioUpSeq);
     h.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
-    h.insert(QStringLiteral("mime"), QStringLiteral("audio/pcm"));
-    h.insert(QStringLiteral("bytes"), pcm.size());
+    // ⚠️ QStringLiteral 只接受字面量（宏展开成 u"" 运算符），不能塞三元表达式。
+    h.insert(QStringLiteral("mime"),
+             opus ? QStringLiteral("audio/opus") : QStringLiteral("audio/pcm"));
+    h.insert(QStringLiteral("bytes"), payload.size());
     const QByteArray header = QJsonDocument(h).toJson(QJsonDocument::Compact);
 
     QByteArray out;
-    out.reserve(3 + header.size() + pcm.size());
+    out.reserve(3 + header.size() + payload.size());
     out.append(char(kProtocolVersion));
     out.append(char((header.size() >> 8) & 0xFF));
     out.append(char(header.size() & 0xFF));
     out.append(header);
-    out.append(pcm);
+    out.append(payload);
     return out;
 }
 
@@ -7604,10 +7614,25 @@ int main(int argc, char *argv[])
                   reason.toUtf8().constData());
         });
     // 语音通话：mic 采集帧 → v1 音频帧发回云端（云端 duplex 单播回发起老师）
+    // 2026-10-21（P1）：先编码成 Opus（640B PCM → ~40B 包，出口带宽降一个数量级）。
+    // 编码失败/未就绪 → **回落裸 PCM**（mime=audio/pcm），绝不能因为编码器问题把语音弄哑。
     QObject::connect(&g_microphone, &Microphone::pcmReady, &app,
         [](const QByteArray &pcm) {
             if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
-            g_ws->sendBinaryMessage(makeAudioFrameBytes(pcm));
+            if (!g_opusEnc.encoderReady())
+                g_opusEnc.initEncoder(16000, 1, 16000);
+            bool opus = false;
+            QByteArray payload = pcm;
+            if (g_opusEnc.encoderReady() && pcm.size() >= 2) {
+                const auto pkt = g_opusEnc.encode(
+                    reinterpret_cast<const int16_t *>(pcm.constData()), pcm.size() / 2);
+                if (!pkt.empty()) {
+                    payload = QByteArray(reinterpret_cast<const char *>(pkt.data()),
+                                         static_cast<int>(pkt.size()));
+                    opus = true;
+                }
+            }
+            g_ws->sendBinaryMessage(makeAudioFrameBytes(payload, opus));
         });
     QObject::connect(&g_microphone, &Microphone::hardStop, &app, [] {
         qInfo("[agent-qt] 🔊 语音通话硬上限到达，学生 mic 自动关闭（安全边界）");
@@ -7785,7 +7810,22 @@ int main(int argc, char *argv[])
             VncBridge::instance().feedDown(payload);
             return;
         }
-        if (mime == QLatin1String("audio/pcm")) {
+        if (mime == QLatin1String("audio/opus") || mime == QLatin1String("audio/pcm")) {
+            // P1（2026-10-21）：Opus 包先解成 PCM（16k/mono/20ms）再播。
+            // audio/pcm 分支是**滚动升级兜底**（旧管理端仍发裸 PCM）——两种都必须能播，
+            // 不能因为对端没升级就变静音。
+            QByteArray pcm = payload;
+            if (mime == QLatin1String("audio/opus")) {
+                if (!g_opusDec.decoderReady()) g_opusDec.initDecoder(16000, 1);
+                if (!g_opusDec.decoderReady()) return;
+                // 5760 = 120ms@16k 上限：对端万一发来非 20ms 包也不会越界
+                const auto out = g_opusDec.decode(
+                    reinterpret_cast<const uint8_t *>(payload.constData()),
+                    payload.size(), 5760);
+                if (out.empty()) return;   // 丢包/坏帧：丢掉这一帧，不阻塞后续
+                pcm = QByteArray(reinterpret_cast<const char *>(out.data()),
+                                 static_cast<int>(out.size() * sizeof(int16_t)));
+            }
             // 语音对讲（设计文档 3.3.6）：老师讲话学生可见（每会话一次，不刷屏）
             if (!g_audioHintShown) {
                 g_audioHintShown = true;
@@ -7798,12 +7838,12 @@ int main(int argc, char *argv[])
                 IslandOverlay::instance()->setExpanded(true);
             }
             if (!g_audioPlayer.isOpen()) g_audioPlayer.open();
-            g_audioPlayer.write(payload);
+            g_audioPlayer.write(pcm);
             // §6.3 语音频谱：喂给灵动岛在**展开态**画 16 条。
             // 2026-10-13 修 bug「频谱显示到窗口去了」：原实现这里 `new SpectrumWidget()`
             // 无 parent 直接 show() ⇒ 桌面上弹出一个独立顶层窗口（挡课件）。
             // 规格 §6.3 是「展开态显示」⇒ 现由岛自己画，不再有独立窗口。
-            IslandOverlay::instance()->feedSpectrum(payload);
+            IslandOverlay::instance()->feedSpectrum(pcm);
             return;
         }
         if (mime == QLatin1String("image/jpeg")) {
