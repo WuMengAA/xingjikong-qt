@@ -280,13 +280,13 @@ public:
         // 多班墙刚打开、或某台设备还没到第一帧时，thumbFrame() 返回的是**空 QImage**。
         // 直接把空图交回去，Qt 会在日志里刷 "Failed to get image from provider"，
         // 一条设备一条，几十台机器就是几十行 —— 看起来像崩了，其实只是"还没帧"。
-        // 这里补一张占位图（尺寸优先用请求尺寸，没有就 16:10 的小图），
-        // 既消掉警告，也让格子里有块稳定的底色而不是忽隐忽现。
+        // 这里补一张**透明占位图**（尺寸优先用请求尺寸，没有就 16:10 的小图）：
+        // 既消掉警告，又让卡片/画面透出自己底下的背景色，而非近黑色块（待点单 #17 黑卡）。
         if (img.isNull()) {
             QSize ph = requested.isValid() && !requested.isEmpty() ? requested : QSize(160, 100);
             if (ph.width() <= 0 || ph.height() <= 0) ph = QSize(160, 100);
-            QImage placeholder(ph, QImage::Format_RGB32);
-            placeholder.fill(QColor(0x14, 0x14, 0x14));
+            QImage placeholder(ph, QImage::Format_ARGB32);
+            placeholder.fill(Qt::transparent);
             if (size) *size = ph;
             return placeholder;
         }

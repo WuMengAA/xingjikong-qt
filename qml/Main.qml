@@ -88,7 +88,7 @@ ApplicationWindow {
     readonly property var th: darkMode ? darkTh : lightTh
 
     // 界面自身的状态（只跟显示有关的东西）
-    property int page: 6                 // [TEMP-FT] 功能测试临时初始页，测完改回 1
+    property int page: 1
 
     // 2026-10-08 修复「选中设备却不在带画面页 → 无限拉流」：
     // 切到其它页就退订当前设备画面 / 多班缩略图墙，云端按订阅发帧，退订即停流。
