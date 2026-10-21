@@ -927,6 +927,7 @@ private:
     // ── 语音对讲（2026-10-07）──
     AudioCapture *m_audioCapture = nullptr;   // 麦克风采集（懒创建）
     bool m_speaking = false;                  // 当前是否在讲话
+    qint64 m_voiceSeq = 0;                    // 上行二进制帧序号（语音/广播共用，单调递增）
     QString m_speakError;
     QTimer *m_speakLimit = nullptr;           // 讲话时长上限（到点自动停）
     int m_speakMaxMs = 3 * 60 * 1000;         // 讲话最长时长（默认 3 分钟，STE_MAX_SPEAK_MS 可覆盖）

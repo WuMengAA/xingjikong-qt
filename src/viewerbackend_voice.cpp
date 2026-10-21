@@ -19,11 +19,40 @@
 #include "audio_playback.h"  // B6 播放（完整类型：m_audioPlayback->stop()）
 
 #include <QBuffer>           // 屏幕广播抓屏 → JPEG
+#include <QDateTime>         // makeBinaryFrame 时间戳
 #include <QGuiApplication>
+#include <QJsonDocument>     // 上行二进制帧头（与云端 protocol.js makeFrame 同格式）
 #include <QPixmap>
 #include <QScreen>
 #include <QTimer>
 #include <QWebSocket>        // startBroadcast 里读 m_ws->state()
+
+// ── 上行二进制帧构造（2026-10-21 · 协议对称化）──────────────────────────────
+// 与云端 protocol.js makeFrame 同格式：[1B ver=1][2B 大端 headerLen][header JSON][payload]
+// header: {v,type:"frame",uid,seq,ts,mime,bytes}。语音/屏幕广播统一走这条，
+// 云端按 header.mime 路由（audio/pcm → 学生端；image/jpeg → 屏幕广播），
+// 不再靠"裸帧 + 会话态推断"——与端侧协议范式对称、向后兼容旧管理端裸帧兜底。
+static QByteArray makeBinaryFrame(const QString &uid, qint64 seq,
+                                  const QString &mime, const QByteArray &payload)
+{
+    QJsonObject h;
+    h[QStringLiteral("v")] = 1;
+    h[QStringLiteral("type")] = QStringLiteral("frame");
+    h[QStringLiteral("uid")] = uid;
+    h[QStringLiteral("seq")] = seq;
+    h[QStringLiteral("ts")] = QDateTime::currentMSecsSinceEpoch();
+    h[QStringLiteral("mime")] = mime;
+    h[QStringLiteral("bytes")] = payload.size();
+    const QByteArray header = QJsonDocument(h).toJson(QJsonDocument::Compact);
+    QByteArray frame;
+    frame.reserve(3 + header.size() + payload.size());
+    frame.append(char(1));
+    frame.append(char((header.size() >> 8) & 0xFF));
+    frame.append(char(header.size() & 0xFF));
+    frame.append(header);
+    frame.append(payload);
+    return frame;
+}
 
 #if defined(Q_OS_ANDROID)
 #include <QJniObject>
@@ -139,10 +168,12 @@ bool ViewerBackend::startSpeakingCapture()
     //    及其子类只能在所属线程使用，每 20ms 跨线程直调 sendBinaryMessage()/state() 是数据竞争 + UB：
     //    轻则内部发送缓冲与状态机被并发破坏、帧错乱，重则断言或访问冲突崩溃。
     //    改成投递回主线程再发（帧只有 640B，队列开销可忽略）。
+    // 2026-10-21：裸 PCM 改为带 mime 的 v1 二进制帧（上行协议对称化），云端按 header.mime 路由。
     m_audioCapture->onFrame = [this](const QByteArray &pcm) {
         QMetaObject::invokeMethod(this, [this, pcm] {
             if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState) return;
-            m_ws->sendBinaryMessage(pcm); // 原始 PCM 帧（云端 parseFrame 兼容，mime 由会话推断）
+            m_ws->sendBinaryMessage(
+                makeBinaryFrame(QString(), ++m_voiceSeq, QStringLiteral("audio/pcm"), pcm));
         }, Qt::QueuedConnection);
     };
     // 采集中途出错也要把状态收干净：只把 m_speaking 置 false 而不发 audio.stop，
@@ -240,7 +271,11 @@ bool ViewerBackend::startBroadcast()
             QByteArray jpg;
             QBuffer buf(&jpg);
             buf.open(QIODevice::WriteOnly);
-            if (pm.save(&buf, "JPG", 70)) m_ws->sendBinaryMessage(jpg);
+            // 2026-10-21：裸 JPEG 改为带 mime 的 v1 二进制帧（上行协议对称化），
+            // 云端按 header.mime=image/jpeg 路由到屏幕广播。
+            if (pm.save(&buf, "JPG", 70))
+                m_ws->sendBinaryMessage(
+                    makeBinaryFrame(QString(), ++m_voiceSeq, QStringLiteral("image/jpeg"), jpg));
         });
     }
     m_bcastTimer->start();

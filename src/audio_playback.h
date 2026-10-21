@@ -2,7 +2,8 @@
 // 管理端语音通话播放器（2026-10-09 · 语音通话功能设计 §4.3 独立组件）
 //
 // 用途：学生端回传的 audio/pcm（16kHz 单声道 16bit）在管理端播放。
-// 与被控端 AudioPlayer 同族（winmm waveOut），但独立实现、不依赖被控端代码。
+// 桌面：与被控端 AudioPlayer 同族（winmm waveOut），独立实现、不依赖被控端代码。
+// Android（手机 App 管理端）：无 waveOut，改用 NDK AAudio OUTPUT 流（详见 .cpp 内联分支）。
 //
 // 设计：
 //   · 懒打开：只有收到第一帧才 open 设备（无通话时不占音频设备）
@@ -15,7 +16,8 @@
 
 #include <QObject>
 #include <QByteArray>
-// 2026-10-11：Android target 手机 App 无 waveOut，stub 实现（audio_playback_android.cpp）
+// 2026-10-21：Android target 手机 App 无 waveOut，改 NDK AAudio OUTPUT 流真实现
+// （实现内联在 audio_playback.cpp 的 #ifdef Q_OS_ANDROID 分支，与 audio_capture_android.cpp 同源范式）。
 #ifndef Q_OS_ANDROID
 #include <windows.h>
 #endif
