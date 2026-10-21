@@ -121,6 +121,14 @@ endif()
 find_package(Qt6 6.12 REQUIRED COMPONENTS Core CorePrivate Gui Quick QuickControls2 Network WebSockets Widgets Svg)
 qt_standard_project_setup(REQUIRES 6.12)
 
+# ── libopus（P1 语音对讲，静态链接）2026-10-21 ────────────────────────────
+# 源码 vendoring 在仓库根 third_party/opus（BSD）。关 shared/tests/programs，
+# 只编静态库 opus 供本目标链接（Windows/Android 同源）。
+set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus ${CMAKE_BINARY_DIR}/_opus)
+
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
 # 2026-10-11：Android target 手机 App 并入 —— 桌面临时专属件（app.rc / winmm 采集 /
 # 单实例守卫）条件化。桌面照旧，Android 用 stub/跳过。
@@ -324,7 +332,7 @@ add_custom_target(viewer_qml_sync ALL
 # 让 exe 依赖它：保证任何一次构建（包括 ninja 默认目标）都先同步过 QML。
 add_dependencies(viewer-qt viewer_qml_sync)
 
-target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg)
+target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg opus)
 
 # ── OpenSSL 运行时 DLL 拷进 build/（2026-10-20 恢复 720bd8d 的规则）──────────
 # 历史：0.6.33 的 `720bd8d` 加过这条规则（作者当时的实证：干净重建后 makensis 报
