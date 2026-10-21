@@ -1052,10 +1052,25 @@ export function setAudioBroadcasting(on, teacherWs = null) {
  * @param {number} seq 帧序号（日志用）
  * @returns {{hits:number, bytes:number}}
  */
+// 背压护栏节流（同 RELAY_BUFFER_MAX，2026-10-21）：被控端/管理端消费不过来时，
+// 继续塞会把帧全积在云端内存、延迟只增不减。语音是实时流，丢这一帧比攒到 OOM 强。
+let audioBpWarnAt = 0;
+let audioUplinkBpWarnAt = 0;
+
 export function broadcastAudioToAgents(buf, mime, seq) {
   let hits = 0;
   for (const d of devices.values()) {
     if (!d.ws || d.ws.readyState !== 1) continue;
+    // 背压护栏：某台被控端消费不过来时跳过该设备，不阻塞其他设备、不报错刷屏（10s 节流告警）。
+    if (d.ws.bufferedAmount > RELAY_BUFFER_MAX) {
+      const now = Date.now();
+      if (now - audioBpWarnAt > 10000) {
+        audioBpWarnAt = now;
+        pushEvent('warn', '被控端消费不过来，跳过该设备语音帧（背压）',
+          { uid: d.uid, buffered: d.ws.bufferedAmount, limit: RELAY_BUFFER_MAX });
+      }
+      continue;
+    }
     // 复用 v1 二进制帧格式（makeFrame 用 uid 标记来源）：audio 帧 uid 用虚拟
     // "audio:<seq>" 来源（agent 端按 mime=audio/pcm 区分语音帧与画面帧，不读 uid）。
     try {
@@ -1080,6 +1095,16 @@ export function duplexActive() { return g_audioBroadcasting && g_audioTeacherWs 
 export function sendAudioToTeacher(buf, seq, fromUid) {
   if (!duplexActive() || !g_audioTeacherWs || g_audioTeacherWs.readyState !== 1) {
     pushEvent('warn', '学生上行音频被丢弃（无 duplex 会话或发起者已离线）', { from: fromUid });
+    return { hits: 0 };
+  }
+  // 背压护栏：管理端消费不过来时跳过这一帧，避免云端积压（10s 节流告警）。
+  if (g_audioTeacherWs.bufferedAmount > RELAY_BUFFER_MAX) {
+    const now = Date.now();
+    if (now - audioUplinkBpWarnAt > 10000) {
+      audioUplinkBpWarnAt = now;
+      pushEvent('warn', '管理端消费不过来，跳过学生上行语音帧（背压）',
+        { from: fromUid, buffered: g_audioTeacherWs.bufferedAmount, limit: RELAY_BUFFER_MAX });
+    }
     return { hits: 0 };
   }
   try {
