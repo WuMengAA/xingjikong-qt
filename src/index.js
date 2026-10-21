@@ -1875,8 +1875,9 @@ viewerWss.on('connection', (ws) => {
       // ── 远控统一 A：vnc-data 帧 → 目标设备主 WS（原样信封，云端只按 uid 中继）──
       // 权限与「订阅画面」同一口径：看得到这台才能控它。语音/广播的裸字节走
       // parseAnyFrame 的 legacy 分支（header=null），不会误进这条。
+      let f = null;
       if (authed) {
-        const f = parseAnyFrame(buf);
+        f = parseAnyFrame(buf);
         if (f.ok && f.header?.type === 'vnc-data') {
           const uid = String(f.header.uid ?? '').trim();
           if (!uid) { pushEvent('warn', 'vnc-data 帧缺 uid，已丢弃', { bytes: buf.length }); return; }
@@ -1893,6 +1894,20 @@ viewerWss.on('connection', (ws) => {
           return;
         }
       }
+      // 2026-10-21 · 上行协议对称化：管理端改发带 mime 的 v1 帧，云端按 header.mime 路由，
+      // 不再依赖 isAudioBroadcasting()/isScreenBroadcasting() 会话态推断（更健壮、解耦）。
+      // 剥掉 v1 头后把裸 PCM/JPEG 交给 broadcast*ToAgents（它再 wrap 成带 mime 的帧下发被控端）。
+      if (f && f.ok && f.header && f.header.mime) {
+        if (f.header.mime === 'audio/pcm') {
+          broadcastAudioToAgents(f.payload, 'audio/pcm', ++audioSeq);
+          return;
+        }
+        if (f.header.mime === 'image/jpeg') {
+          broadcastScreenToAgents(f.payload, ++audioSeq);
+          return;
+        }
+      }
+      // 向后兼容：旧管理端仍发裸帧（parseAnyFrame 回 header=null），靠会话态推断（legacy 兜底）
       if (authed && isAudioBroadcasting()) {
         broadcastAudioToAgents(buf, 'audio/pcm', ++audioSeq);
         return;
