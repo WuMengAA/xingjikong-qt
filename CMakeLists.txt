@@ -29,6 +29,14 @@ option(STE_USE_LIBVNCSERVER "启用被控端 in-agent VNC Server（需 third_par
 # 声明一致避免"配置阶段两端行为不同"——此前 viewer 声明 6.5、control 无版本声明）。
 find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg Qml Quick QuickWidgets)
 
+# ── libopus（P1 语音对讲，静态链接）2026-10-21 ────────────────────────────
+# 源码 vendoring 在仓库根 third_party/opus（BSD）。关 shared/tests/programs，
+# 只编静态库 opus 供本目标链接，避免拖慢构建。
+set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus ${CMAKE_BINARY_DIR}/_opus)
+
 # ── 版本资源 + 应用图标（2026-10-07 补）────────────────────────────────────
 # 补之前 exe 是「无版本资源的裸 PE」：任务管理器细节页空白、右键属性没有描述、
 # 控制面板卸载项里的版本位显示 0.0.0.0。
@@ -185,7 +193,7 @@ add_executable(stelarith-agent-qt
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
-target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Svg)
+target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Svg opus)
 # 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
 target_link_libraries(stelarith-agent-qt PRIVATE winmm)
 # 2026-10-18：in-agent VNC Server 底层（screen_capture 用 GDI BitBlt/CreateDIBSection；input_inject 用 SendInput）
