@@ -41,8 +41,12 @@ private:
 
     bool m_open = false;
 #ifndef Q_OS_ANDROID
+    // 多缓冲轮转：kSlots 个独立槽，每帧写进一个空闲槽，播完由驱动置 WHDR_DONE 复用。
+    // 与被控端 AudioPlayer 同族同配方（2026-10-13 验证：单缓冲+每帧 Reset 会周期性咔咔）。
+    static constexpr int kSlots = 8;   // 8×20ms≈160ms 抖动余量，够吸收调度/网络抖动
     HWAVEOUT m_waveOut = nullptr;
-    WAVEHDR m_header = {};
-    QByteArray m_buffer;      // waveOut 正在播的缓冲（播放期间必须保持存活）
+    WAVEHDR m_hdrs[kSlots] = {};
+    QByteArray m_bufs[kSlots];         // 每槽独立缓冲（深拷贝进这里，驱动异步读它）
+    int m_nextSlot = 0;                // 下一帧优先尝试的槽（轮转起点）
 #endif
 };

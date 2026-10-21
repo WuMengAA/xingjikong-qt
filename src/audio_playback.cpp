@@ -40,18 +40,13 @@ bool AudioPlayback::openDevice()
 
     if (waveOutOpen(&m_waveOut, WAVE_MAPPER, &fmt, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR)
         return false;
-    // 单缓冲：一帧 640 字节（20ms），写入后 waveOutWrite 异步播放。
-    // ⚠️ Prepare 只做**一次**（与被控端 AudioPlayer 同配方）：每帧都 Prepare 而不 Unprepare
-    //    会累积准备状态、重复 prepare 同一 header 返回 WAVERR_... 且缓冲被反复改指针。
-    m_buffer.resize(640);
-    std::memset(&m_header, 0, sizeof(m_header));
-    m_header.lpData = m_buffer.data();
-    m_header.dwBufferLength = 640;
-    if (waveOutPrepareHeader(m_waveOut, &m_header, sizeof(m_header)) != MMSYSERR_NOERROR) {
-        waveOutClose(m_waveOut);
-        m_waveOut = nullptr;
-        return false;
+    // 多缓冲轮转：每槽独立头 + 独立缓冲；open 时清零，首次 write 才 prepare。
+    // 与被控端 AudioPlayer 同族同配方（2026-10-13 验证过：单缓冲+每帧 Reset 会周期性咔咔）。
+    for (int i = 0; i < kSlots; ++i) {
+        m_bufs[i].clear();
+        std::memset(&m_hdrs[i], 0, sizeof(WAVEHDR));
     }
+    m_nextSlot = 0;
     m_open = true;
     return true;
 }
@@ -61,16 +56,16 @@ void AudioPlayback::closeDevice()
     if (m_open && m_waveOut) {
         // 先停再清：未播完的缓冲交给 close 释放
         waveOutReset(m_waveOut);
-        if (m_header.lpData) {
-            waveOutUnprepareHeader(m_waveOut, &m_header, sizeof(m_header));
-            m_header.lpData = nullptr;
-            m_header.dwBufferLength = 0;
+        for (int i = 0; i < kSlots; ++i) {
+            if (m_hdrs[i].dwFlags & WHDR_PREPARED)
+                waveOutUnprepareHeader(m_waveOut, &m_hdrs[i], sizeof(WAVEHDR));
+            std::memset(&m_hdrs[i], 0, sizeof(WAVEHDR));
+            m_bufs[i].clear();
         }
         waveOutClose(m_waveOut);
         m_waveOut = nullptr;
     }
     m_open = false;
-    m_buffer.clear();
 }
 
 void AudioPlayback::write(const QByteArray &pcm)
@@ -78,30 +73,31 @@ void AudioPlayback::write(const QByteArray &pcm)
     if (pcm.isEmpty()) return;
     if (!openDevice()) return;
 
-    // ⚠️ 2026-10-13 修：header 在 openDevice() 里已经 waveOutPrepareHeader 过。按 winmm 的契约，
-    //    header 一经 Prepare **不允许再改 lpData/dwBufferLength**，且它指向的内存必须活到 Unprepare。
-    //    原来这里 `m_buffer = pcm` 会让 QByteArray detach 到新堆块、丢掉原 640B 块：
-    //      ① 上一帧可能仍在播（waveOutReset **不保证**驱动已归还缓冲）⇒ 潜在 use-after-free；
-    //      ② waveOutWrite 拿到的是**没 Prepare 过**的指针 ⇒ 返回 WAVERR_/INVALPARAM，
-    //         而这行原来**完全不检查返回值** —— 学生回传的语音静默不出声，日志一个字都没有。
-    //    现在：尺寸不变就**往同一块缓冲 memcpy**；尺寸真的变了才 Unprepare→改→重 Prepare。
-    if (m_buffer.size() != pcm.size()) {
-        waveOutUnprepareHeader(m_waveOut, &m_header, sizeof(m_header));
-        m_buffer.resize(pcm.size());
-        m_header.lpData = m_buffer.data();
-        m_header.dwBufferLength = DWORD(m_buffer.size());
-        if (waveOutPrepareHeader(m_waveOut, &m_header, sizeof(m_header)) != MMSYSERR_NOERROR) {
-            qWarning("[audio] waveOutPrepareHeader 失败（帧长变化后重新准备）");
+    // 从轮转起点找**空闲槽**：未 INQUEUE 即「已播完 / 从未用过」。
+    // 找不到空闲槽 = 播放端比音频节奏慢 ⇒ 丢这一帧（语音实时优先，不阻塞、不积压、不砍前一帧）。
+    for (int k = 0; k < kSlots; ++k) {
+        const int idx = (m_nextSlot + k) % kSlots;
+        WAVEHDR &h = m_hdrs[idx];
+        if (h.dwFlags & WHDR_INQUEUE) continue;   // 还在播/排队，跳过
+
+        // 复用已播完的旧头：先解除锁定，再重设并重新 prepare。
+        if (h.dwFlags & WHDR_PREPARED)
+            waveOutUnprepareHeader(m_waveOut, &h, sizeof(WAVEHDR));
+
+        m_bufs[idx] = pcm;                        // 深拷贝（waveOut 异步读这块内存）
+        std::memset(&h, 0, sizeof(WAVEHDR));
+        h.lpData = reinterpret_cast<LPSTR>(m_bufs[idx].data());
+        h.dwBufferLength = static_cast<DWORD>(m_bufs[idx].size());
+
+        if (waveOutPrepareHeader(m_waveOut, &h, sizeof(WAVEHDR)) != MMSYSERR_NOERROR) return;
+        if (waveOutWrite(m_waveOut, &h, sizeof(WAVEHDR)) != MMSYSERR_NOERROR) {
+            waveOutUnprepareHeader(m_waveOut, &h, sizeof(WAVEHDR));
             return;
         }
-    } else {
-        std::memcpy(m_buffer.data(), pcm.constData(), size_t(pcm.size()));
+        m_nextSlot = (idx + 1) % kSlots;
+        return;
     }
-    // ⚠️ 上一帧若还在播（waveOut 慢于音频节奏），先 Reset 掉再写新的 —— 语音实时性优先，
-    //    不攒缓冲（攒了就是越听越延迟）。与被控端 AudioPlayer 同一裁决。
-    waveOutReset(m_waveOut);
-    if (waveOutWrite(m_waveOut, &m_header, sizeof(m_header)) != MMSYSERR_NOERROR)
-        qWarning("[audio] waveOutWrite 失败（缓冲未 Prepare / 设备已关？）");
+    // 全槽在播：丢帧（不砍前一帧、不阻塞主线程）。
 }
 
 void AudioPlayback::stop()
