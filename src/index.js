@@ -1898,8 +1898,14 @@ viewerWss.on('connection', (ws) => {
       // 不再依赖 isAudioBroadcasting()/isScreenBroadcasting() 会话态推断（更健壮、解耦）。
       // 剥掉 v1 头后把裸 PCM/JPEG 交给 broadcast*ToAgents（它再 wrap 成带 mime 的帧下发被控端）。
       if (f && f.ok && f.header && f.header.mime) {
-        if (f.header.mime === 'audio/pcm') {
-          broadcastAudioToAgents(f.payload, 'audio/pcm', ++audioSeq);
+        // 2026-10-21（P1）：audio/opus 与 audio/pcm 同路 fan-out，**mime 原样透传** ——
+        // 云端不做编解码，只按 header.mime 路由；端侧按 mime 决定解不解 Opus。
+        // ⚠️ 仍必须过 isAudioBroadcasting() 闸门：带 mime 的帧是"新信封"，不该因此
+        //   绕过「audio.start 才收、audio.stop 就停」的既有契约（否则老师停讲后
+        //   还在途中的帧会继续广播给全教室）。
+        if ((f.header.mime === 'audio/pcm' || f.header.mime === 'audio/opus')
+            && isAudioBroadcasting()) {
+          broadcastAudioToAgents(f.payload, f.header.mime, ++audioSeq);
           return;
         }
         if (f.header.mime === 'image/jpeg') {
@@ -2451,9 +2457,10 @@ wss.on('connection', (ws) => {
       }
       const seq = f.header?.seq ?? 0;
       // ── 语音通话上行（2026-10-09）：学生 mic 音频帧 → 单播回发起老师 ──
-      // 帧头 mime=audio/pcm 时走 duplex 通道，不走画面帧的 broadcastFrame。
-      if (f.header?.mime === 'audio/pcm') {
-        const r = sendAudioToTeacher(f.payload, seq, uid);
+      // 帧头 mime=audio/* 时走 duplex 通道，不走画面帧的 broadcastFrame。
+      // 2026-10-21（P1）：audio/opus 与 audio/pcm 同路，mime 原样带给管理端（云端不解码）。
+      if (f.header?.mime === 'audio/pcm' || f.header?.mime === 'audio/opus') {
+        const r = sendAudioToTeacher(f.payload, seq, uid, f.header.mime);
         if (r.hits === 0) {
           pushEvent('warn', '学生上行音频未送达（非 duplex 会话）', { uid, bytes: f.payload.length });
         }

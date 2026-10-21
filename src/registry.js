@@ -1092,7 +1092,7 @@ export function broadcastAudioToAgents(buf, mime, seq) {
  * 会话 → 丢弃并留事件流水。
  */
 export function duplexActive() { return g_audioBroadcasting && g_audioTeacherWs != null; }
-export function sendAudioToTeacher(buf, seq, fromUid) {
+export function sendAudioToTeacher(buf, seq, fromUid, mime = 'audio/pcm') {
   if (!duplexActive() || !g_audioTeacherWs || g_audioTeacherWs.readyState !== 1) {
     pushEvent('warn', '学生上行音频被丢弃（无 duplex 会话或发起者已离线）', { from: fromUid });
     return { hits: 0 };
@@ -1108,8 +1108,9 @@ export function sendAudioToTeacher(buf, seq, fromUid) {
     return { hits: 0 };
   }
   try {
-    // 复用 v1 二进制帧格式；来源标记 student:<uid>:<seq>，管理端按 mime=audio/pcm 播放
-    g_audioTeacherWs.send(makeFrame(`student:${fromUid}:${seq}`, seq, 'audio/pcm', buf));
+    // 复用 v1 二进制帧格式；来源标记 student:<uid>:<seq>，管理端按 mime 播放
+    // 2026-10-21（P1）：mime 原样透传（audio/opus 或 audio/pcm），云端只转发不解码。
+    g_audioTeacherWs.send(makeFrame(`student:${fromUid}:${seq}`, seq, mime, buf));
     // 帧级不写事件（同 D1）：学生上行也是 20ms 一帧，逐帧 pushEvent 同样会刷屏。
     g_uplinkStat.frames += 1;
     g_uplinkStat.bytes += buf.length;
