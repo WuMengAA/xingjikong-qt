@@ -6,6 +6,7 @@
 #include "vnc_image_provider.h" // 远控画面 → QML（image://vnc/live）
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
 #include "audio_playback.h"  // B6（2026-10-11）：winmm waveOut 播放学生回传的 audio/pcm
+#include "opus_codec.h"      // 2026-10-21（P1）：Opus 解码（shared/audio，与 agent 同源）
 #include <cmath>             // std::isfinite：拦住 NaN/Inf 坐标（2026-10-11）
 #include <QAbstractSocket>
 #include <QDateTime>
@@ -1425,12 +1426,29 @@ void ViewerBackend::onBinaryMessage(const QByteArray &buf)
             const QJsonDocument hd = QJsonDocument::fromJson(buf.mid(3, hLen));
             if (!hd.isObject()) { logf("[viewer] FAIL 帧头解析失败（非 JSON）"); return; }
             const QJsonObject h = hd.object();
-            // B6（2026-10-11）：语音对讲下行 —— 学生端回传的 audio/pcm 与画面帧同为
+            // B6（2026-10-11）：语音对讲下行 —— 学生端回传的音频与画面帧同为
             // type:"frame"，仅 mime 不同。先按 mime 分流，别再拿 type 一刀切成"非帧丢弃"。
+            // P1（2026-10-21）：新增 audio/opus（Opus 包需先解成 PCM）。
+            //   audio/pcm 分支保留 = 滚动升级兜底（旧被控端仍发裸 PCM），两种都能播。
             const QString mime = h.value(QStringLiteral("mime")).toString();
-            if (mime == QLatin1String("audio/pcm")) {
+            if (mime == QLatin1String("audio/opus") || mime == QLatin1String("audio/pcm")) {
                 if (!m_audioPlayback) m_audioPlayback = new AudioPlayback(this);
-                m_audioPlayback->write(buf.mid(3 + hLen));
+                const QByteArray body = buf.mid(3 + hLen);
+                if (mime == QLatin1String("audio/pcm")) {
+                    m_audioPlayback->write(body);
+                    return;
+                }
+                // Opus 解码：实例是**按连接惰性建**的（成员静态只存一次，成本可忽略）。
+                static OpusCodec s_dec;
+                if (!s_dec.decoderReady()) s_dec.initDecoder(16000, 1);
+                if (!s_dec.decoderReady()) return;
+                // 5760 = 120ms@16k 上限，防对端发来非 20ms 包越界
+                const auto pcm = s_dec.decode(
+                    reinterpret_cast<const uint8_t *>(body.constData()), body.size(), 5760);
+                if (pcm.empty()) return;   // 丢包/坏帧：丢这一帧，不阻塞后续
+                m_audioPlayback->write(QByteArray(
+                    reinterpret_cast<const char *>(pcm.data()),
+                    static_cast<int>(pcm.size() * sizeof(int16_t))));
                 return;
             }
             // 远控：云端下发的 vnc-data 帧 = 被控端 VNC 服务产出的**原始 RFB 字节**。

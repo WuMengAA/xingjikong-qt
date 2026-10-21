@@ -332,6 +332,11 @@ add_custom_target(viewer_qml_sync ALL
 # 让 exe 依赖它：保证任何一次构建（包括 ninja 默认目标）都先同步过 QML。
 add_dependencies(viewer-qt viewer_qml_sync)
 
+# ── 共享语音算法（P1，2026-10-21）：OpusCodec 一份实现，agent/viewer 同源 ──
+# Qt-free 的纯 C++（shared/audio），Windows 与 Android 同一份代码。
+target_sources(viewer-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio/opus_codec.cpp")
+target_include_directories(viewer-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio")
+
 target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg opus)
 
 # ── OpenSSL 运行时 DLL 拷进 build/（2026-10-20 恢复 720bd8d 的规则）──────────

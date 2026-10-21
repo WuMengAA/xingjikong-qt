@@ -17,6 +17,7 @@
 
 #include "audio_capture.h"   // 语音对讲采集（完整类型：m_audioCapture->stopCapture()）
 #include "audio_playback.h"  // B6 播放（完整类型：m_audioPlayback->stop()）
+#include "opus_codec.h"      // 2026-10-21（P1）：语音 Opus 编码（shared/audio，两端同源）
 
 #include <QBuffer>           // 屏幕广播抓屏 → JPEG
 #include <QDateTime>         // makeBinaryFrame 时间戳
@@ -169,11 +170,28 @@ bool ViewerBackend::startSpeakingCapture()
     //    轻则内部发送缓冲与状态机被并发破坏、帧错乱，重则断言或访问冲突崩溃。
     //    改成投递回主线程再发（帧只有 640B，队列开销可忽略）。
     // 2026-10-21：裸 PCM 改为带 mime 的 v1 二进制帧（上行协议对称化），云端按 header.mime 路由。
+    // 2026-10-21（P1）：载荷再换成 Opus 包（mime=audio/opus）。教室 60 台 fan-out 时，
+    //   裸 PCM 是 256kbps/路（≈18Mbps 下行，教室会炸），Opus@16k 约 40B/帧 ≈ 16kbps。
+    //   编码失败/未就绪 → 回落裸 PCM（mime=audio/pcm），绝不因为编码器问题把语音弄哑。
+    static OpusCodec s_enc;   // 老师 mic 上行编码（本 TU 独享，惰性初始化）
     m_audioCapture->onFrame = [this](const QByteArray &pcm) {
         QMetaObject::invokeMethod(this, [this, pcm] {
             if (!m_ws || m_ws->state() != QAbstractSocket::ConnectedState) return;
-            m_ws->sendBinaryMessage(
-                makeBinaryFrame(QString(), ++m_voiceSeq, QStringLiteral("audio/pcm"), pcm));
+            if (!s_enc.encoderReady()) s_enc.initEncoder(16000, 1, 16000);
+            bool opus = false;
+            QByteArray payload = pcm;
+            if (s_enc.encoderReady() && pcm.size() >= 2) {
+                const auto pkt = s_enc.encode(
+                    reinterpret_cast<const int16_t *>(pcm.constData()), pcm.size() / 2);
+                if (!pkt.empty()) {
+                    payload = QByteArray(reinterpret_cast<const char *>(pkt.data()),
+                                         static_cast<int>(pkt.size()));
+                    opus = true;
+                }
+            }
+            m_ws->sendBinaryMessage(makeBinaryFrame(
+                QString(), ++m_voiceSeq,
+                opus ? QStringLiteral("audio/opus") : QStringLiteral("audio/pcm"), payload));
         }, Qt::QueuedConnection);
     };
     // 采集中途出错也要把状态收干净：只把 m_speaking 置 false 而不发 audio.stop，
