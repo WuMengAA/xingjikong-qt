@@ -98,6 +98,28 @@ list(GET _viewer_v 2 _viewer_v2)
 list(GET _viewer_v 3 _viewer_v3)
 set(RC_VERSION_QUAD "${_viewer_v0},${_viewer_v1},${_viewer_v2},${_viewer_v3}")
 
+# ── Android 版本真源（2026-10-22 修）──────────────────────────────────────
+# 血的教训：不设这两个变量时，androiddeployqt 会用 Qt 默认模板把 AndroidManifest 写成
+#   versionCode=1 / versionName=1.0 —— 装到手机上根本看不出是哪一版，且**每次重新
+#   configure/部署都会把手工改过的 manifest 冲回默认值**（我今天就手改了一次，
+#   下一次构建又被冲掉）。Qt 6 认 QT_ANDROID_VERSION_NAME / QT_ANDROID_VERSION_CODE，
+#   在这里从同一个 VIEWER_VERSION 派生，才算真正单一真源。
+if (STE_IS_ANDROID)
+  set(QT_ANDROID_VERSION_NAME "${VIEWER_VERSION}")
+  # versionCode 必须是单调递增的整数（安卓用它判"能不能覆盖安装"）。
+  # 规则：major*1e6 + minor*1e4 + patch*100 + 阶段序号
+  #   0.6.47-rc.2 → 604702；0.6.47 正式版 → 604700。
+  if (VIEWER_STAGE_N STREQUAL "")
+    set(_ste_stage_n 0)
+  else()
+    set(_ste_stage_n "${VIEWER_STAGE_N}")
+  endif()
+  math(EXPR _ste_vc
+       "${_viewer_v0} * 1000000 + ${_viewer_v1} * 10000 + ${_viewer_v2} * 100 + ${_ste_stage_n}")
+  set(QT_ANDROID_VERSION_CODE "${_ste_vc}")
+  message(STATUS "[viewer] Android versionName=${QT_ANDROID_VERSION_NAME} versionCode=${QT_ANDROID_VERSION_CODE}")
+endif()
+
 configure_file(src/app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app.rc" @ONLY)
 # ⚠️ rc.exe 的工作目录是构建目录，.rc 里的 ICON "app.ico" 是相对名 ⇒ 图标先备到这里。
 configure_file(src/app.ico "${CMAKE_CURRENT_BINARY_DIR}/app.ico" COPYONLY)
