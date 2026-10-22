@@ -1,0 +1,328 @@
+{
+  "updated": "2026-10-22",
+  "note": "历史超限台账：白名单内未变胖=允许；再长 1 行=判红；拆完一项就删一项。plan 前缀 P1/P2/P3 是拆分优先级。",
+  "files": {
+    "Stelarith-control-qt/src/island.cpp": {
+      "lines": 2446,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 67,
+      "plan": "[P2] 灵动岛逻辑按状态机/动画/数据三段拆"
+    },
+    "Stelarith-control-qt/src/island.h": {
+      "lines": 563,
+      "limit": 300,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 随 island.cpp 拆，接口按段分文件"
+    },
+    "Stelarith-control-qt/src/main.cpp": {
+      "lines": 8142,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 217,
+      "plan": "[P1] 按指令域搬家：media/ota/devices/ws，只搬不改逻辑"
+    },
+    "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
+      "lines": 870,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 拆会话/混音/回执三段"
+    },
+    "Stelarith-control-qt/src/schedule/profile.h": {
+      "lines": 388,
+      "limit": 300,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 与 viewer 端同源，拆前先同步两端"
+    },
+    "Stelarith-control-qt/src/screen_capture_dxgi.cpp": {
+      "lines": 690,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆 DXGI 初始化/抓帧/错误恢复"
+    },
+    "Stelarith-viewer-qt/src/main.cpp": {
+      "lines": 775,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆 QML 引擎装配与 context 注入"
+    },
+    "Stelarith-viewer-qt/src/schedule/profile.h": {
+      "lines": 388,
+      "limit": 300,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 与 control 端同源，拆前先同步两端"
+    },
+    "Stelarith-viewer-qt/src/schedule/schedule_model.h": {
+      "lines": 445,
+      "limit": 300,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 声明与内联实现分离，实现移入 .cpp"
+    },
+    "Stelarith-viewer-qt/src/updater.cpp": {
+      "lines": 633,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆下载/校验/安装三段"
+    },
+    "Stelarith-viewer-qt/src/viewerbackend.cpp": {
+      "lines": 2702,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 89,
+      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService"
+    },
+    "Stelarith-viewer-qt/src/viewerbackend.h": {
+      "lines": 971,
+      "limit": 300,
+      "qInvokable": 61,
+      "topLevel": 14,
+      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛"
+    },
+    "Stelarith-control-qt/qml/shell/BroadcastScheduleSheet.qml": {
+      "lines": 715,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 拆排期行组件/时间轴/拖拽三段"
+    },
+    "Stelarith-control-qt/qml/shell/pages/AgentSettingsPage.qml": {
+      "lines": 380,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆分组卡为子组件"
+    },
+    "Stelarith-viewer-qt/qml/components/AccountMenu.qml": {
+      "lines": 306,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆菜单项组件"
+    },
+    "Stelarith-viewer-qt/qml/components/CameraBindDialog.qml": {
+      "lines": 226,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆设备行组件"
+    },
+    "Stelarith-viewer-qt/qml/components/CameraCenter.qml": {
+      "lines": 1421,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P1] 拆设备网格/预览/绑定三段"
+    },
+    "Stelarith-viewer-qt/qml/components/CommandPalette.qml": {
+      "lines": 201,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆结果行组件"
+    },
+    "Stelarith-viewer-qt/qml/FilePushDialog.qml": {
+      "lines": 258,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆文件行组件"
+    },
+    "Stelarith-viewer-qt/qml/InteractDialog.qml": {
+      "lines": 417,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 拆点歌/祝福/反馈三个 tab 组件"
+    },
+    "Stelarith-viewer-qt/qml/layout/DesktopConsole.qml": {
+      "lines": 271,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆终端输出区"
+    },
+    "Stelarith-viewer-qt/qml/Main.qml": {
+      "lines": 2263,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P1] 外壳保留，内容区按页抽走（见 §9.1）"
+    },
+    "Stelarith-viewer-qt/qml/MaterialLab.qml": {
+      "lines": 820,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 设计实验室按示例卡片拆"
+    },
+    "Stelarith-viewer-qt/qml/mobile/Main.qml": {
+      "lines": 241,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 与桌面 Main 对齐后抽公共壳"
+    },
+    "Stelarith-viewer-qt/qml/mobile/MobileShell.qml": {
+      "lines": 254,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆底部导航项"
+    },
+    "Stelarith-viewer-qt/qml/mobile/SettingsPage.qml": {
+      "lines": 201,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆设置行组件"
+    },
+    "Stelarith-viewer-qt/qml/NotifyDialog.qml": {
+      "lines": 447,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆预览/参数两段"
+    },
+    "Stelarith-viewer-qt/qml/pages/AdminDashboard.qml": {
+      "lines": 343,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆统计卡为组件"
+    },
+    "Stelarith-viewer-qt/qml/pages/ClassDetailPage.qml": {
+      "lines": 399,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆班级信息/设备列表"
+    },
+    "Stelarith-viewer-qt/qml/pages/ControlPage.qml": {
+      "lines": 913,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P1] 拆设备卡/动作栏/批量操作"
+    },
+    "Stelarith-viewer-qt/qml/pages/SettingsPage.qml": {
+      "lines": 598,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 按设置分组拆子组件"
+    },
+    "Stelarith-viewer-qt/qml/panels/ControlDialog.qml": {
+      "lines": 282,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆控制项组件"
+    },
+    "Stelarith-viewer-qt/qml/schedule/ScheduleEditor.qml": {
+      "lines": 206,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆工具栏"
+    },
+    "Stelarith-viewer-qt/qml/schedule/ScheduleGrid.qml": {
+      "lines": 221,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆单元格组件"
+    },
+    "Stelarith-viewer-qt/qml/schedule/SubjectManager.qml": {
+      "lines": 201,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆科目行"
+    },
+    "Stelarith-viewer-qt/qml/schedule/TimeAxisBlock.qml": {
+      "lines": 212,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆刻度/区块"
+    },
+    "Stelarith-viewer-qt/qml/ScheduleDialog.qml": {
+      "lines": 298,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆参数区"
+    },
+    "Stelarith-viewer-qt/qml/shell/MainWindow.qml": {
+      "lines": 710,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 骨架壳：拆 Sidebar/TopBar/StatusBar"
+    },
+    "Stelarith-viewer-qt/qml/shell/SideSheet.qml": {
+      "lines": 289,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆抽屉内容槽"
+    },
+    "Stelarith-viewer-qt/qml/SoftwareDialog.qml": {
+      "lines": 515,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆软件行组件"
+    },
+    "Stelarith-viewer-qt/qml/TerminalDialog.qml": {
+      "lines": 252,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆输出/输入区"
+    },
+    "Stelarith-shared-qml/island/IslandRoot.qml": {
+      "lines": 3095,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P1] 灵动岛单一真源：拆状态层/动画层/内容层（两端同源，改前先同步）"
+    },
+    "Stelarith-shared-qml/island/StateList.qml": {
+      "lines": 214,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆状态行组件"
+    },
+    "Stelarith-shared-qml/island/WhaleMascot.qml": {
+      "lines": 253,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] 拆动画帧与路径数据"
+    },
+    "Stelarith-cloud/src/index.js": {
+      "lines": 2705,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact"
+    },
+    "Stelarith-cloud/src/registry.js": {
+      "lines": 1190,
+      "limit": 600,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 拆注册/心跳/清理三段"
+    }
+  }
+}

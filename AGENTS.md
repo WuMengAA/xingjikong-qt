@@ -285,3 +285,113 @@ ls -t <另一仓>/src | head -3       # 或看 mtime
   整页崩（2026-10-21 事故，见 TopBar.qml 注释）——**改完必须真跑截图**。
 - 只改 QML 不改 C++ 时：`viewer_qml_sync` / `agent_qml_sync` 同步 build/qml，
   否则跑的是旧件。
+
+---
+
+## 10. 工程架构红线（2026-10-22 立 · 用户点单《全局统一设计规范》）
+
+> **适用范围**：所有在本目录写 C++ / QML / 云端 JS 的 AI 会话。
+> **与 §9 的分工**：**§9 管"界面长什么样"，§10 管"代码怎么组织"**。
+> 两者冲突时——**样式问题听 §9，结构问题听 §10**。
+>
+> **落地前提（先看这段，别重建轮子）**：外部规范里要求新建的东西，本项目**大半已有唯一真源**：
+> QML 模块化引用（`import "components"` 等，见 10.3）**已全面落地**；
+> 组件库（AppButton/AppCard/AppDialog）**已映射到 `Md3*` 单一真源**（见 §9.3）。
+> **在 §10 框架下新增能力 = 扩充既有真源，不是另起一套。两份真源必然漂移。**
+
+### 10.1 命名表（照抄，不许自由发挥）
+
+| 类型 | 风格 | 本项目实测 | 处置 |
+|---|---|---|---|
+| C++ 类名 | PascalCase | ✅ 已遵守（`VncClient` / `ScheduleModel` / `FileDialogs`） | 维持 |
+| C++ **文件名** | PascalCase | ✗ 历史大量 snake_case / 全小写（`screen_capture.cpp`、`edge_tts.cpp`、`viewerbackend.cpp`、`vnc_client.cpp`） | **新文件一律 PascalCase 且与类名一致；老文件不重命名**——重命名会切断 git 历史与 blame，收益不抵成本 |
+| C++ 变量 / 函数 | camelCase | ✅ 已遵守（`stelarithHideChildConsole`、`isPlayAllowedNow`） | 维持 |
+| C++ 成员变量 | `m_` 前缀 | ✅ 已遵守 | 维持 |
+| QML 组件文件 | PascalCase | ✅ 已遵守（`Md3Card.qml` / `Md3Chip.qml`） | 维持 |
+| QML 页面 | PascalCase + `Page` | ✅ 已遵守（`ControlPage` / `AgentSettingsPage`） | 维持 |
+| QML 属性 / 函数 | camelCase | ✅ 已遵守 | 维持 |
+| 云端路由 | kebab-case | ✅ 已遵守（`/api/device/activate`、`/api/interact/song-requests`） | 维持 |
+
+### 10.2 目录按职能归档（已建雏形，继续往里搬）
+
+现状：`Stelarith-control-qt/src/` 已有 `modules/`（插件模块）、`plugin/`（SDK 宿主）、`schedule/`（课表）三个职能目录；
+**但主体（ws 客户端 / ffmpeg 媒体 / OTA / VNC）仍全部堆在 `main.cpp` 一个文件里**。
+
+- 新代码**必须**进职能目录（`src/<domain>/xxx.{h,cpp}`），不许再往根目录或 `main.cpp` 里加文件。
+- 拆 `main.cpp` 的原则（见 10.8）：**搬家不改逻辑**——每搬一个域，构建 + 离屏自检绿灯 + 单独提交。
+
+### 10.3 QML 引用：已模块化，禁止退回相对路径
+
+**现状：全库已用"目录即模块"**——`main.cpp` 里 `addImportPath` 注册后，任意深度的 QML 直接写
+`import "components"` / `import "components/md3"` / `import "island"` / `import "schedule"` / `import "pages"`。
+全库最深引用仅 **2 跳**（`../../components`），**没有任何 `../../../` 灾难**。
+
+- ✅ 继续用目录导入。禁写三级以上相对路径；见到有人写 `../../../` 直接打回。
+- 组件真源只有 **shared-qml 构建期拷入的 `qml/components/`** 一处，**禁止新建第二个组件目录**。
+
+### 10.4 C++ 前向声明（改头文件不再引发全量重编译）
+
+- **头文件里只要能用指针 / 引用 / 值参声明解决，就必须 `class Foo;` 前向声明，禁止 `#include "Foo.h"`。**
+- `#include "Foo.h"` 只允许出现在 `.cpp` 里。
+- 例外：继承（`class A : public B`）、模板实例化、inline 函数体内用到成员——这三样必须 include。
+- 现状：viewer 侧已有 29 处前向声明，但**未成文、靠自觉**；本条生效后按此执行。
+
+### 10.5 文件规模红线（有门禁，不是口号）
+
+| 类型 | 红线 | 来源 |
+|---|---|---|
+| `.h` | 300 行 | 规范 |
+| `.cpp` | 600 行 | 规范 |
+| `.qml` | 200 行 | 规范 |
+| `.js` / `.mjs` | 600 行 | 本项目自定（规范未覆盖云端） |
+
+**门禁**：`node Stelarith-shared-qml/scripts/test-file-size.mjs`
+（本机安全策略偶会拦 node 直跑 —— 被拦时用受管 Python `subprocess` 包装，同 `publish-release` 的既定做法）
+
+三段式判定，**不是一刀切判红**（一刀切会让门禁第一天就全红，结局必然是被关掉）：
+
+1. 白名单内 + 行数**没变胖** → warn，允许存在；
+2. 白名单内 + **比登记时还长了 1 行** → **error**（烂地基上不许再叠叠乐）；
+3. 白名单外 + 超线 → **error**（新代码一律从严）。
+
+白名单 = 拆分台账 `Stelarith-shared-qml/scripts/fixtures/oversize-legacy.json`（2026-10-22 登记 **46 项**，
+每项带 `plan` 与 P1/P2/P3 优先级）。**拆完一项就从台账里删一项**——台账只许变短，不许变长。
+
+### 10.6 禁上帝类
+
+出现下列任一信号即为上帝类，**必须按业务拆**（`ClassService` / `DeviceService` / `AudioService` 这种按域拆，
+不是按"helper / util / manager"这种横切词拆）：
+
+- 单文件 `Q_INVOKABLE` > 30，或顶层定义（函数/类/命名空间）> 60。
+
+**已挂号（白名单内，按 P1 优先拆）**：
+
+| 文件 | 信号 |
+|---|---|
+| `Stelarith-control-qt/src/main.cpp` | 8142 行 / 217 个顶层定义 |
+| `Stelarith-viewer-qt/src/viewerbackend.{h,cpp}` | 971 行头文件 / 61 个 `Q_INVOKABLE` |
+| `Stelarith-control-qt/src/island.cpp` | 2446 行 / 67 个顶层定义 |
+| `Stelarith-shared-qml/island/IslandRoot.qml` | 3095 行（两端同源，拆前先同步） |
+
+### 10.7 数据契约：C++ 喂给 QML 的列表必须强类型
+
+- **列表数据一律 `QAbstractListModel` / `QAbstractTableModel` 子类 + `roleNames()`，
+  严禁把 `QVariantMap` / `QJsonObject` / `QVariantList` 当模型传给 QML。**
+- 现状（2026-10-22 实测）：`control-qt` **0 个 Model**，`main.cpp` 里 **108 处** `QVariantMap`/`QJsonObject` 直喂 QML；
+  `viewer` 全端 138 个 `Q_INVOKABLE`。**这是当前最疼的一条**——QML 侧无类型、无补全、无编译期检查，
+  改一个字段名要全库猜哪里在读。
+- **正解样板（照抄它）**：`Stelarith-viewer-qt/src/schedule/{schedule,subject,timeslot}_model.h`
+  —— 它们就是这个规范第 5 条要求的形态，已经跑在产线上。
+- 迁移顺序：从**设备清单**这一个最高频列表开始，新旧字段双轨过渡，不一次性切。
+
+### 10.8 破局路线（大动作等点单，不许擅自开工）
+
+| 步 | 内容 | 状态 |
+|---|---|---|
+| 0 | 立规矩（§10 + 规模门禁 + 46 项台账） | ✅ **已完成（2026-10-22）** |
+| 1 | 拆 `main.cpp`：按指令域搬家（media / ota / devices / ws），只搬不改逻辑，每域一提交 | 待点单 |
+| 2 | 设备清单 `QVariantMap` → `QAbstractListModel`，双轨过渡 | 待点单 |
+| 3 | `viewerbackend` 按业务拆 Service；`Main.qml` / `CameraCenter.qml` 抽子组件 | 待点单 |
+
+**纪律**：第 1/2/3 步都是结构性改动，**开工前必须拿到明确点单**（哪个域、哪个文件、要不要同步发版）。
+自己顺手发现的问题只登记、只上报，不动手。
