@@ -14,3 +14,7 @@ data/
 *.bak
 _archive/
 .probe/
+# C++ compareVersion 抽离编译探针（scripts/compare-version-cpp/run-probe.py）的编译产物
+scripts/compare-version-cpp/_build/
+# 云端常驻进程 pid（run-cloud 写的运行态文件，别跟着误提交）
+callback.pid
