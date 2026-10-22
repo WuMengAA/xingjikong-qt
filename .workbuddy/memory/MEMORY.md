@@ -5,7 +5,7 @@
 - 裁决序：**生产事故 > 用户点单 > 已就绪未接线 > 战略**。属实 bug 直接修并同轮闭环。
 - **只改三工程** {cloud,control-qt,viewer-qt}；`D:\Stelarith\` 同名三份是 bare 远端（outer）只 push；meta 无 remote。
 - **顺带发现 ≠ 点名重点**：只报清单等点单；复制只 cp 不 mv；取证避让：不跑被控端/不动桌面。
-- 部署到生产安装目录；工作区只编译（隔离预览例外）。提交路径限定（永不 -A）；探针 `scripts/_*.py`/`_*.mjs` 不入库。
+- 部署到生产安装目录；工作区只编译（隔离预览例外）。提交路径限定（永不 -A）；探针不入库。
 
 ## 1 部署 / 发版
 - 生产真源 `C:\Program Files\Stelarith\`（guard 每 10min；互斥体 Global\StelarithAgentQt_Singleton）⇒ **换生产=换 exe+qml 整目录**。SOP：停任务→杀进程→改名备份→拷件→sha256→Start；装机按字节核对不看版本号。
