@@ -72,6 +72,17 @@ class SmtcMonitor : public QObject
     // 最近一次失败原因（初始化/轮询异常），正常情况下是空串。
     Q_PROPERTY(QString lastError READ lastError NOTIFY changed)
 
+    // ── 控制能力位（2026-10-22 加）─────────────────────────────
+    // 这些**不是**我们决定的，是播放器自己声明的。网易云/QQ音乐/Edge 各不相同，
+    // 而且同一播放器在"暂停中 / 无歌曲 / 播广告"时也会变。
+    // ⚠️ UI 必须按这些位禁用按钮，不要假设"是播放器就能暂停"。
+    //    有些播放器只上报元数据、完全不响应控制（canPause=false）。
+    Q_PROPERTY(bool canPlay         READ canPlay         NOTIFY changed)
+    Q_PROPERTY(bool canPause        READ canPause        NOTIFY changed)
+    Q_PROPERTY(bool canNext         READ canNext         NOTIFY changed)
+    Q_PROPERTY(bool canPrevious     READ canPrevious     NOTIFY changed)
+    Q_PROPERTY(bool canSeek         READ canSeek         NOTIFY changed)
+
 public:
     static SmtcMonitor *instance();
 
@@ -92,6 +103,11 @@ public:
         qint64  posMs = 0;
         qint64  durMs = 0;
         QString coverPath;   // 本地路径；空 = 本首没封面 / 没换歌
+        bool    canPlay = false;
+        bool    canPause = false;
+        bool    canNext = false;
+        bool    canPrevious = false;
+        bool    canSeek = false;
     };
 
     // 幂等：重复调 start() 不会起第二条线程。
@@ -111,6 +127,23 @@ public:
     QString coverPath() const;
     int     coverRevision() const;
     QString lastError() const;
+    bool    canPlay() const;
+    bool    canPause() const;
+    bool    canNext() const;
+    bool    canPrevious() const;
+    bool    canSeek() const;
+
+    // ── 控制（2026-10-22 加）─────────────────────────────────
+    // 全部**异步**：只把命令丢进工作线程的命令队列就返回，绝不在 UI 线程阻塞。
+    // 结果不直接返回 —— 执行完工作线程会立刻重采一次，UI 靠 playing/positionMs 变化感知。
+    // ⚠️ 这是**媒体键语义**，不是"播放指定歌曲"。SMTC 没有"放这首"的接口，
+    //    要指定内容只能走各播放器自己的协议（网易云是 orpheus://，见 SmtcLauncher）。
+    Q_INVOKABLE void play();
+    Q_INVOKABLE void pause();
+    Q_INVOKABLE void togglePlayPause();   // 按当前 playing 决定 play/pause
+    Q_INVOKABLE void next();
+    Q_INVOKABLE void previous();
+    Q_INVOKABLE void seek(qint64 ms);
 
     // 立刻醒一次工作线程（换歌/切播放器后想让 UI 尽快跟上时用）。
     // 只置标志，不做任何阻塞操作 —— 从 UI 线程调是安全的。
@@ -143,6 +176,11 @@ private:
     qint64  m_durationMs = 0;
     QString m_coverPath;   // 本地文件路径（非 URL），对外 getter 再转 file://
     int     m_coverRevision = 0;
+    bool    m_canPlay = false;
+    bool    m_canPause = false;
+    bool    m_canNext = false;
+    bool    m_canPrevious = false;
+    bool    m_canSeek = false;
     bool    m_quitHooked = false;   // aboutToQuit 只连一次（见 start() 里的说明）
 };
 

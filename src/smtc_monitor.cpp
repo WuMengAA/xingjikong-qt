@@ -21,6 +21,7 @@
 #include <QByteArray>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -33,6 +34,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <thread>
 
@@ -131,11 +133,24 @@ struct SmtcMonitor::Impl
     QString lastCoverKey;
     QString coverFilePath;
 
+    // ── 控制命令队列（2026-10-22 加）──────────────────────────
+    // UI 线程只往这里塞命令，worker 线程负责真正调 WinRT。
+    // 为什么不做成"UI 线程直接调 session 方法"：session 句柄归 worker 独占，
+    // 跨线程用 COM 对象得多一层 marshal，而且 Try*Async().get() 会阻塞 UI。
+    enum class Cmd { Play, Pause, Toggle, Next, Prev, Seek };
+    struct CmdItem { Cmd kind; qint64 arg = 0; };
+    std::mutex cmdMu;
+    std::deque<CmdItem> cmdQ;
+
 #if defined(_WIN32)
     winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager mgr{ nullptr };
+    // 上一轮选中的会话。命令打在它身上 —— 保留跨轮是安全的（COM 引用计数）。
+    winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession curSession{ nullptr };
 #endif
 
     Snapshot poll();
+    void drainCommands();
+    void post(Cmd kind, qint64 arg);   // UI 线程调用
     void runLoop();
 };
 
@@ -218,8 +233,10 @@ SmtcMonitor::Snapshot SmtcMonitor::Impl::poll()
             session = mgr.GetCurrentSession();
         if (!session) {
             lastCoverKey.clear();   // 没有会话 → 下次出现时重新读封面
+            curSession = nullptr;   // 命令队列打在旧句柄上是危险的，一起清掉
             return s;               // active=false
         }
+        curSession = session;       // 供 drainCommands() 使用
 
         s.active = true;
         s.appId = hstr(session.SourceAppUserModelId());
@@ -228,6 +245,15 @@ SmtcMonitor::Snapshot SmtcMonitor::Impl::poll()
         const auto info = session.GetPlaybackInfo();
         s.playing = anyPlaying
                     || info.PlaybackStatus() == wmc::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+
+        // 能力位：播放器自己声明的。有的播放器什么都不支持，UI 得据此禁用按钮。
+        // Controls() 返回的是**值类型 struct**（不是指针），不需要判空。
+        const auto ctl = info.Controls();
+        s.canPlay     = ctl.IsPlayEnabled();
+        s.canPause    = ctl.IsPauseEnabled();
+        s.canNext     = ctl.IsNextEnabled();
+        s.canPrevious = ctl.IsPreviousEnabled();
+        s.canSeek     = ctl.IsPlaybackPositionEnabled();
 
         const auto tl = session.GetTimelineProperties();
         s.posMs = qMax<qint64>(0, msOf(tl.Position()));
@@ -273,6 +299,55 @@ SmtcMonitor::Snapshot SmtcMonitor::Impl::poll()
     return s;
 }
 
+// 执行 UI 线程排进来的控制命令（只在 worker 线程调）。
+// 用 curSession（上一轮 poll() 选的），命令执行完由下一轮 poll 把新状态推回 UI。
+void SmtcMonitor::Impl::drainCommands()
+{
+    std::deque<CmdItem> batch;
+    {
+        std::lock_guard<std::mutex> lk(cmdMu);
+        if (cmdQ.empty())
+            return;
+        batch.swap(cmdQ);
+    }
+    if (!curSession) {
+        qWarning("[smtc] 控制命令被丢弃：当前没有可用会话");
+        return;
+    }
+
+    for (const auto &c : batch) {
+        try {
+            bool ok = false;
+            switch (c.kind) {
+            case Cmd::Play:   ok = curSession.TryPlayAsync().get(); break;
+            case Cmd::Pause:  ok = curSession.TryPauseAsync().get(); break;
+            case Cmd::Next:   ok = curSession.TrySkipNextAsync().get(); break;
+            case Cmd::Prev:   ok = curSession.TrySkipPreviousAsync().get(); break;
+            case Cmd::Seek:
+                // TryChangePlaybackPositionAsync 的单位是 100ns，不是毫秒
+                ok = curSession.TryChangePlaybackPositionAsync(c.arg * 10000).get();
+                break;
+            case Cmd::Toggle: {
+                const auto st = curSession.GetPlaybackInfo().PlaybackStatus();
+                ok = (st == wmc::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing)
+                         ? curSession.TryPauseAsync().get()
+                         : curSession.TryPlayAsync().get();
+                break;
+            }
+            }
+            // 返回 false = 播放器拒绝（能力位声明了但实现没接，很常见）。
+            // **必须记日志**：否则表现是"点了没反应"，排障时无从下手。
+            if (!ok)
+                qWarning("[smtc] 控制命令 %d 被播放器拒绝（返回 false）", int(c.kind));
+        } catch (const winrt::hresult_error &e) {
+            qWarning("[smtc] 控制命令 %d 抛异常 0x%08x", int(c.kind),
+                     static_cast<unsigned>(e.code()));
+        } catch (...) {
+            qWarning("[smtc] 控制命令 %d 抛未知异常", int(c.kind));
+        }
+    }
+}
+
 void SmtcMonitor::Impl::runLoop()
 {
     // MTA：不参与 UI 消息泵，任何线程都能进；同步 get() 在 MTA 里不会死锁。
@@ -311,6 +386,7 @@ void SmtcMonitor::Impl::runLoop()
         }
 
         if (mgr) {
+            drainCommands();   // 先把命令打出去，紧接着 poll 就能看到结果
             SmtcMonitor::Snapshot s = poll();
             QMetaObject::invokeMethod(owner, [o = owner, s] { o->applySnapshot(s); },
                                       Qt::QueuedConnection);
@@ -339,6 +415,7 @@ SmtcMonitor::Snapshot SmtcMonitor::Impl::poll()
     return s;
 }
 
+void SmtcMonitor::Impl::drainCommands() {}
 void SmtcMonitor::Impl::runLoop() {}
 
 #endif
@@ -408,6 +485,29 @@ void SmtcMonitor::refreshNow()
     d->cv.notify_all();
 }
 
+// ── 控制命令（UI 线程侧，只入队）────────────────────────────────────────────
+void SmtcMonitor::Impl::post(Cmd kind, qint64 arg)
+{
+    {
+        std::lock_guard<std::mutex> lk(cmdMu);
+        if (cmdQ.size() > 32)
+            cmdQ.clear();          // 异常情况下防堆积（UI 连点/按键重复）
+        cmdQ.push_back(CmdItem{ kind, arg });
+    }
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        wake = true;
+    }
+    cv.notify_all();
+}
+
+void SmtcMonitor::play()             { d->post(Impl::Cmd::Play, 0); }
+void SmtcMonitor::pause()            { d->post(Impl::Cmd::Pause, 0); }
+void SmtcMonitor::togglePlayPause()  { d->post(Impl::Cmd::Toggle, 0); }
+void SmtcMonitor::next()             { d->post(Impl::Cmd::Next, 0); }
+void SmtcMonitor::previous()         { d->post(Impl::Cmd::Prev, 0); }
+void SmtcMonitor::seek(qint64 ms)    { d->post(Impl::Cmd::Seek, qMax<qint64>(0, ms)); }
+
 // 从 worker 线程经 QueuedConnection 进来，永远在 GUI 线程执行 —— 这里改成员是安全的。
 void SmtcMonitor::applySnapshot(const Snapshot &s)
 {
@@ -415,6 +515,9 @@ void SmtcMonitor::applySnapshot(const Snapshot &s)
         s.available ? QStringLiteral("1") : QStringLiteral("0"),
         s.active ? QStringLiteral("1") : QStringLiteral("0"),
         s.playing ? QStringLiteral("1") : QStringLiteral("0"),
+        // 能力位进 key：同一首歌在不同状态下（广告/切歌）可用控制会变，UI 要跟着禁/启用
+        QStringLiteral("%1%2%3%4%5").arg(s.canPlay).arg(s.canPause).arg(s.canNext)
+            .arg(s.canPrevious).arg(s.canSeek),
         s.appId, s.title, s.artist, s.album, s.lastError
     }.join(QLatin1Char('\x1f'));
 
@@ -432,6 +535,11 @@ void SmtcMonitor::applySnapshot(const Snapshot &s)
         m_artist = s.artist;
         m_album = s.album;
         m_lastError = s.lastError;
+        m_canPlay = s.canPlay;
+        m_canPause = s.canPause;
+        m_canNext = s.canNext;
+        m_canPrevious = s.canPrevious;
+        m_canSeek = s.canSeek;
         m_positionMs = s.posMs;
         m_durationMs = s.durMs;
         if (newCover) {
@@ -475,3 +583,8 @@ QString SmtcMonitor::coverPath() const
 }
 int SmtcMonitor::coverRevision() const { return m_coverRevision; }
 QString SmtcMonitor::lastError() const { return m_lastError; }
+bool SmtcMonitor::canPlay() const { return m_canPlay; }
+bool SmtcMonitor::canPause() const { return m_canPause; }
+bool SmtcMonitor::canNext() const { return m_canNext; }
+bool SmtcMonitor::canPrevious() const { return m_canPrevious; }
+bool SmtcMonitor::canSeek() const { return m_canSeek; }
