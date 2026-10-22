@@ -38,13 +38,13 @@ Item {
     QtObject {
         id: st
         property color primary: "#2F6BFF"
-        property color onPrimary: "#FFFFFF"
+        property color fgPrimary: "#FFFFFF"
         property color primaryContainer: "#E4ECFF"
-        property color onPrimaryContainer: "#0A3ABB"
+        property color fgPrimaryContainer: "#0A3ABB"
         property color surface: "#F5F8FE"
-        property color onSurface: "#131A2E"
+        property color fgSurface: "#131A2E"
         property color surfaceVariant: "#E7EDF8"
-        property color onSurfaceVariant: "#5A6478"
+        property color fgSurfaceVariant: "#5A6478"
         property color outline: "#C5D0E6"
         property color outlineVariant: "#DCE4F2"
         property color containerLowest: "#FFFFFF"
@@ -122,9 +122,9 @@ Item {
     }
 
     function statusOf(it) {
-        if (it.playing) return { text: "在播", bg: st.primaryContainer, fg: st.onPrimaryContainer }
-        if (it.played)  return { text: "已播", bg: st.container,       fg: st.onSurfaceVariant }
-        return { text: "未播", bg: st.containerLow, fg: st.onSurfaceVariant }
+        if (it.playing) return { text: "在播", bg: st.primaryContainer, fg: st.fgPrimaryContainer }
+        if (it.played)  return { text: "已播", bg: st.container,       fg: st.fgSurfaceVariant }
+        return { text: "未播", bg: st.containerLow, fg: st.fgSurfaceVariant }
     }
     function platformName(p) {
         if (p === "netease") return "网易云"
@@ -142,7 +142,7 @@ Item {
     // 排期变化实时同步（voicehub 可能稍后异步到达）
     Connections {
         target: voicehub
-        onScheduleChanged: if (root.opened) syncSchedule()
+        function onScheduleChanged() { if (root.opened) syncSchedule() }
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -206,12 +206,12 @@ Item {
                     Text {
                         text: "广播站 · 排期中心"
                         font.pixelSize: st.titleL; font.weight: Font.Medium
-                        color: st.onSurface
+                        color: st.fgSurface
                     }
                     Text {
                         id: connHint
                         font.pixelSize: st.labelM
-                        color: st.onSurfaceVariant
+                        color: st.fgSurfaceVariant
                         text: {
                             if (!voicehub) return "未连接"
                             if (voicehub.baseUrl === "") return "未配置服务地址"
@@ -230,7 +230,7 @@ Item {
                         anchors.fill: parent; radius: st.rFull
                         color: closeMa.pressed ? Qt.rgba(0,0,0,st.stPress) : (closeMa.containsMouse ? Qt.rgba(0,0,0,st.stHover) : "transparent")
                     }
-                    Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 18; color: st.onSurfaceVariant }
+                    Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 18; color: st.fgSurfaceVariant }
                     MouseArea {
                         id: closeMa; anchors.fill: parent; hoverEnabled: true
                         onClicked: root.closed()
@@ -274,7 +274,7 @@ Item {
                                     anchors.centerIn: parent
                                     text: modelData
                                     font.pixelSize: st.bodyM; font.weight: root.tabIndex === idx ? Font.Medium : Font.Normal
-                                    color: root.tabIndex === idx ? st.onPrimary : st.onPrimaryContainer
+                                    color: root.tabIndex === idx ? st.fgPrimary : st.fgPrimaryContainer
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -335,8 +335,8 @@ Item {
                                     }
                                 }
                                 Column { anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                                    Text { text: "正在播放：" + (voicehub ? voicehub.title : ""); font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.onPrimaryContainer; elide: Text.ElideRight; width: schedFlick.width - 140 }
-                                    Text { text: voicehub ? voicehub.artist : ""; font.pixelSize: st.labelM; color: st.onPrimaryContainer; opacity: 0.8; elide: Text.ElideRight; width: schedFlick.width - 140 }
+                                    Text { text: "正在播放：" + (voicehub ? voicehub.title : ""); font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgPrimaryContainer; elide: Text.ElideRight; width: schedFlick.width - 140 }
+                                    Text { text: voicehub ? voicehub.artist : ""; font.pixelSize: st.labelM; color: st.fgPrimaryContainer; opacity: 0.8; elide: Text.ElideRight; width: schedFlick.width - 140 }
                                 }
                             }
                         }
@@ -366,8 +366,8 @@ Item {
                                     }
                                     Column {
                                         anchors.centerIn: parent; spacing: 2
-                                        Text { text: ["一","二","三","四","五","六","日"][index]; font.pixelSize: st.labelS; color: isToday ? st.onPrimary : st.onSurfaceVariant }
-                                        Text { text: d.getDate(); font.pixelSize: st.titleS; font.weight: isToday ? Font.Medium : Font.Normal; color: isToday ? st.onPrimary : st.onSurface }
+                                        Text { text: ["一","二","三","四","五","六","日"][index]; font.pixelSize: st.labelS; color: isToday ? st.fgPrimary : st.fgSurfaceVariant }
+                                        Text { text: d.getDate(); font.pixelSize: st.titleS; font.weight: isToday ? Font.Medium : Font.Normal; color: isToday ? st.fgPrimary : st.fgSurface }
                                     }
                                     MouseArea { anchors.fill: parent; onClicked: { } } // 选日期：服务端仅开放「当日」，暂为展示
                                 }
@@ -378,7 +378,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             text: "今日排期（" + scheduleModel.count + "）"
-                            font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.onSurfaceVariant
+                            font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgSurfaceVariant
                         }
 
                         // 排期列表（可长按拖拽排序）
@@ -421,7 +421,7 @@ Item {
                                             anchors.centerIn: parent
                                             text: (model.title && model.title.length) ? model.title.charAt(0) : "♪"
                                             font.pixelSize: 22; font.weight: Font.Medium
-                                            color: st.onPrimaryContainer
+                                            color: st.fgPrimaryContainer
                                             visible: model.cover === ""
                                         }
                                     }
@@ -432,8 +432,8 @@ Item {
                                         anchors.right: statusChip.left; anchors.rightMargin: st.spS
                                         anchors.verticalCenter: parent.verticalCenter
                                         spacing: 3
-                                        Text { text: model.title; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.onSurface; elide: Text.ElideRight; width: parent.width }
-                                        Text { text: model.artist + (model.artist ? " · " : "") + platformName(model.platform) + " · " + fmtDur(model.dur); font.pixelSize: st.labelM; color: st.onSurfaceVariant; elide: Text.ElideRight; width: parent.width }
+                                        Text { text: model.title; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgSurface; elide: Text.ElideRight; width: parent.width }
+                                        Text { text: model.artist + (model.artist ? " · " : "") + platformName(model.platform) + " · " + fmtDur(model.dur); font.pixelSize: st.labelM; color: st.fgSurfaceVariant; elide: Text.ElideRight; width: parent.width }
                                     }
 
                                     // 状态 Chip
@@ -488,14 +488,14 @@ Item {
                                 anchors.fill: parent; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                                 visible: scheduleModel.count === 0
                                 text: "今日暂无排期"
-                                font.pixelSize: st.bodyM; color: st.onSurfaceVariant
+                                font.pixelSize: st.bodyM; color: st.fgSurfaceVariant
                             }
                         }
 
                         Text {
                             anchors.left: parent.left
                             text: "提示：长按曲目可调整顺序（本地面板内生效，服务端重排接口待接入）"
-                            font.pixelSize: st.labelS; color: st.onSurfaceVariant
+                            font.pixelSize: st.labelS; color: st.fgSurfaceVariant
                             wrapMode: Text.Wrap; width: parent.width
                         }
                     }
@@ -525,27 +525,27 @@ Item {
                                 anchors.margins: st.spL
                                 spacing: st.spM
 
-                                Text { text: "点歌投稿"; font.pixelSize: st.titleM; font.weight: Font.Medium; color: st.onSurface }
+                                Text { text: "点歌投稿"; font.pixelSize: st.titleM; font.weight: Font.Medium; color: st.fgSurface }
 
                                 // 歌名
                                 Column { spacing: 4; anchors.left: parent.left; anchors.right: parent.right
-                                    Text { text: "歌名 *"; font.pixelSize: st.labelM; color: st.onSurfaceVariant }
+                                    Text { text: "歌名 *"; font.pixelSize: st.labelM; color: st.fgSurfaceVariant }
                                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: st.rS; color: st.surface; border.color: st.outline; border.width: 1
-                                        TextInput { id: tiTitle; anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.onSurface; clip: true }
+                                        TextInput { id: tiTitle; anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.fgSurface; clip: true }
                                         Text { anchors.left: parent.left; anchors.leftMargin: st.spM; anchors.verticalCenter: parent.verticalCenter; text: "输入歌名"; font.pixelSize: st.bodyM; color: st.outline; visible: tiTitle.text === "" }
                                     }
                                 }
                                 // 歌手
                                 Column { spacing: 4; anchors.left: parent.left; anchors.right: parent.right
-                                    Text { text: "歌手"; font.pixelSize: st.labelM; color: st.onSurfaceVariant }
+                                    Text { text: "歌手"; font.pixelSize: st.labelM; color: st.fgSurfaceVariant }
                                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: st.rS; color: st.surface; border.color: st.outline; border.width: 1
-                                        TextInput { id: tiArtist; anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.onSurface; clip: true }
+                                        TextInput { id: tiArtist; anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.fgSurface; clip: true }
                                         Text { anchors.left: parent.left; anchors.leftMargin: st.spM; anchors.verticalCenter: parent.verticalCenter; text: "选填"; font.pixelSize: st.bodyM; color: st.outline; visible: tiArtist.text === "" }
                                     }
                                 }
                                 // 平台选择
                                 Column { spacing: 4; anchors.left: parent.left; anchors.right: parent.right
-                                    Text { text: "来源平台"; font.pixelSize: st.labelM; color: st.onSurfaceVariant }
+                                    Text { text: "来源平台"; font.pixelSize: st.labelM; color: st.fgSurfaceVariant }
                                     Row { spacing: st.spS; anchors.left: parent.left; anchors.right: parent.right
                                         Repeater {
                                             id: platRep
@@ -554,7 +554,7 @@ Item {
                                                 width: 72; height: 32
                                                 property string pk: modelData.k
                                                 Rectangle { anchors.fill: parent; radius: st.rFull; color: reqPlatform === pk ? st.primary : st.containerLow; border.color: reqPlatform === pk ? st.primary : st.outlineVariant; border.width: 1 }
-                                                Text { anchors.centerIn: parent; text: modelData.n; font.pixelSize: st.labelM; color: reqPlatform === pk ? st.onPrimary : st.onSurfaceVariant }
+                                                Text { anchors.centerIn: parent; text: modelData.n; font.pixelSize: st.labelM; color: reqPlatform === pk ? st.fgPrimary : st.fgSurfaceVariant }
                                                 MouseArea { anchors.fill: parent; onClicked: reqPlatform = pk }
                                             }
                                         }
@@ -565,7 +565,7 @@ Item {
                                 Rectangle {
                                     anchors.left: parent.left; anchors.right: parent.right; height: 44; radius: st.rFull
                                     color: (voicehub && voicehub.canRequest() && tiTitle.text.trim() !== "") ? st.primary : st.containerHigh
-                                    Text { anchors.centerIn: parent; text: "提交点歌"; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: (voicehub && voicehub.canRequest() && tiTitle.text.trim() !== "") ? st.onPrimary : st.onSurfaceVariant }
+                                    Text { anchors.centerIn: parent; text: "提交点歌"; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: (voicehub && voicehub.canRequest() && tiTitle.text.trim() !== "") ? st.fgPrimary : st.fgSurfaceVariant }
                                     MouseArea {
                                         anchors.fill: parent
                                         onClicked: {
@@ -580,7 +580,7 @@ Item {
                                 Text {
                                     anchors.left: parent.left; anchors.right: parent.right
                                     text: "投稿会提交到 VoiceHub 后台排队；批准后在排期 Tab 可见。"
-                                    font.pixelSize: st.labelS; color: st.onSurfaceVariant; wrapMode: Text.Wrap
+                                    font.pixelSize: st.labelS; color: st.fgSurfaceVariant; wrapMode: Text.Wrap
                                 }
                             }
                         }
@@ -592,7 +592,7 @@ Item {
                             Text {
                                 anchors.fill: parent; anchors.margins: st.spM
                                 text: "班级投稿列表：待 VoiceHub 开放「投稿查询」接口后接入。当前可先通过点歌表单投稿。"
-                                font.pixelSize: st.labelM; color: st.onSurfaceVariant; wrapMode: Text.Wrap
+                                font.pixelSize: st.labelM; color: st.fgSurfaceVariant; wrapMode: Text.Wrap
                                 verticalAlignment: Text.AlignVCenter
                             }
                         }
@@ -616,7 +616,7 @@ Item {
                         Rectangle {
                             anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: st.rFull
                             color: st.containerLowest; border.color: st.outline; border.width: 1
-                            TextInput { id: searchInput; anchors.fill: parent; anchors.leftMargin: st.spM + 24; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.onSurface; clip: true }
+                            TextInput { id: searchInput; anchors.fill: parent; anchors.leftMargin: st.spM + 24; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.fgSurface; clip: true }
                             Text { anchors.left: parent.left; anchors.leftMargin: st.spM; anchors.verticalCenter: parent.verticalCenter; text: "🔍"; font.pixelSize: st.bodyM; color: st.outline }
                             Text { anchors.left: parent.left; anchors.leftMargin: st.spM + 24; anchors.verticalCenter: parent.verticalCenter; text: "搜索已加载的排期"; font.pixelSize: st.bodyM; color: st.outline; visible: searchInput.text === "" }
                         }
@@ -624,7 +624,7 @@ Item {
                         Text {
                             anchors.left: parent.left
                             text: "（本地过滤当前已加载排期；全曲库搜索接口待 VoiceHub 开放）"
-                            font.pixelSize: st.labelS; color: st.onSurfaceVariant; wrapMode: Text.Wrap; width: parent.width
+                            font.pixelSize: st.labelS; color: st.fgSurfaceVariant; wrapMode: Text.Wrap; width: parent.width
                         }
 
                         Column {
@@ -647,8 +647,9 @@ Item {
                                     border.color: st.outlineVariant; border.width: 1
                                     Row {
                                         anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; spacing: st.spM
-                                        Text { text: modelData.title; font.pixelSize: st.bodyM; color: st.onSurface; elide: Text.ElideRight; Layout.fillWidth: true }
-                                        Text { text: modelData.artist; font.pixelSize: st.labelM; color: st.onSurfaceVariant; elide: Text.ElideRight }
+                                        // 纯 Row 无 Layouts 依赖：标题按「行宽 - 歌手宽 - 间距」约束，启用省略号
+                                        Text { id: sTitle; text: modelData.title; font.pixelSize: st.bodyM; color: st.fgSurface; elide: Text.ElideRight; width: parent.width - sArtist.width - st.spM }
+                                        Text { id: sArtist; text: modelData.artist; font.pixelSize: st.labelM; color: st.fgSurfaceVariant; elide: Text.ElideRight }
                                     }
                                 }
                             }
@@ -656,7 +657,7 @@ Item {
                                 anchors.left: parent.left
                                 visible: scheduleModel.count === 0
                                 text: "暂无可搜索的排期数据"
-                                font.pixelSize: st.bodyM; color: st.onSurfaceVariant
+                                font.pixelSize: st.bodyM; color: st.fgSurfaceVariant
                             }
                         }
                     }
@@ -686,7 +687,7 @@ Item {
     // 点歌结果 → Snackbar
     Connections {
         target: voicehub
-        onControlFinished: snack.show(message, ok)
+        function onControlFinished(ok, message) { snack.show(message, ok) }
     }
 
     Component.onCompleted: syncSchedule()
