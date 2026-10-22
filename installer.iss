@@ -128,6 +128,10 @@ Source: "deploy\msi-post-install.cmd"; DestDir: "{app}"; Flags: ignoreversion
 ; 并能识别"进程活着但僵死"。两件必须成对带走：.bat 只是壳，逻辑在 .ps1 里。
 Source: "deploy\stelarith-agent-guard.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "deploy\stelarith-agent-guard.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; 2026-10-22：guard 的**隐藏启动器**。计划任务的动作必须是 wscript.exe + 这个 .vbs，
+; 不能直接指向 .bat —— Task Scheduler 给 .bat 动作必分配 cmd.exe 控制台窗
+; （任务设置 Hidden=true 只隐调度器 UI，不隐这个窗），每 10 分钟闪一次。
+Source: "deploy\stelarith-agent-guard-hidden.vbs"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
