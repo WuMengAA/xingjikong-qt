@@ -4,9 +4,12 @@
 #include "voicehubmodule.h"
 
 #include <QDateTime>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QUrl>
+
+#include <memory>
 
 // ── 构造 / 清单 ───────────────────────────────────────────────────────────
 
@@ -21,6 +24,11 @@ VoiceHubModule::VoiceHubModule(QObject *parent)
     m_tickTimer.setSingleShot(false);
     m_tickTimer.setInterval(1000);
     connect(&m_tickTimer, &QTimer::timeout, this, &VoiceHubModule::tick);
+
+    // 排期列表：比广播状态慢得多（一天变几次），30s 足够，跟随 pollSec。
+    m_scheduleTimer.setSingleShot(false);
+    m_scheduleTimer.setInterval(30 * 1000);
+    connect(&m_scheduleTimer, &QTimer::timeout, this, &VoiceHubModule::fetchSchedule);
 }
 
 ModuleManifest VoiceHubModule::manifest() const
@@ -61,13 +69,25 @@ void VoiceHubModule::stop()
 
 void VoiceHubModule::loadConfig()
 {
-    m_baseUrl   = cfgGet(QStringLiteral("baseUrl"),
-                         QJsonValue(QStringLiteral("https://voicehub.245959623.xyz"))).toString();
+    // ⚠️ 2026-10-22：默认地址**改成空**。
+    //    原来默认 https://voicehub.245959623.xyz —— 那个 Vercel 部署已被停用
+    //    （HTTP 402 DEPLOYMENT_DISABLED），等于给每台教室机发了个死地址：
+    //    永远显示"没有广播"，还不报错。宁可显示"未配置"。
+    //    部署时用 agent.env 的 STE_VOICEHUB_BASE 注入（script 侧不用点 UI）。
+    QString dflt = qEnvironmentVariable("STE_VOICEHUB_BASE").trimmed();
+    m_baseUrl   = cfgGet(QStringLiteral("baseUrl"), QJsonValue(dflt)).toString();
+    // 环境变量优先级最高（现场排障时改 env 比改注册表快）
+    if (!dflt.isEmpty())
+        m_baseUrl = dflt;
     m_pollSec   = qBound(5, cfgGet(QStringLiteral("pollSec"), 30).toInt(), 300);
     m_staleSec  = qBound(10, cfgGet(QStringLiteral("staleSec"), 95).toInt(), 600);
     m_autoNotify = cfgGet(QStringLiteral("autoNotify"), true).toBool();
     m_controlEnabled = cfgGet(QStringLiteral("controlEnabled"), false).toBool();
+    m_apiKey    = cfgGet(QStringLiteral("apiKey"), QString()).toString();
+    if (m_apiKey.isEmpty())
+        m_apiKey = qEnvironmentVariable("STE_VOICEHUB_APIKEY").trimmed();
     m_pollTimer.setInterval(m_pollSec * 1000);
+    m_scheduleTimer.setInterval(m_pollSec * 1000);
     emit configChanged();
 }
 
@@ -151,7 +171,9 @@ void VoiceHubModule::startClient()
     connectSse();
     m_pollTimer.start();
     m_tickTimer.start();
-    pollOnce();   // 先拿一次快照，不必等一个轮询周期
+    m_scheduleTimer.start();
+    pollOnce();       // 先拿一次快照，不必等一个轮询周期
+    fetchSchedule();  // 排期也立刻拉一次
 }
 
 void VoiceHubModule::stopClient()
@@ -159,6 +181,7 @@ void VoiceHubModule::stopClient()
     abortSse();
     m_pollTimer.stop();
     m_tickTimer.stop();
+    m_scheduleTimer.stop();
     m_sseConnected = false;
     m_sseBackoffSec = 1;
 }
@@ -291,9 +314,187 @@ void VoiceHubModule::onPollFinished(QNetworkReply *r)
     } else if (err != QNetworkReply::OperationCanceledError) {
         // 网络错/404/403 ⇒ 当「没有广播」处理（参考实现同口径：不进错误态、
         // 不清已有状态——停播与否由 stale 判定，不因一次请求失败闪掉）。
-        m_lastError = r->errorString();
+        // 但 2026-10-22 补：**必须把 HTTP 状态写进 lastError**。
+        // 原来只存 errorString()（"Connection refused" 之类），线上 402 停用
+        // 被当成普通网络错，排障时看不出"服务是活的但被停用"。
+        const int httpCode = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (httpCode == 402) {
+            m_lastError = QStringLiteral("VoiceHub 服务已停用（HTTP 402）");
+        } else if (httpCode > 0) {
+            m_lastError = QStringLiteral("VoiceHub 返回 HTTP %1").arg(httpCode);
+        } else {
+            m_lastError = r->errorString();
+        }
     }
     emit stateChanged();
+}
+
+// ── 排期列表（2026-10-22）──────────────────────────────────────────────────
+//
+// GET {base}/api/songs/public —— 匿名可读，返回**数组**（不是对象）。
+// 排期表一直在 VoiceHub 里：星集控云端没有排期实体，别在云端另造一套。
+// 匿名访问时服务端会把 requester 遮罩成 "***"（隐私），我们只取歌与顺序。
+
+void VoiceHubModule::refreshSchedule()
+{
+    fetchSchedule();
+}
+
+void VoiceHubModule::fetchSchedule()
+{
+    if (m_baseUrl.isEmpty()) return;
+    const QUrl url(m_baseUrl + QStringLiteral("/api/songs/public"));
+    if (!url.isValid()) return;
+    QNetworkRequest req(url);
+    req.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
+                     QNetworkRequest::AlwaysNetwork);
+    req.setRawHeader(QByteArrayLiteral("X-Requested-From"),
+                     QByteArrayLiteral("XingJiKong-Agent"));
+    QNetworkReply *r = m_nam->get(req);
+    connect(r, &QNetworkReply::finished, this, [this, r] { onScheduleFinished(r); });
+}
+
+void VoiceHubModule::onScheduleFinished(QNetworkReply *r)
+{
+    r->deleteLater();
+    if (r->error() != QNetworkReply::NoError) {
+        if (r->error() != QNetworkReply::OperationCanceledError) {
+            const int httpCode = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (httpCode == 402)
+                m_lastError = QStringLiteral("VoiceHub 服务已停用（HTTP 402）");
+        }
+        return;   // 排期拉不到就保留上一份，不清空（清空会让面板瞬间空白）
+    }
+
+    QJsonParseError perr;
+    const QJsonDocument doc = QJsonDocument::fromJson(r->readAll(), &perr);
+    if (perr.error != QJsonParseError::NoError || !doc.isArray()) {
+        m_lastError = QStringLiteral("排期列表解析失败（期望数组）");
+        return;
+    }
+
+    QVariantList list;
+    const QJsonArray arr = doc.array();
+    list.reserve(arr.size());
+    for (const QJsonValue &v : arr) {
+        if (!v.isObject()) continue;
+        const QJsonObject o = v.toObject();
+        const QJsonObject song = o.value(QStringLiteral("song")).toObject();
+        QVariantMap m;
+        m[QStringLiteral("id")]               = o.value(QStringLiteral("id")).toInt();
+        m[QStringLiteral("sequence")]         = o.value(QStringLiteral("sequence")).toInt();
+        m[QStringLiteral("played")]           = o.value(QStringLiteral("played")).toBool();
+        m[QStringLiteral("isPlaying")]        = o.value(QStringLiteral("isPlaying")).toBool();
+        // broadcastPosition 可能是 null（未在播）——用 -1 表示，QML 里好判
+        const QJsonValue bp = o.value(QStringLiteral("broadcastPosition"));
+        m[QStringLiteral("broadcastPosition")] = bp.isDouble() ? bp.toDouble() : -1.0;
+        m[QStringLiteral("playDate")]         = o.value(QStringLiteral("playDate")).toString();
+        m[QStringLiteral("title")]            = song.value(QStringLiteral("title")).toString();
+        m[QStringLiteral("artist")]           = song.value(QStringLiteral("artist")).toString();
+        m[QStringLiteral("cover")]            = song.value(QStringLiteral("cover")).toString();
+        m[QStringLiteral("durationSeconds")]  = song.value(QStringLiteral("durationSeconds")).toInt();
+        m[QStringLiteral("musicPlatform")]    = song.value(QStringLiteral("musicPlatform")).toString();
+        m[QStringLiteral("musicId")]          = song.value(QStringLiteral("musicId")).toString();
+        m[QStringLiteral("songId")]           = song.value(QStringLiteral("id")).toInt();
+        list.append(m);
+    }
+
+    if (list != m_schedule) {
+        m_schedule = list;
+        emit scheduleChanged();
+    }
+}
+
+// ── 点歌控制（2026-10-22）──────────────────────────────────────────────────
+//
+// POST {base}/api/open/songs/request，头 x-api-key。
+// 服务端只收 ALLOWED_FIELDS（title/artist/cover/musicPlatform/musicId/…），
+// 所以**不需要先在本地查到 songId** —— 有就带、没有就靠歌名歌手。
+
+void VoiceHubModule::setApiKey(const QString &v)
+{
+    const QString k = v.trimmed();
+    if (k == m_apiKey) return;
+    m_apiKey = k;
+    cfgSet(QStringLiteral("apiKey"), k);
+    emit configChanged();
+}
+
+void VoiceHubModule::requestSong(const QString &title, const QString &artist,
+                                 const QString &musicPlatform, const QString &musicId)
+{
+    m_lastControlError.clear();
+
+    if (!m_controlEnabled) {
+        m_lastControlError = QStringLiteral("点歌通道未开启（设置页里打开控制开关）");
+        emit controlFinished(false, m_lastControlError);
+        return;
+    }
+    if (m_baseUrl.isEmpty()) {
+        m_lastControlError = QStringLiteral("未配置 VoiceHub 服务地址");
+        emit controlFinished(false, m_lastControlError);
+        return;
+    }
+    if (m_apiKey.isEmpty()) {
+        m_lastControlError = QStringLiteral("未配置 API Key（VoiceHub 后台 → API 密钥 → 建一把带 songs:request 的）");
+        emit controlFinished(false, m_lastControlError);
+        return;
+    }
+    if (title.trimmed().isEmpty()) {
+        m_lastControlError = QStringLiteral("歌名不能为空");
+        emit controlFinished(false, m_lastControlError);
+        return;
+    }
+
+    QJsonObject body;
+    body.insert(QStringLiteral("title"), title.trimmed());
+    body.insert(QStringLiteral("artist"), artist.trimmed());
+    body.insert(QStringLiteral("musicPlatform"),
+                musicPlatform.isEmpty() ? QStringLiteral("netease") : musicPlatform);
+    if (!musicId.isEmpty())
+        body.insert(QStringLiteral("musicId"), musicId);
+
+    QNetworkRequest req(QUrl(m_baseUrl + QStringLiteral("/api/open/songs/request")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    // ⚠️ key 只进请求头，不进日志/状态文本
+    req.setRawHeader(QByteArrayLiteral("x-api-key"), m_apiKey.toUtf8());
+    QNetworkReply *r = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(r, &QNetworkReply::finished, this, [this, r] { onRequestFinished(r); });
+}
+
+void VoiceHubModule::onRequestFinished(QNetworkReply *r)
+{
+    r->deleteLater();
+    const int httpCode = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray raw = r->readAll();
+
+    if (r->error() == QNetworkReply::NoError && httpCode >= 200 && httpCode < 300) {
+        QJsonParseError perr;
+        const QJsonDocument doc = QJsonDocument::fromJson(raw, &perr);
+        const QJsonObject o = doc.isObject() ? doc.object() : QJsonObject();
+        const QString t = o.value(QStringLiteral("title")).toString();
+        m_lastControlError.clear();
+        emit controlFinished(true,
+            t.isEmpty() ? QStringLiteral("已提交") : QStringLiteral("已提交：%1").arg(t));
+        // 排期可能立刻变化，拉一次（服务端可能自动排队）
+        fetchSchedule();
+        return;
+    }
+
+    // 失败：把服务端的 message 原样带出来（"系统未设置当前活跃学期"这种要能看到）
+    QString msg;
+    QJsonParseError perr;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw, &perr);
+    if (doc.isObject())
+        msg = doc.object().value(QStringLiteral("message")).toString();
+    if (msg.isEmpty())
+        msg = httpCode == 401 ? QStringLiteral("API Key 无效（401）")
+            : httpCode == 403 ? QStringLiteral("该 Key 没有 songs:request 权限（403）")
+            : httpCode > 0 ? QStringLiteral("HTTP %1").arg(httpCode)
+            : r->errorString();
+
+    m_lastControlError = msg;
+    emit controlFinished(false, msg);
 }
 
 void VoiceHubModule::handleSseFrame(const QString &frame)
@@ -492,24 +693,64 @@ bool VoiceHubModule::execAction(const QString &action, const QJsonObject &params
         return true;
     }
 
-    if (action == QStringLiteral("song_request")
-        || action == QStringLiteral("lyrics")
+    // 2026-10-22：song_request 从留桩转真实现（走 Open API，x-api-key）。
+    // ⚠️ 点歌是**异步**的（QNAM 回调），execAction 必须同步返回，所以这里回
+    //    "submitted"（已受理），真实结果靠 controlFinished → reportCloud 事后上报。
+    //    不要用 QEventLoop 在这里等 —— 那会把 UI 线程卡住，岛直接僵死。
+    if (action == QStringLiteral("song_request")) {
+        const QString title = params.value(QStringLiteral("title")).toString();
+        const QString artist = params.value(QStringLiteral("artist")).toString();
+        const QString platform = params.value(QStringLiteral("musicPlatform"))
+                                     .toString(QStringLiteral("netease"));
+        const QString musicId = params.value(QStringLiteral("musicId")).toString();
+
+        if (title.trimmed().isEmpty()) {
+            out.ok = false;
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("缺少 title");
+            return true;
+        }
+        if (!m_controlEnabled) {
+            out.ok = false;
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("点歌通道未开启（VoiceHub 模块设置里打开控制开关）");
+            return true;
+        }
+        if (m_baseUrl.isEmpty() || m_apiKey.isEmpty()) {
+            out.ok = false;
+            out.result = QStringLiteral("failed");
+            out.error = m_baseUrl.isEmpty()
+                ? QStringLiteral("未配置 VoiceHub 服务地址")
+                : QStringLiteral("未配置 API Key（需要带 songs:request 权限）");
+            return true;
+        }
+
+        auto once = std::make_shared<QMetaObject::Connection>();
+        *once = connect(this, &VoiceHubModule::controlFinished, this,
+                        [this, once](bool ok, const QString &msg) {
+                            disconnect(*once);
+                            if (api().reportCloud) {
+                                api().reportCloud(
+                                    QStringLiteral("voicehub_song_request_result"),
+                                    QJsonObject{ { QStringLiteral("ok"), ok },
+                                                 { QStringLiteral("message"), msg } });
+                            }
+                        });
+        requestSong(title, artist, platform, musicId);
+
+        out.ok = true;
+        out.result = QStringLiteral("submitted");
+        out.data = QJsonObject{ { QStringLiteral("async"), true } };
+        return true;
+    }
+
+    if (action == QStringLiteral("lyrics")
         || action == QStringLiteral("broadcast_audio")) {
-        // 控制留桩（2026-10-17 设计裁决：只读展示先通，控制后接）。
-        // 这三件要写 VoiceHub（Open API x-api-key + songs:request/songs:write 权限），
-        // 密钥存放与审计口径未定之前**不接**——回执必须说清"去哪开、为什么没有"。
+        // 这两个仍是留桩：lyrics 要写/读歌词库、broadcast_audio 要下发音频，
+        // 与"点歌"不是同一条链路，口径未定之前不接。
         out.ok = false;
         out.result = QStringLiteral("not-open");
-        out.data = QJsonObject{
-            { QStringLiteral("controlEnabled"), m_controlEnabled },
-            { QStringLiteral("readonly"), true }
-        };
-        out.error = m_controlEnabled
-            ? QStringLiteral("VoiceHub 控制接口已开开关但尚未接线（需要 Open API x-api-key 的 "
-                             "songs:request 权限；当前只读展示正常）")
-            : QStringLiteral("VoiceHub 控制接口未开放（默认关）。只读展示已启用；"
-                             "如需点歌/歌词/广播下发，请在「控制面板 · 设置 · VoiceHub 联动」"
-                             "打开控制开关（接线后生效）");
+        out.error = QStringLiteral("该能力尚未接线（当前只开了只读展示与点歌）");
         return true;
     }
 
@@ -540,5 +781,22 @@ QJsonObject VoiceHubModule::stateJson() const
     if (!m_lastError.isEmpty()) j[QStringLiteral("lastError")] = m_lastError;
     j[QStringLiteral("baseUrl")] = m_baseUrl;
     j[QStringLiteral("controlEnabled")] = m_controlEnabled;
+    // 2026-10-22：把排期与点歌能力位也带出去，管理端才能判断"能不能点歌"。
+    // ⚠️ 绝不带 apiKey（只报有没有）。
+    j[QStringLiteral("canRequest")] = canRequest();
+    j[QStringLiteral("hasApiKey")] = !m_apiKey.isEmpty();
+    j[QStringLiteral("scheduleCount")] = m_schedule.size();
+    QJsonArray sched;
+    for (const QVariant &v : m_schedule) {
+        const QVariantMap m = v.toMap();
+        sched.append(QJsonObject{
+            { QStringLiteral("sequence"), m.value(QStringLiteral("sequence")).toInt() },
+            { QStringLiteral("played"), m.value(QStringLiteral("played")).toBool() },
+            { QStringLiteral("isPlaying"), m.value(QStringLiteral("isPlaying")).toBool() },
+            { QStringLiteral("title"), m.value(QStringLiteral("title")).toString() },
+            { QStringLiteral("artist"), m.value(QStringLiteral("artist")).toString() },
+        });
+    }
+    j[QStringLiteral("schedule")] = sched;
     return j;
 }

@@ -343,20 +343,27 @@ int main(int argc, char *argv[])
                   .arg(handled).arg(r.ok));
     }
     {
+        // 2026-10-22：点歌从「留桩」改为真实现，断言随行为一起更新。
+        // 参数校验在通道开关之前 —— 缺 title 就是缺 title，与通道无关。
+        const QJsonObject p{ { QStringLiteral("title"), QStringLiteral("回执验证曲") } };
         ModuleResult r;
-        const bool handled = mh->dispatch(QStringLiteral("song_request"), QJsonObject(), r);
-        check(handled && !r.ok && r.result == QStringLiteral("not-open")
-                  && r.error.contains(QStringLiteral("未开放")),
-              QStringLiteral("9b 控制关时点歌回执「未开放」（result=%1）").arg(r.result));
+        const bool handled = mh->dispatch(QStringLiteral("song_request"), p, r);
+        check(handled && !r.ok && r.result == QStringLiteral("failed")
+                  && r.error.contains(QStringLiteral("未开启")),
+              QStringLiteral("9b 控制关时点歌回执「未开启」（error=%1）").arg(r.error));
         vh->setControlEnabled(true);
         ModuleResult r2;
-        mh->dispatch(QStringLiteral("song_request"), QJsonObject(), r2);
-        check(r2.ok == false && r2.error.contains(QStringLiteral("尚未接线")),
-              QStringLiteral("9c 控制开时点歌回执「尚未接线」（error=%1）").arg(r2.error));
+        mh->dispatch(QStringLiteral("song_request"), p, r2);
+        // 控制开了但没配 Key（假服务也没有 Open API）⇒ 必须在**本地**就拒掉，
+        // 不能发给服务端再让 401 回来 —— 那样教室机上只看到"HTTP 401"，没法修。
+        check(r2.ok == false
+                  && (r2.error.contains(QStringLiteral("API Key"))
+                      || r2.error.contains(QStringLiteral("服务地址"))),
+              QStringLiteral("9c 控制开但缺 Key/地址 → 本地拒绝（error=%1）").arg(r2.error));
         ModuleResult r3;
         mh->dispatch(QStringLiteral("lyrics"), QJsonObject(), r3);
         check(!r3.ok && r3.result == QStringLiteral("not-open"),
-              QStringLiteral("9d 歌词同款留桩（result=%1）").arg(r3.result));
+              QStringLiteral("9d 歌词仍为留桩（result=%1）").arg(r3.result));
     }
     mh->setEnabled(QStringLiteral("voicehub"), false);
     {

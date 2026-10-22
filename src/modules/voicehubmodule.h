@@ -42,6 +42,7 @@
 #include <QNetworkReply>
 #include <QPointer>
 #include <QTimer>
+#include <QVariantList>
 
 class VoiceHubModule : public AgentModule
 {
@@ -68,6 +69,24 @@ class VoiceHubModule : public AgentModule
     Q_PROPERTY(int     staleSec      READ staleSec      WRITE setStaleSec      NOTIFY configChanged)
     Q_PROPERTY(bool    autoNotify    READ autoNotify    WRITE setAutoNotify    NOTIFY configChanged)
     Q_PROPERTY(bool    controlEnabled READ controlEnabled WRITE setControlEnabled NOTIFY configChanged)
+
+    // ── 排期列表（2026-10-22 加）────────────────────────────────
+    // 数据源：GET {base}/api/songs/public（匿名可读）。
+    // 每项是 QVariantMap：{ id, sequence, played, isPlaying, broadcastPosition,
+    //                      title, artist, cover, durationSeconds, musicPlatform, musicId }
+    // 这就是「排期中心」的真源——排期表一直在 VoiceHub 里，不在星集控云端。
+    // ⚠️ 匿名访问时 requester 会被服务端遮罩成 "***"，不要把账号当学生姓名用。
+    Q_PROPERTY(QVariantList schedule      READ schedule      NOTIFY scheduleChanged)
+    Q_PROPERTY(int          scheduleCount READ scheduleCount NOTIFY scheduleChanged)
+
+    // ── 点歌控制（2026-10-22 加）────────────────────────────────
+    // 走 VoiceHub 的 Open API（POST {base}/api/open/songs/request，头 x-api-key）。
+    // 需要服务端后台建一把带 songs:request 权限的 Key。
+    // ⚠️ apiKey 以明文存 QSettings(modules/voicehub/apiKey)：教室机本地可接受，
+    //    但不写入任何日志、不进上报、不打印到 statusText。
+    Q_PROPERTY(QString apiKey   READ apiKey   WRITE setApiKey   NOTIFY configChanged)
+    Q_PROPERTY(bool    canRequest READ canRequest NOTIFY configChanged)
+    Q_PROPERTY(QString lastControlError READ lastControlError NOTIFY controlFinished)
 
 public:
     explicit VoiceHubModule(QObject *parent = nullptr);
@@ -104,12 +123,35 @@ public:
     bool    controlEnabled() const { return m_controlEnabled; }
     void    setControlEnabled(bool v);
 
+    // ── 排期 / 控制（2026-10-22）──
+    QVariantList schedule() const { return m_schedule; }
+    int          scheduleCount() const { return m_schedule.size(); }
+    QString      apiKey() const { return m_apiKey; }
+    void         setApiKey(const QString &v);
+    bool         canRequest() const { return !m_baseUrl.isEmpty() && !m_apiKey.isEmpty(); }
+    QString      lastControlError() const { return m_lastControlError; }
+
+    /** 立刻重拉一次排期（进排期面板时调，别等定时器）。 */
+    Q_INVOKABLE void refreshSchedule();
+
+    /**
+     * 点歌（写 VoiceHub）。入参就是 Open API 的 ALLOWED_FIELDS 子集。
+     * 异步：结果通过 controlFinished(bool, QString) 回来，不阻塞 UI。
+     * musicId 为空也可以——服务端会按歌名歌手处理，但有 id 时更准。
+     */
+    Q_INVOKABLE void requestSong(const QString &title,
+                                 const QString &artist,
+                                 const QString &musicPlatform = QStringLiteral("netease"),
+                                 const QString &musicId = QString());
+
     /** 当前状态 JSON（管理端 voicehub_broadcast 动作与探针共用）。 */
     QJsonObject stateJson() const;
 
 signals:
     void stateChanged();    // 广播状态/进度变化 → 岛行与设置页刷新
     void configChanged();   // 配置变化
+    void scheduleChanged(); // 排期列表变化
+    void controlFinished(bool ok, const QString &message);   // 点歌结果
 
 private:
     // ── 配置（QSettings modules/voicehub/*）──
@@ -129,6 +171,11 @@ private:
     void onPollFinished(QNetworkReply *r);
     void handleSseFrame(const QString &frame);
     void scheduleSseReconnect();
+
+    // ── 排期 / 控制（2026-10-22）──
+    void fetchSchedule();                          // GET /api/songs/public
+    void onScheduleFinished(QNetworkReply *r);
+    void onRequestFinished(QNetworkReply *r);
 
     // ── 状态层 ──
     // has=false 或 b 为空对象 ⇒ 「停播」（清状态）。
@@ -179,4 +226,10 @@ private:
     double   m_anchorPos = 0;
     qint64   m_anchorMs = 0;
     qint64   m_lastSnapshotMs = 0;
+
+    // ── 排期 / 控制（2026-10-22）──
+    QTimer       m_scheduleTimer;
+    QVariantList m_schedule;
+    QString      m_apiKey;            // 明文，见属性注释
+    QString      m_lastControlError;
 };
