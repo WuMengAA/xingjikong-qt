@@ -37,7 +37,10 @@ node tests/regression-voice.cjs <port>          # 语音链路回归
 ## 三、边界（别踩）
 
 - ⚠️ **生产跑的就是本目录（工作区份）**：计划任务 `StelarithCloud` / `StelarithCloudWatchdog`
-  均指向本目录的 `run-cloud.cmd` / `cloud-watchdog.cmd`（`node_modules` / `.env` / `assets/pkg` 都在这）。
+  均经本目录的 `run-cloud-hidden.vbs` / `cloud-watchdog-hidden.vbs` 壳执行
+  `run-cloud.cmd` / `cloud-watchdog.cmd`（`node_modules` / `.env` / `assets/pkg` 都在这）。
+  ⚠️ **动作禁止直接指 .cmd/.bat**（Task Scheduler 必分 cmd 控制台窗）；vbs 壳的来龙去脉见
+  `scripts/fix-cloud-console-window.py` 头部注释。
   2026-10-20 已从「外部份运行」正式切回工作区份并改名（`Stelarith-cloud-ws` → `Stelarith-cloud`，
   外部 bare 远端同步改名为 `D:\Stelarith\Stelarith-cloud`，remote `outer` 已更新）——
   详见 `AI-必读-路径变更告知书.md` 的「2026-10-20 改名」节。
