@@ -1,5 +1,7 @@
 #include "edge_tts.h"
 
+#include "winlauncher.h"   // stelarithHideChildConsole：ffmpeg 是控制台程序，不藏会弹窗
+
 #include <QWebSocket>
 #include <QUrl>
 #include <QDebug>
@@ -164,6 +166,10 @@ void EdgeTts::decodeAndPlay()
     const QString ff = ffmpegBin();
     m_pcm.clear();
     m_ffmpeg.kill();
+    // #368 需求①：ffmpeg 是控制台程序，从 GUI 进程拉起必分配控制台窗 —— 每次 TTS
+    // 解码都会闪一个黑窗（2026-10-22 用户第 N 次投诉后审计发现，同类漏修还有
+    // 录像/播放/设备枚举/抓拍/截图共 6 处，本轮一并补齐）。
+    stelarithHideChildConsole(m_ffmpeg);
     m_ffmpeg.start(ff, {
         QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"),
         QStringLiteral("-i"), tmp.fileName(),

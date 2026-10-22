@@ -4340,6 +4340,8 @@ static QString beginRecording(const QString &dev, int maxSec)
     g_recOutPath = g_shotDir + QStringLiteral("/rec-%1.mp4").arg(QDateTime::currentMSecsSinceEpoch());
     g_recProc = new QProcess();
     g_recProc->setProcessChannelMode(QProcess::MergedChannels);
+    // #368 需求①：录像期间 ffmpeg 控制台窗会一直挂在桌上，必须 CREATE_NO_WINDOW
+    stelarithHideChildConsole(*g_recProc);
     g_recProc->start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
                            QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
                            QStringLiteral("dshow"), QStringLiteral("-i"),
@@ -5428,6 +5430,8 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         //    另外别再挂 `-loglevel error` —— 设备列表是 info 级输出的，挂上就全被吞。
         QProcess p;
         p.setProcessChannelMode(QProcess::MergedChannels);
+        // #368 需求①：设备枚举也走 ffmpeg（控制台程序），不藏会弹窗
+        stelarithHideChildConsole(p);
         p.start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-list_devices"),
                       QStringLiteral("true"), QStringLiteral("-f"),
                       QStringLiteral("dshow"), QStringLiteral("-i"),
@@ -5494,6 +5498,8 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
         // ⚠️ 输入串是 `video=<设备名>`。**不是** `video_device=` —— 后者 ffmpeg 直接报
         //    "Malformed dshow input string"（2026-10-09 实测，旧实现对相机永远打不开）。
+        // #368 需求①：抓拍也走 ffmpeg（控制台程序），不藏会弹窗
+        stelarithHideChildConsole(p);
         p.start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
                       QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
                       QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video=%1").arg(dev),
@@ -5557,6 +5563,8 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         // 排障的人只看到"失败"，看不到为什么失败（失败必须给原因，这条红线上栽过）。
         p.setProcessChannelMode(QProcess::SeparateChannels);
         // -frames:v 1 = 只要一帧；-y 覆盖；抽帧失败（设备不存在/占用）ffmpeg 会非零退出
+        // #368 需求①：截图也走 ffmpeg（控制台程序），不藏会弹窗
+        stelarithHideChildConsole(p);
         p.start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
                       QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
                       QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video=%1").arg(dev),
@@ -5794,6 +5802,8 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         }
         g_playProc = new QProcess();
         g_playProc->setProcessChannelMode(QProcess::MergedChannels);
+        // #368 需求①：播放期间 ffplay 控制台窗会一直挂在桌上，必须 CREATE_NO_WINDOW
+        stelarithHideChildConsole(*g_playProc);
         // ── 组件7（2026-10-15）：「播完」态的接线 ────────────────────
         // ffplay 带 -autoexit，播完会**自己退出** —— 原来没人接住这个信号，
         // 岛就一直停在"正在播放"，直到老师手动停 / 时段截断。这里接住：
