@@ -79,6 +79,7 @@ Item {
     }
 
     // ── 终末地工业青 · 在线设备的"数据在流"左缘细规 ──
+    // 2026-10-22：硬编码 #2FB8C6 → 令牌 cAccent（零硬编码纪律）
     Rectangle {
         visible: root.online
         width: 3
@@ -89,7 +90,7 @@ Item {
         anchors.topMargin: 18
         anchors.bottomMargin: 18
         anchors.leftMargin: 5
-        color: "#2FB8C6"
+        color: md3.cAccent
         z: 3
     }
 
@@ -129,7 +130,7 @@ Item {
                     anchors.centerIn: parent
                     visible: !root.online
                     text: "未开机"
-                    font.pixelSize: 12
+                    font.pixelSize: md3.bodyS
                     color: md3.cOutline
                 }
 
@@ -148,7 +149,7 @@ Item {
             Text {
                 width: parent.width
                 text: root.deviceName !== "" ? root.deviceName : root.uid
-                font.pixelSize: 13
+                font.pixelSize: md3.body13
                 font.weight: Font.Medium
                 color: md3.cOnSurface
                 elide: Text.ElideRight
@@ -163,7 +164,7 @@ Item {
                     return root.lastSeenAgoSec < 60 ? "刚断线"
                            : Math.floor(root.lastSeenAgoSec / 60) + " 分前"
                 }
-                font.pixelSize: 12
+                font.pixelSize: md3.bodyS
                 font.family: (root.online && root.version !== "") ? "monospace" : ""
                 color: md3.cOnSurfaceVar
                 elide: Text.ElideRight

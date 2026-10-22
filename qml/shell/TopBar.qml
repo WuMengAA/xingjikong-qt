@@ -11,7 +11,7 @@
 // classes / currentClass **两者都支持**：宿主注入优先，没注入就回落
 // backend.classes / backend.currentClass —— 真源始终只有一份（云端班级目录）。
 // ⚠️ 这里踩过一次：宿主传了 TopBar 上不存在的属性名 ⇒
-//    `Type Md3Shell unavailable` ⇒ 整个 Main.qml 加载失败、程序起不来，
+//    `Type Md3Shell unavailable`（时名，现名 MainWindow）⇒ 整个 Main.qml 加载失败、程序起不来，
 //    而 qmllint 报 0 Error —— 静态检查查不出这类问题，只能真跑。
 import QtQuick
 import QtQuick.Controls
@@ -83,13 +83,13 @@ Item {
             spacing: 2
             Text {
                 text: root.title
-                font.pixelSize: 16
+                font.pixelSize: root.md3 ? root.md3.titleM : 16
                 font.weight: Font.Medium
                 color: root.md3 ? root.md3.cOnSurface : "#1C1B1B"
             }
             Text {
                 text: root.headCount
-                font.pixelSize: 12
+                font.pixelSize: root.md3 ? root.md3.bodyS : 12
                 color: root.md3 ? root.md3.cOnSurfaceVar : "#49454F"
             }
         }
@@ -129,18 +129,18 @@ Item {
         }
 
         // ── 用户头像（圆 32，仅登录后显示）────────────────────────────
+        // 无边框原则（AGENTS.md §9.4）：实心 secondaryContainer 圆已足够辨识，
+        // 2026-10-22 去掉原先 1.5px outline 描边。
         Rectangle {
             visible: root.loggedIn
             width: 32
             height: 32
             radius: 16
             color: root.md3 ? root.md3.cSecondaryCont : "#E8DEF8"
-            border.width: 1.5
-            border.color: root.md3 ? root.md3.cOutlineVar : "#CAC4D0"
             Text {
                 anchors.centerIn: parent
                 text: root.avatarInitial
-                font.pixelSize: 13
+                font.pixelSize: root.md3 ? root.md3.body13 : 13
                 font.weight: Font.Medium
                 color: root.md3 ? root.md3.cOnSecondaryCont : "#1D192B"
             }

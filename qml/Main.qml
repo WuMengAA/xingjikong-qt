@@ -14,6 +14,9 @@ import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
 import "pages"             // U5 A-2：抽出的整屏页（「页」也声明化的第一步；见 pages/SettingsPage.qml）
+// 2026-10-22：全局主框架（App Scaffold · MainWindow）——原 pages/Md3Shell.qml 更名移入。
+// 它是管理端唯一应用外壳（侧栏+顶栏+内容区+状态条），业务页经它挂载；见 AGENTS.md §9。
+import "shell"
 // 2026-10-18：截图预览窗直接声明在本文件（回执驱动，不走 UiPanelHost 清单）
 // ⇒ 必须 import "panels" 才能按类型名实例化 panels/ScreenshotPreviewDialog.qml。
 import "panels"
@@ -1013,11 +1016,12 @@ ApplicationWindow {
             // 老师在两个"看班级"的入口之间犹豫。
             ClassDetailPage { ctx: root._pageCtx }
 
-            // ══ 6 MD3 页面级骨架 ══（2026-10-20 · V1.0 P1）
-            // 新版底座：240px 侧栏 + 64px 顶栏 + 操作区 + 4 列设备网格 + 400px 侧滑面板。
-            // ⚠️ 刻意**并存不动存量**：现有 5 页与底栏标签保持原样，
-            //    骨架验收通过后再决定是否迁移（不擅自推翻已交付的导航）。
-            Md3Shell { ctx: root._pageCtx }
+            // ══ 6 全局主框架 MainWindow ══（2026-10-20 V1.0 P1 立骨架；2026-10-22 更名）
+            // 唯一应用外壳：240px 侧栏 + 64px 顶栏 + 操作区 + 响应式设备网格 + 400px 侧滑面板
+            // + 底部 32 状态条。旧壳 1-5 页保留作下钻目标（侧栏「运行监控」跳 3、
+            // SideSheet「在集控页打开」跳 1、「返回经典界面」回 1），功能不丢。
+            // ⚠️ 新页面一律长在本骨架里（AGENTS.md §9），禁止自绘第二个外壳。
+            MainWindow { ctx: root._pageCtx }
         }
 
         // ── 底部标签（与手机端同一套心智）──

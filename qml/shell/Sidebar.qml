@@ -9,7 +9,7 @@
 // secondaryContainer），图标走 SvgIcon（真源是随 exe 打包的 lucide 图标）。
 //
 // 组件契约（md3/ 目录下所有件一致）：md3 属性接设计令牌实例，
-// 由宿主经 ctx.window.th 注入（见 pages/Md3Shell.qml）。
+// 由宿主经 ctx.window.th 注入（见 shell/MainWindow.qml）。
 import QtQuick
 import QtQuick.Layouts
 import "../components/md3"
@@ -26,12 +26,19 @@ Item {
     /** 宿主上下文（同 _pageCtx 契约）；用于「返回经典界面」走 ctx.window.goPage。 */
     property var ctx: null
 
+    // ── 骨架结构尺寸（AGENTS.md §9.2：命名常量集中声明，不散落魔法数）──
+    readonly property int navWidth: 240        // 规范：NavigationDrawer 宽 240
+    readonly property int navItemH: 56         // MD3 导航项高（规范 48 的 MD3 口径取 56）
+    readonly property int brandRowH: 48        // 品牌行高
+    readonly property int backRowH: 44         // 「返回经典界面」行高
+    readonly property int iconPx: 20           // 菜单图标边长
+
     signal activated(string key)
 
     Layout.fillHeight: true
-    Layout.preferredWidth: 240
+    Layout.preferredWidth: root.navWidth
 
-    implicitWidth: 240
+    implicitWidth: root.navWidth
 
     Rectangle {
         anchors.fill: parent
@@ -56,13 +63,13 @@ Item {
         // 品牌行
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 48
+            Layout.preferredHeight: root.brandRowH
             Text {
                 anchors.left: parent.left
-                anchors.leftMargin: 16
+                anchors.leftMargin: root.md3 ? root.md3.spM : 16
                 anchors.verticalCenter: parent.verticalCenter
                 text: "星集控"
-                font.pixelSize: 16
+                font.pixelSize: root.md3 ? root.md3.titleM : 16
                 font.weight: Font.Medium
                 color: md3.cOnSurfaceVar
             }
@@ -74,7 +81,7 @@ Item {
                 id: navItem
                 required property var modelData
                 Layout.fillWidth: true
-                Layout.preferredHeight: 56
+                Layout.preferredHeight: root.navItemH
                 radius: md3.rFull
                 color: (root.current === modelData.key)
                        ? md3.cSecondaryCont
@@ -82,6 +89,7 @@ Item {
                 Behavior on color { ColorAnimation { duration: md3.durShort } }
 
                 // 终末地工业青 · 选中项左侧细规（"当前终端"冷调点缀）
+                // 2026-10-22：硬编码 #2FB8C6 → 令牌 cAccent（零硬编码纪律）
                 Rectangle {
                     visible: root.current === modelData.key
                     width: 3
@@ -92,24 +100,24 @@ Item {
                     anchors.bottom: parent.bottom
                     anchors.topMargin: 18
                     anchors.bottomMargin: 18
-                    color: "#2FB8C6"
+                    color: md3.cAccent
                 }
 
                 Row {
                     anchors.left: parent.left
-                    anchors.leftMargin: 16
+                    anchors.leftMargin: root.md3 ? root.md3.spM : 16
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 12
 
                     SvgIcon {
                         name: modelData.icon
                         tint: (root.current === modelData.key) ? md3.cOnSecondaryCont : md3.cOnSurfaceVar
-                        px: 20
+                        px: root.iconPx
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: modelData.label
-                        font.pixelSize: 14
+                        font.pixelSize: root.md3 ? root.md3.bodyM : 14
                         font.weight: (root.current === modelData.key) ? Font.Medium : Font.Normal
                         color: (root.current === modelData.key) ? md3.cOnSecondaryCont : md3.cOnSurfaceVar
                         anchors.verticalCenter: parent.verticalCenter
@@ -131,21 +139,21 @@ Item {
         // H7：回旧壳出口（骨架与旧壳并存期必须有退路，否则老师被困在新壳里）
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 44
+            Layout.preferredHeight: root.backRowH
             Row {
                 anchors.left: parent.left
-                anchors.leftMargin: 16
+                anchors.leftMargin: root.md3 ? root.md3.spM : 16
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 12
                 SvgIcon {
                     name: "arrow-left"
                     tint: md3.cOnSurfaceVar
-                    px: 20
+                    px: root.iconPx
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "返回经典界面"
-                    font.pixelSize: 14
+                    font.pixelSize: root.md3 ? root.md3.bodyM : 14
                     color: md3.cOnSurfaceVar
                     anchors.verticalCenter: parent.verticalCenter
                 }

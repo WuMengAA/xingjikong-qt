@@ -3,6 +3,11 @@
 // 规格（用户点单）：点击某台设备，从右侧滑出 400px 宽的面板，
 //   面板带 Level 3 阴影，主背景覆盖 50% 黑色遮罩。
 //
+// ── 竖屏自适应（2026-10-22 用户点单「竖屏横屏两种布局模式」）────────────
+// 面板宽从写死 400 改为 `min(400, 宿主宽)`：手机竖屏（≈390）自动变**整宽**面板
+//   （右滑入场不变，移动端全屏面板本来就是标准形态）；桌面竖条形窗口仍是 400 右板。
+//   同时窄屏压缩两块画面占位的高度（200→150 / 96→72），给按钮和入口腾垂直空间。
+//
 // ── 一处对规格的有意偏离（必须写明）─────────────────────────────────
 // 规格写「面板内分左右两块：左侧 VNC 实时画面、右侧摄像头画面与回放」。
 // 但面板只有 400px 宽，左右分块 ⇒ 每块不足 200px，16:10 画面只有约 120px 高，
@@ -31,6 +36,12 @@ Item {
     property var device: null
 
     signal closed()
+
+    /** 面板实际宽度：横屏/宽竖屏 400；窄屏（手机竖握）收窄到整宽（min 兜底）。
+     *  ⚠️ 不能写死 400：390 宽的手机上会画出界（右缘 10px 被裁）。 */
+    readonly property real drawerW: Math.min(400, root.width)
+    /** 窄屏判定（<480 = 手机竖握）：压缩画面占位高度用。 */
+    readonly property bool narrow: root.width < 480
 
     /** H6 高频面板入口：从 UiPlugins.manifest() 白名单派生。
      *  缺口清单 §2 顺序 5：先补 通知 / 分发文件 / 管控（考试模式）/ 终端 四条
@@ -65,9 +76,9 @@ Item {
     // ── 抽屉容器：靠 x 位移滑入滑出 ──────────────────────────────────
     Item {
         id: drawer
-        width: 400
+        width: root.drawerW
         height: parent.height
-        x: root.opened ? (root.width - 400) : root.width
+        x: root.opened ? (root.width - root.drawerW) : root.width
         Behavior on x { NumberAnimation { id: drawerOut; duration: root.th ? root.th.durMedium : 350 } }
 
         // Level 3 阴影：两层向左扩散的半透明黑（无外部依赖的近似实现）
@@ -123,7 +134,7 @@ Item {
             // ── 上：实时画面（frames/<uid> 通道）────────────────────────
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 200
+                Layout.preferredHeight: root.narrow ? 150 : 200
                 radius: root.th ? root.th.rM : 12
                 color: root.th ? root.th.cContLow : "#F7F2FA"
                 border.width: 1
@@ -249,7 +260,7 @@ Item {
 //    instruction 通道，是能用的，接线等单独点单。
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 96
+                Layout.preferredHeight: root.narrow ? 72 : 96
                 radius: root.th ? root.th.rM : 12
                 color: "transparent"
                 border.width: 1
