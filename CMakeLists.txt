@@ -173,6 +173,9 @@ add_executable(stelarith-agent-qt
   src/edge_tts.h
   src/microphone.cpp
   src/microphone.h
+  # ── 媒体工具层（2026-10-22 · AGENTS.md §10 第 1 刀）：ffmpeg 定位 / 摄像头绑定 / 设备解析 / 错误归类 ──
+  src/media/MediaTools.cpp
+  src/media/MediaTools.h
   # ── 远控隧道（2026-10-18 · RFB over WS）：agent 第二条 WS + 本地 VNC 纯字节桥 ──
   src/vnc_bridge.cpp
   src/vnc_bridge.h
