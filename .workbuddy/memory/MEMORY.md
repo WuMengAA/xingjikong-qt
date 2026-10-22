@@ -1,5 +1,5 @@
 # Stelarith-xingjikong-qt · 项目速查
-> 细节见 `.workbuddy/memory/YYYY-MM-DD.md`（append-only）。说明文档统一写 README.md，不新建 docs/。
+> 细节见 `.workbuddy/memory/YYYY-MM-DD.md`；文档统一写 README.md。
 
 ## 0 铁律
 - 裁决序：**生产事故 > 用户点单 > 已就绪未接线 > 战略**。属实 bug 直接修并同轮闭环。
@@ -16,7 +16,6 @@
 ## 2 编译 / 自检 / 隔离预览
 - Qt 6.12.0 `D:/QTqwq/6.12.0/msvc2022_64`；构建 `control/scripts/_build_agent.py` 等（ninja+MSVC；C1060⇒-j1；GBK 输出）。离屏自检 STE_ALLOW_MULTI=1 -platform offscreen 看退出码（10过/20败/30兜底）。出包：agent ISCC / viewer makensis / APK make-apk.ps1。
 - 隔离预览法见 10-21/22 日志；停进程按 PID，禁 taskkill /IM node.exe（连带生产云端）。
-- ⚠️ viewer 认 `build/qml/Stelarith/<pages|shell>`；只改 QML 时 build/qml 不自动更新 ⇒ viewer_qml_sync/agent_qml_sync。
 
 ## 3 仓库 / UI / 门禁
 - github `WuMengAA/xingjikong-qt`；根仓即 meta（gitlink，无 remote）。⚠️ shared-qml 是 meta 子目录非独立仓库，随 meta 提交。
@@ -36,5 +35,4 @@
 - **监察代码三戒（10-22）**：`GetWindowThreadProcessId` 在 **win32process**（别处没有；回调 except 吞异常连演 4 轮假阴性）；对照先过黄金基准自检（DETACHED pythonw AllocConsole 必建可见窗）；**本环境看不到任何新建控制台窗** ⇒ 桌面可见性只能现场验。
 - **EnumWindows 不过滤可见性** ⇒ 判可见控制台窗必须加 IsWindowVisible（vbs 壳拉起的是隐藏窗）。
 - viewer-run.log 跨运行追加 ⇒ 轮询带 offset；被控端日志 GBK；QTimer 不 start=只有首查。
-- QML 静态检查都不可信：属性自遮蔽（子组件声明 ctx 后宿主注入用 panelCtx）；qmllint 对不存在属性 0 Error 但整页崩 ⇒ 运行时探针才是出口。
-- **QML 整页崩溃两坑（10-22）**：属性名避 `on`+大写开头（onSurfaceVariant 被当信号处理器）；普通 Row 写 Layout.fillWidth 会崩（需 RowLayout）⇒ 用行宽计算。无头验证 QGuiApplication+offscreen+Qt bin 入 PATH。
+- QML 静态检查都不可信（属性自遮蔽：子组件声明 ctx 后宿主注入用 panelCtx；qmllint 对不存在属性 0 Error 但整页崩）⇒ 运行时探针才是出口。**整页崩溃两坑（10-22）**：属性名避 `on`+大写开头（onSurfaceVariant 被当信号处理器）；普通 Row 写 Layout.fillWidth 会崩（需 RowLayout）⇒ 用行宽计算；无头验证 QGuiApplication+offscreen+Qt bin 入 PATH。
