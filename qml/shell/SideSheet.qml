@@ -19,6 +19,7 @@ import QtQuick
 import QtQuick.Layouts
 import "../components/md3"
 import "../island"          // SvgIcon
+import "../UiPlugins.js" as UiPlugins   // H6：面板入口清单（唯一真源，不手写第二份按钮表）
 
 Item {
     id: root
@@ -30,6 +31,20 @@ Item {
     property var device: null
 
     signal closed()
+
+    /** H6 高频面板入口：从 UiPlugins.manifest() 白名单派生。
+     *  缺口清单 §2 顺序 5：先补 通知 / 分发文件 / 管控（考试模式）/ 终端 四条
+     *  （缺口的教学主流程前三 + 一个运维入口）；点击走 ctx.open(id)（→ panelHost.open），
+     *  与 SettingsPage 的「更新日志/帮助」同一通道，不重复造门控。 */
+    function panelEntries() {
+        const want = ["notify", "file", "control", "term"]
+        var all = []
+        try { all = UiPlugins.manifest() } catch (e) { return [] }
+        var out = []
+        for (var i = 0; i < all.length; ++i)
+            if (want.indexOf(all[i].id) >= 0) out.push(all[i])
+        return out
+    }
 
     visible: root.opened || scrimOut.running || drawerOut.running
     anchors.fill: parent
@@ -172,6 +187,56 @@ Item {
                     variant: "error"
                     radius: 12
                     onClicked: if (root.ctx) root.ctx.window.runActionById("reboot")
+                }
+            }
+
+            // ── S6 远控出口（2026-10-22）：VNC 键鼠在集控页，这里给明确入口 ──
+            // 为什么是"跳页"而不是"把远控嵌进来"：远控画面是 VNC over WS（libvncclient
+            // 回环 + image://vnc/live），键鼠注入也绑在 ControlPage 的坐标换算上。
+            // 在侧滑面板里重写一套 = 第二份实现 + 两倍的坐标/焦点坑，收益为零。
+            // 出口点这里，比让老师自己找更符合"指哪打哪"的诉求。
+            Md3Btn {
+                Layout.fillWidth: true
+                md3: root.th
+                text: "在集控页打开（鼠标键盘远控）"
+                variant: "outlined"
+                radius: 12
+                onClicked: {
+                    if (!root.ctx) return
+                    // currentUid 已由设备卡点击写进宿主；这里只负责"跳过去"
+                    root.ctx.window.goPage(1)
+                    root.closed()
+                }
+            }
+
+            // ── 面板功能（H6）：高频面板可见入口 ──────────────────────
+            // ⚠️ 为什么纯文本无图标：Md3Btn 的 icon 是 emoji 占位，骨架页
+            //    渲染成方块（10-20 实证）；SvgIcon 需要 lucide 文件在位，
+            //    terminal.svg 不在 resources/icons 里 ⇒ 本区不引图标，
+            //    等图标资源补齐再按 manifest().icon 接线（待点单）。
+            Text {
+                Layout.fillWidth: true
+                text: "面板功能"
+                font.pixelSize: 12
+                color: root.th ? root.th.cOnSurfaceVar : "#49454F"
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: 8
+                rowSpacing: 8
+                Repeater {
+                    model: root.panelEntries()
+                    delegate: Md3Btn {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        md3: root.th
+                        text: modelData.title
+                        variant: "tonal"
+                        radius: 12
+                        tip: modelData.tip || ""
+                        onClicked: if (root.ctx) root.ctx.open(modelData.id)
+                    }
                 }
             }
 
