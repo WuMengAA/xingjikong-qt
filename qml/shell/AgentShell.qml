@@ -17,6 +17,7 @@ import "AgentPages.js" as AgentPages
 Rectangle {
     id: shellRoot
     color: tok.cSurface
+    property bool sheetOpen: false   // 广播站排期中心是否展开（2026-10-22）
 
     Md3 { id: tok; dark: !agentUi.lightMode }
 
@@ -55,14 +56,34 @@ Rectangle {
             font.weight: Font.Medium
             color: tok.cOnSurface
         }
-        Text {
+        Row {
             anchors.right: parent.right
-            anchors.rightMargin: 20
+            anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
-            // 打开面板那一刻的状态（agentUi.refresh() 在 openPanel 里先行调用）
-            text: agentUi.connState
-            font.pixelSize: 12
-            color: agentUi.connState.indexOf("已连接") === 0 ? tok.cOk : tok.cWarn
+            spacing: 12
+
+            // 广播站排期中心入口（蓝色按钮，预览其内部蓝白主题）
+            Item {
+                height: 28; width: 72
+                Rectangle {
+                    anchors.fill: parent; radius: 14
+                    color: bcMa.pressed ? "#1F57E8" : (bcMa.containsMouse ? "#5B8BFF" : "#2F6BFF")
+                }
+                Text {
+                    anchors.centerIn: parent; text: "广播站"
+                    font.pixelSize: 12; font.weight: Font.Medium; color: "#FFFFFF"
+                }
+                MouseArea {
+                    id: bcMa; anchors.fill: parent; hoverEnabled: true
+                    onClicked: shellRoot.sheetOpen = true
+                }
+            }
+            Text {
+                // 打开面板那一刻的状态（agentUi.refresh() 在 openPanel 里先行调用）
+                text: agentUi.connState
+                font.pixelSize: 12
+                color: agentUi.connState.indexOf("已连接") === 0 ? tok.cOk : tok.cWarn
+            }
         }
     }
 
@@ -97,5 +118,14 @@ Rectangle {
         }
         currentIndex: pageHost.currentIndex
         onActivated: pageHost.goTo(index)
+    }
+
+    // ── 广播站排期中心（右侧滑出 SideSheet，2026-10-22）──────────────────
+    // 同目录兄弟组件，QML 直接按类型名解析，无需 import。
+    BroadcastScheduleSheet {
+        id: sheet
+        anchors.fill: parent
+        opened: shellRoot.sheetOpen
+        onClosed: shellRoot.sheetOpen = false
     }
 }
