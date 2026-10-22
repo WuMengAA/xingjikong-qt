@@ -24,6 +24,7 @@
 #include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 #include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
 #include "island.h"           // 2026-10-07：被控端灵动岛（顶部居中胶囊 + 缓动 + 交互穿透）
+#include "smtc_monitor.h"     // 2026-10-22：系统媒体识别（SMTC），起工作线程 + 元数据
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -7393,7 +7394,15 @@ int main(int argc, char *argv[])
     // 2026-10-03 实测：计划任务里套一层 `cmd /c start-agent.bat` 会**卡住不退出**，
     // 任务永远 Running、被控端根本没被拉起。
     migrateAgentEnvFromInstallDir();   // 老机器：把安装目录里的旧配置搬进数据目录（幂等，无则不动）
-    const int envN = loadEnvFile(agentEnvPath());
+
+    // ── 系统媒体识别（2026-10-22）──────────────────────────────────────
+    // 起一条 MTA 工作线程轮询 SMTC，回答「这台机器现在真在放什么」。
+    // 与 VoiceHub 那套（bridge.media*，语义是"我们的排期播放器播到哪"）互补：
+    // 学生自己开个网易云，VoiceHub 一无所知，SMTC 能看见。
+    // ⚠️ 必须在这里（日志 handler 已装之后）：失败原因要落 agent-qt.log，
+    //    否则装到没起 WMP/SMTC 服务的老机器上，全是"看着像没实现"的黑洞。
+    SmtcMonitor::instance()->start();
+    qInfo("[agent-qt] SMTC 系统媒体识别已启动（800ms 轮询，独立 MTA 线程）");    const int envN = loadEnvFile(agentEnvPath());
     if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（%s）", envN, qPrintable(agentEnvPath()));
     loadClassCode();   // 2026-10-08：载入持久化的班级码，register 时带给云端
     loadClassName();   // 2026-10-09：载入班级显示名（同上，register 一起带给云端）

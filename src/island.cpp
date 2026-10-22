@@ -29,6 +29,8 @@
 #include "island_bridge.h"       // P0-0：historySnapshotJson() 复用桥的 history() 组装口径
 #include "svgiconprovider.h"
 #include "whale_audio.h"
+// 2026-10-22：系统媒体识别实例，注入 QML 给岛面/排期中心读「本机正在放什么」。
+#include "smtc_monitor.h"
 #include "danmaku.h"             // 2026-10-15 组件5：祝福弹幕全屏浮层
 
 #include <QApplication>
@@ -275,6 +277,11 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     // 小鲸鱼音效实例（QML 侧 WhaleMascot 通过 bridgeRef.whaleClicked/whaleLongPressed 触发，
     // 不直接用 whaleAudio，但留这个 context property 以备将来 QML 直接调 playByName）。
     m_quick->rootContext()->setContextProperty(QStringLiteral("whaleAudio"), WhaleAudio::instance());
+    // 2026-10-22：系统正在播放的媒体（SMTC）。
+    // 与 bridge 的 media* 不是一路：bridge.media* = **我们的排期播放器**播到哪；
+    // smtc.* = **这台机器上真在响什么**（学生自己开的网易云/网页视频都算）。
+    // QML 用 smtc.available 决定要不要显示，别在没拿到会话管理器时显示空歌名。
+    m_quick->rootContext()->setContextProperty(QStringLiteral("smtc"), SmtcMonitor::instance());
     // SVG 图标 provider（QML 侧 SvgIcon.qml 用 image://svgicon/<name>?color=...）。
     // ⚠️ 必须挂在**这个 QQuickWidget 自己的 engine** 上，不能挂全局默认 engine ——
     //    QQuickWidget 有独立 engine，挂错了图标全空白（且不报错，最难查）。

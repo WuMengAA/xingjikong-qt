@@ -207,6 +207,21 @@ target_link_libraries(stelarith-agent-qt PRIVATE gdi32 user32)
 if(WIN32)
   target_link_libraries(stelarith-agent-qt PRIVATE d3d11 dxgi ole32)
 endif()
+# 2026-10-22：系统媒体识别 SMTC（winrt/Windows.Media.Control.h，C++/WinRT 消费端）
+#   windowsapp.lib = WinRT 的 umbrella import lib（RequestAsync / RoInitialize 等）。
+#   SDK 的 cppwinrt 头目录已由 scripts/_build_agent.py 的 INCLUDE 提供；
+#   用 VS 生成器时由 WindowsTargetPlatform 自动带上，不需要额外 include 路径。
+if(WIN32)
+  target_sources(stelarith-agent-qt PRIVATE src/smtc_monitor.cpp src/smtc_monitor.h)
+  target_link_libraries(stelarith-agent-qt PRIVATE windowsapp)
+  # ⚠️ 本文件必须按 C++20 编：工程级是 C++17，而 C++/WinRT 在 C++17 下会
+  #    落到 <experimental/coroutine>（需要 /await），MSVC 14.51 直接硬失败
+  #    （error C2338：experimental/coroutine 已被弃用，要求改 C++20 标准库）。
+  #    只给这一个文件提标准：全工程提 C++20 会让 270+ 个既有编译单元一起变行为，
+  #    /std 覆盖）警告。注意：源文件级 COMPILE_FEATURES cxx_std_20 在 MSVC 上
+  #    **不会**真的改写命令行（实测仍留 -std:c++17），必须用 COMPILE_OPTIONS 硬给。
+  set_source_files_properties(src/smtc_monitor.cpp PROPERTIES COMPILE_OPTIONS "/std:c++20")
+endif()
 # 2026-10-11：灵动岛 QML（QQuickWidget 承载 qml/island/IslandRoot.qml）
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Qml Qt6::Quick Qt6::QuickWidgets)
 
