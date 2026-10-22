@@ -75,14 +75,20 @@ Write-Host "[ok] 已创建计划任务 $TaskName（登录时启动，交互会�
 # 3) 看门狗计划任务：每 10 分钟巡检一次（2026-10-18 补）
 # ⚠️ 事故背景：这条任务以前只在个别机器上手工建过，装机脚本里**没有** ⇒ 干净装机没有兜底，
 #    agent 崩了就真的不起来（10-18 凌晨 00:54 崩掉后 35 分钟无人拉起）。
-#    任务只调 .bat 壳，判定逻辑在 stelarith-agent-guard.ps1（按完整路径识别生产实例 +
+#    任务只调壳，判定逻辑在 stelarith-agent-guard.ps1（按完整路径识别生产实例 +
 #    僵死检测 + 清理同名异路径实例，因为单例互斥体是机器级的）。
+# ⚠️ 2026-10-22 修（第二次踩同一个坑）：动作**必须**是 wscript+vbs 壳，不能直接指 .bat ——
+#    Task Scheduler 给 .bat/.cmd 动作必分配一个 cmd.exe 控制台窗，看门狗每 10 分钟弹一次黑窗
+#    （任务设 Hidden 只隐调度器 UI）。10-22 已用手工脚本修过 live 任务
+#    （scripts/fix-guard-console-window.py），但本脚本每次装机都重新注册、
+#    会把修复打回原形 —— 所以注册源头一并改掉。壳逻辑见 vbs 头部注释。
 $GuardTask = 'StelarithAgentGuard'
-$guardBat = Join-Path $Dest 'stelarith-agent-guard.bat'
+$guardVbs = Join-Path $Dest 'stelarith-agent-guard-hidden.vbs'
 $guardPs1 = Join-Path $Dest 'stelarith-agent-guard.ps1'
-if ((Test-Path $guardBat) -and (Test-Path $guardPs1)) {
+if ((Test-Path $guardVbs) -and (Test-Path $guardPs1)) {
     try {
-        $gAction = New-ScheduledTaskAction -Execute $guardBat -WorkingDirectory $Dest
+        $gAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" `
+            -Argument """$guardVbs""" -WorkingDirectory $Dest
         $gTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
             -RepetitionInterval (New-TimeSpan -Minutes 10)
         $gSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -96,7 +102,7 @@ if ((Test-Path $guardBat) -and (Test-Path $guardPs1)) {
         Write-Host "[warn] 看门狗任务注册失败：$($_.Exception.Message)"
     }
 } else {
-    Write-Host "[warn] 看门狗脚本缺失，跳过 $GuardTask（$guardBat）"
+    Write-Host "[warn] 看门狗脚本缺失，跳过 $GuardTask（$guardVbs）"
 }
 
 Write-Host ''
