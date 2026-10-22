@@ -17,11 +17,11 @@
 #include <QThread>
 
 // ── 跨 TU 引用 main.cpp 的状态 ──────────────────────────────────────
-// 这三条第二刀已从匿名 namespace 提出（外部链接）。g_shotDir 归「存储/路径」域、
-// g_recProc/g_recOutPath 归录像会话域，等各自那一刀再收进对应模块。
+// 2026-10-23 第四刀：g_recProc / g_recOutPath 已收归 MediaSession（录像状态本就属于
+// 媒体会话模块），本文件改走 MediaSession::recProc() / recOutPath() 访问器。
+// 只剩 g_shotDir —— 它属「存储/路径」域，被 media / screenshot / 抓屏 三处共用，
+// 收进 media 会固化反向依赖，等存储域单独一刀处理。
 extern QString   g_shotDir;     // 截图/存图目录（screenshot 动作与抓屏也用它）
-extern QProcess *g_recProc;     // 正在录制的 ffmpeg 进程
-extern QString   g_recOutPath;  // 正在录制的输出 mp4 路径
 
 namespace CameraActions {
 
@@ -230,13 +230,14 @@ ExecOut recordStart(const QJsonObject &params)
     // 而 waitForStarted() 这种情况照样返回 true → 回执 done、一个字节都没录到（假成功）。
     // 所以真等两秒，看输出文件有没有真的长出来；没有就 kill + 删文件 + 如实报失败。
     QThread::msleep(2000);
-    const bool reallyRecording = QFileInfo::exists(g_recOutPath) && QFileInfo(g_recOutPath).size() > 0;
+    const bool reallyRecording = QFileInfo::exists(MediaSession::recOutPath())
+                                 && QFileInfo(MediaSession::recOutPath()).size() > 0;
     if (!reallyRecording) {
-        g_recProc->kill();
-        ProcessUtil::waitFinished(*g_recProc, 3000);
-        QFile::remove(g_recOutPath);
-        delete g_recProc; g_recProc = nullptr;
-        g_recOutPath.clear();
+        MediaSession::recProc()->kill();
+        ProcessUtil::waitFinished(*MediaSession::recProc(), 3000);
+        QFile::remove(MediaSession::recOutPath());
+        MediaSession::setRecProc(nullptr);      // 等价于 delete 旧对象 + 置空
+        MediaSession::setRecOutPath(QString());
         out.result = QStringLiteral("failed");
         out.error  = QStringLiteral("开录失败：2 秒内没拿到任何画面（设备 %1 没找到或被占用）—— 现在并没有在录").arg(dev);
         out.data.insert(QStringLiteral("errorCode"), QStringLiteral("device_not_found"));
@@ -245,7 +246,7 @@ ExecOut recordStart(const QJsonObject &params)
     }
     out.result = QStringLiteral("done");
     out.data.insert(QStringLiteral("recording"), true);   // 明示：这条回执是"确认真的在录"，不是"进程开了"
-    out.data.insert(QStringLiteral("path"), QDir::toNativeSeparators(g_recOutPath));
+    out.data.insert(QStringLiteral("path"), QDir::toNativeSeparators(MediaSession::recOutPath()));
     out.data.insert(QStringLiteral("device"), dev);
     out.data.insert(QStringLiteral("maxSec"), maxSec);
     return out;
@@ -254,12 +255,12 @@ ExecOut recordStart(const QJsonObject &params)
 ExecOut recordStop()
 {
     ExecOut out;
-    if (!g_recProc) {
+    if (!MediaSession::recProc()) {
         out.result = QStringLiteral("failed");
         out.error = QStringLiteral("camera_record_stop: 当前没有录像在进行");
         return out;
     }
-    const QString recPath = g_recOutPath;
+    const QString recPath = MediaSession::recOutPath();
     qint64 bytes = 0; QString err2;
     // ⚠️ 2026-10-13：不再要求"进程必须还在跑"才停。ffmpeg 带 -t 到点会**自己结束**，
     //    那时 state 已是 NotRunning，但文件是完整的 —— 旧写法会把这种"已录好的文件"

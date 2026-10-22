@@ -184,6 +184,8 @@ add_executable(stelarith-agent-qt
   src/media/CameraActions.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
+  # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──
+  src/core/AgentSettings.h
   # ── 通用进程工具（2026-10-22 · 第 2 刀）：同步等进程退出但不卡主线程（录像/OTA/远控/终端共用）──
   src/core/ProcessUtil.cpp
   src/core/ProcessUtil.h

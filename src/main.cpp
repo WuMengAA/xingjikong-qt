@@ -30,6 +30,7 @@
 #include "media/CameraActions.h" // 2026-10-23 §10 第 3 刀：相机六件套分支体
 #include "core/ProcessUtil.h"    // 2026-10-22 §10 第二刀：通用进程等待（跨域复用）   // 2026-10-22 §10 第 1 刀：媒体工具层     // 2026-10-22：系统媒体识别（SMTC），起工作线程 + 元数据
 #include "core/ExecOut.h"     // 2026-10-23 §10 第 3 刀：指令执行结果（跨 TU 共享）
+#include "core/AgentSettings.h" // 2026-10-23 §10 第 4 刀：本地功能开关（原嵌在匿名域内，跨不了 TU）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -238,17 +239,17 @@ static QString windowIconBase64(HWND hwnd)
 // SDK 头灌进来，只会让它更容易撞 C1060（编译器堆空间不足）。
 
 // ── 跨 TU 共享的状态（2026-10-22 · AGENTS.md §10 第二刀）──────────────────
-// 这几条**必须在匿名 namespace 之外**：src/media/MediaSession.cpp 用 extern
-// 引用它们，而匿名域符号是内部链接，跨 TU 会 LNK2019。
+// 这几条**必须在匿名 namespace 之外**：匿名域符号是内部链接，跨 TU 会 LNK2019。
 // （项目里 makeEnvelope 踩过同一个坑，见文件末尾那段的注释。）
-// 第三刀把相机分支抽成函数时，状态随之收进 MediaSession 模块，届时删本节。
-QString g_shotDir;             // 截图/存图目录（screenshot 动作与抓屏都用它）
-QProcess *g_recProc = nullptr;     // camera_record 正在录制的 ffmpeg 进程（stop 时 terminate）
-QString g_recOutPath;              // 正在录制的输出 mp4 路径
-QProcess *g_playProc = nullptr;    // media_session 正在播放的 ffplay 进程
-QTimer *g_mediaTick = nullptr;   // P3：媒体在播时推进岛底「已播时长」的 1s 计时器
-QTimer *g_mediaAutoStop = nullptr;  // P3：超播放时段窗口自动截断（单一定时器，避免旧计时器误停新会话）
-bool g_mediaStopping = false;
+//
+// ⚠️ 2026-10-23 第四刀：录像/播放的 6 个状态（g_recProc / g_recOutPath /
+//    g_playProc / g_mediaTick / g_mediaAutoStop / g_mediaStopping）已**收归
+//    src/media/MediaSession.cpp**（文件内 static + 访问器）。相机分支第三刀抽走、
+//    媒体会话分支第四刀抽走之后，本文件对它们已无使用点。
+//    剩下这两条属「存储/路径」域，被 media / screenshot / 抓屏 三处共用，
+//    等存储域那一刀再处理。
+QString g_mediaDir;                // 媒体库目录（media_list/media_session 默认扫这里）
+QString g_shotDir;                 // 截图/存图目录（screenshot 动作与抓屏都用它）
 
 namespace {
 
@@ -334,7 +335,6 @@ QVector<QTimer *> g_schedTimers;   // 定时关机：每个任务一个单次定
 QHash<QString, QTimer *> g_schedTimerById;   // 任务 id → 定时器（取消时必须停掉，否则到点仍会执行）
 QString g_schedFile;               // 调度持久化文件（崩溃恢复后重挂未到期任务）
 QString g_schedDir;                // 调度文件所在目录（写文件要 mkpath）
-QString g_mediaDir;                // 媒体库目录（media_list/media_session 默认扫这里）
 QString g_recvDir;                 // file_push 落盘目录
 bool g_remoteControl = false;      // remote_control_start/stop 的真实会话状态
 int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
@@ -406,35 +406,10 @@ bool g_unconfiguredNotified = false; // 未配置气泡只弹一次
 // 落 QSettings（组织 Stelarith / 应用 Stelarith Agent，注册表 HKCU）。默认全开，
 // 各子系统的入口点（speakText / notifyFromParams / noise_monitor_start / 灵动岛初始化）统一读这里。
 // 这样"设置项"才真的"调用设置项"，而不是只摆几个开机自启开关（用户 2026-10-14 反思）。
-namespace AgentSettings {
-    static bool noiseEnabled()  { return QSettings().value(QStringLiteral("feature/noiseEnabled"), true).toBool(); }
-    static void setNoiseEnabled(bool v) { QSettings().setValue(QStringLiteral("feature/noiseEnabled"), v); }
-    static bool voiceEnabled()  { return QSettings().value(QStringLiteral("feature/voiceEnabled"), true).toBool(); }
-    static void setVoiceEnabled(bool v) { QSettings().setValue(QStringLiteral("feature/voiceEnabled"), v); }
-    static bool notifyEnabled() { return QSettings().value(QStringLiteral("feature/notifyEnabled"), true).toBool(); }
-    static void setNotifyEnabled(bool v) { QSettings().setValue(QStringLiteral("feature/notifyEnabled"), v); }
-    static bool islandIdle()    { return QSettings().value(QStringLiteral("ui/islandIdle"), true).toBool(); }
-    static void setIslandIdle(bool v) { QSettings().setValue(QStringLiteral("ui/islandIdle"), v); }
-    static bool lightMode()     { return QSettings().value(QStringLiteral("ui/lightMode"), false).toBool(); }
-    static void setLightMode(bool v) { QSettings().setValue(QStringLiteral("ui/lightMode"), v); }
-
-    // ── P0-0（2026-10-17 · 灵动岛第三方推岛治理）─────────────────────────────
-    // 「允许第三方（插件）向灵动岛推送」。默认**开**：与既有能力保持一致 ——
-    // 插件通道上线以来 island_show 一直是放行的，默认关会让已装插件一夜之间"静默失效"，
-    // 那属于行为回归而不是治理。治理靠的是 pluginhost 里的长度/频率/来源/紧急档四道约束，
-    // 这个开关是老师侧的"一键掐断"，不是默认态。
-    // 键名 feature/pluginIslandPush；**键名是门禁契约**（shared-qml/scripts/test-plugin-island-gate.mjs
-    // 会核对 key/默认值/接线三处一致）。
-    static bool pluginIslandPush() { return QSettings().value(QStringLiteral("feature/pluginIslandPush"), true).toBool(); }
-    static void setPluginIslandPush(bool v) { QSettings().setValue(QStringLiteral("feature/pluginIslandPush"), v); }
-
-    // ── P3 播放时段管理：允许的播放时段窗口（本地时 "HH:MM-HH:MM"）──
-    // 默认关闭 = 随时可播（不限制）；开启后只有落在窗口内才允许 media_session_start。
-    static bool playScheduleEnabled() { return QSettings().value(QStringLiteral("play/scheduleEnabled"), false).toBool(); }
-    static void setPlayScheduleEnabled(bool v) { QSettings().setValue(QStringLiteral("play/scheduleEnabled"), v); }
-    static QStringList playWindows() { return QSettings().value(QStringLiteral("play/windows"), QStringList()).toStringList(); }
-    static void setPlayWindows(const QStringList &v) { QSettings().setValue(QStringLiteral("play/windows"), v); }
-}
+// ⚠️ 2026-10-23（AGENTS.md §10 第四刀地基）：AgentSettings 已下沉到 src/core/AgentSettings.h。
+//    原因：它原先**嵌套在本文件匿名 namespace（251 行起）内**、函数又全带 static ⇒ 内部链接，
+//    跨不了 TU；media_session_start 分支下沉到 src/media/ 之后，那边必须能读 playScheduleEnabled。
+//    唯一变换 static → inline（头文件定义的标准要求），函数体与键名逐字未动。
 bool g_reconnectNow = false;         // 保存新配置后：断线回调里立刻重连（别等退避）
 bool g_configDialogOpen = false;     // 配置窗防重入（首运行自动弹 + 手动点可能撞车）
 
@@ -2583,8 +2558,6 @@ static void appendJsonl(const QString &subdir, const QJsonObject &o);
 static void logNoiseSample(double db, bool active, int seq, bool study, bool ok);
 static qint64 logStudyStart(double th, int need, int recSec);
 static void logStudyStop(qint64 startTs, int alertCount);
-static bool isPlayAllowedNow();
-static qint64 remainingMsInWindow();
 static PluginHost *g_pluginHost = nullptr;   // P2：插件宿主（进程外插件 ABI）；定义在 openPluginStore 之前以便对话框使用
 void runSelfCheck()
 {
@@ -2976,7 +2949,7 @@ void openPlayScheduleDialog()
         QString cur = (IslandOverlay::instance() && IslandOverlay::instance()->mediaOn())
             ? QStringLiteral("正在播放：%1").arg(IslandOverlay::instance()->mediaTitle()) : QStringLiteral("当前无媒体在播");
         state->setText(QStringLiteral("当前状态：%1 · 时段内允许播放：%2")
-                       .arg(cur).arg(isPlayAllowedNow() ? QStringLiteral("是") : QStringLiteral("否")));
+                       .arg(cur).arg(MediaSession::isPlayAllowedNow() ? QStringLiteral("是") : QStringLiteral("否")));
     }
     lay->addWidget(state);
 
@@ -4241,7 +4214,7 @@ static void studyTriggerRecord()
         e.insert(QStringLiteral("seconds"), g_studyRecordSec);
         e.insert(QStringLiteral("thresholdDb"), g_studyThreshDb);
         e.insert(QStringLiteral("count"), g_studyAlertCount);
-        e.insert(QStringLiteral("path"), QDir::toNativeSeparators(g_recOutPath));
+        e.insert(QStringLiteral("path"), QDir::toNativeSeparators(MediaSession::recOutPath()));
         sendNoiseAlert(e);
     }
     qInfo("[study] 噪音异常，自动录制开始（%d 秒，设备 %s）", g_studyRecordSec, qPrintable(dev));
@@ -4347,45 +4320,9 @@ static void logStudyStop(qint64 startTs, int alertCount)
 
 // ── P3 播放时段管理：时段判断 ───────────────────────────────────
 // 没开时段限制 → 随时可播；开了但窗口为空 → 也放开；否则落在任一窗口内才放行。
-static bool isPlayAllowedNow()
-{
-    if (!AgentSettings::playScheduleEnabled()) return true;
-    const QStringList wins = AgentSettings::playWindows();
-    if (wins.isEmpty()) return true;
-    const QTime now = QTime::currentTime();
-    for (const QString &w : wins) {
-        const QStringList p = w.split(QStringLiteral("-"));
-        if (p.size() != 2) continue;
-        const QTime a = QTime::fromString(p.at(0).trimmed(), QStringLiteral("HH:mm"));
-        const QTime b = QTime::fromString(p.at(1).trimmed(), QStringLiteral("HH:mm"));
-        if (!a.isValid() || !b.isValid()) continue;
-        if (a <= b) { if (now >= a && now <= b) return true; }
-        else        { if (now >= a || now <= b) return true; }   // 跨午夜窗口
-    }
-    return false;
-}
+// ⚠️ 2026-10-23（§10 第四刀地基）：isPlayAllowedNow 已下沉到 src/media/MediaSession。
 // 当前窗口距结束的剩余毫秒（无限制/无窗口返回 -1）。供「最大最小适配」：超长播放自动截断。
-static qint64 remainingMsInWindow()
-{
-    if (!AgentSettings::playScheduleEnabled()) return -1;
-    const QStringList wins = AgentSettings::playWindows();
-    if (wins.isEmpty()) return -1;
-    const QTime now = QTime::currentTime();
-    qint64 best = -1;
-    for (const QString &w : wins) {
-        const QStringList p = w.split(QStringLiteral("-"));
-        if (p.size() != 2) continue;
-        const QTime a = QTime::fromString(p.at(0).trimmed(), QStringLiteral("HH:mm"));
-        const QTime b = QTime::fromString(p.at(1).trimmed(), QStringLiteral("HH:mm"));
-        if (!a.isValid() || !b.isValid()) continue;
-        qint64 rem = -1;
-        if (a <= b) { if (now >= a && now <= b) rem = QDateTime::currentDateTime().secsTo(QDateTime(QDate::currentDate(), b)) * 1000; }
-        else        { if (now >= a) rem = QDateTime::currentDateTime().secsTo(QDateTime(QDate::currentDate(), b)) * 1000;
-                      else if (now <= b) rem = QDateTime::currentDateTime().secsTo(QDateTime(QDate::currentDate().addDays(1), b)) * 1000; }
-        if (rem >= 0 && (best < 0 || rem < best)) best = rem;
-    }
-    return best;
-}
+// ⚠️ 2026-10-23（§10 第四刀地基）：remainingMsInWindow 已下沉到 src/media/MediaSession。
 
 
 // 修复③（2026-10-19）：定义在 6082 起，被 executeAction 的 remote_control_stop
@@ -5279,129 +5216,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     }
 
     // 播放：用 ffplay 后台打开指定媒体（或媒体库里的默认第一个）。
-    if (action == QStringLiteral("media_session_start")) {
-        const QString fp = MediaTools::ffplayBin();
-        if (fp.isEmpty()) {
-            out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("media_session_start: 找不到 ffplay（可设 STE_QT_FFPLAY）");
-            return out;
-        }
-        // P3 播放时段管理（"最大最小适配播放时段"）：开了时段限制且当前不在窗口内 → 拦。
-        if (AgentSettings::playScheduleEnabled() && !isPlayAllowedNow()) {
-            out.result = QStringLiteral("blocked");
-            out.error = QStringLiteral("media_session_start: 当前不在允许的播放时段内");
-            out.data.insert(QStringLiteral("allowed"), false);
-            // 组件7（2026-10-15）：被时段拦住 → 学生端的岛也显示"禁播"这一态。
-            // 原来只有管理端能看到 blocked 回执，学生端一片安静：点了"点歌"没反应，
-            // 最容易被当成"机器坏了"。这里让岛把"为什么没播"讲清楚（3.5s 自动收）。
-            if (IslandOverlay::instance())
-                IslandOverlay::instance()->mediaBlocked(QStringLiteral("当前时段不开放播放"));
-            return out;
-        }
-        QString target = params.value(QStringLiteral("path")).toString().trimmed();
-        if (target.isEmpty()) {
-            QDir d(g_mediaDir);
-            const QFileInfoList ls = d.entryInfoList(
-                { QStringLiteral("*.mp4"), QStringLiteral("*.mp3") }, QDir::Files, QDir::Name);
-            if (!ls.isEmpty()) target = ls.first().absoluteFilePath();
-        }
-        if (target.isEmpty()) {
-            out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("media_session_start: 没有指定 path，且媒体库里也没有可播放文件");
-            return out;
-        }
-        if (!QFileInfo::exists(target)) {
-            out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("media_session_start: 文件不存在 %1").arg(QDir::toNativeSeparators(target));
-            return out;
-        }
-        if (g_playProc && g_playProc->state() != QProcess::NotRunning) {
-            g_playProc->terminate();
-            if (!ProcessUtil::waitFinished(*g_playProc, 3000)) g_playProc->kill();
-            delete g_playProc;
-            g_playProc = nullptr;
-        }
-        g_playProc = new QProcess();
-        g_playProc->setProcessChannelMode(QProcess::MergedChannels);
-        // #368 需求①：播放期间 ffplay 控制台窗会一直挂在桌上，必须 CREATE_NO_WINDOW
-        stelarithHideChildConsole(*g_playProc);
-        // ── 组件7（2026-10-15）：「播完」态的接线 ────────────────────
-        // ffplay 带 -autoexit，播完会**自己退出** —— 原来没人接住这个信号，
-        // 岛就一直停在"正在播放"，直到老师手动停 / 时段截断。这里接住：
-        // 非主动停止（g_mediaStopping=false）才算"播完"。
-        // ⚠️ context 传 g_playProc：进程对象被 delete 时连接自动断开，
-        //    lambda 不会在野指针上跑。
-        QObject::connect(g_playProc, &QProcess::finished, g_playProc,
-                         [](int, QProcess::ExitStatus) {
-            if (g_mediaStopping) return;              // 我们主动停的，不是播完
-            if (g_mediaTick) g_mediaTick->stop();
-            if (IslandOverlay::instance()) IslandOverlay::instance()->mediaFinished();
-        });
-        g_playProc->start(fp, { QStringLiteral("-nodisp"), QStringLiteral("-autoexit"), target });
-        if (!g_playProc->waitForStarted(3000)) {
-            const int code = g_playProc->exitCode();
-            delete g_playProc; g_playProc = nullptr;
-            out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("media_session_start: ffplay 启动失败（退出码 %1）").arg(code);
-            return out;
-        }
-        out.result = QStringLiteral("done");
-        out.data.insert(QStringLiteral("path"), QDir::toNativeSeparators(target));
-        out.data.insert(QStringLiteral("pid"), (int)g_playProc->processId());
-        // P3 播放时段管理：岛底「正在播放」（标题/总时长/下一首/封面）+ 1s 计时器推进已播。
-        const QString mTitle = params.value(QStringLiteral("title")).toString();
-        const qint64 mTotal = (qint64)params.value(QStringLiteral("totalMs")).toDouble(0);
-        const QString mNext  = params.value(QStringLiteral("nextTitle")).toString();
-        const QString mCover = params.value(QStringLiteral("nextCover")).toString();
-        if (IslandOverlay::instance())
-            IslandOverlay::instance()->setMediaSession(
-                mTitle.isEmpty() ? QFileInfo(target).fileName() : mTitle, mTotal, mNext, mCover);
-        if (!g_mediaTick) {
-            g_mediaTick = new QTimer();
-            g_mediaTick->setInterval(1000);
-            QObject::connect(g_mediaTick, &QTimer::timeout, [] {
-                if (IslandOverlay::instance()) IslandOverlay::instance()->advanceMediaElapsed(1000);
-            });
-        }
-        g_mediaTick->start();
-        // 最大最小适配：给定总时长超过本窗口剩余 → 到点自动截断（不让播放溢出时段）。
-        if (g_mediaAutoStop) g_mediaAutoStop->stop();
-        if (mTotal > 0) {
-            const qint64 rem = remainingMsInWindow();
-            const qint64 stopMs = (rem > 0 ? qMin(mTotal, rem) : mTotal);
-            if (stopMs > 0) {
-                if (!g_mediaAutoStop) {
-                    g_mediaAutoStop = new QTimer();
-                    QObject::connect(g_mediaAutoStop, &QTimer::timeout, [] { MediaSession::stopMediaSession(); });
-                }
-                g_mediaAutoStop->setSingleShot(true);
-                g_mediaAutoStop->start((int)qMin(stopMs, (qint64)0x7FFFFFFF));
-            }
-        }
-        return out;
-    }
+    if (action == QStringLiteral("media_session_start")) return MediaSession::startMediaSession(params);
 
-    if (action == QStringLiteral("media_session_stop")) {
-        if (!g_playProc) {
-            out.result = QStringLiteral("failed");
-            out.error = QStringLiteral("media_session_stop: 当前没有在播放");
-            return out;
-        }
-        // 「停止」的结果就是**播放停了** —— 不管是被我们停的，还是播放器自己播完退出的
-        // （本机没可用输出设备时 ffplay 会秒退）。原来一律回 failed「当前没有在播放」，
-        // 老师点了停止却看到"没在播放"，等于把"已经停了"说成了"做失败"。
-        const int pid = (int)g_playProc->processId();
-        const bool wasRunning = (g_playProc->state() != QProcess::NotRunning);
-        MediaSession::stopMediaSession();   // P3：统一停止（终止 ffplay + 清岛底 + 停计时器），与自动截断共用
-        out.result = QStringLiteral("done");
-        out.data.insert(QStringLiteral("stopped"), true);
-        out.data.insert(QStringLiteral("pid"), pid);
-        out.data.insert(QStringLiteral("wasRunning"), wasRunning);
-        if (!wasRunning)
-            out.data.insert(QStringLiteral("note"),
-                            QStringLiteral("播放器此前已自行退出（播完或无输出设备），不是我们停的"));
-        return out;
-    }
+    if (action == QStringLiteral("media_session_stop")) return MediaSession::stopMediaSessionAction();
 
     // ── P3 播放时段管理：配置允许的播放时段窗口 ──
     if (action == QStringLiteral("play_schedule_set")) {
@@ -5423,7 +5240,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("enabled"), AgentSettings::playScheduleEnabled());
         out.data.insert(QStringLiteral("windows"), QJsonArray::fromStringList(AgentSettings::playWindows()));
-        out.data.insert(QStringLiteral("allowedNow"), isPlayAllowedNow());
+        out.data.insert(QStringLiteral("allowedNow"), MediaSession::isPlayAllowedNow());
         return out;
     }
 
@@ -6655,7 +6472,7 @@ void agentUiFill(AgentUi *ui)
             ? QStringLiteral("正在播放：%1").arg(IslandOverlay::instance()->mediaTitle())
             : QStringLiteral("当前无媒体在播");
         ui->m_playStateText = QStringLiteral("当前状态：%1 · 时段内允许播放：%2")
-                                  .arg(cur).arg(isPlayAllowedNow() ? QStringLiteral("是") : QStringLiteral("否"));
+                                  .arg(cur).arg(MediaSession::isPlayAllowedNow() ? QStringLiteral("是") : QStringLiteral("否"));
     }
 }
 
