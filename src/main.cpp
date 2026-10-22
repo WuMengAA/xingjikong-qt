@@ -25,7 +25,9 @@
 #include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
 #include "island.h"           // 2026-10-07：被控端灵动岛（顶部居中胶囊 + 缓动 + 交互穿透）
 #include "smtc_monitor.h"
-#include "media/MediaTools.h"   // 2026-10-22 §10 第 1 刀：媒体工具层     // 2026-10-22：系统媒体识别（SMTC），起工作线程 + 元数据
+#include "media/MediaTools.h"
+#include "media/MediaSession.h"  // 2026-10-22 §10 第二刀：录像/播放会话控制
+#include "core/ProcessUtil.h"    // 2026-10-22 §10 第二刀：通用进程等待（跨域复用）   // 2026-10-22 §10 第 1 刀：媒体工具层     // 2026-10-22：系统媒体识别（SMTC），起工作线程 + 元数据
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -233,6 +235,19 @@ static QString windowIconBase64(HWND hwnd)
 // 刻意独立成编译单元：main.cpp 已经 5500+ 行，再把 WASAPI/MMDevice 那一大套
 // SDK 头灌进来，只会让它更容易撞 C1060（编译器堆空间不足）。
 
+// ── 跨 TU 共享的状态（2026-10-22 · AGENTS.md §10 第二刀）──────────────────
+// 这几条**必须在匿名 namespace 之外**：src/media/MediaSession.cpp 用 extern
+// 引用它们，而匿名域符号是内部链接，跨 TU 会 LNK2019。
+// （项目里 makeEnvelope 踩过同一个坑，见文件末尾那段的注释。）
+// 第三刀把相机分支抽成函数时，状态随之收进 MediaSession 模块，届时删本节。
+QString g_shotDir;             // 截图/存图目录（screenshot 动作与抓屏都用它）
+QProcess *g_recProc = nullptr;     // camera_record 正在录制的 ffmpeg 进程（stop 时 terminate）
+QString g_recOutPath;              // 正在录制的输出 mp4 路径
+QProcess *g_playProc = nullptr;    // media_session 正在播放的 ffplay 进程
+QTimer *g_mediaTick = nullptr;   // P3：媒体在播时推进岛底「已播时长」的 1s 计时器
+QTimer *g_mediaAutoStop = nullptr;  // P3：超播放时段窗口自动截断（单一定时器，避免旧计时器误停新会话）
+bool g_mediaStopping = false;
+
 namespace {
 
 constexpr int kFrameIntervalMs = 2000;   // 2 秒一帧，与 D2 保持一致
@@ -308,7 +323,6 @@ int g_timeoutMs = 30000;                    // 云端判离线阈值（只用于
 QTimer *g_hbTimer = nullptr;   // 心跳定时器（registered 拿到参数后要能改间隔，所以放外面）
 
 QString g_logPath;             // 被控端日志落盘（装机后没有 stdout，没日志就只能靠猜）
-QString g_shotDir;             // 截图/存图目录（screenshot 动作与抓屏都用它）
 
 // 前向声明：调度器回调在文件后面用到它，避免 C++ 的"用到才定义"顺序问题。
 bool enableShutdownPriv();
@@ -320,15 +334,6 @@ QString g_schedFile;               // 调度持久化文件（崩溃恢复后重
 QString g_schedDir;                // 调度文件所在目录（写文件要 mkpath）
 QString g_mediaDir;                // 媒体库目录（media_list/media_session 默认扫这里）
 QString g_recvDir;                 // file_push 落盘目录
-QProcess *g_recProc = nullptr;     // camera_record 正在录制的 ffmpeg 进程（stop 时 terminate）
-QString g_recOutPath;              // 正在录制的输出 mp4 路径
-QProcess *g_playProc = nullptr;    // media_session 正在播放的 ffplay 进程
-static QTimer *g_mediaTick = nullptr;   // P3：媒体在播时推进岛底「已播时长」的 1s 计时器
-static QTimer *g_mediaAutoStop = nullptr;  // P3：超播放时段窗口自动截断（单一定时器，避免旧计时器误停新会话）
-// 组件7（2026-10-15）：「正在主动停止」标志 —— stopMediaSession() 里置位，
-// 用来把"我们主动 terminate 引发的 finished"和"ffplay 自己播完的 finished"分开。
-// 少了它，老师点「停止」会被岛报成"播放结束"（见 media_session_start 里的 finished 连接）。
-static bool g_mediaStopping = false;
 bool g_remoteControl = false;      // remote_control_start/stop 的真实会话状态
 int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
 // ── 远控上行治理配套旗标（2026-10-19 修复①③，见下方背压闸与看门狗）──────────
@@ -2291,23 +2296,6 @@ static bool runElevatedWait(const QString &file, const QString &params, int time
 
 // 2026-10-13 登记项：主线程 QProcess::waitForFinished 会把**整个事件循环**停掉 ——
 // 心跳不发、推帧停摆、WS pong 回不了；camera_test 最长等 9 秒，弱机教室机上就是一次肉眼可见的假死。
-// procWaitFinished：保持"同步等到退出"的函数语义（调用方代码一行不改），但等待在
-// QEventLoop 里转 —— 期间心跳照发、指令照收、定时器照跑。
-// 重入说明：等待期间云端再派同一动作（如连发两次抓拍）时，各用独立 QProcess/独立临时
-// 文件名（毫秒戳），无共享态，安全；云端本来也要等本动作回执后才标记完成。
-static bool procWaitFinished(QProcess &p, int timeoutMs)
-{
-    if (p.state() == QProcess::NotRunning) return true;
-    QEventLoop loop;
-    QTimer t;
-    t.setSingleShot(true);
-    QObject::connect(&t, &QTimer::timeout, &loop, &QEventLoop::quit);
-    QObject::connect(&p, &QProcess::finished, &loop, &QEventLoop::quit);
-    QObject::connect(&p, &QProcess::errorOccurred, &loop, &QEventLoop::quit);
-    t.start(timeoutMs);
-    loop.exec();
-    return p.state() == QProcess::NotRunning;
-}
 
 static bool agentAutostartEnabled()
 {
@@ -2315,7 +2303,7 @@ static bool agentAutostartEnabled()
     stelarithHideChildConsole(p);   // #368 需求①：schtasks 查询静默，不弹控制台窗
     p.start(QStringLiteral("schtasks"),
             {QStringLiteral("/Query"), QStringLiteral("/TN"), QString::fromLatin1(kAgentTaskName)});
-    if (!procWaitFinished(p, 4000)) { p.kill(); return false; }
+    if (!ProcessUtil::waitFinished(p, 4000)) { p.kill(); return false; }
     return p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
 
@@ -2595,7 +2583,6 @@ static qint64 logStudyStart(double th, int need, int recSec);
 static void logStudyStop(qint64 startTs, int alertCount);
 static bool isPlayAllowedNow();
 static qint64 remainingMsInWindow();
-static void stopMediaSession();
 static PluginHost *g_pluginHost = nullptr;   // P2：插件宿主（进程外插件 ABI）；定义在 openPluginStore 之前以便对话框使用
 void runSelfCheck()
 {
@@ -4162,111 +4149,7 @@ static void otaOnFinished()
     qInfo("[agent-qt] 🚀 OTA 已启动安装包（/S + /VERYSILENT），重启助手已派发；本进程即将被替换");
 }
 
-// ── 班级监控上传（设计文档 3.6 第一版，2026-10-07）──
-// record_stop 后把本地 rec-*.mp4 POST 到云端 /api/recordings/upload（Bearer 设备令牌）。
-// 异步执行：QNetworkAccessManager 是 QObject，放在这里创建并负责自己生命周期。
-void uploadRecordingAsync(const QString &mp4Path)
-{
-    if (!QFileInfo::exists(mp4Path)) return;
-    const QString wsUrl = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
-    if (wsUrl.isEmpty()) { qWarning("[rec] 上传跳过：没有 STE_QT_WS_URL"); return; }
-    // ws://host:port/ws/agent → http://host:port/api/recordings/upload?uid=...
-    QString httpUrl = wsUrl;
-    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
-           .replace(QLatin1String("ws://"), QLatin1String("http://"));
-    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
-    if (wsIdx > 0) httpUrl.truncate(wsIdx);
-    httpUrl += QStringLiteral("/api/recordings/upload?uid=") + g_uid;
 
-    auto *mgr = new QNetworkAccessManager();
-    QNetworkRequest req((QUrl(httpUrl)));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
-    const QString token = qEnvironmentVariable("STE_QT_WS_TOKEN").trimmed();
-    if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token.toUtf8());
-
-    QFile *file = new QFile(mp4Path);
-    if (!file->open(QIODevice::ReadOnly)) {
-        qWarning("[rec] 上传失败：打不开 %s", qPrintable(mp4Path));
-        delete file; delete mgr;
-        return;
-    }
-    QNetworkReply *reply = mgr->post(req, file);
-    QObject::connect(reply, &QNetworkReply::finished, [reply, file, mgr, mp4Path]() {
-        const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (code == 200) {
-            qInfo("[rec] 📹 录制已上传云端：%s", qPrintable(mp4Path));
-        } else {
-            qWarning("[rec] 上传失败（HTTP %d）：%s", code, qPrintable(mp4Path));
-        }
-        reply->deleteLater();
-        file->deleteLater();
-        mgr->deleteLater();
-    });
-}
-
-// ── 录像启停（2026-10-13 抽出，供 camera_record_* 与自习模式自动录制共用）──────
-// 这两段逻辑原本只在 executeAction 的 camera_record_* 分支里各一份；自习模式的
-// "噪音异常自动录制"要复用它们 —— 若不抽出就会变成"两处各写一遍、改一处漏一处"
-// （跨端审计报告点过这个坑）。行为与原地逐字一致，只把结果从 out.xxx 换成返回值。
-static QString beginRecording(const QString &dev, int maxSec)
-{
-    const QString ff = MediaTools::ffmpegBin();
-    if (ff.isEmpty()) return QStringLiteral("找不到 ffmpeg");
-    if (g_recProc && g_recProc->state() != QProcess::NotRunning) {
-        return QStringLiteral("已有一条录像在进行中（%1），请先 record_stop").arg(
-            QDir::toNativeSeparators(g_recOutPath));
-    }
-    QDir().mkpath(g_shotDir);
-    g_recOutPath = g_shotDir + QStringLiteral("/rec-%1.mp4").arg(QDateTime::currentMSecsSinceEpoch());
-    g_recProc = new QProcess();
-    g_recProc->setProcessChannelMode(QProcess::MergedChannels);
-    // #368 需求①：录像期间 ffmpeg 控制台窗会一直挂在桌上，必须 CREATE_NO_WINDOW
-    stelarithHideChildConsole(*g_recProc);
-    g_recProc->start(ff, { QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
-                           QStringLiteral("error"), QStringLiteral("-y"), QStringLiteral("-f"),
-                           QStringLiteral("dshow"), QStringLiteral("-i"),
-                           QStringLiteral("video=%1").arg(dev),
-                           QStringLiteral("-t"), QString::number(maxSec),
-                           QStringLiteral("-c:v"), QStringLiteral("libx264"), QStringLiteral("-preset"),
-                           QStringLiteral("ultrafast"), QStringLiteral("-crf"), QStringLiteral("28"),
-                           QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
-                           QStringLiteral("-r"), QStringLiteral("15"), g_recOutPath });
-    if (!g_recProc->waitForStarted(4000)) {
-        const int code = g_recProc->exitCode();
-        delete g_recProc; g_recProc = nullptr;
-        return QStringLiteral("ffmpeg 启动失败（退出码 %1，设备 %2）").arg(code).arg(dev);
-    }
-    return QString();
-}
-
-// 停止录像：返回 true = 有有效文件（并已发起上传）；bytes/code/err 为明细。
-// ⚠️ 容忍 ffmpeg 因 -t 到点**自己结束**（那时 state 已是 NotRunning，但文件是好的）——
-//    自习模式的自动录制到点常走这条；不能因为"进程已退出"就当成"没有录像"。
-static bool endRecording(qint64 *outBytes, QString *outErr, int *outCode = nullptr)
-{
-    if (!g_recProc) {
-        if (outErr) *outErr = QStringLiteral("当前没有录像在进行");
-        return false;
-    }
-    if (g_recProc->state() != QProcess::NotRunning) {
-        g_recProc->terminate();
-        if (!procWaitFinished(*g_recProc, 5000)) { g_recProc->kill(); procWaitFinished(*g_recProc, 2000); }
-    } else {
-        procWaitFinished(*g_recProc, 1000);   // 已自然结束，等它彻底收尾
-    }
-    const int code = g_recProc->exitCode();
-    const qint64 bytes = QFileInfo(g_recOutPath).exists() ? QFileInfo(g_recOutPath).size() : 0;
-    delete g_recProc; g_recProc = nullptr;
-    if (outCode) *outCode = code;
-    if (bytes <= 0) {
-        QFile::remove(g_recOutPath);
-        if (outErr) *outErr = QStringLiteral("没有产生有效文件（退出码 %1）").arg(code);
-        return false;
-    }
-    if (outBytes) *outBytes = bytes;
-    uploadRecordingAsync(g_recOutPath);   // 完成后自动上传云端 recordings/（上传失败不改本函数结论）
-    return true;
-}
 
 // ── 自习模式（2026-10-13）：噪音检测 + 噪音异常自动录制 ──────────────────────
 // 定位：**静默监控**，不干扰学生（区别于考试模式的全屏拦截）。
@@ -4341,7 +4224,7 @@ static void studyTriggerRecord()
 {
     QString dev = MediaTools::boundCamera();
     if (dev.isEmpty()) dev = QStringLiteral("video0");
-    const QString err = beginRecording(dev, g_studyRecordSec);
+    const QString err = MediaSession::beginRecording(dev, g_studyRecordSec);
     if (!err.isEmpty()) {
         // 起不来自动录制（如手动录制占着 / 设备被占）：如实上报，不静默吞
         sendEvent(QStringLiteral("warn"), QStringLiteral("noise_alert_record_failed"),
@@ -4366,7 +4249,7 @@ static void studyTriggerRecord()
         g_studyRecTimer->setSingleShot(true);
         QObject::connect(g_studyRecTimer, &QTimer::timeout, [] {
             qint64 bytes = 0; int code = 0; QString err2;
-            const bool ok = endRecording(&bytes, &err2, &code);
+            const bool ok = MediaSession::endRecording(&bytes, &err2, &code);
             QJsonObject e;
             e.insert(QStringLiteral("event"), QStringLiteral("record_stop"));
             e.insert(QStringLiteral("ok"), ok);
@@ -4502,21 +4385,6 @@ static qint64 remainingMsInWindow()
     return best;
 }
 
-// 停掉媒体会话：终止 ffplay + 清空岛底「正在播放」+ 停计时器。media_session_stop 与
-// 自动截断计时器共用，避免两份停止逻辑。
-static void stopMediaSession()
-{
-    g_mediaStopping = true;   // 组件7：本次停止是我们发起的，finished 不当"播完"
-    if (g_mediaTick) { g_mediaTick->stop(); }
-    if (g_mediaAutoStop) { g_mediaAutoStop->stop(); }
-    if (g_playProc && g_playProc->state() != QProcess::NotRunning) {
-        g_playProc->terminate();
-        if (!procWaitFinished(*g_playProc, 3000)) g_playProc->kill();
-    }
-    delete g_playProc; g_playProc = nullptr;
-    g_mediaStopping = false;
-    if (IslandOverlay::instance()) IslandOverlay::instance()->clearMediaSession();
-}
 
 // 修复③（2026-10-19）：定义在 6082 起，被 executeAction 的 remote_control_stop
 // 分支先用到 ⇒ 此处前向声明（同 TU 静态函数，声明后可后定义）。
@@ -5316,9 +5184,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                       QStringLiteral("true"), QStringLiteral("-f"),
                       QStringLiteral("dshow"), QStringLiteral("-i"),
                       QStringLiteral("dummy") });
-        if (!procWaitFinished(p, 4000)) {
+        if (!ProcessUtil::waitFinished(p, 4000)) {
             p.kill();
-            procWaitFinished(p, 1500);
+            ProcessUtil::waitFinished(p, 1500);
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("ffmpeg 枚举设备超时（DirectShow 可能不可用）");
             return out;
@@ -5385,11 +5253,11 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                       QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video=%1").arg(dev),
                       QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-q:v"),
                       QStringLiteral("2"), path });
-        const bool finished = procWaitFinished(p, 9000);
+        const bool finished = ProcessUtil::waitFinished(p, 9000);
         const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - t0;
         if (!finished) {
             p.kill();
-            procWaitFinished(p, 1500);
+            ProcessUtil::waitFinished(p, 1500);
             QFile::remove(path);
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("自检超时（%1ms，设备 %2）：设备被占用或不出帧").arg(elapsed).arg(dev);
@@ -5450,9 +5318,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                       QStringLiteral("dshow"), QStringLiteral("-i"), QStringLiteral("video=%1").arg(dev),
                       QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-q:v"),
                       QStringLiteral("2"), path });
-        if (!procWaitFinished(p, 8000)) {
+        if (!ProcessUtil::waitFinished(p, 8000)) {
             p.kill();
-            procWaitFinished(p, 1500);
+            ProcessUtil::waitFinished(p, 1500);
             QFile::remove(path);
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("camera_snapshot: ffmpeg 超时（设备 %1）").arg(dev);
@@ -5489,7 +5357,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         if (dev.isEmpty()) dev = MediaTools::boundCamera();
         if (dev.isEmpty()) dev = QStringLiteral("video0");
         const int maxSec = qBound(1, params.value(QStringLiteral("duration_sec")).toInt(300), 3600);
-        const QString startErr = beginRecording(dev, maxSec);
+        const QString startErr = MediaSession::beginRecording(dev, maxSec);
         if (!startErr.isEmpty()) {
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("camera_record: ") + startErr;
@@ -5502,7 +5370,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         const bool reallyRecording = QFileInfo::exists(g_recOutPath) && QFileInfo(g_recOutPath).size() > 0;
         if (!reallyRecording) {
             g_recProc->kill();
-            procWaitFinished(*g_recProc, 3000);
+            ProcessUtil::waitFinished(*g_recProc, 3000);
             QFile::remove(g_recOutPath);
             delete g_recProc; g_recProc = nullptr;
             g_recOutPath.clear();
@@ -5532,7 +5400,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         // ⚠️ 2026-10-13：不再要求"进程必须还在跑"才停。ffmpeg 带 -t 到点会**自己结束**，
         //    那时 state 已是 NotRunning，但文件是完整的 —— 旧写法会把这种"已录好的文件"
         //    判成"没有录像在进行"而丢掉（自习模式自动录制到点常走这条）。endRecording 容忍它。
-        if (!endRecording(&bytes, &err2)) {
+        if (!MediaSession::endRecording(&bytes, &err2)) {
             out.result = QStringLiteral("failed");
             out.error = QStringLiteral("camera_record_stop: ") + err2;
             return out;
@@ -5676,7 +5544,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         }
         if (g_playProc && g_playProc->state() != QProcess::NotRunning) {
             g_playProc->terminate();
-            if (!procWaitFinished(*g_playProc, 3000)) g_playProc->kill();
+            if (!ProcessUtil::waitFinished(*g_playProc, 3000)) g_playProc->kill();
             delete g_playProc;
             g_playProc = nullptr;
         }
@@ -5731,7 +5599,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             if (stopMs > 0) {
                 if (!g_mediaAutoStop) {
                     g_mediaAutoStop = new QTimer();
-                    QObject::connect(g_mediaAutoStop, &QTimer::timeout, [] { stopMediaSession(); });
+                    QObject::connect(g_mediaAutoStop, &QTimer::timeout, [] { MediaSession::stopMediaSession(); });
                 }
                 g_mediaAutoStop->setSingleShot(true);
                 g_mediaAutoStop->start((int)qMin(stopMs, (qint64)0x7FFFFFFF));
@@ -5751,7 +5619,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         // 老师点了停止却看到"没在播放"，等于把"已经停了"说成了"做失败"。
         const int pid = (int)g_playProc->processId();
         const bool wasRunning = (g_playProc->state() != QProcess::NotRunning);
-        stopMediaSession();   // P3：统一停止（终止 ffplay + 清岛底 + 停计时器），与自动截断共用
+        MediaSession::stopMediaSession();   // P3：统一停止（终止 ffplay + 清岛底 + 停计时器），与自动截断共用
         out.result = QStringLiteral("done");
         out.data.insert(QStringLiteral("stopped"), true);
         out.data.insert(QStringLiteral("pid"), pid);
@@ -6762,6 +6630,51 @@ void captureAndSend(const QString &outDir)
 }
 
 } // namespace
+
+// ── 录像上传（2026-10-22 移出匿名 namespace）─────────────────────────────
+// 必须排在 `} // namespace` 之后：它引用 g_uid，而 g_uid 在匿名域内（同 TU 可见，
+// 但要排在其后）。MediaSession.cpp 用 extern 跨 TU 调它，故需外部链接。
+// ── 班级监控上传（设计文档 3.6 第一版，2026-10-07）──
+// record_stop 后把本地 rec-*.mp4 POST 到云端 /api/recordings/upload（Bearer 设备令牌）。
+// 异步执行：QNetworkAccessManager 是 QObject，放在这里创建并负责自己生命周期。
+void uploadRecordingAsync(const QString &mp4Path)
+{
+    if (!QFileInfo::exists(mp4Path)) return;
+    const QString wsUrl = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
+    if (wsUrl.isEmpty()) { qWarning("[rec] 上传跳过：没有 STE_QT_WS_URL"); return; }
+    // ws://host:port/ws/agent → http://host:port/api/recordings/upload?uid=...
+    QString httpUrl = wsUrl;
+    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
+           .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0) httpUrl.truncate(wsIdx);
+    httpUrl += QStringLiteral("/api/recordings/upload?uid=") + g_uid;
+
+    auto *mgr = new QNetworkAccessManager();
+    QNetworkRequest req((QUrl(httpUrl)));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
+    const QString token = qEnvironmentVariable("STE_QT_WS_TOKEN").trimmed();
+    if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token.toUtf8());
+
+    QFile *file = new QFile(mp4Path);
+    if (!file->open(QIODevice::ReadOnly)) {
+        qWarning("[rec] 上传失败：打不开 %s", qPrintable(mp4Path));
+        delete file; delete mgr;
+        return;
+    }
+    QNetworkReply *reply = mgr->post(req, file);
+    QObject::connect(reply, &QNetworkReply::finished, [reply, file, mgr, mp4Path]() {
+        const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (code == 200) {
+            qInfo("[rec] 📹 录制已上传云端：%s", qPrintable(mp4Path));
+        } else {
+            qWarning("[rec] 上传失败（HTTP %d）：%s", code, qPrintable(mp4Path));
+        }
+        reply->deleteLater();
+        file->deleteLater();
+        mgr->deleteLater();
+    });
+}
 
 // ── U5-A3：QML 控制面板（2026-10-16）──────────────────────────────────
 // header-only（AgentUi + AgentShell 两个 Q_OBJECT 类），内联实现直接调用上面

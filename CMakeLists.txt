@@ -176,6 +176,12 @@ add_executable(stelarith-agent-qt
   # ── 媒体工具层（2026-10-22 · AGENTS.md §10 第 1 刀）：ffmpeg 定位 / 摄像头绑定 / 设备解析 / 错误归类 ──
   src/media/MediaTools.cpp
   src/media/MediaTools.h
+  # ── 媒体会话控制（2026-10-22 · 第 2 刀）：录像启停 / 播放停止 ──
+  src/media/MediaSession.cpp
+  src/media/MediaSession.h
+  # ── 通用进程工具（2026-10-22 · 第 2 刀）：同步等进程退出但不卡主线程（录像/OTA/远控/终端共用）──
+  src/core/ProcessUtil.cpp
+  src/core/ProcessUtil.h
   # ── 远控隧道（2026-10-18 · RFB over WS）：agent 第二条 WS + 本地 VNC 纯字节桥 ──
   src/vnc_bridge.cpp
   src/vnc_bridge.h
