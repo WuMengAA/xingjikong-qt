@@ -36,6 +36,10 @@ _archive/
 
 # OTA 清单是每次发布生成的部署产物（含域名/URL/sha256），不进版本库；只留 .example
 ota.json
+# rc 通道清单同类（2026-10-22 补：发 rc.3 时发现 ota-rc.json 逃过上面的规则，
+# 每次 publish --channel rc 都会脏一次 status；灰度 ota-gray.json 是人工 pin 的
+# 配置性质且已入轨，保持 tracked 不一并忽略）
+ota-rc.json
 
 # 设备报修台账（运行时数据，由 scripts/backup.mjs 备份；不入库）
 repairs.json

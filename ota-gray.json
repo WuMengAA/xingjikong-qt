@@ -1,14 +1,14 @@
 {
   "products": {
     "agent": {
-      "version": "0.6.24-rc.7",
-      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.24-rc.7.exe",
-      "sha256": "7ed3e023d0de116d909718744dbacb66528cd4201342051ee8e1c280895f06a0",
-      "size": 27464099,
-      "notes": "去 WebEngine 瘦身 + ldc 唯一推流路（真 rc.7，修正上版 exe 内部还是 rc.6 的问题）",
-      "mandatory": true
+      "version": "0.6.43",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.43.exe",
+      "sha256": "42e031640b7d1e1d313b05908cb3c4173fa11b90a3bff3f62237aa817f7a6fd4",
+      "size": 32689242,
+      "notes": "v0.6.43",
+      "mandatory": false
     }
   },
-  "generatedAt": "2026-10-10T15:59:01.734Z",
+  "generatedAt": "2026-10-17T03:23:56.097Z",
   "generatedBy": "scripts/publish-release.mjs"
 }
