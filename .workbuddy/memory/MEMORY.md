@@ -25,14 +25,14 @@
 
 ## 4 已交付 / 进行中（查 git log）
 - 0.6.45/0.6.46 发版；OOBE；二维码绑定；班级真源统一；RBAC×2；MD3+竖横屏。
-- **CMD 窗口根治（10-22 收官+实弹）**：winlauncher.h 两 helper（CREATE_NO_WINDOW）；云端两任务+guard/P2P 改 wscript+vbs；agent 6 处 ffmpeg/ffplay 补齐；装机 install-autostart.ps1 防回退。实弹 4 路径全触发、零可见窗（桌面终验待现场）。机理：控制台父起的 CUI 子继承父控制台不建新窗 ⇒ 命令行跑 ffmpeg 从不弹窗；**弹窗只在 GUI 父起 CUI 子时**；Qt+CREATE_NO_WINDOW+管道 stdio ⇒ 有 conhost 但窗口不显示。
+- **CMD 窗口根治（10-22 收官+实弹）**：winlauncher.h 两 helper（CREATE_NO_WINDOW）；云端两任务+guard/P2P 改 wscript+vbs；agent 6 处 ffmpeg/ffplay 补齐；装机 install-autostart.ps1 防回退。实弹零可见窗（桌面终验待现场）。机理：控制台父起的 CUI 子继承父控制台不建新窗 ⇒ 命令行跑 ffmpeg 从不弹窗；**弹窗只在 GUI 父起 CUI 子时**；Qt+CREATE_NO_WINDOW+管道 stdio ⇒ 有 conhost 但窗口不显示。
 - 语音对讲 P0 已修未发版（8 槽轮转+背压）；裸 PCM 300kbps/路炸教室，Opus@16k≈1Mbps；不上 WebRTC。VoiceHub 已通；SMTC 已入（外部音源靠窗口标题+WASAPI 峰值）。
-- **拆 main.cpp（三刀 8142→7708）**：已建 `media/{MediaTools,MediaSession,CameraActions}`+`core/{ProcessUtil,ExecOut}`；第四刀=媒体四件套。
+- **拆 main.cpp（四刀 8142→7525）**：已建 `media/{MediaTools,MediaSession,CameraActions}`+`core/{ProcessUtil,ExecOut,AgentSettings}`；媒体域 extern 已清零（剩 4 行存储/上传域）。
 
 ## 5 踩坑实证（还会再踩）
 - 抓图只用 `_shotpw.py`（DPI 感知+PrintWindow）；BitBlt 屏幕 DC 在 Win11/DWM 全黑；判有效看 PIL 黑占比<10%。
 - 找主窗按类名过滤 MessageWindow/IME 再取最大。
-- **监察代码三戒（10-22）**：`GetWindowThreadProcessId` 在 **win32process**（别处没有；回调 except 吞异常连演 4 轮假阴性）；对照先过黄金基准自检（DETACHED pythonw AllocConsole 必建可见窗）；**本环境看不到任何新建控制台窗** ⇒ 桌面可见性只能现场验。
+- **监察三戒（10-22）**：`GetWindowThreadProcessId` 在 **win32process**（别处没有；回调 except 吞异常⇒连演 4 轮假阴性）；**本环境看不到任何新建控制台窗** ⇒ 桌面可见性只能现场验。
 - **EnumWindows 不过滤可见性** ⇒ 判可见控制台窗必须加 IsWindowVisible。
 - **跨 TU 引用 main.cpp 符号前先查它在不在匿名域**（251 起那片）：不止变量，**类型**也跨不了（`ExecOut` 已提到 `core/ExecOut.h`）。
 - 被控端日志 GBK；viewer-run.log 追加 ⇒ 轮询带 offset；QTimer 不 start=只有首查。
