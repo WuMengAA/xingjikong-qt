@@ -17,11 +17,11 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 7708,
+      "lines": 7525,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 217,
-      "plan": "[P1] 第 1/2/3 刀已搬 ffmpeg 纯函数层+录制播放控制+相机六件套分支（8142→7708）；第 4 刀：媒体四件套（media_session_start/stop）分支出 executeAction，抽完 g_playProc 等 4 个播放状态才能收进 MediaSession"
+      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域"
     },
     "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
       "lines": 870,
