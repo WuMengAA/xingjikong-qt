@@ -462,6 +462,74 @@ void VoiceHubModule::requestSong(const QString &title, const QString &artist,
     connect(r, &QNetworkReply::finished, this, [this, r] { onRequestFinished(r); });
 }
 
+void VoiceHubModule::reorderSchedule(const QVariantList &pairs)
+{
+    m_lastControlError.clear();
+
+    if (m_baseUrl.isEmpty()) {
+        m_lastControlError = QStringLiteral("未配置 VoiceHub 服务地址");
+        emit reorderFinished(false, m_lastControlError);
+        return;
+    }
+    if (m_apiKey.isEmpty()) {
+        m_lastControlError = QStringLiteral("未配置 API Key（需具备 schedules:write 权限）");
+        emit reorderFinished(false, m_lastControlError);
+        return;
+    }
+
+    // 组装 { schedules: [{ id, sequence }, ...] }，与 admin/schedule/sequence.post.ts 同契约
+    QJsonArray arr;
+    for (const QVariant &v : pairs) {
+        if (!v.canConvert<QVariantMap>()) continue;
+        const QVariantMap m = v.toMap();
+        QJsonObject o;
+        o.insert(QStringLiteral("id"), m.value(QStringLiteral("id")).toInt());
+        o.insert(QStringLiteral("sequence"), m.value(QStringLiteral("sequence")).toInt());
+        arr.append(o);
+    }
+    if (arr.isEmpty()) {
+        emit reorderFinished(false, QStringLiteral("没有可保存的排期"));
+        return;
+    }
+    QJsonObject body;
+    body.insert(QStringLiteral("schedules"), arr);
+
+    QNetworkRequest req(QUrl(m_baseUrl + QStringLiteral("/api/open/schedules/reorder")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    // ⚠️ key 只进请求头，不进日志/状态文本
+    req.setRawHeader(QByteArrayLiteral("x-api-key"), m_apiKey.toUtf8());
+    QNetworkReply *r = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(r, &QNetworkReply::finished, this, [this, r] { onReorderFinished(r); });
+}
+
+void VoiceHubModule::onReorderFinished(QNetworkReply *r)
+{
+    r->deleteLater();
+    const int httpCode = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray raw = r->readAll();
+
+    if (r->error() == QNetworkReply::NoError && httpCode >= 200 && httpCode < 300) {
+        m_lastControlError.clear();
+        emit reorderFinished(true, QStringLiteral("已保存"));
+        // 顺序已落地，稍后拉取会让排期与服务端一致（无需立刻刷新打断拖拽手感）
+        return;
+    }
+
+    QString msg;
+    QJsonParseError perr;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw, &perr);
+    if (doc.isObject())
+        msg = doc.object().value(QStringLiteral("message")).toString();
+    if (msg.isEmpty())
+        msg = httpCode == 401 ? QStringLiteral("API Key 无效（401）")
+            : httpCode == 403 ? QStringLiteral("该 Key 没有 schedules:write 权限（403）")
+            : httpCode > 0 ? QStringLiteral("HTTP %1").arg(httpCode)
+            : r->errorString();
+
+    m_lastControlError = msg;
+    emit reorderFinished(false, msg);
+}
+
 void VoiceHubModule::onRequestFinished(QNetworkReply *r)
 {
     r->deleteLater();

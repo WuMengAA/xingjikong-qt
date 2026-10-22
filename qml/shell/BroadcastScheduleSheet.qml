@@ -22,9 +22,10 @@ import QtQuick 2.15
 //   · 投稿 Tab：点歌表单 → voicehub.requestSong；提交结果走 controlFinished → Snackbar
 //   · 搜索 Tab：本地过滤当前已加载排期（全曲库搜索接口待 VoiceHub 开放）
 //
-// ⚠️ 诚实标注：排期「拖拽排序」与「投稿→排期」目前只在本地面板内生效，
-//   服务端尚无重排接口；点歌提交会真实落到 VoiceHub，但「从投稿列表拖入排期」
-//   的持久化要等后端排期写接口。面板不伪造「已保存」。
+// ⚠️ 持久化状态：排期「拖拽排序」已接 VoiceHub 开放写接口
+//   （POST /api/open/schedules/reorder，需 API Key 具备 schedules:write 权限）——
+//   松手即把新顺序提交服务端；失败则回滚到服务端真值。
+//   「投稿→排期」仍只在本地面板内生效（服务端尚无「投稿直接入排期」接口），面板不伪造「已保存」。
 
 Item {
     id: root
@@ -476,8 +477,19 @@ Item {
                                                 ma.drag.active = false
                                                 // 拖到一半时 card.y 已是内容坐标，取中点命中目标行
                                                 var idx = schedList.indexAt(schedList.contentX, card.y + height / 2)
-                                                if (idx >= 0 && idx !== myIndex)
+                                                if (idx >= 0 && idx !== myIndex) {
                                                     scheduleModel.move(myIndex, idx, 1)
+                                                    // 组装新顺序并提交到 VoiceHub（松手即持久化）
+                                                    var pairs = []
+                                                    for (var k = 0; k < scheduleModel.count; ++k) {
+                                                        var it = scheduleModel.get(k)
+                                                        pairs.push({ id: it.sid, sequence: k + 1 })
+                                                    }
+                                                    if (voicehub && voicehub.canRequest())
+                                                        voicehub.reorderSchedule(pairs)
+                                                    else
+                                                        snack.show("未配置 API Key，顺序仅在本地面板内生效", false)
+                                                }
                                             }
                                         }
                                     }
@@ -494,7 +506,7 @@ Item {
 
                         Text {
                             anchors.left: parent.left
-                            text: "提示：长按曲目可调整顺序（本地面板内生效，服务端重排接口待接入）"
+                            text: "提示：长按曲目可调整顺序，松手即保存到 VoiceHub（需 API Key 具备 schedules:write 权限）"
                             font.pixelSize: st.labelS; color: st.fgSurfaceVariant
                             wrapMode: Text.Wrap; width: parent.width
                         }
@@ -688,6 +700,15 @@ Item {
     Connections {
         target: voicehub
         function onControlFinished(ok, message) { snack.show(message, ok) }
+        function onReorderFinished(ok, message) {
+            if (ok) {
+                for (var k = 0; k < scheduleModel.count; ++k) scheduleModel.setProperty(k, "seq", k + 1)
+                snack.show("顺序已保存到 VoiceHub", true)
+            } else {
+                snack.show(message, false)
+                if (voicehub) voicehub.refreshSchedule() // 失败回滚到服务端真值
+            }
+        }
     }
 
     Component.onCompleted: syncSchedule()

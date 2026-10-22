@@ -144,6 +144,14 @@ public:
                                  const QString &musicPlatform = QStringLiteral("netease"),
                                  const QString &musicId = QString());
 
+    /**
+     * 重排已发布排期顺序（写 VoiceHub 开放接口 POST /api/open/schedules/reorder）。
+     * @param pairs QVariantList，每项 QVariantMap { id:int, sequence:int }，按新视觉顺序 1..N。
+     * 异步：结果经 reorderFinished(bool, QString) 回传，不阻塞 UI。
+     * 需服务端 API Key 具备 schedules:write（见 voicehub_ref 权限枚举）。
+     */
+    Q_INVOKABLE void reorderSchedule(const QVariantList &pairs);
+
     /** 当前状态 JSON（管理端 voicehub_broadcast 动作与探针共用）。 */
     QJsonObject stateJson() const;
 
@@ -152,6 +160,7 @@ signals:
     void configChanged();   // 配置变化
     void scheduleChanged(); // 排期列表变化
     void controlFinished(bool ok, const QString &message);   // 点歌结果
+    void reorderFinished(bool ok, const QString &message);   // 重排结果
 
 private:
     // ── 配置（QSettings modules/voicehub/*）──
@@ -176,6 +185,7 @@ private:
     void fetchSchedule();                          // GET /api/songs/public
     void onScheduleFinished(QNetworkReply *r);
     void onRequestFinished(QNetworkReply *r);
+    void onReorderFinished(QNetworkReply *r);
 
     // ── 状态层 ──
     // has=false 或 b 为空对象 ⇒ 「停播」（清状态）。
