@@ -206,3 +206,82 @@ ls -t <另一仓>/src | head -3       # 或看 mtime
 
 **§7 自检规则已扩充（2026-10-06 本轮加的）**：判断"某能力是否已实现"时**必须 grep blob 本体**，
 不能读提交信息。已把 `Select-String` 一条命令加进自检清单 —— 只读提交信息会误判成"已修好"。
+
+---
+
+## 9. 全局 UI 构建红线（2026-10-22 立 · 用户点单「全局统一」）
+
+> **目的**：不让 AI 一个页面一个页面地"猜"样式。所有星集控 QML 界面必须长在
+> **同一套骨架 + 同一套零件 + 同一套规则**里。本节对所有 AI 会话生效，
+> **优先级高于任何页面临时发挥**；与上文铁律冲突时，UI 相关以本节为准。
+>
+> 落地背景：外部规范（Theme.qml 单例 / AppButton / AppCard / AppDialog / AppTopBar /
+> MainWindow 骨架）在本项目**逐一映射到既有单一真源**，不新建第二套——
+> 两份真源必然漂移，那正是"全局统一"要消灭的东西。
+
+### 9.1 全局页面骨架（只有三种，不许发明第四种）
+
+| 规范骨架 | 本项目唯一实现 | 说明 |
+|---|---|---|
+| **主框架 MainWindow** | `Stelarith-viewer-qt/qml/shell/MainWindow.qml` | 管理端唯一应用外壳：240 侧栏 + 64 顶栏 + 内容区（边缘 padding 24）+ 32 状态条 + SideSheet/Toast 上层 |
+| **弹窗遮罩 Modal Overlay** | `Stelarith-shared-qml/ui/md3/Md3Dialog.qml`（居中模态）+ `qml/shell/SideSheet.qml`（右侧抽屉） | 模态一律 Md3Dialog；设备详情抽屉用 SideSheet |
+| **OOBE 独立窗口** | `Stelarith-control-qt/qml/oobe/`（被控端首次引导） | 无侧栏，居中流式；管理端 `qml/layout/OobeConfig.qml` 同理 |
+
+**新页面 = 在 `qml/pages/` 新增一个文件 + 在 MainWindow 里挂载（StackLayout/Loader）。**
+禁止：自绘侧栏/顶栏/状态条、新建第二个应用外壳、在页面里另起一套布局。
+
+### 9.2 设计令牌（单一真源 `Stelarith-shared-qml/ui/Md3.qml`）
+
+- 颜色 / 形状 / 间距 / 字阶 / 动效**全部从 Md3 取**。深浅两实例由宿主经
+  `ctx.window.th`（或 `md3:` 属性）注入——**禁止新建第二个 Theme/令牌文件**
+  （旧 Theme.qml 已退役并入 Md3.qml；外部规范的 Theme.qml Singleton 形态不采用：
+  应用需要深浅两套并存，单例持一份值做不到，详见 Md3.qml 头注释）。
+- **零硬编码**：颜色、字号、圆角、间距禁止写字面量。`md3` 可能为 null 的组件用
+  `md3 ? md3.x : <浅色令牌值>` 兜底，**兜底值必须等于令牌浅色值**（防止"兜底比令牌好看"
+  被故意触发）。兜底是容错不是默认路径——宿主必须传令牌。
+- **骨架结构尺寸**（侧栏 240 / 顶栏 64 / 导航项 56 / 状态条 32 / Toast 偏移 28 等）
+  以组件内 `readonly property` **命名常量**集中声明，禁止散落魔法数。
+- **间距刻度只有 4/8/16/24/32**（spXS/spS/spM/spL/spXL）。既有布局里不在刻度上的
+  微调值（6/12/20）legacy 保留但**不得新增**；新代码一律取刻度值。
+
+### 9.3 全局组件库（只能用这些；严禁原生控件）
+
+| 规范名 | 本项目组件（真源） | 规格 |
+|---|---|---|
+| AppButton | `ui/md3/Md3Btn.qml` | 高 40、默认药丸（shape.full）；filled/tonal/text 为主 |
+| AppCard | `ui/md3/Md3Card.qml` | 圆角 16（shape.lg）、elevated 变体带极微弥散阴影、默认无边框 |
+| AppDialog | `ui/md3/Md3Dialog.qml` | 圆角 28、50% 黑底、居中、进场缩放+淡入动效 |
+| AppTopBar | `qml/shell/TopBar.qml` | 高 64、surface 底、标题 titleM(16) |
+| Chip | `ui/md3/Md3Chip.qml` | 筛选 chip 一律用它，与集控/监控页同语言 |
+| Snackbar | `ui/md3/Md3Snackbar.qml` 或 inverse 令牌自绘 Toast | — |
+
+- **严禁直接使用** QtQuick.Controls 的 `Button` / `TextField` / `Switch` 默认样式；
+  一律用上表组件。既有特许：TopBar 班级下拉用原生 `Menu`（项目没有自带下拉框，
+  2026-10-21 决议），新增场景先问再扩。
+- **按钮圆角例外（已登记）**：监控中心与 ActionBar 的方角按钮（radius 12）是用户
+  2026-10-19 明确点单；**新代码默认药丸**，要方角必须在注释里引用本条。
+
+### 9.4 排版与色彩法则
+
+- **层级排版**：卡片标题 `titleM`(16 加粗) / 正文 `bodyM`(14) / 辅助 `bodyS`(12) 或
+  `body13`(13，项目"正"字号) / 读数 `labelS`(11)。禁止所有字一样大。
+- **无边框原则**：严禁 `border.width` / `border.color`。区块隔离靠
+  `surface ↔ surfaceContainer` 色差 + 圆角 + 极微投影。既有特许（改前先读注释）：
+  DeviceCard 选中描边、Md3Chip 未选描边、Sidebar/TopBar 发丝分隔线（分隔线不是边框）。
+- 品牌点缀「终末地工业青」= 令牌 `cAccent`，禁止再写 `#2FB8C6`。
+
+### 9.5 动效法则
+
+- 颜色变化必须 `Behavior on color { ColorAnimation { duration: md3.durShort } }`
+  （时长走令牌，不写死数字）。
+- 弹窗弹出必须背景变暗 + 微小缩放（Md3Dialog 已内置），**禁止生硬闪现**。
+- hover/press 用 MD3 状态层（onSurface @ stHover/stPress）叠透明度，不改底色——
+  改底色是"塑料感"主因（DeviceCard 注释有完整说明）。
+
+### 9.6 执行与门禁
+
+- 文案门禁：`node Stelarith-shared-qml/scripts/test-ui-terms.mjs`（禁用词进仓库即红）。
+- UI 合规靠 **review + 运行时探针**：qmllint 查不出"给组件传了不存在的属性"导致的
+  整页崩（2026-10-21 事故，见 TopBar.qml 注释）——**改完必须真跑截图**。
+- 只改 QML 不改 C++ 时：`viewer_qml_sync` / `agent_qml_sync` 同步 build/qml，
+  否则跑的是旧件。

@@ -4,6 +4,11 @@
 // 管理端都用这个」——本文件 + qml/components/md3/ 组件库即两端的唯一视觉模板。
 // 规范值：Material Design 3 baseline 色板 / 字阶 / 形状 / 状态层 / 动效。
 //
+// 规范（2026-10-22 用户点单「全局统一」）：本文件即全局设计系统（Design System），
+// 与 AGENTS.md §9「全局 UI 构建红线」配套生效 —— 颜色/形状/间距/字阶/动效的唯一真源。
+// 外部规范里的 Theme.qml（Singleton）在本项目的落地**就是本文件**：不新建第二个令牌文件，
+// 避免两份真源漂移（历史：旧 Theme.qml 已退役并入此处，见下方迁移桥注释）。
+//
 // 用法：
 //   Md3 { id: md3; dark: root.darkMode }     // 深浅两实例并存、运行期切换
 //   color: md3.cSurface   font.pixelSize: md3.titleM   radius: md3.rM
@@ -55,6 +60,10 @@ QtObject {
     property color cOk:            dark ? "#4CC38A" : "#1B7A43"
     property color cWarn:          dark ? "#D4A017" : "#A87C0A"
     property color cInfo:          dark ? "#7FB3E0" : "#2A6394"
+    // 品牌点缀色「终末地工业青」（2026-10-22 收编为令牌）：在线设备的"数据在流"左缘细规、
+    // 侧栏选中项细规等冷调点缀，不抢紫色主色。此前在两处硬编码 #2FB8C6（深浅同值），
+    // 按「零硬编码」纪律收编到此处；保持既有像素不变（深浅同值）。
+    property color cAccent:        "#2FB8C6"
 
     // ═══ 形状（MD3 shape scale） ═══
     property int rXS: 4      // 文本框 / Snackbar
@@ -69,6 +78,7 @@ QtObject {
     property int spS: 8      // 组内元素
     property int spM: 16     // 组件间距（默认）
     property int spL: 24     // 面板左右外边距 / 大区块间距
+    property int spXL: 32    // 页面级留白 / 骨架大间距（2026-10-22 按规范补）
 
     // ═══ 动效（MD3 motion） ═══
     property int durShort: 200    // 颜色 / 开关 / 指示器
@@ -94,6 +104,9 @@ QtObject {
     property int bodyL: 16
     property int bodyM: 14
     property int bodyS: 12
+    // 项目「正」字号：Main.qml 根 font.pixelSize: 13 兜底档（2026-10-22 收编为令牌，
+    // 对齐规范字阶 bodyMedium=13）。页面里 13px 一律取此令牌，不再散落字面量。
+    property int body13: 13
     property int labelL: 14
     property int labelM: 12
     property int labelS: 11
