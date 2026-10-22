@@ -20,8 +20,8 @@
 ## 3 仓库 / UI / 门禁
 - github `WuMengAA/xingjikong-qt`；根仓即 meta（gitlink，无 remote）。⚠️ shared-qml 是 meta 子目录非独立仓库，随 meta 提交。
 - QML 纪律：字号 12/13/14/16；锚只锚 parent；不用原生 Button/TextField；NSIS .nsi 带 BOM。
-- 门禁七件在 `shared-qml/scripts/`；ui-terms 扫字符串字面量（16 禁用词），C++ 只扫 QStringLiteral。
-- **UI 单一真源 = `shared-qml/ui/Md3.qml`+12 件组件**；AGENTS.md §9=全局 UI 红线。骨架唯一外壳=viewer `qml/shell/MainWindow.qml`；portrait=宽<高 ⇒ 竖屏走 shell/BottomNav.qml。
+- 门禁八件在 `shared-qml/scripts/`（ui-terms 扫字符串字面量 / file-size 守行数）。
+- **UI 单一真源 = `shared-qml/ui/Md3.qml`+12 件组件**；AGENTS.md §9=UI 红线、§10=工程架构红线（规模门禁 `node shared-qml/scripts/test-file-size.mjs` + 46 项拆分台账 `fixtures/oversize-legacy.json`）。骨架唯一外壳=viewer `qml/shell/MainWindow.qml`。
 
 ## 4 已交付 / 进行中（查 git log）
 - 0.6.45/0.6.46 发版；OOBE；二维码绑定；班级真源统一；RBAC×2；MD3+竖横屏。
