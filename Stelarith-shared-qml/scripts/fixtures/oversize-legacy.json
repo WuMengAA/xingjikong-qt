@@ -17,11 +17,11 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 8142,
+      "lines": 8022,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 217,
-      "plan": "[P1] 按指令域搬家：media/ota/devices/ws，只搬不改逻辑"
+      "plan": "[P1] 第 1 刀已搬 ffmpeg 纯函数层（8142→8023）；下一刀：相机四件套分支出 executeAction"
     },
     "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
       "lines": 870,
