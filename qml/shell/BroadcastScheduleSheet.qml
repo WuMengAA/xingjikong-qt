@@ -18,7 +18,7 @@ import QtQuick 2.15
 // 交互：
 //   · 顶栏「广播站」按钮 → opened=true（由 AgentShell 控制）
 //   · 三 Tab：排期 / 投稿 / 搜索（SegmentedButton）
-//   · 排期 Tab：周历横条 + 列表（每首带封面/标题/歌手/时长/平台徽标/状态 Chip），长按拖拽排序
+//   · 排期 Tab：数据驱动日期条 + 当日排期列表（每首带封面/标题/歌手/时长/平台徽标/状态 Chip），拖拽排序
 //   · 投稿 Tab：点歌表单 → voicehub.requestSong；提交结果走 controlFinished → Snackbar
 //   · 搜索 Tab：本地过滤当前已加载排期（全曲库搜索接口待 VoiceHub 开放）
 //
@@ -441,7 +441,7 @@ Item {
                             font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgSurfaceVariant
                         }
 
-                        // 排期列表（可长按拖拽排序 · 仅当日，按日隔离）
+                        // 排期列表（可拖拽排序 · 仅当日，按日隔离）
                         ListView {
                             id: schedList
                             anchors.left: parent.left; anchors.right: parent.right
@@ -512,7 +512,7 @@ Item {
                                         anchors.bottom: parent.bottom; anchors.bottomMargin: 4
                                         text: "⇕"
                                         font.pixelSize: st.labelS; color: st.outline
-                                        visible: false // 占位，长按即触发
+                                        visible: false // 占位，拖动即触发
                                     }
 
                                     // 状态层
@@ -530,28 +530,44 @@ Item {
                                         drag.axis: Drag.YAxis
                                         drag.minimumY: 0
                                         drag.maximumY: schedList.contentHeight - height
-                                        onPressAndHold: if (!root.saving) ma.drag.active = true
+                                        // 2026-10-23 修复：Qt 6 起 Drag.active 只读（QQuickDrag 的
+                                        // Q_PROPERTY 无 WRITE，赋值抛 TypeError），「onPressAndHold 里
+                                        // drag.active=true 启动拖拽」的旧写法从未生效过（10-22 起潜伏）。
+                                        // 改为 MouseArea 内置移动拖拽（移动超阈值自动开始）。
+                                        property real pressY: 0
+                                        onPressed: pressY = card.y
                                         onReleased: {
-                                            if (ma.drag.active) {
-                                                ma.drag.active = false
-                                                // 拖到一半时 card.y 已是内容坐标，取中点命中目标行
-                                                var idx = schedList.indexAt(schedList.contentX, card.y + height / 2)
-                                                if (idx >= 0 && idx !== myIndex) {
-                                                    dayModel.move(myIndex, idx, 1)
-                                                    // 只把「当日」这一组按新视觉顺序 1..N 提交；
-                                                    // 其它日期根本不在 dayModel 里，故不会被污染。
-                                                    var pairs = []
-                                                    for (var k = 0; k < dayModel.count; ++k) {
-                                                        var it = dayModel.get(k)
-                                                        pairs.push({ id: it.sid, sequence: k + 1 })
-                                                    }
-                                                    if (voicehub && voicehub.canRequest()) {
-                                                        root.saving = true
-                                                        voicehub.reorderSchedule(pairs)
-                                                    } else {
-                                                        snack.show("未配置 API Key，顺序仅在本地面板内生效", false)
-                                                    }
+                                            // 落点换算（2026-10-23 修复，探针实证）：
+                                            // 不能用 card.y+height/2 调 indexAt——拖拽中 card 与相邻行
+                                            // 视觉重叠，按 card 中心查恒命中自己被拖动的那一行
+                                            // （idx==myIndex，表现为「拖了却从不换序」）；按鼠标点调
+                                            // indexAt 同样命中重叠的被拖动卡。故用「鼠标释放点」按行高
+                                            // 算术换算目标行；行高取 card.height + schedList.spacing，
+                                            // 与 ListView 排布同源，不写死魔数。
+                                            var idx = -1
+                                            if (!root.saving) {
+                                                var mp = ma.mapToItem(schedList, mouse.x, mouse.y)
+                                                idx = Math.floor((schedList.contentY + mp.y)
+                                                                / (card.height + schedList.spacing))
+                                                idx = Math.max(0, Math.min(dayModel.count - 1, idx))
+                                            }
+                                            if (idx >= 0 && idx !== myIndex) {
+                                                dayModel.move(myIndex, idx, 1)
+                                                // 只把「当日」这一组按新视觉顺序 1..N 提交；
+                                                // 其它日期根本不在 dayModel 里，故不会被污染。
+                                                var pairs = []
+                                                for (var k = 0; k < dayModel.count; ++k) {
+                                                    var it = dayModel.get(k)
+                                                    pairs.push({ id: it.sid, sequence: k + 1 })
                                                 }
+                                                if (voicehub && voicehub.canRequest()) {
+                                                    root.saving = true
+                                                    voicehub.reorderSchedule(pairs)
+                                                } else {
+                                                    snack.show("未配置 API Key，顺序仅在本地面板内生效", false)
+                                                }
+                                            } else {
+                                                card.y = pressY // 原地放下/保存中被拦：放回原列
                                             }
                                         }
                                     }
@@ -568,7 +584,7 @@ Item {
 
                         Text {
                             anchors.left: parent.left
-                            text: "提示：长按曲目可调整顺序，松手即保存到 VoiceHub（仅对当日生效，需 API Key 具备 schedules:write 权限）"
+                            text: "提示：拖动曲目即可调整顺序，松手保存到 VoiceHub（仅对当日生效，需 API Key 具备 schedules:write 权限）"
                             font.pixelSize: st.labelS; color: st.fgSurfaceVariant
                             wrapMode: Text.Wrap; width: parent.width
                         }
