@@ -41,15 +41,15 @@ Item {
             md3: pane.md3
             width: pane.cellW
             height: 188
-            uid: modelData.uid
-            name: modelData.name
-            online: modelData.online
-            version: modelData.version
-            lastSeenAgoSec: modelData.lastSeen
-            hasThumb: modelData.hasThumb
-            thumbRev: modelData.thumbRev
-            selected: modelData.uid === pane.selectedUid
-            onClicked: pane.deviceClicked(modelData.uid)
+            uid: model.uid
+            name: model.name
+            online: model.online
+            version: model.version
+            lastSeenAgoSec: model.lastSeen
+            hasThumb: model.hasThumb
+            thumbRev: model.thumbRev
+            selected: model.uid === pane.selectedUid
+            onClicked: pane.deviceClicked(model.uid)
         }
 
         ScrollBar.vertical: ScrollBar { width: 8 }

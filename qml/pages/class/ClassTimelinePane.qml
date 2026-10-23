@@ -59,7 +59,7 @@ Item {
 
                 // 时间（等宽，事件流的"刻度"）
                 Text {
-                    text: pane.hhmm(modelData.at)
+                    text: pane.hhmm(model.at)
                     font.pixelSize: md3.bodyS
                     font.family: "monospace"
                     color: md3.cOutline
@@ -67,7 +67,7 @@ Item {
                 }
 
                 SvgIcon {
-                    property var st: pane.kindStyle(modelData.kind, modelData.isMember)
+                    property var st: pane.kindStyle(model.kind, model.isMember)
                     name: st.icon
                     px: 14
                     tint: st.tint === "ok" ? md3.cOk
@@ -83,7 +83,7 @@ Item {
 
                     Text {
                         width: parent.width
-                        text: pane.kindStyle(modelData.kind, modelData.isMember).label
+                        text: pane.kindStyle(model.kind, model.isMember).label
                         font.pixelSize: md3.body13
                         color: md3.cOnSurface
                         elide: Text.ElideRight
@@ -91,12 +91,12 @@ Item {
                     // 第二行：设备名位（uid）+ detail 里的人话（离线原因等）
                     Text {
                         width: parent.width
-                        visible: (modelData.uid || "") !== "" || (modelData.detail || "") !== ""
-                        text: (modelData.uid || "") !== ""
-                              ? ((modelData.detail || "") !== ""
-                                     ? (modelData.uid + " · " + modelData.detail)
-                                     : modelData.uid)
-                              : (modelData.detail || "")
+                        visible: (model.uid || "") !== "" || (model.detail || "") !== ""
+                        text: (model.uid || "") !== ""
+                              ? ((model.detail || "") !== ""
+                                     ? (model.uid + " · " + model.detail)
+                                     : model.uid)
+                              : (model.detail || "")
                         font.pixelSize: md3.bodyS
                         color: md3.cOnSurfaceVar
                         elide: Text.ElideRight
