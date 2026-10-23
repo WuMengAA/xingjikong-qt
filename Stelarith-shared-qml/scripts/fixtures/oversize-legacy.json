@@ -191,34 +191,6 @@
       "topLevel": 0,
       "plan": "[P3] 拆预览/参数两段"
     },
-    "Stelarith-viewer-qt/qml/pages/AdminDashboard.qml": {
-      "lines": 343,
-      "limit": 200,
-      "qInvokable": 0,
-      "topLevel": 0,
-      "plan": "[P3] 拆统计卡为组件"
-    },
-    "Stelarith-viewer-qt/qml/pages/ClassDetailPage.qml": {
-      "lines": 399,
-      "limit": 200,
-      "qInvokable": 0,
-      "topLevel": 0,
-      "plan": "[P3] 拆班级信息/设备列表"
-    },
-    "Stelarith-viewer-qt/qml/pages/ControlPage.qml": {
-      "lines": 913,
-      "limit": 200,
-      "qInvokable": 0,
-      "topLevel": 0,
-      "plan": "[P1] 拆设备卡/动作栏/批量操作"
-    },
-    "Stelarith-viewer-qt/qml/pages/SettingsPage.qml": {
-      "lines": 598,
-      "limit": 200,
-      "qInvokable": 0,
-      "topLevel": 0,
-      "plan": "[P2] 按设置分组拆子组件"
-    },
     "Stelarith-viewer-qt/qml/panels/ControlDialog.qml": {
       "lines": 282,
       "limit": 200,
@@ -262,7 +234,7 @@
       "plan": "[P3] 拆参数区"
     },
     "Stelarith-viewer-qt/qml/shell/MainWindow.qml": {
-      "lines": 495,
+      "lines": 496,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
@@ -323,6 +295,20 @@
       "qInvokable": 0,
       "topLevel": 0,
       "plan": "[P2] 拆注册/心跳/清理三段"
+    },
+    "Stelarith-viewer-qt/qml/pages/control/ControlPage.qml": {
+      "lines": 913,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P1] 拆设备卡/动作栏/批量操作"
+    },
+    "Stelarith-viewer-qt/qml/pages/settings/SettingsPage.qml": {
+      "lines": 598,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 按设置分组拆子组件"
     }
   }
 }
