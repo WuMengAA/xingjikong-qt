@@ -203,16 +203,26 @@ Item {
             Layout.fillHeight: true
             spacing: 0
 
-            // ══ 左侧导航栏（240px · SurfaceVariant）══
-            // 竖屏让位给底部 BottomNav（visible:false 的项不占布局空间）
-            Sidebar {
+            // ══ 左侧班级导航（240px · #473 点单①：左班级导航 + 右班级工作台）══
+            // 与 Sidebar 的分工：Sidebar 是功能菜单（竖屏 BottomNav 仍用它那份 navItems），
+            // ClassNav 是"以班为单位"的入口——班级列表在上（人数一眼可见），系统组在下。
+            // 竖屏让位给 BottomNav（visible:false 的项不占布局空间）。
+            ClassNav {
                 id: nav
                 visible: !shell.portrait
                 md3: shell.th
                 ctx: shell.ctx
-                items: shell.navItems
-                current: shell.section
-                onActivated: function (key) { shell.navActivated(key) }
+                classes: backend ? backend.classes : []
+                devices: backend ? backend.devices : []
+                currentClass: backend ? backend.currentClass : ""
+                section: shell.section
+                onClassPicked: function (code) {
+                    // 点班级 = 双写（旧筛选 + 新班级域）并切到工作台段
+                    shell.section = "classes"
+                    classDash.activateClass(code)
+                }
+                onSystemActivated: function (key) { shell.navActivated(key) }
+                onClassicRequested: if (shell.ctx) shell.ctx.window.goPage(1)
             }
 
             // ══ 主内容区（Surface）══
