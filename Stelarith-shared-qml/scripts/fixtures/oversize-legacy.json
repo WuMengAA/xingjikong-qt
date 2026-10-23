@@ -262,7 +262,7 @@
       "plan": "[P3] 拆参数区"
     },
     "Stelarith-viewer-qt/qml/shell/MainWindow.qml": {
-      "lines": 458,
+      "lines": 454,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
