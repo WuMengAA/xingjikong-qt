@@ -23,7 +23,9 @@ Item {
     property var classes: []          // backend.classes [{code,name}]
     property var devices: []          // backend.devices（算每班在线数）
     property string currentClass: ""  // backend.currentClass
-    property string section: ""       // 系统组选中：dash / classes / settings
+    property string section: ""       // 系统组选中：dash / classes / control / monitor / settings
+    /** 系统组菜单源：外壳的 navItems（{key,icon,label}），与 BottomNav 同一份。 */
+    property var navItems: []
 
     signal classPicked(string code)
     signal systemActivated(string key)
@@ -37,11 +39,11 @@ Item {
     Layout.preferredWidth: navWidth
 
     /** 系统组（监控仍是跳整页，走宿主 navActivated 的统一分支）。 */
-    readonly property var sysItems: [
-        { key: "dash",     icon: "monitor",  label: "仪表盘" },
-        { key: "monitor",  icon: "eye",      label: "运行监控" },
-        { key: "settings", icon: "settings", label: "系统设置" }
-    ]
+    /** 系统组：由外壳的 navItems 派生（**不另写一份**）。
+     *  以前这里硬编码 3 项，加了「设备集控」栏目就漏了——左栏少了入口，
+     *  页面却切得过去，属于"能到但找不到路"。
+     *  classes 项保留：班级名单为空（云端没下发）时，它是进班级工作台的唯一入口。 */
+    readonly property var sysItems: nav.navItems
 
     /** 某个班的在线/总数（现算；devices 是云端下发的唯一名单）。 */
     function countOf(code) {

@@ -1,8 +1,6 @@
 // 班级工作台 · 三栏编排器（#461-#472）
-//
 // 点单项②：三栏 = 左身份 / 中设备网格+展板 / 右动作+Timeline。本文件只做编排与
 // 状态接线，可见内容全在同目录窗格件里（各守 200 行，AGENTS.md §10）。
-//
 // ── 状态真源（不自己另存一份）──
 //   · 订阅态：backend.classService（#460）—— subscribed/classCode/className/
 //     onlineCount/deviceCount/lastError + 两个 typed model；
@@ -10,11 +8,10 @@
 //     subscribeClass（新班级域），两套机制并存到集控页迁移完成；
 //   · 选中设备：host.pickDevice(uid,0,0)（宿主唯一选择路径，currentUid + picked
 //     双写；危险动作由宿主按 currentUid 快照下发，不会发错机器）。
-//
 // ── pending（订阅中）── 本地过渡态：activateClass 置 true；subscribedChanged /
 //   classError / subscribeFailed 任一到达置 false（不探 m_pendingCode，用信号收口）。
-//
 // ── 竖屏（宽<高）── 三栏竖排：身份 → 中栏 → 动作 → 时间线，中段以下进 Flickable。
+// ── 去集控页 ── openControlFn 由外壳注入（切 control section）；未注入回落旧壳 goPage(1)。
 import QtQuick
 
 Item {
@@ -25,6 +22,7 @@ Item {
     property var cs: null        // ClassService
     property var devices: []     // backend.devices（动作面板算本班在线名单用）
     property var toastFn: null   // (msg, isErr) 外壳页级 toast
+    property var openControlFn: null   // 去集控页（外壳注入 section 切换）
 
     /** 订阅请求在飞（本地过渡态，见文件头）。 */
     property bool pending: false
@@ -128,6 +126,7 @@ Item {
                     selectedUid: dash.selectedUid
                     selectedName: dash.selectedName()
                     toastFn: dash.toastFn
+                    openControlFn: dash.openControlFn
                 }
                 ClassTimelinePane {
                     width: parent.width
@@ -186,6 +185,7 @@ Item {
                     selectedUid: dash.selectedUid
                     selectedName: dash.selectedName()
                     toastFn: dash.toastFn
+                    openControlFn: dash.openControlFn
                 }
                 ClassTimelinePane {
                     width: parent.width

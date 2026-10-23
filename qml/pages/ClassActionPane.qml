@@ -1,20 +1,15 @@
 // 班级工作台 · 右栏上「动作面板」（#461-#472）
-//
 // 两条动作链，刻意分开（与集控页同一哲学：单机选中管"看哪台"，
 // 多选 picked 管"给哪些台发"，并成一条会互相踢）：
 //   ① 全班：把**本班在线设备**塞进宿主 picked，再走 pick 系列批量 id
 //      （pick-lock / pick-shutdown）—— 权限、能力、危险确认全在宿主的
 //      runActionById 里，本面板不复制任何一份校验逻辑；
-//   ② 单台：点格子时宿主已 pickDevice(uid)（currentUid/picked 双写），
-//      这里直接 runActionById("screenshot"/"lock"/"reboot")，
-//      danger 分支在宿主持 backend.currentUid 快照下发，不会发错机器。
-//
-// 本班在线名单从 backend.devices 按 classCode 现算（零 C++、零新协议）——
-// 班级归属只认云端 knownDevices 表口径的 classCode 字段（与 ClassService
-// 的班级域事件同一权威），不信任任何本地缓存名单。
-//
-// 反馈走注入的 toastFn（宿主的页级 toast）：本面板被探针实例化时没有
-// 宿主，toastFn 为空则静默 —— 探针不崩、真机有反馈。
+//   ② 单台：点格子时宿主已 pickDevice(uid)（currentUid/picked 双写），这里直接
+//      runActionById("screenshot"/"lock"/"reboot")；danger 分支在宿主持
+//      backend.currentUid 快照下发，不会发错机器。
+// 本班在线名单从 backend.devices 按 classCode 现算（零 C++、零新协议）——班级归属
+// 只认云端 knownDevices 表口径的 classCode 字段（与 ClassService 班级域同一权威）。
+// 反馈走注入的 toastFn（宿主页级 toast）：探针实例化时为空则静默，真机有反馈。
 import QtQuick
 import "../components/md3"     // Md3Btn
 import "../island"             // SvgIcon
@@ -29,6 +24,8 @@ Item {
     property string selectedUid: ""
     property string selectedName: ""
     property var toastFn: null  // (msg, isErr) 由外壳注入
+    /** 去集控页。外壳内嵌时注入（切到 control section），未注入则回落旧壳 goPage(1)。 */
+    property var openControlFn: null
 
     readonly property bool subbed: cs && cs.subscribed === true
     readonly property string code: (cs && cs.classCode) ? cs.classCode : ""
@@ -184,7 +181,10 @@ Item {
                     md3: pane.md3
                     text: "在集控页打开"
                     variant: "outlined"
-                    onClicked: if (pane.host) pane.host.goPage(1)
+                    onClicked: {
+                        if (pane.openControlFn) pane.openControlFn()
+                        else if (pane.host) pane.host.goPage(1)
+                    }
                 }
 
                 Text {
