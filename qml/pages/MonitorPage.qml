@@ -21,6 +21,12 @@ Item {
     id: page
 
     property var ctx
+
+    /** 返回出口。内嵌进新外壳（MainWindow 的 monitor section）时由外壳注入，
+     *  点一下切回仪表盘；旧壳 page 3 不注入，回落原来的"跳回集控页"。
+     *  这样同一份页面在两处都成立，不用复制第二份（AGENTS.md §9.3 单一真源）。 */
+    property var backFn: null
+
     readonly property var th: (ctx && ctx.window && ctx.window.th) ? ctx.window.th : null
 
     Rectangle { anchors.fill: parent; color: th ? th.body : "#141414" }
@@ -174,7 +180,14 @@ Item {
             // #370：监控页直接推文件给当前看的这台（file_push 面板走 openOnly("file")）
             Md3Btn { md3: th; text: "推文件"; variant: "tonal"; onClicked: ctx.window.runActionById("file_push") }
             // #370：显式「返回」跳回集控（page=1），不必去点顶部标签
-            Md3Btn { md3: th; text: "← 返回"; variant: "text"; onClicked: ctx.window.goPage(1) }
+            // 新外壳内嵌时 backFn 由外壳注入（切回仪表盘），旧壳仍跳 page 1。
+            Md3Btn {
+                md3: th; text: "← 返回"; variant: "text"
+                onClicked: {
+                    if (page.backFn) page.backFn()
+                    else ctx.window.goPage(1)
+                }
+            }
 
             // 停止看当前设备（outlined 弱化；Md3Btn 无 error 变体色的 text 写法，
             // 用 outlined + 红色 icon 近似 —— 语义仍清楚）

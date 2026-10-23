@@ -69,8 +69,10 @@ Item {
 
     // ── 侧栏菜单（文案走教育 B 端规范）────────────────────────────────
     // icon 用 lucide 图标名（随 exe 打包），不用 emoji —— emoji 在本机会渲染成方块。
-    // 2026-10-22：新增「运行监控」——它不是本页的一个 section，而是**跳旧壳 page 3**
-    //   （监控页是整页大画面 + 单机帧流，一次性重写风险大且收益低，先做出口）。
+    // 2026-10-24 旧界面迁移：**「运行监控」从"跳旧壳 page 3"改成第 4 个 section**。
+    //   原来是 goPage(3) 把整页甩给旧壳——旧壳那页有自己的底部标签栏和背景，
+    //   点进去像"出了这个软件"。现在 MonitorPage 直接内嵌在内容区（同一个 TopBar /
+    //   同一个状态条），旧壳 page 3 保留但仍可用（同一份 QML，靠 backFn 区分出口）。
     readonly property var navItems: [
         { key: "dash",     icon: "monitor",     label: "仪表盘" },
         { key: "classes",  icon: "users",       label: "班级看板" },
@@ -78,7 +80,7 @@ Item {
         { key: "settings", icon: "settings",    label: "系统设置" }
     ]
 
-    /** 当前栏目：dash / classes / settings（monitor 是跳转项，不驻留）。 */
+    /** 当前栏目：dash / classes / monitor / settings。 */
     property string section: "dash"
 
     /** 侧滑面板展示哪台设备（"" = 关闭）。 */
@@ -116,18 +118,26 @@ Item {
         return { total: ds.length, on: on, off: ds.length - on, pending: pend }
     }
 
-    /** 当前栏目在 StackLayout 里的下标。 */
-    readonly property int sectionIndex: shell.section === "settings" ? 2
-                                      : (shell.section === "classes" ? 1 : 0)
+    /** 当前栏目在 StackLayout 里的下标（顺序与 navItems 一致）。 */
+    readonly property int sectionIndex: {
+        if (shell.section === "classes") return 1
+        if (shell.section === "monitor") return 2
+        if (shell.section === "settings") return 3
+        return 0
+    }
+
+    /** 顶栏标题（随栏目变，避免四个栏目都写「设备监控」）。 */
+    readonly property string sectionTitle: {
+        if (shell.section === "classes") return "班级看板"
+        if (shell.section === "monitor") return "运行监控"
+        if (shell.section === "settings") return "系统设置"
+        return "设备监控"
+    }
 
     /** 导航激活（Sidebar 与 BottomNav 共用，别处不许再写一份分支逻辑）：
-     *   运行监控 = 跳旧壳 page 3（整页大画面），不是本页 section；
-     *   系统设置先过 RBAC 门禁（H5：受限身份不切栏、弹页级提示）。 */
+     *   系统设置先过 RBAC 门禁（H5：受限身份不切栏、弹页级提示）。
+     *   2026-10-24：「运行监控」不再跳旧壳 page 3，改为本页 section。 */
     function navActivated(key) {
-        if (key === "monitor") {
-            if (shell.ctx) shell.ctx.window.goPage(3)
-            return
-        }
         if (key === "settings" && (typeof perms === "undefined" || !perms.can("system:settings"))) {
             shell.toast("当前身份不能进系统设置", true)
             return
@@ -243,7 +253,7 @@ Item {
                         id: topBar
                         ctx: shell.ctx
                         md3: shell.th          // 颜色令牌（TopBar 默认 md3=null，内部有兜底）
-                        title: "设备监控"
+                        title: shell.sectionTitle
                         // ⚠️ 班级列表与当前班**不在这里传参** —— TopBar 内部直接读
                         //    backend.classes / backend.currentClass。曾经多传不存在的属性，
                         //    结果 `Type Md3Shell unavailable` 整页起不来（qmllint 0 Error）。
@@ -251,7 +261,9 @@ Item {
                         // 写旧筛选（setCurrentClass）与新班级域（subscribeClass）。
                         // 只写旧的话，班级工作台永远订不到班（网格空着不说话）。
                         onClassPicked: function (code) { classDash.activateClass(code) }
-                        onAvatarClicked: function () { if (shell.ctx) shell.ctx.window.goPage(2) }
+                        // 头像 = 账户入口，落点就是系统设置。走 navActivated 而不是
+                        // goPage(2)：RBAC 门禁只有那一处，绕过去等于开第二个口子。
+                        onAvatarClicked: function () { shell.navActivated("settings") }
                         onLoginRequested: {
                             shell.toast("正在打开站点登录…")
                             if (backend) backend.loginWithSite()
@@ -312,7 +324,18 @@ Item {
                             toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
                         }
 
-                        // ③ 系统设置：复用已交付的设置页（零重复）
+                        // ③ 运行监控（旧界面迁移 2026-10-24）：直接内嵌 MonitorPage，
+                        //    不再 goPage(3) 甩给旧壳。同一份 QML 在旧壳 page 3 仍可用，
+                        //    差别只在 backFn —— 注入了就切回仪表盘，不注入就跳 page 1。
+                        Loader {
+                            source: "../pages/MonitorPage.qml"
+                            onLoaded: if (item) {
+                                item.ctx = shell.ctx
+                                item.backFn = function () { shell.section = "dash" }
+                            }
+                        }
+
+                        // ④ 系统设置：复用已交付的设置页（零重复）
                         Loader {
                             source: "../pages/SettingsPage.qml"
                             onLoaded: if (item) item.ctx = shell.ctx
