@@ -241,9 +241,27 @@ public:
         }
     }
 
+    /** 广播社成员模块（2026-10-23 #广播站移交）注入：与 setVoicehub 同口径，
+     *  上下文属性名 `broadcastClub`，页内直接引用。 */
+    static void setBroadcastClub(QObject *m)
+    {
+        s_broadcastClub = m;
+        if (s_live)
+            s_live->engine()->rootContext()->setContextProperty(QStringLiteral("broadcastClub"), m);
+        if (m && s_live) {
+            AgentShell *live = s_live;
+            QObject::connect(m, &QObject::destroyed, live, [live]() {
+                if (live && live->engine())
+                    live->engine()->rootContext()->setContextProperty(
+                        QStringLiteral("broadcastClub"), QVariant());
+            });
+        }
+    }
+
 private:
     // s_live：已创建实例（本类全局最多一个；ensure 的局部 s_inst 管创建，这里管补设）。
     inline static QPointer<QObject> s_voicehub;
+    inline static QPointer<QObject> s_broadcastClub;
     inline static AgentShell *s_live = nullptr;
 
     explicit AgentShell(QWidget *parent = nullptr)
@@ -273,6 +291,10 @@ private:
         // 正常路径下这里一定拿得到（竞态兜底在 setVoicehub 的 if 分支）。
         if (s_voicehub)
             engine()->rootContext()->setContextProperty(QStringLiteral("voicehub"), s_voicehub);
+        // 广播社成员模块（2026-10-23）：main.cpp 注册后调 setBroadcastClub；
+        // 懒创建保证正常路径下这里一定拿得到。
+        if (s_broadcastClub)
+            engine()->rootContext()->setContextProperty(QStringLiteral("broadcastClub"), s_broadcastClub);
         // 数据接线在 main.cpp（agentUiWire 定义处能访问全部 static 符号）。
         agentUiWire(&m_ui);
         // 与岛同模式：QML 相对 exe 目录（CMake POST_BUILD 拷到 build/qml/）。

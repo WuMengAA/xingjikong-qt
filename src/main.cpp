@@ -124,6 +124,7 @@
 #include "modules/modulehost.h"  // 2026-10-16：内置模块层（编译进 agent 的官方模块，与进程外插件共用门控）
 #include "modules/usbmodule.h"
 #include "modules/voicehubmodule.h"  // 2026-10-17：VoiceHub 联动（只读展示权威广播状态）
+#include "modules/broadcastclubmodule.h"  // 2026-10-23：广播社成员独立身份登录通道
 #include <QMessageBox>         // P2：插件市场对话框
 #include <QListWidget>         // P2：插件市场列表
 #include <QUrlQuery>
@@ -7515,6 +7516,15 @@ int main(int argc, char *argv[])
         mh->startEnabled();
         IslandOverlay::instance()->setQmlObjectProperty(QStringLiteral("voicehubObj"), vh);
         AgentShell::setVoicehub(vh);
+
+        // 广播社成员模块（2026-10-23 #广播站移交）：独立身份登录通道，账号在云端自管。
+        // 不注册为内置模块（不是可启停插件），仅作为 QObject 注入控制面板上下文属性
+        // `broadcastClub`，供新页 BroadcastClubPage 调用。base URL 复用 agent 自身云端地址。
+        {
+            auto *bc = new BroadcastClubModule();
+            bc->setBaseUrl(siteBaseFromWsUrl(qEnvironmentVariable("STE_QT_WS_URL")));
+            AgentShell::setBroadcastClub(bc);
+        }
     }
 
     const int rc = app.exec();

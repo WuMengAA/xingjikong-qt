@@ -66,6 +66,17 @@ function manifest() {
             title: "时段",
             icon: "播",
             entry: "pages/AgentPlaySchedulePage.qml"
+        },
+        {
+            id: "broadcastclub",
+            surfaces: ["page"],
+            scope: ["agent"],     // ⚠️ 同上：漏写会被门控全过滤
+            order: 6,
+            title: "广播社",
+            icon: "社",
+            // 广播社成员独立界面（2026-10-23 #广播站移交）：页内自带登录门，
+            // 登录后只能看/排自己归属 station 的排期，不触及老师其它功能。
+            entry: "pages/BroadcastClubPage.qml"
         }
     ];
 }

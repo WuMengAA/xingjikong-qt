@@ -128,6 +128,9 @@ add_executable(stelarith-agent-qt
   # ── VoiceHub 联动（2026-10-17）：只读展示 VoiceHub 权威广播状态 ──
   src/modules/voicehubmodule.cpp
   src/modules/voicehubmodule.h
+  # ── 广播社成员（2026-10-23 #广播站移交）：独立身份登录 + 排期代理 ──
+  src/modules/broadcastclubmodule.cpp
+  src/modules/broadcastclubmodule.h
   src/schedule/profile.h
   # ── 远程终端（2026-10-06 加：REPL 命令行，需确认 + 单会话）──
   src/terminal_console.cpp
