@@ -74,20 +74,26 @@ GridLayout {
             }
 
             Repeater {
-                model: backend.actionRanking ? backend.actionRanking.slice(0, 5) : []
+                // 排名算进 model：delegate 声明 required property 后，Qt 6 不再把上下文
+                // 属性 index 注入委托链（实测 ReferenceError: index is not defined；
+                // 存量 Md3Shell.qml:449 同坑）。这里不依赖 index。
+                model: {
+                    const src = backend.actionRanking ? backend.actionRanking.slice(0, 5) : []
+                    const out = []
+                    for (let i = 0; i < src.length; ++i)
+                        out.push({ rank: i + 1, action: src[i].action, ok: src[i].ok, total: src[i].total })
+                    return out
+                }
                 delegate: RowLayout {
                     required property var modelData
-                    // ⚠️ 不用 required property int index：Repeater 的 index 是上下文属性，
-                    //    声明成 required 在部分版本取不到值。
                     Layout.fillWidth: true
                     spacing: cards.md3 ? cards.md3.spS : 8
-
                     Text {
-                        text: (index + 1)
+                        text: modelData.rank
                         font.pixelSize: cards.md3 ? cards.md3.bodyS : 12
-                        font.weight: index < 3 ? Font.Bold : Font.Normal
-                        color: index < 3 ? (cards.md3 ? cards.md3.cPrimary : "#6750A4")
-                                         : (cards.md3 ? cards.md3.cOnSurfaceVar : "#49454F")
+                        font.weight: modelData.rank <= 3 ? Font.Bold : Font.Normal
+                        color: modelData.rank <= 3 ? (cards.md3 ? cards.md3.cPrimary : "#6750A4")
+                                                   : (cards.md3 ? cards.md3.cOnSurfaceVar : "#49454F")
                     }
                     Text {
                         Layout.fillWidth: true

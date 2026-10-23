@@ -27,7 +27,7 @@ ColumnLayout {
     spacing: md3 ? md3.spM : 16
 
     /** 在 devices 之上按 chip 再筛一层（与集控页同名同义，但那份含其它班）。 */
-    function visible() {
+    function shownDevices() {
         if (sec.filterMode === "all") return sec.devices
         var out = []
         for (var i = 0; i < sec.devices.length; ++i) {
@@ -113,7 +113,7 @@ ColumnLayout {
         Item { Layout.fillWidth: true }
 
         Text {
-            text: sec.visible().length + " 台"
+            text: sec.shownDevices().length + " 台"
             font.pixelSize: sec.md3 ? sec.md3.bodyS : 12
             color: sec.md3 ? sec.md3.cOutline : "#79747E"
         }
@@ -127,7 +127,7 @@ ColumnLayout {
         rowSpacing: sec.md3 ? sec.md3.spM : 16
 
         Repeater {
-            model: sec.visible()
+            model: sec.shownDevices()
 
             delegate: DeviceCard {
                 required property var modelData
@@ -147,7 +147,7 @@ ColumnLayout {
 
     Text {
         Layout.fillWidth: true
-        visible: sec.visible().length === 0
+        visible: sec.shownDevices().length === 0
         text: sec.filterMode === "all"
               ? "这个班还没有设备"
               : ("当前筛选（" + (sec.filterMode === "online" ? "在线" : "离线") + "）下没有设备")
