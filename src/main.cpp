@@ -255,7 +255,38 @@ QString g_shotDir;                 // 截图/存图目录（screenshot 动作与
 
 namespace {
 
-constexpr int kFrameIntervalMs = 2000;   // 2 秒一帧，与 D2 保持一致
+constexpr int kFrameIntervalMs = 2000;   // 兜底默认（现由 previewIntervalMs() 读取，可 env 覆盖）
+
+// ── 2026-10-24：预览流（WS 单帧 JPEG）参数改为可配 ──────────────────────────
+// 背景：实测生产帧率恒为 2.01s/帧，且**与帧大小无关**（240KB 与 320KB 同为 2.01s）
+//   ⇒ 不是链路限速，是本文件里两处自设闸门（2s 定时器 + 150KB/s 令牌桶）在卡。
+//   而 CF 隧道才是真正的限流大头，把自设帽放开来才能让隧道吃饱。
+// 取值：STE_PREVIEW_INTERVAL_MS（默认 1000，钳 200..10000）
+//       STE_PREVIEW_KBPS（默认 400 KB/s，0=不限；钳 0 或 50..20000）
+//       STE_PREVIEW_MAX_EDGE（默认 854 = 480p 档长边；0=不缩放）
+static int previewIntervalMs()
+{
+    int v = qEnvironmentVariableIntValue("STE_PREVIEW_INTERVAL_MS");
+    if (v <= 0) v = 1000;
+    return qBound(200, v, 10000);
+}
+
+static qint64 previewQuotaBytes()
+{
+    int kbps = qEnvironmentVariableIntValue("STE_PREVIEW_KBPS");
+    if (kbps == 0 && qEnvironmentVariableIsSet("STE_PREVIEW_KBPS")) return 0;   // 显式 0 = 不限
+    if (kbps <= 0) kbps = 400;
+    kbps = qBound(50, kbps, 20000);
+    return static_cast<qint64>(kbps) * 1024;
+}
+
+static int previewMaxEdge()
+{
+    int v = qEnvironmentVariableIntValue("STE_PREVIEW_MAX_EDGE");
+    if (v == 0 && qEnvironmentVariableIsSet("STE_PREVIEW_MAX_EDGE")) return 0;  // 显式 0 = 不缩放
+    if (v <= 0) v = 854;
+    return qBound(320, v, 3840);
+}
 constexpr int kHeartbeatIntervalMs = 10000; // 心跳缺省值（云端 registered 里给了就以云端为准）
 // 2026-10-14 修（审计 P2）：云端下发的心跳间隔以前只要 >0 就无条件采纳，
 // 异常值（笔误写成 3600000 = 1 小时之类）会让心跳变得极稀 → 云端 30s 判离线 →
@@ -6146,9 +6177,20 @@ void captureAndSend(const QString &outDir)
 
     QByteArray jpeg;
     {
+        // 2026-10-24：预览帧按 480p 档送出（原生 1080p/2K 直接压 JPEG，单帧 200-400KB，
+        //   在 CF 隧道上是纯浪费）。长边限到 previewMaxEdge()（默认 854），保比例不放大。
+        //   只影响**网络帧**；outDir 落盘仍用原始 pm，取证不受影响。
+        QPixmap net = pm;
+        const int maxEdge = previewMaxEdge();
+        if (maxEdge > 0) {
+            const int longEdge = qMax(pm.width(), pm.height());
+            if (longEdge > maxEdge) {
+                net = pm.scaled(maxEdge, maxEdge, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
+        }
         QBuffer buffer(&jpeg);
         buffer.open(QIODevice::WriteOnly);
-        if (!pm.save(&buffer, "JPEG", 60)) {
+        if (!net.save(&buffer, "JPEG", 60)) {
             qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: JPEG 编码失败");
             return;
         }
@@ -6204,7 +6246,12 @@ void captureAndSend(const QString &outDir)
         //   grace 写法，L~7676），从第二帧起恢复 150KB/s 配额 —— 最坏多一帧流量，
         //   保证画面流至少能走起来。
         const bool grace = (winFrames == 0);
-        if (!grace && winBytes + jpeg.size() > 150 * 1024) {
+        // 2026-10-24：配额由 150KB/s 放开到可配（默认 400KB/s，0=不限）。
+        //   原 150KB/s 是"CF 隧道劣化到 250KB/s 时保心跳"的应急值，长期挂着等于
+        //   把 4Mbps 的线当 1.2Mbps 用。真限流大头在 CF 隧道，自设帽只会让它吃不满。
+        //   心跳保护仍由上面的 bytesToWrite(1MB) 积压闸兜底 —— 那条才是真正防踢人的。
+        const qint64 quota = previewQuotaBytes();
+        if (quota > 0 && !grace && winBytes + jpeg.size() > quota) {
             static int bwSkipped = 0;
             if (++bwSkipped % 50 == 1)
                 qWarning("[agent-qt] 本秒帧流量已到 150KB 配额，跳帧保心跳（累计跳 %d）", bwSkipped);
@@ -7168,7 +7215,18 @@ int main(int argc, char *argv[])
                          g_ws->bytesToWrite() / 1024, vncSkipped);
             return;
         }
-        // 每秒 200KB 配额窗口（整条链路共用一组记账）
+        // 每秒配额窗口（整条链路共用一组记账）
+        // 2026-10-24：由写死 200KB/s 改为可配 STE_VNC_KBPS（默认 800 KB/s ≈ 6.4Mbps）。
+        //   原 200KB/s 是"CF 隧道劣化到 250KB/s 时保心跳"的应急值，长期挂着等于
+        //   把链路当 1.6Mbps 用；真限流大头在 CF 隧道，自设帽只会让它吃不满。
+        //   心跳保护仍由上面的 1MB 积压闸兜底（它才是真正防踢人的那道）。
+        static const qint64 vQuota = [] {
+            int kbps = qEnvironmentVariableIntValue("STE_VNC_KBPS");
+            if (kbps == 0 && qEnvironmentVariableIsSet("STE_VNC_KBPS")) return qint64(0);  // 显式 0 = 不限
+            if (kbps <= 0) kbps = 800;
+            return qint64(qBound(100, kbps, 20000)) * 1024;
+        }();
+        const qint64 vMegaBytes = qMax<qint64>(64 * 1024, vQuota / 2);   // "整屏基础图"判定阈值随配额走
         static qint64 vWinStart = 0;
         static qint64 vWinBytes = 0;
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -7194,7 +7252,7 @@ int main(int argc, char *argv[])
         //     基本只可能是整屏帧；一次性（g_vncMegaDone 本会话只豁免一个），
         //     之后的整屏量级帧回到配额（帧可丢的规矩不破）。
         const bool grace = (g_vncSessionStartMs > 0 && now - g_vncSessionStartMs < 3000);
-        if (grace || (data.size() >= 200 * 1024 && !g_vncMegaDone)) {
+        if (grace || (data.size() >= vMegaBytes && !g_vncMegaDone)) {
             if (!grace) g_vncMegaDone = true;   // 宽限期内不消耗一次性豁免
             vWinBytes += data.size();           // 这一秒的配额确实被它占了，照常记账
             g_ws->sendBinaryMessage(makeVncFrameBytes(data));
@@ -7202,10 +7260,11 @@ int main(int argc, char *argv[])
                   grace ? "会话起步宽限" : "整屏基础图一次性豁免");
             return;
         }
-        if (vWinBytes + data.size() > 200 * 1024) {
+        if (vQuota > 0 && vWinBytes + data.size() > vQuota) {
             static int vBwSkipped = 0;
             if (++vBwSkipped % 50 == 1)
-                qWarning("[agent-qt] [vnc] 本秒 up 流量已到 200KB 配额，丢弃本批保心跳（累计丢 %d 批）", vBwSkipped);
+                qWarning("[agent-qt] [vnc] 本秒 up 流量已到 %lld KB 配额，丢弃本批保心跳（累计丢 %d 批）",
+                         vQuota / 1024, vBwSkipped);
             return;
         }
         vWinBytes += data.size();
@@ -7300,7 +7359,9 @@ int main(int argc, char *argv[])
         QObject::connect(frameTimer, &QTimer::timeout, &app, [storeFrames] {
             captureAndSend(storeFrames);
         });
-        frameTimer->start(kFrameIntervalMs);
+        frameTimer->start(previewIntervalMs());
+        qInfo("[agent-qt] 预览流：间隔 %d ms，配额 %lld KB/s，长边 %d px（均可 env 覆盖）",
+              previewIntervalMs(), previewQuotaBytes() / 1024, previewMaxEdge());
         qInfo("[agent-qt] WS 单帧轮询推送已启用（RTC 未连通时兜底；STE_ENABLE_WS_FRAME_PUSH=0 可关）");
     } else {
         qInfo("[agent-qt] WS 单帧轮询推送已停用（STE_ENABLE_WS_FRAME_PUSH=0）");

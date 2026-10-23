@@ -124,21 +124,28 @@ quint16 VncServer::start(quint16 port, int fps) {
     const int nw = probe.width(), nh = probe.height();
     if (nw <= 0 || nh <= 0) return 0;
 
-    // ── 输出分辨率：720p 档（2026-10-18 实证修复）──────────────────────
-    // 2560x1440 原生 Raw 增量 40-400KB/批，在劣化隧道（~250KB/s）上灌爆上行。
-    // 内接 1280x720 保宽高比、**不放大**（屏幕本来就小就按原样）。
-    // 像素量降到 1/7 以内，配合 HexTile 编码后带宽从瓶颈变成余量。
+    // ── 输出分辨率：480p 档（2026-10-24 下调，原 720p）────────────────────
+    // 原有 720p 是为"Raw 增量 40-400KB/批 灌爆 250KB/s 隧道"设的。实测链路
+    // （CF 隧道）仍是限流大头，远控要在几 Mbps 里跑出可交互帧率，只能压像素量：
+    // 720p → 480p 像素降 56%，单帧接近腰斩。
+    // 可用 STE_VNC_MAX_EDGE 覆盖（默认 854 = 480p 档；0 或负数 = 不缩放原样输出）。
+    // 内接保宽高比、**不放大**（屏幕本来就小就按原样）。
     int tw = nw, th = nh;
-    const double sx = 1280.0 / nw, sy = 720.0 / nh;
-    const double s = (sx < sy) ? sx : sy;
-    if (s < 1.0) {
+    const int maxEdge = [] {
+        int v = qEnvironmentVariableIntValue("STE_VNC_MAX_EDGE");
+        if (v == 0 && qEnvironmentVariableIsSet("STE_VNC_MAX_EDGE")) return 0;  // 显式 0 = 不缩放
+        if (v <= 0) v = 854;
+        return qBound(320, v, 3840);
+    }();
+    if (maxEdge > 0 && qMax(nw, nh) > maxEdge) {
+        const double s = double(maxEdge) / qMax(nw, nh);
         tw = static_cast<int>(nw * s) & ~1;
         th = static_cast<int>(nh * s) & ~1;
     }
     if (tw <= 0 || th <= 0) { tw = nw; th = nh; }
     const int w = tw, h = th;
     if (w != nw || h != nh)
-        qInfo("[vnc] 抓屏按 %dx%d 输出（原生 %dx%d，缩到 720p 档省带宽）", w, h, nw, nh);
+        qInfo("[vnc] 抓屏按 %dx%d 输出（原生 %dx%d，缩到 %dp 档省带宽）", w, h, nw, nh, maxEdge);
 
     int argc = 0;
     char **argv = nullptr;
