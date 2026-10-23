@@ -262,11 +262,11 @@
       "plan": "[P3] 拆参数区"
     },
     "Stelarith-viewer-qt/qml/shell/MainWindow.qml": {
-      "lines": 454,
+      "lines": 480,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 骨架壳：已抽仪表盘三件（DashPage/DashDeviceSection/DashInsightCards，718→458，#473）；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav"
+      "plan": "[P2] 骨架壳：已抽仪表盘三件（718→458，#473）；旧界面迁移把监控/集控内嵌成 section（458→480，2026-10-24）；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav"
     },
     "Stelarith-viewer-qt/qml/shell/SideSheet.qml": {
       "lines": 289,
