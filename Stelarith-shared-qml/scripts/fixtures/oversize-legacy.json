@@ -150,11 +150,11 @@
       "plan": "[P3] 拆终端输出区"
     },
     "Stelarith-viewer-qt/qml/Main.qml": {
-      "lines": 2263,
+      "lines": 1594,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 外壳保留，内容区按页抽走（见 §9.1）"
+      "plan": "[P1] 外壳保留：旧壳 0-5 页 + 顶条 + 底标签已删（2263→1594，2026-10-24 迁移第三刀）；余 goPage 兼容层与弹窗/面板装配待继续抽"
     },
     "Stelarith-viewer-qt/qml/MaterialLab.qml": {
       "lines": 820,
@@ -262,11 +262,11 @@
       "plan": "[P3] 拆参数区"
     },
     "Stelarith-viewer-qt/qml/shell/MainWindow.qml": {
-      "lines": 480,
+      "lines": 495,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 骨架壳：已抽仪表盘三件（718→458，#473）；旧界面迁移把监控/集控内嵌成 section（458→480，2026-10-24）；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav"
+      "plan": "[P2] 骨架壳：已抽仪表盘三件（718→458，#473）；旧界面迁移把监控/集控内嵌成 section（458→480→495，2026-10-24）；第三刀加 sectionHook 与栏目驱动拉流；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav"
     },
     "Stelarith-viewer-qt/qml/shell/SideSheet.qml": {
       "lines": 289,
