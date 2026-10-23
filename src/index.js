@@ -207,6 +207,12 @@ import { createSongKeyStore } from './class-songkey.js';
 import { initSongKeyStore, readSongKeys, writeSongKeys } from './class-songkey-db.js';
 // 2026-10-18 · 点歌代发：端上只能"请求"，写入由云端用该班 Key 发往 VoiceHub。
 import { requestSongViaVoiceHub } from './song-request-proxy.js';
+// 2026-10-23 · 广播社成员（云端自管账号）+ VoiceHub 排期写代理
+import {
+  initBroadcastClub, createClubMember, disableClubMember, listClubMembers,
+  verifyClubMember, mintClubToken, verifyClubToken, voicehubConfigured,
+  proxyGetSchedules, proxyReorder, auditReorder, readAudit,
+} from './broadcast-club.js';
 import { parseIncoming, parseFrame, parseAnyFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 import { timingSafeEqual } from 'node:crypto';
 
@@ -484,6 +490,71 @@ const server = http.createServer((req, res) => {
     return res.end(body);
   }
 
+  // ── 2026-10-23 · 广播社成员（管理端独立身份）────────────────────────────
+  // 账号自管在云端；成员令牌 = viewer 票（claims 带 broadcast_club 角色 + station）。
+  // 写排期经云端代理到 VoiceHub（密钥云端持有），每次写落审计。
+  if (u.pathname.startsWith('/api/broadcast-club/')) {
+    const sub = u.pathname.slice('/api/broadcast-club'.length).replace(/^\/+/, '').replace(/\/+$/, '');
+    // 登录：无需鉴权
+    if (req.method === 'POST' && sub === 'login') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+      req.on('end', () => {
+        let p;
+        try { p = JSON.parse(body || '{}'); }
+        catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+        const r = verifyClubMember(p.username, p.password);
+        if (!r.ok) return send(401, { ok: false, code: 'AUTH_FAILED', error: '用户名或密码错误' });
+        const t = mintClubToken(r.username, r.station);
+        if (!t.ok) return send(500, { ok: false, error: t.reason || '签发票据失败（未配置 CLOUD_VIEWER_SECRET）' });
+        pushEvent('info', '广播社成员登录', { username: r.username, station: r.station });
+        return send(200, { ok: true, token: t.token, station: r.station, expiresInMs: t.expiresInMs });
+      });
+      return undefined;
+    }
+    // 其余子路由均需成员令牌
+    if (sub === 'schedules' || sub === 'schedules/reorder') {
+      const auth = req.headers.authorization || '';
+      const tok = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+      const v = verifyClubToken(tok);
+      if (!v.ok) return send(401, { ok: false, code: 'TOKEN_INVALID', error: v.reason || '未授权：需要广播社成员令牌' });
+      if (req.method === 'GET' && sub === 'schedules') {
+        proxyGetSchedules().then((r) => {
+          if (!r.ok) return send(r.code && r.code >= 400 && r.code < 500 ? r.code : 502, { ok: false, error: r.error });
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+          return res.end(r.data);
+        });
+        return undefined;
+      }
+      if (req.method === 'POST' && sub === 'schedules/reorder') {
+        let body = '';
+        req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+        req.on('end', async () => {
+          let p;
+          try { p = JSON.parse(body || '{}'); }
+          catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+          const pairs = Array.isArray(p.schedules) ? p.schedules : (Array.isArray(p) ? p : []);
+          const before = Array.isArray(p.before) ? p.before : [];
+          const r = await proxyReorder(pairs);
+          auditReorder({
+            uid: v.uid, station: v.station,
+            clientIp: req.socket ? req.socket.remoteAddress : null,
+            before, after: pairs, ok: r.ok, error: r.error,
+          });
+          if (!r.ok) {
+            pushEvent('warn', '广播社成员排期保存失败', { username: v.uid, station: v.station, code: r.code || 0, error: r.error });
+            return send(r.code && r.code >= 400 && r.code < 500 ? r.code : 502, { ok: false, error: r.error });
+          }
+          pushEvent('info', '广播社成员排期已保存', { username: v.uid, station: v.station, count: pairs.length });
+          return send(200, { ok: true });
+        });
+        return undefined;
+      }
+      return send(405, { ok: false, error: '该子路由仅支持 GET/POST' });
+    }
+    return send(404, { ok: false, error: '未知的 broadcast-club 子路由' });
+  }
+
   if (req.method === 'GET' && u.pathname === '/api/public/ota') {
     // ⚠️ 2026-10-14 测试通道抓到的缺口：本端点此前走通用 send()，**不带 cache-control**
     //    ⇒ 公网 CDN/代理按启发式缓存，发布新版本后官网下载中心可能几分钟不刷新。
@@ -567,7 +638,9 @@ const server = http.createServer((req, res) => {
     // 2026-10-20 · 班级绑定码：能开码 = 能把任一台设备领进某个班，必须管理面鉴权
     u.pathname.startsWith('/api/admin/bindcode') ||
     // 2026-10-20 · RBAC 第二批·用户权限（user-claims）：能改=能给别人提权，必须管理面鉴权
-    u.pathname.startsWith('/api/admin/user-claims');
+    u.pathname.startsWith('/api/admin/user-claims') ||
+    // 2026-10-23 · 广播社成员管理（仅全权/平台超管）
+    u.pathname.startsWith('/api/admin/broadcast-club');
   const isManageApi =
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
@@ -594,6 +667,12 @@ const server = http.createServer((req, res) => {
       pushEvent('warn', 'HTTP 管理面鉴权失败，已拒绝', { path: u.pathname });
       // 错误码体系（2026-10-06）：REST 错误同样带 ecode（AU1003 令牌无效），站点/客户端可按码判断
       return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN> 或网站账号签发的票据' });
+    }
+    // 2026-10-23 · 广播社成员令牌（broadcast_club 角色）只允许 /api/broadcast-club/*，
+    // 禁止进入管理面（防越权：成员票若带空 scopes 会被 identityFromAuth 当成全权）。
+    if (isTicket && Array.isArray(tver.claims?.roles) && tver.claims.roles.includes('broadcast_club')) {
+      pushEvent('warn', '广播社成员令牌尝试访问管理面，已拒绝', { uid: tver.uid });
+      return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '该令牌无权访问管理面' });
     }
     if (isTicket) req.__ticketUid = tver.uid;
     // 2026-10-15（权限契约）：鉴权结果挂到 req，REST 的「返回设备 / 下发指令」路径按 scopes 过滤
@@ -761,6 +840,48 @@ const server = http.createServer((req, res) => {
       return send(200, { ok: true, existed: r.existed });
     }
     return send(405, { ok: false, error: '仅支持 GET / PUT / DELETE' });
+  }
+
+  // ── 2026-10-23 · 广播社成员管理（管理面鉴权，仅全权/平台超管）────────────
+  // GET    /api/admin/broadcast-club          → 成员清单 + VoiceHub 写配置状态
+  // POST   /api/admin/broadcast-club          → { username, password, station } 创建成员
+  // POST   /api/admin/broadcast-club/disable  → { username } 禁用成员
+  if (u.pathname.startsWith('/api/admin/broadcast-club')) {
+    const uident = identityFromAuth(req.__auth);
+    const canAdmin = uident && (isPlatformIdent(uident) || uident.scopes === null);
+    if (!canAdmin) return send(403, { ok: false, code: 'PERMISSION_DENIED', error: '仅平台超管可管理广播社成员' });
+    const sub = u.pathname.slice('/api/admin/broadcast-club'.length).replace(/^\/+/, '').replace(/\/+$/, '');
+    if (req.method === 'GET' && sub === '') {
+      return send(200, { ok: true, configured: voicehubConfigured(), members: listClubMembers() });
+    }
+    if (req.method === 'POST' && sub === '') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+      req.on('end', () => {
+        let p;
+        try { p = JSON.parse(body || '{}'); } catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+        const who = req.__auth?.uid ?? req.__auth?.mode ?? '?';
+        const r = createClubMember(p.username, p.password, p.station, who);
+        if (!r.ok) return send(400, { ok: false, error: r.error });
+        pushEvent('info', '广播社成员已创建', { username: r.username, station: r.station, by: who, persisted: r.persisted });
+        return send(200, { ok: true, username: r.username, station: r.station });
+      });
+      return undefined;
+    }
+    if (req.method === 'POST' && sub === 'disable') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+      req.on('end', () => {
+        let p;
+        try { p = JSON.parse(body || '{}'); } catch (e) { return send(400, { ok: false, error: `请求体不是合法 JSON：${e.message}` }); }
+        const r = disableClubMember(p.username);
+        if (!r.ok) return send(404, { ok: false, error: r.error });
+        pushEvent('info', '广播社成员已禁用', { username: p.username });
+        return send(200, { ok: true });
+      });
+      return undefined;
+    }
+    return send(405, { ok: false, error: '该子路由仅支持 GET / POST' });
   }
 
   if (req.method === 'GET' && u.pathname === '/api/events') {

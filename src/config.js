@@ -220,3 +220,13 @@ export const TCP_SESSION_IDLE_MS = Number(process.env.TCP_SESSION_IDLE_MS || 600
 
 // 连上多久不发 HELLO 即断开（ms）：防裸连接堆积（扫描/探测类流量）。
 export const TCP_HELLO_GRACE_MS = Number(process.env.TCP_HELLO_GRACE_MS || 15000);
+
+/* ---------- 广播社成员（2026-10-23 · 管理端独立身份）----------
+ * 账号体系自包含在云端（用户名+scrypt 哈希，落 club-members.json），不依赖站点 OAuth、不碰 VoiceHub 后端。
+ * 排期读写经云端代理到 VoiceHub：云端持有写密钥（下面两项），成员令牌只用于云端鉴权，密钥绝不下发。
+ * 联调期 STE_VOICEHUB_WRITE_BASE 指向本机开发夹具（http://127.0.0.1:3000）即可端到端跑通。 */
+export const VOICEHUB_WRITE_BASE = (process.env.STE_VOICEHUB_WRITE_BASE || '').trim();
+export const VOICEHUB_WRITE_KEY = process.env.STE_VOICEHUB_WRITE_KEY || '';
+export const CLUB_MEMBERS_FILE = process.env.CLOUD_CLUB_MEMBERS_FILE || 'club-members.json';
+export const CLUB_AUDIT_FILE = process.env.CLOUD_CLUB_AUDIT_FILE || 'broadcast-club-audit.log';
+export const CLUB_TOKEN_TTL_MS = Number(process.env.CLOUD_CLUB_TOKEN_TTL_MS || 12 * 60 * 60 * 1000);
