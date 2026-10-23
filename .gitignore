@@ -47,3 +47,18 @@ repairs.json
 # 一次性调试脚本（非构建基础设施），不进版本库
 scripts/_*.mjs
 !scripts/_inspect-queue.mjs
+
+# 本地 VoiceHub 替身（scripts/_local_voicehub_standin.js）运行时持久化状态，不入库
+data/
+
+# ── 2026-10-24 工作区整理：一次性探针/诊断/备份，本地可用但不入库 ──
+# 运行时缓存与备份目录
+__pycache__/
+backups/
+*.bak-*
+# 一次性脚本（scripts/_*.py 为本地诊断；已入库的 _dev_broadcast_club_harness.py 不受影响）
+scripts/_*.py
+_bp-*.mjs
+_vnc_*.mjs
+diag-*.mjs
+mock-*.mjs

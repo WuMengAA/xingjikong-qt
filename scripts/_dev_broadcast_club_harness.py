@@ -41,6 +41,10 @@ def parse_args():
                    help="不自动拉起面板，仅起云端（自己手动起 exe）")
     p.add_argument("--smoke", action="store_true",
                    help="自证模式：起云+种账号+登录/读排期/reorder 自检后自动退出")
+    p.add_argument("--standin", dest="standin", action="store_true", default=True,
+                   help="使用独立 Node 本地 VoiceHub 替身（默认，走真实 HTTP 代理路径）")
+    p.add_argument("--no-standin", dest="standin", action="store_false",
+                   help="改用进程内内存 mock VoiceHub（离线 CI 用，不依赖 node）")
     return p.parse_args()
 
 # ── 端口工具：自动挑空闲端口 + 清掉占用者 ──────────────────────────────────────
@@ -136,6 +140,20 @@ def start_mock_vh(port, key):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
+def start_standin_node(port, key):
+    """起独立 Node 本地 VoiceHub 替身（scripts/_local_voicehub_standin.js），走真实 HTTP 代理路径。"""
+    env = dict(os.environ)
+    env["STE_VH_STANDIN_PORT"] = str(port)
+    env["STE_VOICEHUB_WRITE_KEY"] = key
+    try:
+        proc = subprocess.Popen([which_node(), "scripts/_local_voicehub_standin.js"],
+                                cwd=CLOUD_DIR, env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return proc
+    except Exception as e:
+        print(f"[FAIL] 启动本地替身失败: {e}")
+        return None
+
 def build_env(args, mock_port, tmp, cloud_port):
     e = dict(os.environ)
     e.update({
@@ -201,9 +219,15 @@ def main():
     kill_port_owners(vh_port)
     time.sleep(1)
 
-    # ② mock VoiceHub
-    print(f"[*] 起 mock VoiceHub 端口={vh_port} 期望密钥前缀={args.vh_key[:8]}…")
-    vh = start_mock_vh(vh_port, args.vh_key)
+    # ② VoiceHub 后端：默认用独立 Node 本地替身（真实 HTTP 路径），--no-standin 退回内存 mock
+    if args.standin:
+        print(f"[*] 起独立本地 VoiceHub 替身（scripts/_local_voicehub_standin.js）端口={vh_port} 期望密钥前缀={args.vh_key[:8]}…")
+        vh = start_standin_node(vh_port, args.vh_key)
+        if vh is None:
+            return 1
+    else:
+        print(f"[*] 起进程内 mock VoiceHub 端口={vh_port} 期望密钥前缀={args.vh_key[:8]}…")
+        vh = start_mock_vh(vh_port, args.vh_key)
 
     # ③ 隔离云端
     log = open(os.path.join(tmp, "cloud.log"), "w", encoding="utf-8", errors="replace")
@@ -298,14 +322,15 @@ def main():
     except KeyboardInterrupt:
         print("\n[*] 收到中断，清理进程…")
     finally:
-        for p in (proc, exep):
-            if p is not None:
+        for p in (proc, exep, vh):
+            if isinstance(p, subprocess.Popen):
                 try:
                     p.terminate(); p.wait(timeout=8)
                 except Exception:
                     try: p.kill()
                     except Exception: pass
-        try: vh.shutdown()
+        try:
+            if hasattr(vh, "shutdown"): vh.shutdown()
         except Exception: pass
         try: log.close()
         except Exception: pass
