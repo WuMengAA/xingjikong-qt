@@ -109,6 +109,31 @@ export const QUEUE_DB_FILE = process.env.CLOUD_QUEUE_DB_FILE || 'instruction-que
  */
 export const CLASS_DIR_DB_FILE = process.env.CLOUD_CLASS_DIR_DB_FILE || 'class-dir.db';
 
+/* ---------- 班级域事件通道（2026-10-23 · #458 班级工作台地基）----------
+ * class-events.js 的四个闸门。设计动机见该文件头：班级域与 devices 广播、
+ * pushEvent 流水、按设备订阅中继三条通道正交，专服务"按班"的订阅/推送/历史。
+ * 全部可按需调，缺省值即"任何取值都跑得起来"（纪律：不许留空就死）。 */
+// 每班环形事件缓冲条数：Timeline 只看最近几十条，200 覆盖一节课的全部事件量级；
+// 无限增长会把云端内存吃穿（噪音样本 2s/条的前车之鉴）。
+export const CLASS_EVENT_LOG_KEEP = Number(process.env.CLOUD_CLASS_EVENT_LOG_KEEP || 200);
+
+// 订阅时快照带回的事件条数：后订者先看最近 20 条历史，再收实时。
+export const CLASS_EVENT_SNAPSHOT = Number(process.env.CLOUD_CLASS_EVENT_SNAPSHOT || 20);
+
+// 每 uid×kind 最小投递间隔（ms）：为 #459 缩略图（每台约 1s 一张）预置的闸门。
+// 现在没有高频发送方也开着——先立规矩，等负载真来了不用改协议。
+export const CLASS_EVENT_MIN_MS = Number(process.env.CLOUD_CLASS_EVENT_MIN_MS || 1000);
+
+// 单条事件 data 的序列化体积上限（字节）：64KB 够一张小缩略图的 base64 之外的
+// 一切元数据；超了说明发送方有问题，拒收并如实回错（不静默丢弃）。
+export const CLASS_EVENT_MAX_BYTES = Number(process.env.CLOUD_CLASS_EVENT_MAX_BYTES || 64 * 1024);
+
+// 班级事件 fanout 的背压阈值：订阅的管理端消费不过来（bufferedAmount 超限）时
+// 跳过本条，与 registry 的 RELAY_BUFFER_MAX 同口径（事件类数据丢一条远好过
+// 把心跳/指令一起堵死）。
+export const CLASS_RELAY_BUFFER_MAX = Number(
+  process.env.CLOUD_CLASS_RELAY_BUFFER_MAX || 8 * 1024 * 1024);
+
 /* 站点基址（用于把站点签发的「接入码 XJK-…」兑换成班级身份）。
  * 云端是设备侧的唯一入口；站点继续持有它自己的班级库，由云端代为兑换并归一，
  * 设备端因此**只需要认识一个地址**。

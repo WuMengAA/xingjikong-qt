@@ -267,6 +267,12 @@ import { initClassDir, resolveClassCode, registerExternalCode, listClassDir, cla
 import { loadRepairs, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
 // 权限消费层（2026-10-15 · 契约《多校多身份-scope契约草案》§4.3：云端是唯一权限入口）
 import { identityFromAuth, canAccess, filterDevices, maskDevices } from './perms.js';
+// 班级域事件通道（2026-10-23 · #458 班级工作台地基）：按班订阅/推送/历史，
+// 与 devices 广播、pushEvent 流水、按设备订阅中继三条通道正交（见 class-events.js 头注）
+import {
+  handleViewerClassMsg, handleAgentClassMsg,
+  noteMemberOnline, noteMemberOffline, removeViewerClasses,
+} from './class-events.js';
 // 用户 claims 存储（2026-10-20 · RBAC 第二批）：票无 claims 时按 uid 回填身份，权限真正流动
 import { initUserClaims, applyStoredClaims, setUserClaims, deleteUserClaims, listUserClaims } from './user-claims.js';
 // CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
@@ -2125,6 +2131,12 @@ viewerWss.on('connection', (ws) => {
         if (ok) rtcSignalToAgent(p.payload.uid, 'rtc-stop', { uid: p.payload.uid });
         return;
       }
+      // 班级域（2026-10-23 · #458）：按班订阅/退订。权限判断（canAccess）在
+      // class-events 模块内做，与 subscribe/instruction 同一口径（契约 §4.3）。
+      case 'subscribe_class':
+      case 'unsubscribe_class':
+        handleViewerClassMsg(ws, p, { ident: identityFromAuth(ws.__who), snd, sndErr });
+        return;
       case 'devices': {
         // 2026-10-15（权限契约 §4.3）：设备列表按本连接 scopes 过滤，不把全班/全校吐给没权限的人。
         const ident = identityFromAuth(ws.__who);
@@ -2370,6 +2382,8 @@ viewerWss.on('connection', (ws) => {
   ws.on('close', () => {
     clearTimeout(deadline);
     removeViewer(ws);
+    // 班级域（2026-10-23 · #458）：摘掉这个管理端的全部班级订阅（防漏内存 + 往死连接投递）
+    removeViewerClasses(ws);
     // 管理端走了 ⇒ 它经手的所有闪传会话收口（防会话泄漏：远控泄漏那次的同一病）
     udpRelay.closeSessionsWhere((s) => s.viewerWs === ws);
     tcpRelay.closeSessionsWhere((s) => s.viewerWs === ws);
@@ -2391,7 +2405,11 @@ setInterval(() => {
 setInterval(() => {
   try {
     const stale = sweepStale();
-    if (stale.length > 0) broadcastDevices();   // 立刻把"它没了"推给管理端，别等下一次轮询
+    if (stale.length > 0) {
+      broadcastDevices();   // 立刻把"它没了"推给管理端，别等下一次轮询
+      // 班级域（2026-10-23 · #458）：心跳超时的设备 → 所在班订阅者收 member.offline
+      for (const u of stale) noteMemberOffline(u, 'heartbeat-timeout');
+    }
   } catch (e) {
     pushEvent('error', '离线清扫异常', { error: e.message });
   }
@@ -2529,6 +2547,9 @@ wss.on('connection', (ws) => {
         className: (p.payload && typeof p.payload.className === 'string' && p.payload.className.trim()) ? p.payload.className.trim().slice(0, 64) : null,
       };
       markConnected(uid, String(version || ''), ws, regCaps, regMeta);
+      // 班级域（2026-10-23 · #458）：该设备所在班的订阅者收到 member.online
+      // （班级归属取云端 knownDevices 表，设备没绑班时模块内静默跳过）
+      noteMemberOnline(uid);
       // 设备上线：把还没挑设备的管理端补上订阅（否则老师先开软件 → 永远黑屏）
       const auto = autoSubscribeViewers(uid);
       if (auto > 0) pushEvent('info', '已自动给管理端补上订阅', { uid, viewers: auto });
@@ -2686,6 +2707,15 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // ── 班级域事件上报（2026-10-23 · #458）──
+    // 设备往自己所属班推一条事件（成员动态、将来的缩略图 kind='thumbnail' 走这条）。
+    // 班级归属只认云端表（class-events 内 getDeviceClassCode），载荷里自报的
+    // classCode 一律忽略——设备自报是不可信输入（interact.js 同款教训）。
+    if (p.type === 'class-event') {
+      handleAgentClassMsg(ws, p, uid, snd);
+      return;
+    }
+
     if (p.type === 'receipt') {
       // 被控端真执行完了，回的是 done/failed（不是 received）。必须如实记、如实转。
       const { id, action, result, error, data } = p.payload;
@@ -2743,7 +2773,11 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     finish();
-    if (registered) markDisconnected(ws);
+    if (registered) {
+      // markDisconnected 回 uid（这台连接对应的设备）；班级域据此发 member.offline
+      const off = markDisconnected(ws);
+      if (off) noteMemberOffline(off, 'disconnect');
+    }
     // 设备走了 ⇒ 它参与的闪传会话全部收口（防中继侧会话/连接泄漏）
     if (uid) {
       udpRelay.closeSessionsWhere((s) => s.uid === uid);
