@@ -185,6 +185,9 @@ add_executable(stelarith-agent-qt
   # ── 相机指令（2026-10-23 · 第 3 刀）：executeAction 的相机六件套分支体 ──
   src/media/CameraActions.cpp
   src/media/CameraActions.h
+  # ── 班级域缩略图上报（2026-10-23 · #459）：定时抓小图 → class-event{kind:thumbnail} ──
+  src/media/ThumbnailReporter.cpp
+  src/media/ThumbnailReporter.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──

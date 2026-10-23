@@ -28,6 +28,7 @@
 #include "media/MediaTools.h"
 #include "media/MediaSession.h"  // 2026-10-22 §10 第二刀：录像/播放会话控制
 #include "media/CameraActions.h" // 2026-10-23 §10 第 3 刀：相机六件套分支体
+#include "media/ThumbnailReporter.h" // 2026-10-23 #459：班级域缩略图上报（class-event{kind:thumbnail}）
 #include "core/ProcessUtil.h"    // 2026-10-22 §10 第二刀：通用进程等待（跨域复用）   // 2026-10-22 §10 第 1 刀：媒体工具层     // 2026-10-22：系统媒体识别（SMTC），起工作线程 + 元数据
 #include "core/ExecOut.h"     // 2026-10-23 §10 第 3 刀：指令执行结果（跨 TU 共享）
 #include "core/AgentSettings.h" // 2026-10-23 §10 第 4 刀：本地功能开关（原嵌在匿名域内，跨不了 TU）
@@ -7061,6 +7062,29 @@ int main(int argc, char *argv[])
             if (!g_ws) return;
             g_ws->sendTextMessage(makeEnvelope(type, payload));
         });
+
+    // ── 班级域缩略图上报（#459 · 与云端 class-events.js #458 配对）─────
+    // 班级工作台设备网格的画面源：定时抓小图 → JPEG(base64) → class-event
+    // {kind:'thumbnail'} → 云端按班 fanout 给订阅者。纪律：
+    //   · payload 不带 classCode（伪冒防护：班级归属云端只认 knownDevices 表）；
+    //   · 未绑班 / WS 未连时 tick 直接跳过（模块内不抓屏，零空转）；
+    //   · 信封仍走 makeEnvelope（cloud_proto.h 的唯一封装修辞），模块不认识协议。
+    ThumbnailReporter::setSender([](const QJsonObject &payload) {
+        if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
+        g_ws->sendTextMessage(makeEnvelope(QStringLiteral("class-event"), payload));
+    });
+    ThumbnailReporter::setReadyCheck([] {
+        return !g_classCode.isEmpty()
+            && g_ws && g_ws->state() == QAbstractSocket::ConnectedState;
+    });
+    // 定时器归 app（主线程单线程跑 tick：DXGI timeout=0 非阻塞 + 首帧一次性
+    // ~200ms 可接受）。间隔 env 现读 ⇒ 改 STE_THUMB_INTERVAL_MS 下拍生效。
+    auto *thumbTimer = new QTimer(&app);
+    QObject::connect(thumbTimer, &QTimer::timeout, &app, [thumbTimer] {
+        thumbTimer->setInterval(ThumbnailReporter::intervalMs());
+        ThumbnailReporter::tick();
+    });
+    thumbTimer->start(ThumbnailReporter::intervalMs());
 
     QObject::connect(g_ws, &QWebSocket::connected, &app, [] {
         qInfo("[agent-qt] 已连上云端（等待 register 回执）");
