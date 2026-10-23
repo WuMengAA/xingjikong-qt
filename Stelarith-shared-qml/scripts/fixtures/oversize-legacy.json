@@ -311,11 +311,11 @@
       "plan": "[P3] 拆动画帧与路径数据"
     },
     "Stelarith-cloud/src/index.js": {
-      "lines": 2705,
+      "lines": 2860,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact"
+      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）"
     },
     "Stelarith-cloud/src/registry.js": {
       "lines": 1190,
