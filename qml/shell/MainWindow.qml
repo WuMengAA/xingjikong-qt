@@ -471,10 +471,25 @@ Item {
         function onOpenUidChanged() { shell.syncThumbs() }
     }
 
+    /** 栏目变化 = 拉流开关（2026-10-24 迁移第三刀）：集控/监控要看单台大画面，
+     *  其余栏目不看。原先这个开关写在 Main.qml 的 syncPageLive 里按 page 判定，
+     *  但 page 已收敛为 6，只有本件知道当前栏目 ⇒ 责任搬到这里。 */
+    onSectionChanged: {
+        if (backend)
+            backend.setScreenActive(shell.section === "control" || shell.section === "monitor")
+    }
+
     Component.onCompleted: {
         shell.syncThumbs()
         // S3：进页面拉一次排行（云端 instructions 近 7 天；失败静默，界面自己会显示空态）
         if (backend) backend.fetchActionRanking()
+        // 把栏目跳转通道交给宿主的 goPage（老页号兼容层）：Main.qml 的 goPage(idx)
+        // 与各处 `ctx.window.goPage(1)` 最终都落到这里，RBAC 也只在这里判一次。
+        if (shell.ctx && shell.ctx.window) {
+            shell.ctx.window.sectionHook = function (key) { shell.navActivated(key) }
+        }
+        if (backend)
+            backend.setScreenActive(shell.section === "control" || shell.section === "monitor")
     }
     Component.onDestruction: backend.subscribeThumbnails([])
 }

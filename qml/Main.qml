@@ -97,16 +97,35 @@ ApplicationWindow {
     // 想临时看旧壳：侧栏底部「返回经典界面」，或命令行 --page 1（若后续需要）。
     property int page: 6
 
+    /** 栏目跳转通道：由 MainWindow 启动时注册（打开某个新栏目）。
+     *  旧壳 7 页栈已退役（2026-10-24 旧界面迁移第三刀），但外部仍有 20+ 处按**老页号**
+     *  调 goPage（弹窗、侧滑面板、业务页的「返回」等）—— 这里把老页号**映射**成新栏目，
+     *  调用点不必逐个改，且语义仍对得上（老 page 1 是集控，新 control 也是集控）。 */
+    property var sectionHook: null
+
+    /** 旧页号 → 新栏目 key。6（主框架）不在此表里。 */
+    readonly property var _sectionOfPage: ({
+        0: "dash", 1: "control", 2: "settings", 3: "monitor", 4: "classes", 5: "classes"
+    })
+
     // 2026-10-08 修复「选中设备却不在带画面页 → 无限拉流」：
     // 切到其它页就退订当前设备画面 / 多班缩略图墙，云端按订阅发帧，退订即停流。
-    // 回到对应页再恢复订阅。两个订阅互不干扰（退订缩略图会跳过当前选中那台）。
     // 2026-10-11：「批量管控」页已删，多班墙改由「多班墙」弹窗显式订阅（见 multiThumbDlg），
     // 不再跟随页签自动拉 —— 否则每次切页都在后台偷偷订阅一遍。
-    // 2026-10-21（审查 P2）：与 syncPageLive 同一逻辑，直接委托，删重复体。
-    onPageChanged: { root.syncPageLive() }
+    // 2026-10-24：单台大画面的拉流开关改由 MainWindow 按栏目驱动（只有它知道当前 section），
+    // 这里只保留多班墙退订；page 收敛逻辑见下方 onPageChanged。
+    onPageChanged: {
+        if (root.page !== 6) {
+            // 谁写了老页号（例如 MultiThumbDialog 直接 `page = 1`）都收敛到主框架，
+            // 再按映射切栏目 —— 一个入口，不会出现"页号变了但界面没动"。
+            const key = root._sectionOfPage[root.page]
+            root.page = 6
+            if (key && root.sectionHook) root.sectionHook(key)
+            return
+        }
+        root.syncPageLive()
+    }
     function syncPageLive() {
-        // 2026-10-19：监控页（page=3）与集控页（page=1）都要单台帧流
-        backend.setScreenActive(root.page === 1 || root.page === 3)   // 单台大画面只在集控/监控拉
         if (!panelHost.isOpen("multiband")) backend.subscribeThumbnails([])
     }
     property int volumeValue: 30
@@ -359,663 +378,20 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        // ── 顶部条 ──
-        // 令牌表：顶条 44px / 底标签 42px，两边各留 18。以前是 48，看着没差别，
-        // 但和稿并排一比就出来了。
-        Item {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 44
-            // 2026-10-20 P1：骨架页（page 6）有自己的 64px TopBar（标题 + 班级切换 + 头像），
-            // 旧的 44px 顶条再留一条就是两套顶栏（实测右侧"已登录/管理员"和骨架顶栏并排）⇒ 骨架页隐藏。
-            visible: root.page !== 6
 
-            // 稿 .top 有条 border-bottom:#141414 —— 之前整条没画，顶条和主体糊在一起
-            Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 1
-                color: th.sepline
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 18
-                anchors.rightMargin: 18
-                spacing: 16
-
-                Text {
-                    text: "星集控"
-                    color: th.fg
-                    font.pixelSize: 16
-                    font.weight: Font.Medium
-                }
-
-                Item { Layout.fillWidth: true }
-
-                // ── 顶栏右侧：连接状态 + 账户/身份入口 ──
-                // 2026-10-06 重写：原来这儿是「控制 ┃ 被控」一个分段控件 ——
-                // 那是开发期用来"假装自己是被控端"的自检开关（被控端是另一台机器上另一个程序，
-                // 这台机器上切它没有任何效果），留在外面就是个说不清来路的死开关。
-                // 换成账户入口后，顶栏这一行讲的全是"谁在用、连没连上"。
-                RowLayout {
-                    spacing: 14
-
-                    RowLayout {
-                        spacing: 8
-                        // 2026-10-10 彩色令牌试点：连接状态点 = ok 绿（在线）/ err 红（离线）
-                        // 规范：状态强调只用点/标签/描边，不做背景铺色
-                        Rectangle {
-                            width: 5; height: 5; radius: 3
-                            color: backend.connected ? th.ok : th.err
-                        }
-                        Text {
-                            text: backend.connected
-                                  ? (backend.onlineCount + " 台在线")
-                                  : (backend.accountBusy ? "正在登录…"
-                                     : (backend.loggedIn ? "没连上云端" : "没登录"))
-                            color: th.fg3
-                            font.pixelSize: 12
-                            // 顶栏这一句必须能点：没登录/断开了的时候，用户第一件该做的事
-                            // （去登录）不该藏在设置页第三张卡里。
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (!backend.loggedIn && !backend.accountBusy)
-                                        backend.loginWithSite()
-                                    else
-                                        goPage(2)   // RBAC 首切：受限身份会被 goPage 拦下
-                                }
-                            }
-                        }
-                    }
-
-                    // 胶囊尺寸问容器（Item 默认 0×0，不给尺寸就是"顶栏右侧空一块"）
-                    AccountMenu {
-                        id: acctMenu
-                        theme: root.th
-                        hostLayer: acctLayer
-                        Layout.preferredWidth: 150
-                        Layout.preferredHeight: 28
-                    }
-                }
-            }
-        }
-
-        // ── 主体：三页，按底部标签切换（一屏一主）──
+        // ── 主体：只有一页（MainWindow 是唯一外壳）──
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: root.page
+            // 2026-10-24：旧壳页已删，这里只剩 MainWindow 一项，索引恒 0。
+            // page 属性仍保留作**兼容层**（外部按老页号调 goPage），但不再驱动界面。
+            currentIndex: 0
 
-            // ══ 0 概览 ══
-            // 稿里这屏的主角是「今日课表」，但课表现在没有数据源（站点那套课表没接进来）。
-            // 规则 6「零编造」压过版式：宁可不摆那张卡，也不填一排自己编出来的课名。
-            // 所以主角换成确实有的东西：在线设备 + 最近回执，两张卡按稿 .box 做。
-            Item {
-                Rectangle { anchors.fill: parent; color: th.body }
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 14
-
-                    // 稿上是「在线 / 待办 / 离线」三个数。待办（待执行指令）与离线设备现在
-                    // 已由云端持久下发（backend.storage.*），故补齐这三个；已收帧移出顶部（属会话态指标）。
-                    //
-                    // ── 2026-10-18 MD3 排版升级（用户反馈「还是卡片堆叠的老样子」）──
-                    // 原来是纯文本行（12px 标签 + 20px 数字挤在一行），与下方卡片无层次差。
-                    // 现改为 **MD3 统计卡**：labelSmall 标签 + headlineSmall 大数 +
-                    // surfaceContainer 高一档的底色 + outlined 描边，三张并排——
-                    // 让"看什么数字"一眼可分，这是 MD3「层次用容器色阶表达」的正路。
-                    Row {
-                        spacing: 12
-                        Repeater {
-                            model: [
-                                { k: "在线", v: backend.onlineCount, accent: true },
-                                // E5 占位：backend.storage 首拉前为空对象，pendingInstructions/offlineDevices 为 undefined，
-                                // 此时显「—」而非空白（storage 卡本身有 at===undefined 空态，这儿补顶行）。
-                                { k: "待办", v: (backend.storage.pendingInstructions !== undefined ? backend.storage.pendingInstructions : "—"), accent: false },
-                                { k: "离线", v: (backend.storage.offlineDevices !== undefined ? backend.storage.offlineDevices : "—"), accent: false }
-                            ]
-                            delegate: Rectangle {
-                                width: 132
-                                height: 76
-                                radius: th.rCard
-                                // MD3：容器色阶分层次——第一张（在线）用 secondaryContainer 突出，
-                                // 其余用 surfaceContainer 高一档底 + outlineVariant 细描边
-                                color: modelData.accent ? th.cSecondaryCont : th.cContHigh
-                                border.color: modelData.accent ? "transparent" : th.cOutlineVar
-                                border.width: modelData.accent ? 0 : 1
-                                Column {
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 14
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    spacing: 2
-                                    Text {
-                                        text: modelData.k
-                                        // MD3 labelMedium：12px / Medium / 0.5 字距（用 letterSpacing 近似）
-                                        color: modelData.accent ? th.cOnSecondaryCont : th.fg3
-                                        font.pixelSize: 12; font.weight: Font.Medium
-                                    }
-                                    Text {
-                                        text: modelData.v
-                                        // MD3 headlineSmall：24px——数字是这张卡的主角
-                                        color: modelData.accent ? th.cOnSecondaryCont : th.fg
-                                        font.pixelSize: 24; font.weight: Font.Medium
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── 快捷操作（4.7 效率功能）──
-                    // 高频动作钉在概览页顶部，一个键直达（不翻菜单 / 不挨卡片）。
-                    Row {
-                        spacing: 8
-                        Repeater {
-                            // 2026-10-11：手机管理端隐藏「屏幕广播」（老师桌面推流，桌面专属）
-                            // 2026-10-14：按钮文案「刷新多班墙」→「多班墙」（行为本就是把墙弹窗打开，
-                            // 叫"刷新"名不副实；多设备入口留在概览，单设备操作列表不再放它）
-                            // U4：清单改从声明派生（ActionDefs.js 里 quick:true 的那些）。
-                            // phone:false 的（屏幕广播 / 考试模式）由 quickList() 按 isPhone 滤掉，
-                            // 与 2026-10-11「手机管理端隐藏屏幕广播」同效。
-                            model: root.quickList()
-                            // ── 2026-10-18 MD3：快捷按钮从手写 76×30 方块改为 tonal 胶囊 ──
-                            // MD3 tonal：secondaryContainer 底 + onSecondaryContainer 字，
-                            // 全圆角（rFull），状态层 hover 8% / press 12% 叠加——
-                            // 与下方统计卡同一套容器色阶语言，整屏不再"三种按钮三种长相"。
-                            delegate: Rectangle {
-                                width: lbl.implicitWidth + 28
-                                height: 36
-                                radius: height / 2
-                                color: qhMa.pressed ? th.cSecondaryCont : (qhMa.containsMouse ? th.cSecondaryCont : th.cContHigh)
-                                border.color: "transparent"
-                                border.width: 0
-                                // MD3 状态层（onSecondaryContainer 叠加）
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: parent.radius
-                                    color: th.cOnSecondaryCont
-                                    opacity: qhMa.pressed ? 0.12 : (qhMa.containsMouse ? 0.08 : 0)
-                                    Behavior on opacity { NumberAnimation { duration: th ? (th.durXShort || 120) : 120 } }
-                                }
-                                Text {
-                                    id: lbl
-                                    anchors.centerIn: parent
-                                    text: modelData.quickTitle || modelData.title
-                                    color: th.cOnSecondaryCont
-                                    font.pixelSize: 13; font.weight: Font.Medium
-                                }
-                                MouseArea {
-                                    id: qhMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.runActionById(modelData.id, { quick: true })
-                                }
-                            }
-                        }
-                    }
-
-                    // ── 今日课表（2026-10-06 补上：读真机 ClassIsland 档案，不再空）──
-                    // ── 2026-10-18 MD3：卡片从"最低档底"升为 **elevated 卡** ──
-                    // 统计卡是 cContHigh（最高档容器），课表卡若是 th.panel（最低档）
-                    // 会显得"越重要越淡"。MD3 的做法：内容卡用 elevated（cContLow 底 +
-                    // outlineVariant 细边），与统计卡的 filled 形成"主次 + 深浅"双层次。
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 148
-                        radius: 12
-                        color: th.cContLow
-                        border.color: th.cOutlineVar
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 14
-                            spacing: 8
-                            // ⚠️ 这里原来是 Row + 子项 anchors.right —— Qt 每次启动刷两条
-                            //    "Row: Cannot specify left/right/horizontalCenter/fill/centerIn
-                            //     anchors for items inside Row. Row will not function."
-                            //    Row 内部子项只能用 x/spacing 定位；要左右分栏就得用 Item（2026-10-06 修）。
-                            Item {
-                                width: parent.width
-                                height: 16
-                                Text {
-                                    text: "今日课表"
-                                    // MD3 titleSmall：14px / Medium / 0.1 字距
-                                    color: th.cOnSurface
-                                    font.pixelSize: 14; font.weight: Font.Medium
-                                    font.letterSpacing: 0.1
-                                }
-                                Text {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: Qt.formatDate(new Date(), "MM月dd日 dddd")
-                                    color: th.cOnSurfaceVar; font.pixelSize: 12
-                                }
-                            }
-                            // 课程列表（scheduleToday.rows：JSON 数组）
-                            // ── 2026-10-18 MD3：行高亮从 th.cream 手写改为容器色阶 ──
-                            // 现在这节 = secondaryContainer 底 + onSecondaryContainer 字
-                            //（与统计卡「在线」同语言），过去/未来回落 onSurfaceVar。
-                            ListView {
-                                width: parent.width
-                                height: parent.height - 30
-                                clip: true
-                                model: scheduleToday.rows
-                                delegate: Rectangle {
-                                    width: parent.width
-                                    height: 30
-                                    radius: 8
-                                    color: modelData.isNow ? th.cSecondaryCont : "transparent"
-                                    Row {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        x: 10; spacing: 12
-                                        Text {
-                                            text: modelData.time
-                                            // 时间戳固定宽，右缘对齐，避免跟课程名长短抖动
-                                            color: modelData.isNow ? th.cOnSecondaryCont : th.cOnSurfaceVar
-                                            font.pixelSize: 12
-                                            width: 66
-                                            horizontalAlignment: Text.AlignRight
-                                        }
-                                        Text {
-                                            text: modelData.subject
-                                            color: modelData.isNow ? th.cOnSecondaryCont
-                                                 : (modelData.isPast ? th.cOutline : th.cOnSurface)
-                                            font.pixelSize: 13
-                                            font.weight: modelData.isNow ? Font.Medium : Font.Normal
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── 云端存储概况（需求 #2：概览页要展示云端存储信息）──
-                    // 数据面来自 backend.storage（/api/storage 返回），界面只消费，不自己再数一遍。
-                    // ── 2026-10-18 MD3：整卡从 th.panel 升至 elevated；小指标从裸文本列
-                    //    改为 chip 组（cSurfaceVar 底 + 圆角 8 药丸）——与上方三张
-                    //    大统计卡（headlineSmall 大数）形成"大数字 / 小指标"两个层次，
-                    //    不再是一屏里三种各自为政的小字。
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 124
-                        radius: 12
-                        color: th.cContLow
-                        border.color: th.cOutlineVar
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 14
-                            spacing: 10
-                            Item {
-                                width: parent.width; height: 16
-                                Text { text: "云端存储概况"; color: th.cOnSurface; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
-                                Text {
-                                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                                    text: (backend.storage.at ? ("更新于 " + backend.storage.at) : "")
-                                    color: th.cOnSurfaceVar; font.pixelSize: 12
-                                }
-                            }
-                            Flow {
-                                width: parent.width
-                                spacing: 8
-                                Repeater {
-                                    model: [
-                                        { k: "已知设备",   v: backend.storage.knownDevices },
-                                        { k: "在线",       v: backend.storage.onlineDevices },
-                                        { k: "离线",       v: backend.storage.offlineDevices },
-                                        { k: "班级",       v: backend.storage.classes },
-                                        { k: "待执行指令", v: backend.storage.pendingInstructions },
-                                        { k: "事件落盘",   v: backend.storage.eventsFiles }
-                                    ]
-                                    // MD3 信息 chip：labelLarge + 药丸底，一眼是"一组标签"
-                                    delegate: Rectangle {
-                                        width: chipRow.implicitWidth + 18
-                                        height: 28
-                                        radius: 14
-                                        color: th.cSurfaceVar
-                                        Row {
-                                            id: chipRow
-                                            anchors.centerIn: parent
-                                            spacing: 5
-                                            Text { text: modelData.k; color: th.cOnSurfaceVar; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-                                            Text {
-                                                text: (modelData.v === undefined || modelData.v === null) ? "—" : String(modelData.v)
-                                                color: th.cOnSurface; font.pixelSize: 13; font.weight: Font.Medium
-                                                anchors.verticalCenter: parent.verticalCenter
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Text {
-                                visible: (backend.storage.at === undefined)
-                                text: "尚未从云端取到存储概况（连上后会自动拉取）"
-                                color: th.fg4; font.pixelSize: 12
-                            }
-                        }
-                    }
-
-                    // ── 动作排行（2026-10-19 · 用户指令②方向 A：云端 instructions 表）──
-                    // 数据面来自 backend.actionRanking（/api/actions/ranking，最近 7 天），
-                    // 界面只消费。排行 = 老师常用指令的执行热度，与「最近回执」互补：
-                    // 回执看"刚发生了什么"，排行看"哪些操作被用得多 / 哪台被管得多"。
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 170
-                        radius: 12
-                        color: th.cContLow
-                        border.color: th.cOutlineVar
-                        border.width: 1
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 14
-                            spacing: 8
-                            Item {
-                                width: parent.width; height: 18
-                                Text { text: "动作排行 · 近 7 天"; color: th.cOnSurface; font.pixelSize: 14; font.weight: Font.Medium; font.letterSpacing: 0.1 }
-                                Rectangle {
-                                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                                    width: 52; height: 24; radius: 12
-                                    color: rankRefreshMa.containsMouse ? th.cContHigh : th.cSurfaceVar
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "刷新"
-                                        color: th.cOnSurfaceVar; font.pixelSize: 11
-                                    }
-                                    MouseArea {
-                                        id: rankRefreshMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            backend.fetchActionRanking()
-                                            root.toast("已刷新动作排行")
-                                        }
-                                    }
-                                }
-                            }
-                            // 排行列表（最多 8 条；每行：名次 + 中文动作名 + 次数 + 成功率）
-                            ListView {
-                                width: parent.width
-                                height: parent.height - 40
-                                clip: true
-                                model: backend.actionRanking
-                                delegate: Row {
-                                    width: parent.width
-                                    height: 16
-                                    spacing: 8
-                                    Text {
-                                        width: 22
-                                        text: (index + 1)
-                                        color: index < 3 ? th.cPrimary : th.cOnSurfaceVar
-                                        font.pixelSize: 12; font.weight: index < 3 ? Font.Bold : Font.Normal
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    Text {
-                                        width: 90
-                                        elide: Text.ElideRight
-                                        text: root.actionTitleOf(modelData.action) !== ""
-                                              ? root.actionTitleOf(modelData.action)
-                                              : modelData.action
-                                        color: th.cOnSurface
-                                        font.pixelSize: 12
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    Text {
-                                        width: parent.width - 220
-                                        // 副信息：成功/总次数（失败也可见，不藏）
-                                        text: "成功 " + modelData.ok + " / " + modelData.total
-                                        color: th.cOnSurfaceVar
-                                        font.pixelSize: 11
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    Rectangle {
-                                        width: 56; height: 14; radius: 7
-                                        color: (modelData.ok > 0 && modelData.settled > 0
-                                                && modelData.ok >= modelData.settled)
-                                               ? th.cSurfaceVar : th.cSecondaryCont
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: (modelData.settled > 0)
-                                                  ? Math.round(modelData.ok * 100 / modelData.settled) + "%"
-                                                  : "—"
-                                            color: (modelData.ok > 0 && modelData.settled > 0
-                                                    && modelData.ok >= modelData.settled)
-                                                   ? th.cOnSurfaceVar : th.cOnSecondaryCont
-                                            font.pixelSize: 10
-                                        }
-                                    }
-                                }
-                            }
-                            // 空态：还没拉到（首次连上自动拉一次）
-                            // ⚠️ Column 内**不能**用 anchors.centerIn（Column 禁用锚点，
-                            //    会报 "Column will not function" 且布局失效）——用宽度+文本对齐居中。
-                            Text {
-                                visible: backend.actionRanking.length === 0
-                                width: parent.width
-                                horizontalAlignment: Text.AlignHCenter
-                                topPadding: 26
-                                text: "还没有排行数据（连上云端后自动统计；无历史则说明近 7 天没下发过指令）"
-                                color: th.fg4; font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                            }
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        spacing: 14
-
-                        // 卡片＝稿 .box：panel 底 + card 边 + 12 圆角 + 16 内距
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            radius: th.rCard
-                            color: th.panel
-                            border.color: th.card
-                            border.width: 1
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 16
-                                spacing: 10
-
-                                // Row 里不许给子项设 right/fill 之类的 anchors（会报 "Row will not
-                                // function"）；左右分栏用 Item，同「今日课表」标题行（2026-10-06 修）。
-                                Item {
-                                    width: parent.width
-                                    height: 16
-                                    Text {
-                                        text: "在线设备"
-                                        color: th.fg; font.pixelSize: 13; font.weight: Font.Medium
-                                    }
-                                    Text {
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: backend.onlineCount + " 台在线"
-                                        color: th.fg3; font.pixelSize: 12
-                                    }
-                                }
-                                // 2026-10-09：这张卡叫「在线设备」，只列 true 在线的；
-                                // 离线机器留到控制页（那里按班分组、离线画灰，便于看哪些教室掉了）。
-                                // refreshDevices 现在把离线也留在台账里，所以这里要自己滤一遍，
-                                // 否则离线机也会顶着亮点和「在线设备」的标题混进来。
-                                Repeater {
-                                    model: root.devices.filter(function (d) { return d.online !== false })
-                                    delegate: Rectangle {
-                                        width: parent.width
-                                        height: 38
-                                        radius: 9
-                                        color: ovHover.containsMouse ? th.cream : "transparent"
-
-                                        Row {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            x: 12
-                                            spacing: 10
-                                            Rectangle {
-                                                width: 5; height: 5; radius: 3
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                color: th.inv
-                                            }
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                // 2026-10-09：优先显示设备名（云端 register 带上来），没有才回退 uid，
-                                                // 与控制页设备列表保持一致，不再只裸一个 uid。
-                                                text: (modelData.name !== undefined && modelData.name !== null && modelData.name !== "")
-                                                      ? modelData.name : modelData.uid
-                                                color: th.fg; font.pixelSize: 14
-                                            }
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: (modelData.framesIn || 0) + " 帧"
-                                                color: th.fg3; font.pixelSize: 12
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            id: ovHover
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                backend.currentUid = modelData.uid
-                                                goPage(1)   // 点一台就跳到控制页看它
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 空态照稿 .empty：标题 12/操作色 + 说明 11/辅助色，两行居中。
-                                // 之前只有孤零零一句"暂无设备"，看着像坏了不像没设备。
-                                Item {
-                                    width: parent.width
-                                    height: 96
-                                    visible: (root.devices.filter(function (d) { return d.online !== false })).length === 0
-                                    Column {
-                                        anchors.centerIn: parent
-                                        spacing: 6
-                                        Text {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "暂无设备"
-                                            color: th.op; font.pixelSize: 13
-                                        }
-                                        Text {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "屏幕上的设备会自动出现"
-                                            color: th.fg3; font.pixelSize: 12
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            radius: th.rCard
-                            color: th.panel
-                            border.color: th.card
-                            border.width: 1
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 16
-                                spacing: 10
-
-                                Text {
-                                    text: "最近回执"
-                                    color: th.fg; font.pixelSize: 13; font.weight: Font.Medium
-                                }
-
-                                // 稿 .feed：时间 42px/11/辅助色，✓ ✕ 固定宽 12px，
-                                // 成功失败靠符号分不靠颜色（规则 3）—— 所以两个符号同色。
-                                Repeater {
-                                    model: root.results
-                                    delegate: Row {
-                                        spacing: 11
-                                        width: parent.width
-                                        Text {
-                                            text: modelData.t
-                                            color: th.fg3
-                                            font.pixelSize: 12
-                                            width: 42
-                                        }
-                                        SvgIcon {
-                                            name: modelData.ok ? "check" : "x"
-                                            tint: th.fg
-                                            width: 13
-                                            height: 13
-                                            anchors.verticalCenter: parent.verticalCenter
-                                        }
-                                        Text {
-                                            width: parent.width - 76
-                                            text: modelData.uid + " · " + root.actionLabel(modelData.action)
-                                                  + (modelData.ok ? ""
-                                                        : (modelData.err ? "（" + modelData.err + "）" : ""))
-                                            color: modelData.ok ? th.op : th.fg3
-                                            font.pixelSize: 13
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-                                }
-
-                                Item {
-                                    width: parent.width
-                                    height: 96
-                                    visible: root.results.length === 0
-                                    Column {
-                                        anchors.centerIn: parent
-                                        spacing: 6
-                                        Text {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "还没有操作"
-                                            color: th.op; font.pixelSize: 13
-                                        }
-                                        Text {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            text: "点了右边的动作，结果记在这儿"
-                                            color: th.fg3; font.pixelSize: 12
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ══ 1 控制 ══
-            // 稿 .body 的底色是 #080808，比窗口 #0A0A0A 深一档 —— 差两个十六进制数位，
-            // 肉眼几乎分不出，但主体区域"沉下去"那点层次就是靠它。
-            ControlPage { ctx: root._pageCtx }
-
-
-            // ══ 2 设置 ══
-            // 稿 03：pad + 两列卡片（账户 / 连接 / 提醒 / 外观）+ 通栏「关于」。
-            // 现在只有「连接」「外观」两张是真的：前者读运行时状态，后者深浅切换确实做了。
-            SettingsPage { ctx: root._pageCtx }
-
-            // ══ 3 监控 ══（2026-10-19 · 用户反馈「监控没有独立界面和操作 UI」）
-            // 此前监控散落：摄像头弹窗 / 多班墙弹窗 / 画面在集控页中栏。
-            // 新增独立整页：设备选择 + 主画面 + 操作栏（截图/摄像头/多班墙/远控）。
-            MonitorPage { ctx: root._pageCtx }
-
-            // ══ 4 班级看板 ══（2026-10-20 · V1.0 P1）
-            // 多卡片式班级桌面（班名 / 在线比例 / 状态点阵 + 多选班级批量）。
-            // ⚠️ 千人千面不在本页判断：云端行级过滤已经把设备表按身份 scope 过滤过，
-            //    老师与管理员看到不同数量的卡片是**数据决定的**，不是页面分支。
-            AdminDashboard { ctx: root._pageCtx }
-
-            // ══ 5 班级详情 ══（看板点班级进入；页内「返回看板」回 page 4）
-            // 不进底部标签：它是看板的下一层（有明确返回路径），占一个标签只会让
-            // 老师在两个"看班级"的入口之间犹豫。
-            ClassDetailPage { ctx: root._pageCtx }
-
+            // ══ 旧壳 0-5 页已退役（2026-10-24 旧界面迁移第三刀）══
+            // 概览/集控/设置/监控/看板/班级详情 的界面全部迁入 MainWindow 的五个栏目
+            // （dash/classes/control/monitor/settings）。原内联段 ~560 行已删除；
+            // 对应 .qml 文件保留（ControlPage/SettingsPage/MonitorPage 由新壳 Loader 复用，
+            // AdminDashboard/ClassDetailPage 暂留待删）。老页号 → 新栏目的映射见 goPage。
             // ══ 6 全局主框架 MainWindow ══（2026-10-20 V1.0 P1 立骨架；2026-10-22 更名）
             // 唯一应用外壳：240px 侧栏 + 64px 顶栏 + 操作区 + 响应式设备网格 + 400px 侧滑面板
             // + 底部 32 状态条。旧壳 1-5 页保留作下钻目标（侧栏「运行监控」跳 3、
@@ -1024,54 +400,6 @@ ApplicationWindow {
             MainWindow { ctx: root._pageCtx }
         }
 
-        // ── 底部标签（与手机端同一套心智）──
-        // 令牌表：底标签 42px，顶上一条 #141414 分隔线。
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 42
-            color: th.win
-            // 2026-10-20 P1：MD3 骨架页（page 6）自带 240px 侧栏导航，
-            // 再叠一条底标签就是**双重导航**（用户实测反馈"两套入口"）⇒ 骨架页隐藏底栏。
-            // 回经典界面按 Ctrl+2 / 命令面板即可。
-            visible: root.page !== 6
-
-            Rectangle { width: parent.width; height: 1; color: th.sepline }
-
-            RowLayout {
-                anchors.fill: parent
-                spacing: 0
-
-                Repeater {
-                    // 2026-10-11：原来第三个标签「批量管控」是一整页卡片（通知/广播/考试/语音/监控…），
-                    // 与「集控」页割裂 —— 老师要在两个页面之间来回跳才能管完一台机器。
-                    // 按「一站式」需求：那一页**删掉**，卡片改成集控页右栏按钮点开的弹窗，
-                    // 于是底部只剩三个标签：0 概览 / 1 集控 / 2 设置。
-                    // 2026-10-19：加「监控」——监控从散落弹窗收成独立整页（0 概览 / 1 集控 / 2 设置 / 3 监控）。
-                    // 2026-10-20 V1.0 P1：加「看板」（page 4）。
-                    // 班级详情（page 5）不进底栏 —— 它是从看板点班级进入的下一层，
-                    // 页内有「返回看板」按钮，不需要常驻标签。
-                    model: [ "概览", "集控", "设置", "监控", "看板" ]
-                    delegate: Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        color: "transparent"
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData
-                            color: (index === root.page) ? th.fg : th.fg3
-                            font.pixelSize: 13
-                            font.weight: (index === root.page) ? Font.Medium : Font.Normal
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: goPage(index)   // 底部标签栏：RBAC 首切统一走 goPage（受限身份点不到设置）
-                        }
-                    }
-                }
-            }
-        }
     }
 
     // ── 音量弹层 ──
@@ -1260,15 +588,16 @@ ApplicationWindow {
     function openScheduleEditor() { schedEditor.show() }
 
     /** 整屏页「返回/退出」用：页号是主界面的事，不让子组件猜（见下方 _pageCtx 注释）。
-     *  #370：监控页加显式「返回」按钮跳回集控（page=1），老师不必去点顶部标签。
-     *  ⚠️ 所有跳页必须走这里（不要直接写 root.page = …）：RBAC 首切（2026-10-20）
-     *     在这里拦「系统设置」—— 受限身份（老师/助教）进不了 page 2；
-     *     全权/平台超管 can("system:settings")===true，行为与今天完全一致。 */
+     *  2026-10-24 旧界面迁移第三刀：旧壳 7 页栈退役，本函数变成**老页号 → 新栏目**的
+     *  兼容层 —— 老调用点（弹窗、侧滑面板、业务页「返回」）一行不改也落到正确位置：
+     *      0→仪表盘 1→设备集控 2→系统设置 3→运行监控 4/5→班级看板 6→主框架本身
+     *  RBAC 门禁不在这里了：唯一判定在 MainWindow.navActivated（绕过去就是开第二个口子）。 */
     function goPage(idx) {
-        // 2026-10-21（审查 #11）：受限身份被拦时**要说一句** —— 原来静默 return，
-        // 用户视角是"点了没反应"（和未实现能力置灰是两条路，这里先用提示顶上）。
-        if (idx === 2 && !perms.can("system:settings")) { root.toast("当前身份不能进系统设置"); return }
-        root.page = idx
+        if (idx === undefined || idx === null || idx >= 6) { root.page = 6; return }
+        const key = root._sectionOfPage[idx]
+        root.page = 6
+        if (!key) return
+        if (root.sectionHook) root.sectionHook(key)
     }
 
     // ══════════════ 弹窗互斥 ══════════════
@@ -1381,8 +710,10 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+L"; enabled: backend.firstRunDone; onActivated: { root.runOnPicked("") } }
 
     Component.onCompleted: {
-        syncPageLive()   // 2026-10-08：启动即按当前页归一化拉流（默认 page=1，缩略图墙不预订阅）
-        acctMenu.goSettings = function () { goPage(2) }
+        syncPageLive()   // 启动即归一化拉流（多班墙不预订阅）
+        // 2026-10-24 迁移第三刀：旧壳顶条已删，其账户菜单（acctMenu）随之消失；
+        // 「去设置」现在由 MainWindow 的 TopBar 头像承担（navActivated("settings")，
+        // RBAC 只在那一处判）。原来这行 `acctMenu.goSettings = …` 已无对象可挂。
         // U4：命令面板条目同样从声明派生（surfaces 含 "command" 的那些）。
         // 每条回指声明 id，点击时统一走 root.runActionById —— 与右栏按钮、快捷行
         // **同一条路**，所以权限 / 能力 / 危险确认这三道再也绕不过去。
