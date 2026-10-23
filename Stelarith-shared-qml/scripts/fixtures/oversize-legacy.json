@@ -115,11 +115,11 @@
       "plan": "[P3] 拆设备行组件"
     },
     "Stelarith-viewer-qt/qml/components/CameraCenter.qml": {
-      "lines": 1421,
+      "lines": 1381,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 拆设备网格/预览/绑定三段"
+      "plan": "[P1] 拆设备网格/预览/绑定三段。已收编内联分段按钮为共享件 Md3SegmentedButton（-40 行，1421→1381，#471）"
     },
     "Stelarith-viewer-qt/qml/components/CommandPalette.qml": {
       "lines": 201,
@@ -262,11 +262,11 @@
       "plan": "[P3] 拆参数区"
     },
     "Stelarith-viewer-qt/qml/shell/MainWindow.qml": {
-      "lines": 710,
+      "lines": 458,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 骨架壳：拆 Sidebar/TopBar/StatusBar"
+      "plan": "[P2] 骨架壳：已抽仪表盘三件（DashPage/DashDeviceSection/DashInsightCards，718→458，#473）；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav"
     },
     "Stelarith-viewer-qt/qml/shell/SideSheet.qml": {
       "lines": 289,
