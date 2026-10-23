@@ -36,6 +36,7 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 #include <QVariantMap>
 
 class PermissionManager;   // RBAC（2026-10-20）：前端权限镜像层，仅持裸指针，不引入头依赖
+class ClassService;        // 班级域（#460）：前向声明即可（Q_PROPERTY 指针 + 访问器）
 
 // ── 文件推送共享符号（2026-10-13 架构拆分）──
 // viewerbackend.cpp / viewerbackend_file.cpp 两个翻译单元共享：常量用 constexpr
@@ -207,6 +208,10 @@ class ViewerBackend : public QObject
     // 管理端概览页展示：已知设备数 / 在线 / 离线 / 班级数 / 待执行指令 / 事件落盘量 / 最近活跃时刻。
     // 数据面由云端 getStorageInfo 算好推下来，界面只消费，不许前端自己再数一遍（避免两端口径不一致）。
     Q_PROPERTY(QJsonObject storage READ storage NOTIFY storageChanged)
+    // ── 班级域（#460 · 2026-10-23）：班级工作台数据面 ──
+    // ClassService 持 typed Models（设备网格 + Timeline）与缩略图缓存，自己不认识 WS：
+    // 出海发信号经本类 sendEnvelope 出，入站由 onClassDomainMessage 转进来。
+    Q_PROPERTY(ClassService *classService READ classService CONSTANT)
 
     // ── 远控（VNC over WS，libvncclient）状态 ──
     // vncActive：是否正在远控（画面走 VNC）。vncState：连接状态文案（连接中/已连接/断开/错误），
@@ -552,6 +557,9 @@ public:
     QJsonObject recordings() const { return m_recordings; }
     /** 取某台设备的缩略图帧（多班面板；无则空图）。 */
     QImage thumbFrame(const QString &uid) const { return m_thumbFrames.value(uid); }
+    // ── 班级域（#460）──
+    /** 班级工作台数据面。QML：backend.classService.deviceModel / .subscribeClass(code)。 */
+    ClassService *classService() const { return m_classService; }
     /** 摄像头第二轨最新帧（2026-10-12 · 四·双画面；无则空图）。 */
     QImage camFrame() const { return m_camFrame; }
     int cameraFrameCount() const { return m_camFrameCount; }
@@ -746,6 +754,8 @@ private:
     void setVncState(const QString &s);
     void tickFps();
     void sendEnvelope(const QString &type, const QJsonObject &payload);
+    /** 班级域入站分发（#460）：onTextMessage 把六个 class-* type 转来这里。 */
+    void onClassDomainMessage(const QString &type, const QJsonObject &pay);
     /** 断线 / 退出时把语音和广播一起收掉，why 直接显示成状态行那句话。 */
     void stopAllLive(const QString &why);
 
@@ -960,6 +970,9 @@ private:
     // ── 多班面板缩略图墙（2026-10-07，设计文档 3.2.2）──
     QStringList m_thumbUids;                  // 当前订阅缩略图的设备 uid 列表
     QHash<QString, QImage> m_thumbFrames;     // uid → 缩略图帧缓存
+
+    // ── 班级域（#460 · 2026-10-23）──
+    ClassService *m_classService = nullptr;   // 班级工作台数据面（ctor 创建）
 
     // ── 2026-10-11「进后台就连不上云端」修复（#4）：半开连接探活 ──
     // Android 后台网络被系统切断时，QWebSocket 是**半开连接**（不触发 connected/

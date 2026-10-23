@@ -36,6 +36,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickImageProvider>
+#include "class/class_thumb_provider.h"   // 班级缩略图 → QML（image://classthumb/<uid>，#460）
 #include "svgiconprovider.h"
 #include "vnc_image_provider.h"   // 2026-10-18：远控画面 image://vnc/live
 #include <QTimer>
@@ -531,6 +532,10 @@ int main(int argc, char *argv[])
     auto *vncProvider = new VncImageProvider;
     engine.addImageProvider(QStringLiteral("vnc"), vncProvider);
     backend.setVncImageProvider(vncProvider);
+    // 2026-10-23 #460 班级域缩略图：Image { source: "image://classthumb/<uid>?t<rev>" }。
+    // 取 backend.classService() 顺带把 ClassService 建出来（ctor 里已建，这里只是访问）。
+    engine.addImageProvider(QStringLiteral("classthumb"),
+                            new ClassThumbProvider(backend.classService()));
     // 2026-10-08 lucide(morphicons 同款) SVG 图标：image://svgicon/<name>?color=<tint>
     engine.addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider);
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);

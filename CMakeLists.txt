@@ -190,6 +190,18 @@ qt_add_executable(viewer-qt
   src/viewerbackend_voice.cpp
   # 2026-10-13 架构拆分：站点账号域（OAuth + 接入票 + 凭据）独立编译单元
   src/viewerbackend_account.cpp
+  # ── 班级域（2026-10-23 #460 · viewerbackend P1 拆分第一刀 ClassService）──
+  # 班级工作台数据面：ClassService + typed Models（设备网格/Timeline）+ 缩略图 provider。
+  # viewerbackend_class.cpp 只放入站分发；协议状态与模型全在 src/class/。
+  src/viewerbackend_class.cpp
+  src/class/class_device_model.cpp
+  src/class/class_device_model.h
+  src/class/class_event_model.cpp
+  src/class/class_event_model.h
+  src/class/class_service.cpp
+  src/class/class_service.h
+  src/class/class_thumb_provider.cpp
+  src/class/class_thumb_provider.h
   ${STE_SINGLEINSTANCE_SRC}
   src/oauthlogin.cpp
   src/oauthlogin.h

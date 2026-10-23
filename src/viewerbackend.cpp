@@ -4,6 +4,7 @@
 #include "oauthlogin.h"
 #include "vnc_client.h"       // 2026-10-18：远控 VNC 客户端（libvncclient，RFB over WS）
 #include "vnc_image_provider.h" // 远控画面 → QML（image://vnc/live）
+#include "class/class_service.h"   // 班级域（#460）：ClassService + typed Models
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
 #include "audio_playback.h"  // B6（2026-10-11）：winmm waveOut 播放学生回传的 audio/pcm
 #include "opus_codec.h"      // 2026-10-21（P1）：Opus 解码（shared/audio，与 agent 同源）
@@ -161,6 +162,11 @@ ViewerBackend::ViewerBackend(QObject *parent)
     // new ...` 散落在各接口里（checkQmlPatch/fetchRecordings/requestClasses/requestStorage/
     // fetchEvents/ensureCloudTicket），每处都要判空。构造创建后这些检查全删。
     m_nam = new QNetworkAccessManager(this);
+    // 班级域（#460）：ClassService 持班级工作台数据面。它自己不认识 WS ——
+    // 出海信号直接接到 sendEnvelope（与其余出站消息同一条 v1 信封路）。
+    m_classService = new ClassService(this);
+    connect(m_classService, &ClassService::sendRequested,
+            this, &ViewerBackend::sendEnvelope);
     // 身份与提醒开关先落下来（QSettings），后面所有门控判断都基于它。
     loadPrefs();
     // 主题三档（E4，2026-10-11）：0 浅色 / 1 深色 / 2 跟随系统。默认浅色，读自 QSettings。
@@ -940,6 +946,7 @@ void ViewerBackend::onDisconnected()
     // 远控会话也一并收掉：主 WS 断了，vnc-data 帧已经不可能到达，
     // 留着 VncClient 的解码线程只会对着空缓冲干等。
     if (m_vncActive) stopVnc();
+    if (m_classService) m_classService->onDisconnected();   // #460：置未订、保留数据、重连自动重订
     if (!m_offlineSince) m_offlineSince = QDateTime::currentMSecsSinceEpoch();
     emit connectedChanged();
     // 「设备离线时提醒」：断线是常驻程序最该让用户知道的一件事，
@@ -1216,6 +1223,7 @@ void ViewerBackend::onTextMessage(const QString &text)
             });
         }
         m_refreshTimer->start();
+        if (m_classService) m_classService->onAuthed();   // #460：曾订过班就自动重订
     } else if (type == QStringLiteral("auth-fail")) {
         m_authFailReason = pay.value(QStringLiteral("reason")).toString();
         // 拿票连的、却被拒 —— 票可能是过期的、也可能是站点那边换了密钥（旧票仍签得出但验不过）。
@@ -1274,6 +1282,9 @@ void ViewerBackend::onTextMessage(const QString &text)
         const QString message = pay.value(QStringLiteral("message")).toString();
         logf("[viewer] FAIL 云端拒绝 → %s/%s：%s",
              ecode.toUtf8().constData(), code.toUtf8().constData(), message.toUtf8().constData());
+        // #460 班级域旁路：订阅 pending 窗口内到来的 error 就是订阅被拒
+        // （无权限 / 班级不存在…）。ClassService 内部只在该窗口内认领。
+        if (m_classService) m_classService->onError(pay);
         // 认证失效（AU1002 过期 / AU1003 无效）：旧令牌已不可用，直接走重登流程，
         // 避免"看起来还连着，但每条指令都被拒"的假在线状态。
         if (ecode == QLatin1String("AU1002") || ecode == QLatin1String("AU1003")) {
@@ -1411,6 +1422,11 @@ void ViewerBackend::onTextMessage(const QString &text)
     } else if (type == QStringLiteral("noise_alert")) {
         // 自习模式：噪音异常 → 自动录制 的开始/结束记录
         handleNoiseAlert(pay);
+    } else if (type == QLatin1String("class-subscribed") || type == QLatin1String("class-unsubscribed")
+               || type == QLatin1String("class.event") || type == QLatin1String("class.member.online")
+               || type == QLatin1String("class.member.offline")) {
+        // 班级域（#460）：订阅回执 / 事件 / 成员上下线 → ClassService（模型在它身上）
+        onClassDomainMessage(type, pay);
     } else {
         logf("[viewer] 收到未处理的云端消息 type=%s", type.toUtf8().constData());
     }
