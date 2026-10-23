@@ -17,11 +17,11 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 7525,
+      "lines": 7559,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 217,
-      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域"
+      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。登记 7559：+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线（2026-10-23，setCloudReporter 旁款注入点）"
     },
     "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
       "lines": 870,
@@ -45,11 +45,11 @@
       "plan": "[P3] 拆 DXGI 初始化/抓帧/错误恢复"
     },
     "Stelarith-viewer-qt/src/main.cpp": {
-      "lines": 775,
+      "lines": 780,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P3] 拆 QML 引擎装配与 context 注入"
+      "plan": "[P3] 拆 QML 引擎装配与 context 注入。#460 班级域 +5（classthumb provider 注册，2026-10-23）"
     },
     "Stelarith-viewer-qt/src/schedule/profile.h": {
       "lines": 388,
@@ -73,18 +73,18 @@
       "plan": "[P3] 拆下载/校验/安装三段"
     },
     "Stelarith-viewer-qt/src/viewerbackend.cpp": {
-      "lines": 2702,
+      "lines": 2718,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 89,
-      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService"
+      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由"
     },
     "Stelarith-viewer-qt/src/viewerbackend.h": {
-      "lines": 971,
+      "lines": 984,
       "limit": 300,
       "qInvokable": 61,
-      "topLevel": 14,
-      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛"
+      "topLevel": 15,
+      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明"
     },
     "Stelarith-control-qt/qml/shell/BroadcastScheduleSheet.qml": {
       "lines": 795,
