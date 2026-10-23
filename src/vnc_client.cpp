@@ -315,18 +315,22 @@ bool VncClient::setupClient()
     if (!m_password.isEmpty())
         m_cl->GetPassword = &VncClient::passwordTrampoline;
 
-    // 编码策略（2026-10-24 重构：两端换带 zlib 的 libvnc，启用 ZRLE）：
-    //   · zrle：zlib 无损压缩（调色板 + 增量），**桌面 UI/PPT/文字**场景压缩率远高于
-    //           hextile，且不像 Tight 的 JPEG 层那样把文字压花（Tight 需 libjpeg，
-    //           本项目未引入，故不选）；
+    // 编码策略（2026-10-24 第二次重构：Tight 优先）：
+    //   · tight：**有损** JPEG 分块 + zlib 差分。带宽是硬约束（CF 隧道 + 教室上行
+    //           合计只有几 Mbps），ZRLE 无损压缩对高熵画面只能压 3-4 倍，撑不起帧率；
+    //           Tight 能把单帧再降一个数量级。代价是文字轻微发软（q≈6/9）。
     //   · copyrect：块移动（滚动/拖窗）零字节；
-    //   · hextile：ZRLE 不可用时的次级（大面积纯色仍很好）；
+    //   · zrle：Tight 不可用时的无损回退（zlib）；
+    //   · hextile：再回退；
     //   · raw：兜底（库内部恒支持）。
     //   ⚠️ 服务端取"客户端 SetEncodings 里第一个它支持的编码"为 preferredEncoding
-    //     （见 rfbserver.c 的 SetEncodings 分支），所以 zrle 必须排第一。
-    //   ⚠️ ZRLE 依赖两端库带 zlib 构建（LIBVNCSERVER_HAVE_LIBZ）；换库后才有，
-    //     旧的 no-zlib 预编译库下此串会静默退化到 hextile。
-    m_cl->appData.encodingsString = "zrle copyrect hextile raw";
+    //     （见 rfbserver.c 的 SetEncodings 分支），所以 tight 必须排第一。
+    //   ⚠️ Tight 依赖两端库带 libjpeg 构建（LIBVNCSERVER_HAVE_LIBJPEG）；换库后才有，
+    //     旧的 no-jpeg 预编译库下此串会静默退化到 zrle/hextile。
+    m_cl->appData.encodingsString = "tight copyrect zrle hextile raw";
+    // Tight 质量等级（0..9，库默认 5）：6 在"文字可读 / 带宽"之间取平衡。
+    // 走 SetEncodings 的 QualityLevel 伪编码下发给服务端。
+    m_cl->appData.qualityLevel = 6;
 
     // 帧缓冲更新回调：解出一帧 → 拷成 QImage → frameReady
     m_cl->GotFrameBufferUpdate = &VncClient::updateScreenTrampoline;
