@@ -98,8 +98,16 @@ Item {
     // 投稿默认平台（网易云）
     property string reqPlatform: "netease"
 
+    // 排期按日隔离（2026-10-23）：列表只显示选中日的排期，拖拽只在当日 1..N 重排，
+    // 其它日 sequence 不动 —— 彻底消除「整窗多日混排 + 全量重编号」导致的跨日序号污染。
+    property string selectedDate: ""        // 当前选中日 YYYY-MM-DD
+    property var dateChips: []              // 可用日期（今日 ∪ 数据中出现过的日期），升序
+    property bool saving: false             // 是否正在向 VoiceHub 保存新顺序（保存期间禁用再拖）
+
     // ── 本地排期模型（镜像 voicehub.schedule，便于拖拽重排）──────────────
     ListModel { id: scheduleModel }
+    // 选中日的过滤视图：ListView 直接吃这个，拖拽/重排都只在这一日范围内
+    ListModel { id: dayModel }
 
     function syncSchedule() {
         if (!voicehub) return
@@ -117,8 +125,54 @@ Item {
                 mid: s.musicId || "",
                 playing: !!s.isPlaying,
                 played: !!s.played,
-                pos: (typeof s.broadcastPosition === "number") ? s.broadcastPosition : -1
+                pos: (typeof s.broadcastPosition === "number") ? s.broadcastPosition : -1,
+                playDate: s.playDate || ""          // 2026-10-23：按日隔离必需
             })
+        }
+        rebuildDayModel()
+    }
+
+    // 本地日期（YYYY-MM-DD），与服务端 playDate 同口径（机房均为中国时区）
+    function todayStr() {
+        var t = new Date()
+        function p(n) { return (n < 10 ? "0" + n : "" + n) }
+        return t.getFullYear() + "-" + p(t.getMonth() + 1) + "-" + p(t.getDate())
+    }
+    function isTodayStr(d) { return d === todayStr() }
+    function fmtChip(d) {
+        var p = String(d).split("-")
+        if (p.length < 3) return d
+        return parseInt(p[1], 10) + "/" + parseInt(p[2], 10)
+    }
+
+    // 重建日期条 + 当日过滤列表：今日永远在条上（即使无排期），其余取数据中出现的日期，升序去重
+    function rebuildDayModel() {
+        var seen = {}
+        var list = []
+        var tday = todayStr()
+        if (!seen[tday]) { seen[tday] = true; list.push(tday) }
+        for (var i = 0; i < scheduleModel.count; ++i) {
+            var d = scheduleModel.get(i).playDate
+            if (d && !seen[d]) { seen[d] = true; list.push(d) }
+        }
+        list.sort()
+        root.dateChips = list
+
+        // 选中日失效（数据变了）则回退到今日/首日
+        if (root.selectedDate === "" || list.indexOf(root.selectedDate) < 0) {
+            root.selectedDate = (list.indexOf(tday) >= 0) ? tday : (list[0] || tday)
+        }
+
+        dayModel.clear()
+        for (var j = 0; j < scheduleModel.count; ++j) {
+            var it = scheduleModel.get(j)
+            if (it.playDate === root.selectedDate) {
+                dayModel.append({
+                    sid: it.sid, seq: it.seq, title: it.title, artist: it.artist,
+                    cover: it.cover, dur: it.dur, platform: it.platform, mid: it.mid,
+                    playing: it.playing, played: it.played, pos: it.pos, playDate: it.playDate
+                })
+            }
         }
     }
 
@@ -342,52 +396,57 @@ Item {
                             }
                         }
 
-                        // 周历横条
-                        Row {
+                        // 日期切换条（数据驱动：今日 ∪ 数据中出现过的日期，升序）
+                        // 点选某日 → 列表只显示当日排期；拖拽只在当日 1..N 重排。
+                        Flickable {
                             anchors.left: parent.left; anchors.right: parent.right
-                            spacing: st.spXS
-                            Repeater {
-                                id: weekRep
-                                model: 7
-                                delegate: Item {
-                                    width: (schedFlick.width - 2*st.spL - 6*st.spXS) / 7
-                                    height: 56
-                                    property date d: {
-                                        var base = new Date()
-                                        var dow = (base.getDay() + 6) % 7 // 周一=0
-                                        var day = new Date(base.getFullYear(), base.getMonth(), base.getDate() - dow + index)
-                                        return day
+                            height: 48
+                            contentWidth: chipRow.width
+                            contentHeight: height
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            Row {
+                                id: chipRow
+                                spacing: st.spXS
+                                Repeater {
+                                    model: root.dateChips
+                                    delegate: Item {
+                                        width: 56; height: 40
+                                        property bool sel: modelData === root.selectedDate
+                                        property bool tdy: isTodayStr(modelData)
+                                        Rectangle {
+                                            anchors.fill: parent; radius: st.rFull
+                                            color: sel ? st.primary : st.containerLow
+                                            border.color: sel ? st.primary : (tdy ? st.primary : st.outlineVariant)
+                                            border.width: (tdy && !sel) ? 1.5 : 1
+                                        }
+                                        Column {
+                                            anchors.centerIn: parent; spacing: 1
+                                            Text { text: fmtChip(modelData); font.pixelSize: st.labelM; font.weight: sel ? Font.Medium : Font.Normal; color: sel ? st.fgPrimary : st.fgSurface }
+                                            Text { text: tdy ? "今天" : " "; font.pixelSize: st.labelS; color: sel ? st.fgPrimary : st.fgSurfaceVariant }
+                                        }
+                                        MouseArea { anchors.fill: parent; onClicked: { root.selectedDate = modelData; rebuildDayModel() } }
                                     }
-                                    property bool isToday: (function(){ var t=new Date(); return d.getFullYear()===t.getFullYear()&&d.getMonth()===t.getMonth()&&d.getDate()===t.getDate() })()
-                                    Rectangle {
-                                        anchors.fill: parent; radius: st.rM
-                                        color: isToday ? st.primary : st.containerLow
-                                        border.color: isToday ? st.primary : st.outlineVariant
-                                        border.width: 1
-                                    }
-                                    Column {
-                                        anchors.centerIn: parent; spacing: 2
-                                        Text { text: ["一","二","三","四","五","六","日"][index]; font.pixelSize: st.labelS; color: isToday ? st.fgPrimary : st.fgSurfaceVariant }
-                                        Text { text: d.getDate(); font.pixelSize: st.titleS; font.weight: isToday ? Font.Medium : Font.Normal; color: isToday ? st.fgPrimary : st.fgSurface }
-                                    }
-                                    MouseArea { anchors.fill: parent; onClicked: { } } // 选日期：服务端仅开放「当日」，暂为展示
                                 }
                             }
                         }
 
-                        // 列表标题
+                        // 列表标题（诚实标注：显示选中日，而非误导性「今日排期」）
                         Text {
                             anchors.left: parent.left
-                            text: "今日排期（" + scheduleModel.count + "）"
+                            text: "排期 · " + fmtChip(root.selectedDate)
+                                  + (isTodayStr(root.selectedDate) ? "（今天）" : "")
+                                  + "（" + dayModel.count + "）"
+                                  + (root.saving ? " · 保存中…" : "")
                             font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgSurfaceVariant
                         }
 
-                        // 排期列表（可长按拖拽排序）
+                        // 排期列表（可长按拖拽排序 · 仅当日，按日隔离）
                         ListView {
                             id: schedList
                             anchors.left: parent.left; anchors.right: parent.right
-                            height: Math.max(120, scheduleModel.count * 84 + 8)
-                            model: scheduleModel
+                            height: Math.max(120, dayModel.count * 84 + 8)
+                            model: dayModel
                             spacing: st.spS
                             clip: true
                             displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
@@ -471,24 +530,27 @@ Item {
                                         drag.axis: Drag.YAxis
                                         drag.minimumY: 0
                                         drag.maximumY: schedList.contentHeight - height
-                                        onPressAndHold: ma.drag.active = true
+                                        onPressAndHold: if (!root.saving) ma.drag.active = true
                                         onReleased: {
                                             if (ma.drag.active) {
                                                 ma.drag.active = false
                                                 // 拖到一半时 card.y 已是内容坐标，取中点命中目标行
                                                 var idx = schedList.indexAt(schedList.contentX, card.y + height / 2)
                                                 if (idx >= 0 && idx !== myIndex) {
-                                                    scheduleModel.move(myIndex, idx, 1)
-                                                    // 组装新顺序并提交到 VoiceHub（松手即持久化）
+                                                    dayModel.move(myIndex, idx, 1)
+                                                    // 只把「当日」这一组按新视觉顺序 1..N 提交；
+                                                    // 其它日期根本不在 dayModel 里，故不会被污染。
                                                     var pairs = []
-                                                    for (var k = 0; k < scheduleModel.count; ++k) {
-                                                        var it = scheduleModel.get(k)
+                                                    for (var k = 0; k < dayModel.count; ++k) {
+                                                        var it = dayModel.get(k)
                                                         pairs.push({ id: it.sid, sequence: k + 1 })
                                                     }
-                                                    if (voicehub && voicehub.canRequest())
+                                                    if (voicehub && voicehub.canRequest()) {
+                                                        root.saving = true
                                                         voicehub.reorderSchedule(pairs)
-                                                    else
+                                                    } else {
                                                         snack.show("未配置 API Key，顺序仅在本地面板内生效", false)
+                                                    }
                                                 }
                                             }
                                         }
@@ -498,15 +560,15 @@ Item {
 
                             Text {
                                 anchors.fill: parent; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                                visible: scheduleModel.count === 0
-                                text: "今日暂无排期"
+                                visible: dayModel.count === 0
+                                text: "该日暂无排期"
                                 font.pixelSize: st.bodyM; color: st.fgSurfaceVariant
                             }
                         }
 
                         Text {
                             anchors.left: parent.left
-                            text: "提示：长按曲目可调整顺序，松手即保存到 VoiceHub（需 API Key 具备 schedules:write 权限）"
+                            text: "提示：长按曲目可调整顺序，松手即保存到 VoiceHub（仅对当日生效，需 API Key 具备 schedules:write 权限）"
                             font.pixelSize: st.labelS; color: st.fgSurfaceVariant
                             wrapMode: Text.Wrap; width: parent.width
                         }
@@ -701,9 +763,11 @@ Item {
         target: voicehub
         function onControlFinished(ok, message) { snack.show(message, ok) }
         function onReorderFinished(ok, message) {
+            root.saving = false
             if (ok) {
-                for (var k = 0; k < scheduleModel.count; ++k) scheduleModel.setProperty(k, "seq", k + 1)
-                snack.show("顺序已保存到 VoiceHub", true)
+                // 本地视觉顺序已是拖拽结果；服务端也已落库，无需再改属性。
+                // 下一轮 30s 轮询或重开面板会拉到服务端真值，保持一致。
+                snack.show("顺序已保存到 VoiceHub（" + fmtChip(root.selectedDate) + "）", true)
             } else {
                 snack.show(message, false)
                 if (voicehub) voicehub.refreshSchedule() // 失败回滚到服务端真值
