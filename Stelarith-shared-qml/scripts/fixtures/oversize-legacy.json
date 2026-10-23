@@ -87,11 +87,11 @@
       "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛"
     },
     "Stelarith-control-qt/qml/shell/BroadcastScheduleSheet.qml": {
-      "lines": 715,
+      "lines": 795,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 拆排期行组件/时间轴/拖拽三段"
+      "plan": "[P2] 拆排期行组件/时间轴/拖拽三段；按日隔离+拖拽修复（2026-10-23 探针 25 断言全绿后登记）"
     },
     "Stelarith-control-qt/qml/shell/pages/AgentSettingsPage.qml": {
       "lines": 380,
