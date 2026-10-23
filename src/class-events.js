@@ -37,6 +37,11 @@ import {
  *  等于让设备端决定 UI 词汇表（与"学生是不可信输入源"同一纪律）。 */
 const KIND_RE = /^[a-z0-9][a-z0-9_.-]{0,31}$/;
 
+/** 缩略图事件 kind（与 control-qt `ThumbnailReporter.cpp` 上报值一致）。
+ *  只走实时 fanout、**不进历史环**：15s/台 的高频帧，进环会把每班 200 条历史挤满图片
+ *  （量大时 GB 级内存，而 Timeline 本就不展示缩略图）。 */
+const THUMB_KIND = 'thumbnail';
+
 /** 管理端连接 → 订阅的班级码集合。只在订阅过至少一个班时存在。 */
 const classSubs = new Map();           // ws -> Set<classCode>
 
@@ -220,7 +225,8 @@ export function pushClassEvent(code, kind, data, uid) {
   }
 
   const ev = { id: ++evSeq, at: new Date().toISOString(), kind: k, uid: String(uid || ''), data: JSON.parse(raw) };
-  logEvent(code, ev);
+  // 缩略图不进历史环（见 THUMB_KIND 注释）；实时 fanout 照旧。
+  if (k !== THUMB_KIND) logEvent(code, ev);
   const r = fanoutClass(code, 'class.event', { classCode: code, ...ev });
   return { ok: true, id: ev.id, viewers: r.hits };
 }

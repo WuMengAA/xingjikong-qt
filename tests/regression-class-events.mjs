@@ -233,6 +233,14 @@ try {
     assert.equal(ack.payload.viewers, 1, `viewers=${ack.payload.viewers}`);
   });
 
+  // ②b 缩略图：实时 fanout 照旧，但不进历史环（防大班量下内存炸）
+  await ok('缩略图：实时 fanout 照常、但不进历史环', async () => {
+    agentA.ws.send(JSON.stringify({ v: 1, type: 'class-event', id: 'e2b',
+      payload: { kind: 'thumbnail', data: { w: 320, h: 180, mime: 'image/jpeg', b64: 'AAAA' } } }));
+    const ev = await waitFor(viewer1.inbox, (x) => x.type === 'class.event' && x.payload?.kind === 'thumbnail');
+    assert.ok(ev, '缩略图实时 fanout 没送达订阅者');
+  });
+
   // ③ 伪冒防护：载荷带假 classCode，标签仍是云端真值
   await ok('伪冒防护：载荷里的假 classCode 被忽略，事件标签仍是云端真值', async () => {
     agentA.ws.send(JSON.stringify({ v: 1, type: 'class-event', id: 'e3',
@@ -319,6 +327,7 @@ try {
     const kinds = m.payload.events.map((e) => e.kind);
     assert.ok(kinds.includes('member.online'), '历史里没有 member.online');
     assert.ok(kinds.includes('test.ping'), '历史里没有 test.ping');
+    assert.ok(!kinds.includes('thumbnail'), '缩略图进了历史环（应被排除）');
     assert.ok(m.payload.events.length <= 20, `快照事件条数 ${m.payload.events.length} 超过 20`);
   });
 
