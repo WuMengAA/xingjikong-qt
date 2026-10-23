@@ -45,6 +45,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../components/md3"     // Md3Card / Md3Chip / Md3Btn（全局组件库，AGENTS.md §9.3）
 import "../shell"              // Sidebar / TopBar / ActionBar / DeviceCard / SideSheet（同目录骨架件）
+import "../pages"              // ClassDashboard（班级工作台 · #472）
 import "../island"             // SvgIcon
 
 Item {
@@ -105,18 +106,6 @@ Item {
         return out
     }
 
-    /** S5：在 classDevices() 之上再按 filterMode 过滤（本页自有筛选，不碰宿主那份）。 */
-    function visibleDevices() {
-        const ds = shell.classDevices()
-        if (shell.filterMode === "all") return ds
-        var out = []
-        for (var i = 0; i < ds.length; ++i) {
-            const on = ds[i].online !== false
-            if ((shell.filterMode === "online") === on) out.push(ds[i])
-        }
-        return out
-    }
-
     /** S1：计数（读 backend.storage 的待办；未拉到前显示 ——，不假装是 0）。 */
     function stats() {
         const ds = shell.classDevices()
@@ -130,16 +119,6 @@ Item {
     /** 当前栏目在 StackLayout 里的下标。 */
     readonly property int sectionIndex: shell.section === "settings" ? 2
                                       : (shell.section === "classes" ? 1 : 0)
-
-    /** S7：内容区宽度决定列数（窄窗不再挤成 4 列 100px 卡片）。
-     *  竖屏（2026-10-22）：单列为主，宽竖屏（≥560，桌面竖条形/平板竖握）给 2 列；
-     *  横屏沿用 4/3/2。 */
-    function gridColumns(w) {
-        if (shell.portrait) return w >= 560 ? 2 : 1
-        if (w >= 900) return 4
-        if (w >= 660) return 3
-        return 2
-    }
 
     /** 导航激活（Sidebar 与 BottomNav 共用，别处不许再写一份分支逻辑）：
      *   运行监控 = 跳旧壳 page 3（整页大画面），不是本页 section；
@@ -213,21 +192,6 @@ Item {
         return txt
     }
 
-    /** 动作用中文名（复用宿主的映射表，不另建一份）。 */
-    function actionLabel(a) {
-        if (shell.ctx && shell.ctx.window && shell.ctx.window.actionTitleOf) {
-            const t = shell.ctx.window.actionTitleOf(a)
-            if (t && t !== "") return t
-        }
-        return a || ""
-    }
-
-    /** S4：宿主最近回执（真回执流水，主界面 root.results）。 */
-    function recentResults() {
-        if (shell.ctx && shell.ctx.window && shell.ctx.window.results) return shell.ctx.window.results
-        return []
-    }
-
     Rectangle { anchors.fill: parent; color: shell.th ? shell.th.cSurface : "#FFFBFE" }
 
     ColumnLayout {
@@ -273,7 +237,10 @@ Item {
                         // ⚠️ 班级列表与当前班**不在这里传参** —— TopBar 内部直接读
                         //    backend.classes / backend.currentClass。曾经多传不存在的属性，
                         //    结果 `Type Md3Shell unavailable` 整页起不来（qmllint 0 Error）。
-                        onClassPicked: function (code) { backend.setCurrentClass(code) }
+                        // 2026-10-23 #472：班级选择改为**双写**——activateClass 同时
+                        // 写旧筛选（setCurrentClass）与新班级域（subscribeClass）。
+                        // 只写旧的话，班级工作台永远订不到班（网格空着不说话）。
+                        onClassPicked: function (code) { classDash.activateClass(code) }
                         onAvatarClicked: function () { if (shell.ctx) shell.ctx.window.goPage(2) }
                         onLoginRequested: {
                             shell.toast("正在打开站点登录…")
@@ -304,291 +271,35 @@ Item {
                         Layout.bottomMargin: shell.th ? shell.th.spM : 16
                         currentIndex: shell.sectionIndex
 
-                        // ① 仪表盘（S1/S2/S3/S4/S5/S7 全在这里）
-                        Flickable {
-                            id: dash
-                            contentWidth: width          // 纪律：显式声明，否则列宽算不出来
-                            contentHeight: dashCol.implicitHeight
-                            clip: true
-                            boundsBehavior: Flickable.StopAtBounds
-
-                            ColumnLayout {
-                                id: dashCol
-                                width: dash.width
-                                spacing: shell.th ? shell.th.spM : 16
-
-                                // ── S1 三张统计卡（全局组件库 Md3Card，禁手绘卡片）──
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: shell.th ? shell.th.spM : 16
-                                    Repeater {
-                                        model: [
-                                            { k: "在线设备", v: String(shell.stats().on),  sub: "共 " + shell.stats().total + " 台" },
-                                            { k: "待执行指令", v: String(shell.stats().pending), sub: "云端队列" },
-                                            { k: "离线设备", v: String(shell.stats().off), sub: "需排查" }
-                                        ]
-                                        delegate: Md3Card {
-                                            required property var modelData
-                                            Layout.fillWidth: true
-                                            Layout.preferredHeight: 96
-                                            md3: shell.th
-                                            variant: "elevated"
-                                            ColumnLayout {
-                                                anchors.fill: parent
-                                                spacing: shell.th ? shell.th.spXS : 4
-                                                Text {
-                                                    text: modelData.k
-                                                    font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                    color: shell.th ? shell.th.cOnSurfaceVar : "#49454F"
-                                                }
-                                                Text {
-                                                    text: modelData.v
-                                                    font.pixelSize: shell.th ? shell.th.headlineM : 28
-                                                    font.weight: Font.Medium
-                                                    color: shell.th ? shell.th.cOnSurface : "#1D1B20"
-                                                }
-                                                Text {
-                                                    text: modelData.sub
-                                                    font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                    color: shell.th ? shell.th.cOutline : "#79747E"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // ── S5 筛选 chip（全局组件库 Md3Chip，与集控/监控页同语言）──
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: shell.th ? shell.th.spS : 8
-                                    Repeater {
-                                        model: [
-                                            { k: "all",    t: "全部" },
-                                            { k: "online", t: "在线" },
-                                            { k: "offline", t: "离线" }
-                                        ]
-                                        delegate: Md3Chip {
-                                            required property var modelData
-                                            md3: shell.th
-                                            text: modelData.t
-                                            selected: shell.filterMode === modelData.k
-                                            onClicked: shell.filterMode = modelData.k
-                                        }
-                                    }
-                                    Item { Layout.fillWidth: true }
-                                    Text {
-                                        text: shell.visibleDevices().length + " 台"
-                                        font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                        color: shell.th ? shell.th.cOutline : "#79747E"
-                                    }
-                                }
-
-                                // ── 设备网格（S7 响应式列数）──
-                                GridLayout {
-                                    Layout.fillWidth: true
-                                    columns: shell.gridColumns(dashCol.width)
-                                    columnSpacing: shell.th ? shell.th.spM : 16
-                                    rowSpacing: shell.th ? shell.th.spM : 16
-
-                                    Repeater {
-                                        model: shell.visibleDevices()
-                                        delegate: DeviceCard {
-                                            required property var modelData
-                                            Layout.fillWidth: true
-                                            Layout.preferredHeight: 168
-                                            md3: shell.th
-                                            uid: modelData.uid || ""
-                                            deviceName: modelData.name || ""
-                                            online: modelData.online !== false
-                                            version: modelData.version || ""
-                                            lastSeenAgoSec: (modelData.lastSeenAgoSec === undefined)
-                                                          ? -1 : modelData.lastSeenAgoSec
-                                            selected: shell.openUid === (modelData.uid || "")
-                                            onClicked: {
-                                                const uid = modelData.uid || ""
-                                                shell.openUid = uid
-                                                // H1：同时写宿主的「看哪台」真源 —— SideSheet 三键
-                                                // 与危险动作的目标都从 backend.currentUid 取。
-                                                if (uid !== "" && backend) backend.currentUid = uid
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    visible: shell.visibleDevices().length === 0
-                                    text: shell.filterMode === "all"
-                                          ? "这个班还没有设备"
-                                          : ("当前筛选（" + (shell.filterMode === "online" ? "在线" : "离线")
-                                             + "）下没有设备")
-                                    font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                    color: shell.th ? shell.th.cOutline : "#79747E"
-                                }
-
-                                // ── S3 动作排行 + S2 存储概况 + S4 最近回执 ──
-                                // 横屏双卡并排；竖屏单列堆叠（ GridLayout 列数随朝向，
-                                // 不是两套布局代码）
-                                GridLayout {
-                                    Layout.fillWidth: true
-                                    Layout.bottomMargin: shell.th ? shell.th.spS : 8
-                                    columns: shell.portrait ? 1 : 2
-                                    columnSpacing: shell.th ? shell.th.spM : 16
-                                    rowSpacing: shell.th ? shell.th.spM : 16
-
-                                    // S3 动作排行（Md3Card）
-                                    Md3Card {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 208
-                                        md3: shell.th
-                                        variant: "elevated"
-                                        ColumnLayout {
-                                            anchors.fill: parent
-                                            spacing: shell.th ? shell.th.spS : 8
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                Text {
-                                                    text: "动作排行 · 近 7 天"
-                                                    font.pixelSize: shell.th ? shell.th.titleS : 14
-                                                    font.weight: Font.Medium
-                                                    color: shell.th ? shell.th.cOnSurface : "#1D1B20"
-                                                }
-                                                Item { Layout.fillWidth: true }
-                                                Text {
-                                                    text: "刷新"
-                                                    font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                    color: shell.th ? shell.th.cPrimary : "#6750A4"
-                                                    MouseArea {
-                                                        anchors.fill: parent
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: {
-                                                            backend.fetchActionRanking()
-                                                            shell.toast("已刷新动作排行")
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Repeater {
-                                                model: backend.actionRanking ? backend.actionRanking.slice(0, 5) : []
-                                                delegate: RowLayout {
-                                                    required property var modelData
-                                                    // ⚠️ 不用 `required property int index`：Repeater 的
-                                                    //    index 是上下文属性，声明成 required 在部分版本会拿不到值。
-                                                    Layout.fillWidth: true
-                                                    spacing: shell.th ? shell.th.spS : 8
-                                                    Text {
-                                                        text: (index + 1)
-                                                        font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                        font.weight: index < 3 ? Font.Bold : Font.Normal
-                                                        color: index < 3 ? (shell.th ? shell.th.cPrimary : "#6750A4")
-                                                                         : (shell.th ? shell.th.cOnSurfaceVar : "#49454F")
-                                                    }
-                                                    Text {
-                                                        Layout.fillWidth: true
-                                                        elide: Text.ElideRight
-                                                        text: shell.actionLabel(modelData.action)
-                                                        font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                        color: shell.th ? shell.th.cOnSurface : "#1D1B20"
-                                                    }
-                                                    Text {
-                                                        text: "成功 " + modelData.ok + " / " + modelData.total
-                                                        font.pixelSize: shell.th ? shell.th.labelS : 11
-                                                        color: shell.th ? shell.th.cOnSurfaceVar : "#49454F"
-                                                    }
-                                                }
-                                            }
-                                            Text {
-                                                Layout.fillWidth: true
-                                                visible: !backend.actionRanking || backend.actionRanking.length === 0
-                                                text: "还没有排行数据（连上云端后自动统计）"
-                                                font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                wrapMode: Text.WordWrap
-                                                color: shell.th ? shell.th.cOutline : "#79747E"
-                                            }
-                                            Item { Layout.fillHeight: true }
-                                        }
-                                    }
-
-                                    // S2 存储概况 + S4 最近回执（Md3Card）
-                                    Md3Card {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 208
-                                        md3: shell.th
-                                        variant: "elevated"
-                                        ColumnLayout {
-                                            anchors.fill: parent
-                                            spacing: shell.th ? shell.th.spS : 8
-                                            Text {
-                                                text: "云端存储概况"
-                                                font.pixelSize: shell.th ? shell.th.titleS : 14
-                                                font.weight: Font.Medium
-                                                color: shell.th ? shell.th.cOnSurface : "#1D1B20"
-                                            }
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: "已知设备 " + (backend.storage.knownDevices !== undefined ? backend.storage.knownDevices : "—")
-                                                      + " · 班级 " + (backend.storage.classes !== undefined ? backend.storage.classes : "—")
-                                                      + " · 事件文件 " + (backend.storage.eventsFiles !== undefined ? backend.storage.eventsFiles : "—")
-                                                font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                wrapMode: Text.WordWrap
-                                                color: shell.th ? shell.th.cOnSurfaceVar : "#49454F"
-                                            }
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: "最近回执"
-                                                font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                font.weight: Font.Medium
-                                                color: shell.th ? shell.th.cOnSurface : "#1D1B20"
-                                                topPadding: shell.th ? shell.th.spXS : 4
-                                            }
-                                            Repeater {
-                                                model: shell.recentResults().slice(0, 4)
-                                                delegate: RowLayout {
-                                                    required property var modelData
-                                                    Layout.fillWidth: true
-                                                    spacing: shell.th ? shell.th.spS : 8
-                                                    Text {
-                                                        text: modelData.t || ""
-                                                        font.pixelSize: shell.th ? shell.th.labelS : 11
-                                                        color: shell.th ? shell.th.cOutline : "#79747E"
-                                                    }
-                                                    Text {
-                                                        Layout.fillWidth: true
-                                                        elide: Text.ElideRight
-                                                        text: shell.actionLabel(modelData.action) + " · " + (modelData.uid || "")
-                                                        font.pixelSize: shell.th ? shell.th.labelS : 11
-                                                        color: shell.th ? shell.th.cOnSurfaceVar : "#49454F"
-                                                    }
-                                                    Text {
-                                                        text: modelData.ok ? "成功" : "失败"
-                                                        font.pixelSize: shell.th ? shell.th.labelS : 11
-                                                        color: modelData.ok
-                                                               ? (shell.th ? shell.th.cPrimary : "#6750A4")
-                                                               : (shell.th ? shell.th.cError : "#B3261E")
-                                                    }
-                                                }
-                                            }
-                                            Text {
-                                                Layout.fillWidth: true
-                                                visible: shell.recentResults().length === 0
-                                                text: "还没有回执（下发动作后这里会显示执行结果）"
-                                                font.pixelSize: shell.th ? shell.th.bodyS : 12
-                                                wrapMode: Text.WordWrap
-                                                color: shell.th ? shell.th.cOutline : "#79747E"
-                                            }
-                                            Item { Layout.fillHeight: true }
-                                        }
-                                    }
-                                }
+                        // ① 仪表盘（S1/S2/S3/S4/S5/S7 全在 pages/DashPage.qml）
+                        // 抽件原因：本文件已到登记上限（710 行），内联 270 行不允许再长。
+                        DashPage {
+                            md3: shell.th
+                            host: shell.ctx ? shell.ctx.window : null
+                            devices: shell.classDevices()
+                            stats: shell.stats()
+                            portrait: shell.portrait
+                            filterMode: shell.filterMode
+                            openUid: shell.openUid
+                            toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
+                            onFilterChanged: function (m) { shell.filterMode = m }
+                            onDeviceActivated: function (uid) {
+                                shell.openUid = uid
+                                // H1：同时写宿主「看哪台」真源（SideSheet 与危险动作都取它）
+                                if (uid !== "" && backend) backend.currentUid = uid
                             }
                         }
 
-                        // ② 班级看板：复用已交付的看板页（零重复，行为与 page 4 一致）
-                        // ⚠️ 本文件 2026-10-22 从 pages/ 移入 shell/，Loader 源改相对路径
-                        //    "../pages/..."（否则解析到 shell/ 下不存在的文件，静默不加载）。
-                        Loader {
-                            source: "../pages/AdminDashboard.qml"
-                            onLoaded: if (item) item.ctx = shell.ctx
+                        // ② 班级工作台（#461-#472）：左身份 / 中设备网格+展板 / 右动作+Timeline
+                        // 数据走班级域 backend.classService（#460 typed 服务）。
+                        // 旧「班级看板」页（AdminDashboard.qml）文件保留，page 4 仍用它。
+                        ClassDashboard {
+                            id: classDash
+                            md3: shell.th
+                            host: shell.ctx ? shell.ctx.window : null
+                            cs: backend ? backend.classService : null
+                            devices: backend ? backend.devices : []
+                            toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
                         }
 
                         // ③ 系统设置：复用已交付的设置页（零重复）

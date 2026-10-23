@@ -486,61 +486,21 @@ Item {
                         anchors.margins: cc.tSpM
                         spacing: cc.tSpS
 
-                        // 模式切换：MD3 SegmentedButton（底色区分选中，无边框无药丸）
-                        Row {
+                        // 模式切换：共享组件 Md3SegmentedButton（2026-10-23 #461 收编）
+                        // 原先是这里一段 56 行内联实现 —— 班级工作台中栏「设备↔展板」
+                        // 是同一范式，收编到 Stelarith-shared-qml/ui/md3/ 后全库一份。
+                        // ⚠️ current 是 var：layoutMode 是 int（0/1/2），段 value 必须同型。
+                        Md3SegmentedButton {
                             id: segRow
                             anchors.horizontalCenter: parent.horizontalCenter
-                            height: 32
-                            spacing: cc.tSpXS
-                            Repeater {
-                                model: [
-                                    { icon: "monitor",     label: "仅屏幕",   mode: 1, tip: "只看被控端屏幕" },
-                                    { icon: "layout-grid", label: "",         mode: 0, tip: "双画面：屏幕 + 摄像头" },
-                                    { icon: "video",       label: "仅摄像头", mode: 2, tip: "只看摄像头实时流" }
-                                ]
-                                delegate: Rectangle {
-                                    height: 32
-                                    // 文字段 = 图标 + 文字 + 左右各 12 内边距；纯图标段定宽 44
-                                    width: modelData.label !== ""
-                                           ? (16 + 6 + segTx.implicitWidth + 24)
-                                           : 44
-                                    radius: cc.tRM
-                                    color: cc.layoutMode === modelData.mode
-                                           ? cc.tSegBg
-                                           : (segMa.containsMouse ? cc.tCardHi : "transparent")
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 6
-                                        SvgIcon {
-                                            id: segIcon
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            name: modelData.icon
-                                            px: 16
-                                            tint: cc.layoutMode === modelData.mode ? cc.tSegFg : cc.tFg3
-                                        }
-                                        Text {
-                                            id: segTx
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            visible: modelData.label !== ""
-                                            text: modelData.label
-                                            color: cc.layoutMode === modelData.mode ? cc.tSegFg : cc.tFg3
-                                            font.pixelSize: cc.tLabelM
-                                        }
-                                    }
-                                    MouseArea {
-                                        id: segMa
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: cc.layoutMode = modelData.mode
-                                    }
-                                    ToolTip {
-                                        visible: segMa.containsMouse
-                                        delay: 400
-                                        text: modelData.tip
-                                    }
-                                }
-                            }
+                            md3: cc.theme
+                            model: [
+                                { value: 1, label: "仅屏幕",   icon: "monitor",     tip: "只看被控端屏幕" },
+                                { value: 0, label: "",         icon: "layout-grid", tip: "双画面：屏幕 + 摄像头" },
+                                { value: 2, label: "仅摄像头", icon: "video",       tip: "只看摄像头实时流" }
+                            ]
+                            current: cc.layoutMode
+                            onActivated: function (v) { cc.layoutMode = v }
                         }
 
                         // 画面台（最深底色，像一块"屏幕"）
