@@ -10,8 +10,8 @@
 //
 // 本卡纯展示，零信号零动作 —— 没有可交互的东西就不发信号（宁缺毋滥）。
 import QtQuick
-import "../components/md3"     // Md3Card
-import "../island"             // SvgIcon
+import "../../components/md3"     // Md3Card
+import "../../island"             // SvgIcon
 
 Item {
     id: pane

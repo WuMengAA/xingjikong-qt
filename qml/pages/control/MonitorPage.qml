@@ -15,7 +15,7 @@
 //   ctx.window = 主界面 root；backend = C++ 上下文属性（本文件内可直接访问）
 import QtQuick
 import QtQuick.Layouts
-import "../components/md3"
+import "../../components/md3"
 
 Item {
     id: page

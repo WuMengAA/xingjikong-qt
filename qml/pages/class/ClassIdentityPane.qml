@@ -13,8 +13,8 @@
 // 数据真源：backend.classService（#460 typed 服务）。本面板只读 + 发一个
 // 退订信号，不自己存任何班级状态（避免第二份真源）。
 import QtQuick
-import "../components/md3"     // Md3Card / Md3Btn
-import "../island"             // SvgIcon
+import "../../components/md3"     // Md3Card / Md3Btn
+import "../../island"             // SvgIcon
 
 Item {
     id: pane

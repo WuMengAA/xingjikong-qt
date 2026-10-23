@@ -39,13 +39,14 @@
 // ⚠️ 刻意**不用** ctx.window.filteredDevices：它叠加了集控页左栏 chip 的状态，
 //   老师在那页筛过"离线"再进本页会只剩离线设备（本页有自己的 chip，见 S5）。
 //
-// ctx 形状与 pages/ControlPage.qml 同一份契约（Main.qml 的 _pageCtx）。
+// ctx 形状与 pages/control/ControlPage.qml 同一份契约（Main.qml 的 _pageCtx）。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components/md3"     // Md3Card / Md3Chip / Md3Btn（全局组件库，AGENTS.md §9.3）
 import "../shell"              // Sidebar / TopBar / ActionBar / DeviceCard / SideSheet（同目录骨架件）
-import "../pages"              // ClassDashboard（班级工作台 · #472）
+import "../pages/dashboard"     // DashPage（仪表盘三件）
+import "../pages/class"          // ClassDashboard（班级工作台 · #472）
 import "../island"             // SvgIcon
 
 Item {
@@ -300,7 +301,7 @@ Item {
                         Layout.bottomMargin: shell.th ? shell.th.spM : 16
                         currentIndex: shell.sectionIndex
 
-                        // ① 仪表盘（S1/S2/S3/S4/S5/S7 全在 pages/DashPage.qml）
+                        // ① 仪表盘（S1/S2/S3/S4/S5/S7 全在 pages/dashboard/）
                         // 抽件原因：本文件已到登记上限（710 行），内联 270 行不允许再长。
                         DashPage {
                             md3: shell.th
@@ -343,7 +344,7 @@ Item {
                             id: controlLoader
                             Component.onCompleted: {
                                 if (shell.ctx)
-                                    setSource("../pages/ControlPage.qml", { "ctx": shell.ctx })
+                                    setSource("../pages/control/ControlPage.qml", { "ctx": shell.ctx })
                             }
                         }
 
@@ -354,7 +355,7 @@ Item {
                             id: monitorLoader
                             Component.onCompleted: {
                                 if (!shell.ctx) return
-                                setSource("../pages/MonitorPage.qml", {
+                                setSource("../pages/control/MonitorPage.qml", {
                                     "ctx": shell.ctx,
                                     "backFn": function () { shell.section = "dash" }
                                 })
@@ -363,7 +364,7 @@ Item {
 
                         // ⑤ 系统设置：复用已交付的设置页（零重复）
                         Loader {
-                            source: "../pages/SettingsPage.qml"
+                            source: "../pages/settings/SettingsPage.qml"
                             onLoaded: if (item) item.ctx = shell.ctx
                         }
                     }

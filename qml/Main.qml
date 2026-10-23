@@ -13,7 +13,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
-import "pages"             // U5 A-2：抽出的整屏页（「页」也声明化的第一步；见 pages/SettingsPage.qml）
 // 2026-10-22：全局主框架（App Scaffold · MainWindow）——原 pages/Md3Shell.qml 更名移入。
 // 它是管理端唯一应用外壳（侧栏+顶栏+内容区+状态条），业务页经它挂载；见 AGENTS.md §9。
 import "shell"

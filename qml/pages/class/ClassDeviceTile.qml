@@ -11,7 +11,7 @@
 //
 // 数据真源：ClassDeviceModel（typed）—— 本件只收标量属性，不碰 backend。
 import QtQuick
-import "../island"          // SvgIcon
+import "../../island"          // SvgIcon
 
 Item {
     id: root

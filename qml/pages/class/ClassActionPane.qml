@@ -11,8 +11,8 @@
 // 只认云端 knownDevices 表口径的 classCode 字段（与 ClassService 班级域同一权威）。
 // 反馈走注入的 toastFn（宿主页级 toast）：探针实例化时为空则静默，真机有反馈。
 import QtQuick
-import "../components/md3"     // Md3Btn
-import "../island"             // SvgIcon
+import "../../components/md3"     // Md3Btn
+import "../../island"             // SvgIcon
 
 Item {
     id: pane

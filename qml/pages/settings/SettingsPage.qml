@@ -1,12 +1,12 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../components"     // Btn / ToggleRow（本端自有通用组件）
+import "../../components"     // Btn / ToggleRow（本端自有通用组件）
 // 2026-10-18：MD3 布局组件（Md3SwitchRow / Md3ListItem / Md3NavBar…）。
 // 真源在 Stelarith-shared-qml/ui/md3/，构建时由 CMake copy_directory 落到
 // qml/Stelarith/components/md3/ —— 故源码树下 qmllint 解析不到（磁盘加载模式），
 // 以「构建 + 运行」验证为准，与岛同套路。
-import "../components/md3"
+import "../../components/md3"
 
 // 设置页（整屏页 · U5「两端同 shell」A-2 第一页）
 //

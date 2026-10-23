@@ -12,7 +12,7 @@
 //       解析失败（脏数据）显示 "——" 而不崩、不显示 Invalid Date。
 import QtQuick
 import QtQuick.Controls          // ScrollBar
-import "../island"               // SvgIcon
+import "../../island"               // SvgIcon
 
 Item {
     id: pane

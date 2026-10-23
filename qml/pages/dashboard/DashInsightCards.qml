@@ -7,7 +7,7 @@
 // 空态一律写人话（"连上云端后自动统计"），不摆 0 假装有数据。
 import QtQuick
 import QtQuick.Layouts
-import "../components/md3"     // Md3Card
+import "../../components/md3"     // Md3Card
 
 GridLayout {
     id: cards

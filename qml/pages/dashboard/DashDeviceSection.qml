@@ -8,8 +8,8 @@
 // 事件原样抛给宿主——不自己改 openUid、不自己写 backend（选择路径只有一条）。
 import QtQuick
 import QtQuick.Layouts
-import "../components/md3"     // Md3Card / Md3Chip
-import "../shell"              // DeviceCard
+import "../../components/md3"     // Md3Card / Md3Chip
+import "../../shell"              // DeviceCard
 
 ColumnLayout {
     id: sec

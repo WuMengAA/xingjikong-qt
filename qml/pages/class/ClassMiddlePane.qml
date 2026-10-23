@@ -9,8 +9,8 @@
 //   · 选中态、分段态都由宿主传，事件原样抛回（deviceClicked）。
 import QtQuick
 import QtQuick.Layouts
-import "../components/md3"     // Md3SegmentedButton
-import "../island"             // （SvgIcon 由子件自带，这里不直接用）
+import "../../components/md3"     // Md3SegmentedButton
+import "../../island"             // （SvgIcon 由子件自带，这里不直接用）
 
 Item {
     id: pane
