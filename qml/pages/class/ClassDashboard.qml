@@ -139,6 +139,17 @@ Item {
                     openControlFn: dash.openControlFn
                     onPublishRequested: publishDlg.open()
                 }
+                // 课堂工具（2026-10-25 教室小工具第一刀）：对全班一键的音量档位 /
+                // 专注 / 噪音监测。独立面板而不是塞进 ClassActionPane —— 那个已顶
+                // 200 行红线，且语义不同（那边是电源类危险动作，这边是教学常用）。
+                ClassToolPane {
+                    width: parent.width
+                    md3: dash.md3
+                    host: dash.host
+                    cs: dash.cs
+                    devices: dash.devices
+                    toastFn: dash.toastFn
+                }
                 ClassTimelinePane {
                     width: parent.width
                     height: Math.max(120, parent.height - 220)

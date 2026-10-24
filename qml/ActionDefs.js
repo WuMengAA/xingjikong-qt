@@ -198,6 +198,48 @@ function manifest() {
           order: 90, surfaces: ["command"],
           keys: ["overview", "gailan", "gl"], tip: "查看设备在线状态、最近回执与今日课表" },
 
+        // ══ 课堂工具（2026-10-25 · 教室小工具第一刀）═════════════════════
+        // 落点**全部是被控端已有指令**，管理端此前只有单机音量滑块（volume 那条），
+        // 班级场景缺"对全班一键"。这里补批量入口，被控端零改动、零新协议。
+        // ⚠️ 音量三档用固定值而不是滑块：批量场景下"拖到一半点下发"没法对 40 台
+        //    逐台确认，档位是老师真正会用的形状（静音 / 标准 / 大声）。
+        // ⚠️ study_mode / noise_monitor 在被控端有「本地开关」门：学生机自己关了
+        //    噪音监测，这两条会回 skipped（不是失败）⇒ 回执里看得见，不会假装成功。
+        { id: "pick-volume-mute", title: "全班静音", palName: "将全班设备设为静音",
+          kind: "special", action: "set_volume", params: { value: 0 },
+          group: "课堂", wide: true, bulk: true, order: 70, surfaces: ["action"],
+          keys: ["mute", "jingyin", "jy"], tip: "把全班在线设备的系统主音量设为 0" },
+
+        { id: "pick-volume-low", title: "音量 30%", palName: "将全班设备音量设为 30%",
+          kind: "special", action: "set_volume", params: { value: 30 },
+          group: "课堂", bulk: true, order: 71, surfaces: ["action"],
+          keys: ["volume30", "yl30"], tip: "把全班在线设备的系统主音量设为 30%" },
+
+        { id: "pick-volume-high", title: "音量 80%", palName: "将全班设备音量设为 80%",
+          kind: "special", action: "set_volume", params: { value: 80 },
+          group: "课堂", bulk: true, order: 72, surfaces: ["action"],
+          keys: ["volume80", "yl80"], tip: "把全班在线设备的系统主音量设为 80%" },
+
+        { id: "pick-study-on", title: "开启专注模式", palName: "对全班开启专注模式",
+          kind: "special", action: "study_mode_start",
+          group: "课堂", bulk: true, order: 73, surfaces: ["action"],
+          keys: ["study", "zhuanzhu", "zz"], tip: "对全班开启专注模式（自习/课堂静音纪律）" },
+
+        { id: "pick-study-off", title: "结束专注模式", palName: "对全班结束专注模式",
+          kind: "special", action: "study_mode_stop",
+          group: "课堂", bulk: true, order: 74, surfaces: ["action"],
+          keys: ["studyoff", "zzoff"], tip: "对全班结束专注模式，恢复正常提醒" },
+
+        { id: "pick-noise-on", title: "开启噪音监测", palName: "对全班开启噪音监测",
+          kind: "special", action: "noise_monitor_start",
+          group: "课堂", bulk: true, order: 75, surfaces: ["action"],
+          keys: ["noise", "zaoyin", "zy"], tip: "对全班开启噪音监测（超阈值留证）" },
+
+        { id: "pick-noise-off", title: "关闭噪音监测", palName: "对全班关闭噪音监测",
+          kind: "special", action: "noise_monitor_stop",
+          group: "课堂", bulk: true, order: 76, surfaces: ["action"],
+          keys: ["noiseoff", "zyoff"], tip: "对全班关闭噪音监测" },
+
         { id: "page-control", palOrder: 19, title: "前往屏幕监视", kind: "app", app: "page", payload: "1",
           order: 91, surfaces: ["command"],
           keys: ["control", "kongzhi", "kz"], tip: "查看设备实时画面并下发操作" },
@@ -254,13 +296,13 @@ function manifest() {
 }
 
 /** 需要自定义分支的 id 清单（宿主 SPECIAL 表的键）—— 供回归断言核对两边不漏。 */
+/** special 类的 id 清单（供门禁比对「宿主 runSpecial 的 case 是否齐全」）。
+ *  2026-10-25：改成**从 manifest() 派生**。原来是手抄的 18 个 id —— 那正是本文件
+ *  立件要消灭的「多份清单」病的残余：加了 7 个课堂工具条目忘了抄这里，门禁立刻报
+ *  「宿主有、声明没有」。手抄清单 = 迟早漏，派生才是单一真源。 */
 function specialIds() {
-    return ["software-list", "volume", "schedule",
-            "voice-toggle", "voice-start", "voice-stop",
-            "screen-toggle", "screen-start", "screen-stop",
-            "exam-toggle", "exam-start", "exam-stop",
-            "select-all", "pick-clear", "pick-lock", "pick-lock-all", "pick-shutdown",
-            "refresh-devices"];
+    return manifest().filter(function (p) { return p.kind === "special" })
+                     .map(function (p) { return p.id });
 }
 
 /** app 类的 app 子类型（宿主按它分派到 5 个固定本地方法）。 */

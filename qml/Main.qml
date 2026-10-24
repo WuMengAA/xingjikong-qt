@@ -872,7 +872,10 @@ ApplicationWindow {
             return true
         }
 
-        if (p.kind === "send") { backend.sendAction(p.action, {}); return true }
+        // 2026-10-25：params 口子。原来是 `{}` 硬编码 —— 被控端一堆带参指令
+        // （set_volume 的 value、noise_monitor 的 intervalMs）从管理端发出去全是
+        // 默认值。无 params 的条目行为与改造前逐字一致（`|| {}`）。
+        if (p.kind === "send") { backend.sendAction(p.action, p.params || {}); return true }
         if (p.kind === "panel") { openOnly(p.panel); return true }
         if (p.kind === "app") return root.runApp(p)
 
@@ -888,6 +891,16 @@ ApplicationWindow {
         if (p.app === "external") { backend.openExternal(p.payload); return true }
         backend.reportUnsupported(p.title, "未知的 app 类型：" + p.app)
         return false
+    }
+
+    /** 取动作的展示名（供批量 toast / 确认框用）。
+     *  为什么要有它：MainWindow.runBulk 原来是
+     *  `(actionId === "pick-lock") ? "锁定桌面" : "远程重启"` 的二元组 —— 只有两个
+     *  批量动作时恰好蒙对，加第三个（课堂工具）就会把"全班静音"显示成"远程重启"。
+     *  回执上写错动作名 = 骗人，故 label 也收敛到注册表这唯一真源。 */
+    function actionLabel(id) {
+        const p = uiReg.byId(id)
+        return (p && p.title) ? p.title : id
     }
 
     /** special 类（需要多步/条件）。分支体**照搬**改造前各处原实现，行为不变。 */
@@ -954,6 +967,23 @@ ApplicationWindow {
         case "pick-lock":     root.runOnPicked("lock"); return true
         case "pick-lock-all": root.runOnPicked(""); return true
         case "pick-shutdown": root.runOnPicked("shutdown"); return true
+
+        // ── 课堂工具（2026-10-25 · 教室小工具第一刀）──
+        // 表驱动：指令名与参数**全部取自声明**（ActionDefs 的 action / params 字段，
+        // params 是 UiContract 2026-10-25 新增的 object 字段）。宿主只做"批量执行"
+        // 这一件事 —— 每工具各抄一行 runOnPicked 的话，加一个工具要改两处，
+        // 漏一处就是静默不一致（U4 立件要治的正是这个病）。
+        case "pick-volume-mute":
+        case "pick-volume-low":
+        case "pick-volume-high":
+        case "pick-study-on":
+        case "pick-study-off":
+        case "pick-noise-on":
+        case "pick-noise-off": {
+            const q = uiReg.byId(id)
+            root.runOnPicked(q.action, q.params)
+            return true
+        }
 
         // ── 系统 ──
         case "refresh-devices": backend.requestDevices(); return true
@@ -1281,7 +1311,9 @@ ApplicationWindow {
     }
     /** 对选中设备批量下发。a 为空 = 对全部在线设备（Ctrl+Shift+L 走这条）。
      *  权限判据直接问 permOk(a)：a 就是 action 名，adminOnlyActions 里那批都要管理员。 */
-    function runOnPicked(a) {
+    /** 批量执行入口。params = 该批动作的指令参数（2026-10-25 课堂工具：音量档位）。
+     *  不传 = 不发参数，行为与改造前逐字一致。 */
+    function runOnPicked(a, params) {
         if (!permOk(a)) {
             backend.reportDenied("锁屏 / 关机")
             return
@@ -1309,14 +1341,15 @@ ApplicationWindow {
             root.askDanger(a, list.length, list, list.length === 1 ? list[0] : "")
             return
         }
-        root.doBatch(a, list)
+        root.doBatch(a, list, params)
     }
 
     /** 批量下发循环体（从 runOnPicked 原样拆出，行为不变）。
      *  ⚠️ label 改走 dangerLabel()：原来的三元表达式只认 lock/shutdown，
      *     reboot 会原样显示成英文 `reboot已下发 3 台`（顺手一并修，就在本条路径上）。 */
-    function doBatch(a, list) {
+    function doBatch(a, list, params) {
         const label = root.dangerLabel(a)
+        const extra = (params && Object.keys(params).length > 0) ? params : null
         root.batchStart(label + (list.length > 1 ? " " + list.length + " 台" : ""), list)
         const dead = []
         let sent = 0
@@ -1325,7 +1358,7 @@ ApplicationWindow {
             if (!root.isDevOnline(list[i])) { dead.push(list[i]); continue }
             // 2026-10-21（审查 #6）：sendActionTo 显式目标 —— 原来逐台改 currentUid，
             // 批量越大主画面抖得越凶、最后一台被选中；"发给谁"与"看哪台"分开。
-            backend.sendActionTo(list[i], a, {})
+            backend.sendActionTo(list[i], a, extra || {})
             sent += 1
         }
         for (let j = 0; j < dead.length; ++j) root.batchStep(dead[j], false, "设备不在线")

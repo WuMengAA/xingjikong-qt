@@ -81,6 +81,15 @@ Column {
                 openControlFn: stack.openControlFn
                 onPublishRequested: stack.publishRequested()
             }
+            // 课堂工具（2026-10-25）：与横屏右栏同一面板，竖屏同样要能一键对全班。
+            ClassToolPane {
+                width: parent.width
+                md3: stack.md3
+                host: stack.host
+                cs: stack.cs
+                devices: stack.devices
+                toastFn: stack.toastFn
+            }
             ClassTimelinePane {
                 width: parent.width
                 height: 180
