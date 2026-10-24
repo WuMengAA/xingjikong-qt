@@ -19,8 +19,15 @@ Item {
     property var deviceModel: null
     property bool subscribed: false
     property string selectedUid: ""
-    /** 当前段：devices / board（宿主持有，切段不改数据）。 */
+    /** 当前段：devices / board / members（宿主持有，切段不改数据）。
+     *  members = 成员管理（2026-10-24 方案 B）：设备移出/换班。 */
     property string tab: "devices"
+    /** members 段用：换班目标名单（backend.classes）。 */
+    property var classes: []
+    /** members 段用：当前班码。 */
+    property string classCode: ""
+    /** members 段用：外壳页级 toast。 */
+    property var toastFn: null
 
     signal deviceClicked(string uid)
     signal tabActivated(string tab)
@@ -28,7 +35,8 @@ Item {
     // 分段定义只写一份（横竖屏共用）
     readonly property var segModel: [
         { value: "devices", label: "设备网格", icon: "layout-grid", tip: "本班设备实时画面" },
-        { value: "board",   label: "班级展板", icon: "tv",          tip: "教室大屏常亮视图（规划中）" }
+        { value: "board",   label: "班级展板", icon: "tv",          tip: "教室大屏常亮视图（规划中）" },
+        { value: "members", label: "成员管理", icon: "users",        tip: "设备移出本班 / 换到别的班" }
     ]
 
     Column {
@@ -47,7 +55,7 @@ Item {
         StackLayout {
             width: parent.width
             height: parent.height - seg.height - 12
-            currentIndex: pane.tab === "board" ? 1 : 0
+            currentIndex: pane.tab === "board" ? 1 : (pane.tab === "members" ? 2 : 0)
 
             ClassDeviceGrid {
                 md3: pane.md3
@@ -57,6 +65,13 @@ Item {
                 onDeviceClicked: function (uid) { pane.deviceClicked(uid) }
             }
             ClassBoardPane { md3: pane.md3 }
+            ClassMemberPane {
+                md3: pane.md3
+                deviceModel: pane.deviceModel
+                classes: pane.classes
+                classCode: pane.classCode
+                subscribed: pane.subscribed
+            }
         }
     }
 }

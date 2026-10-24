@@ -200,6 +200,9 @@ qt_add_executable(viewer-qt
   src/class/class_event_model.h
   src/class/class_service.cpp
   src/class/class_service.h
+  # 班级管理写操作（2026-10-24 方案 B）：HTTP /api/class/*，只发不存状态
+  src/class/class_admin.cpp
+  src/class/class_admin.h
   src/class/class_thumb_provider.cpp
   src/class/class_thumb_provider.h
   ${STE_SINGLEINSTANCE_SRC}

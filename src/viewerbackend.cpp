@@ -5,6 +5,7 @@
 #include "vnc_client.h"       // 2026-10-18：远控 VNC 客户端（libvncclient，RFB over WS）
 #include "vnc_image_provider.h" // 远控画面 → QML（image://vnc/live）
 #include "class/class_service.h"   // 班级域（#460）：ClassService + typed Models
+#include "class/class_admin.h"     // 班级管理写操作（2026-10-24 方案 B）
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
 #include "audio_playback.h"  // B6（2026-10-11）：winmm waveOut 播放学生回传的 audio/pcm
 #include "opus_codec.h"      // 2026-10-21（P1）：Opus 解码（shared/audio，与 agent 同源）
@@ -167,6 +168,9 @@ ViewerBackend::ViewerBackend(QObject *parent)
     m_classService = new ClassService(this);
     connect(m_classService, &ClassService::sendRequested,
             this, &ViewerBackend::sendEnvelope);
+    // 班级管理写操作（2026-10-24 方案 B）：自带 QNAM，凭据每次现取
+    // httpBaseUrl()/viewerToken()（与 InteractBridge 同口径，不落第二份）。
+    m_classAdmin = new ClassAdmin(this, this);
     // 身份与提醒开关先落下来（QSettings），后面所有门控判断都基于它。
     loadPrefs();
     // 主题三档（E4，2026-10-11）：0 浅色 / 1 深色 / 2 跟随系统。默认浅色，读自 QSettings。
@@ -1053,10 +1057,14 @@ void ViewerBackend::setCurrentUid(const QString &uid)
     emit statsChanged();
     // 2026-10-08：带画面页不可见（用户切到概览/批量/设置）时**不订阅**——
     // 退订即停流，云端不再往这台推帧，省流量也省被控端抓屏开销。回到该页由 setScreenActive(true) 再订阅。
+    // 2026-10-24：原来这里 `if (!m_screenActive) return;` —— 但 m_screenActive 由外壳
+    //   按"当前栏目是否带画面"维护，实测在集控页上也会被判成 false（真机日志：
+    //   "切到 X，但带画面页不可见，暂不订阅"），结果选中设备后既不下发 remote_control_start
+    //   也不订阅画面 —— 远控整条链起不来。订阅本身很便宜（云端只是把 uid 加进集合），
+    //   正确性优先：选中就订阅，离开页面由 setScreenActive(false) 统一退订。
     if (!m_screenActive) {
-        logf("[viewer] 切到 %s，但带画面页不可见，暂不订阅其画面（回到集控页再拉流）",
+        logf("[viewer] 切到 %s（页面标记为不可见，仍先订阅以保证远控能起来）",
              uid.toUtf8().constData());
-        return;
     }
     logf("[viewer] 切到 %s，向云端订阅它的画面", uid.toUtf8().constData());
     QJsonObject sp;
@@ -1079,8 +1087,20 @@ void ViewerBackend::setCurrentUid(const QString &uid)
         sendAction(QStringLiteral("remote_control_start"), rc);
         m_remoteControlling = true;
         m_remoteControlUid = uid;
+        m_pendingVncUid = uid;   // 等回执/兜底再拉 VNC（见下）
         logf("[viewer] 选中即远控：已对 %s 下发 remote_control_start", uid.toUtf8().constData());
-        startVnc(uid);   // 2026-10-18：接管即拉起 VNC 会话（RFB over WS）
+        // ⚠️ 2026-10-24 修复（VNC 从未通过的根因）：
+        //   原来这里是「发指令」和「startVnc」在同一毫秒执行 —— 而被控端要等指令
+        //   到达后才起抓屏线程、绑 127.0.0.1:5900、接桥。管理端立刻连过去，等不到
+        //   "RFB 003.008"，rfbInitClient 直接失败（日志"连接或握手未完成"），
+        //   于是整场远控都退回 JPEG 轮询照片（1fps，无交互）。
+        //   现在改为**等被控端回执确认 VNC 已起**再拉（见 instruction-result 分支），
+        //   并留一个 2s 兜底定时器（回执丢失时不至于永远不拉）。
+        QTimer::singleShot(2000, this, [this, uid]() {
+            if (m_pendingVncUid != uid || m_vncActive) return;
+            logf("[viewer] 2s 兜底：仍未见回执，直接拉起 VNC（uid=%s）", uid.toUtf8().constData());
+            startVnc(uid);
+        });
     } else {
         logf("[viewer] 选中 %s 但未自动进远控（role=%s，远控能力=%d）——权限或设备能力不满足",
              uid.toUtf8().constData(), role().toUtf8().constData(),
@@ -1092,6 +1112,10 @@ void ViewerBackend::setScreenActive(bool on)
 {
     if (m_screenActive == on) return;
     m_screenActive = on;
+    // 诊断（2026-10-24）：这个标记直接决定"选中设备要不要订阅/拉 VNC"，
+    // 但它被 QML 多处置位，出问题时完全看不见 —— 每次翻转都留痕。
+    logf("[viewer] 画面页可见性 -> %s（当前设备 %s）", on ? "可见" : "不可见",
+         m_currentUid.isEmpty() ? "(无)" : m_currentUid.toUtf8().constData());
     if (m_currentUid.isEmpty()) return;   // 没选设备，无所谓订阅
     QJsonObject sp;
     sp.insert(QStringLiteral("uid"), m_currentUid);
@@ -1392,6 +1416,15 @@ void ViewerBackend::onTextMessage(const QString &text)
             m_remoteControlling = false;
             m_remoteControlUid.clear();
             stopVnc();
+        }
+        // 2026-10-24：被控端确认 VNC 已起 → 这时候才拉 VNC 客户端（修「必然握手失败」竞态）。
+        //   判据用 m_pendingVncUid（点"接管"时置位），不用 m_remoteControlling ——
+        //   被控端看门狗收口回执会把后者清掉（真实踩坑）。
+        if (action == QStringLiteral("remote_control_start") && !m_vncActive
+            && !uid.isEmpty() && uid == m_pendingVncUid
+            && result != QStringLiteral("failed")) {
+            logf("[viewer] 被控端 VNC 已就绪，拉起客户端（uid=%s）", uid.toUtf8().constData());
+            startVnc(uid);
         }
         // 探活的往返时间只有 backend 知道（发出时刻记在这儿），算好塞进 data 给界面用
         if (action == QStringLiteral("ping") && m_pingSentMs > 0) {
@@ -2370,6 +2403,12 @@ void ViewerBackend::setVncState(const QString &s)
 void ViewerBackend::startVnc(const QString &uid)
 {
     if (uid.isEmpty()) return;
+    // 幂等：同一台已经在连/已连上，就不要再重启会话（重启必然打断正在进行的握手）。
+    if (m_vncActive && m_vncUid == uid) {
+        logf("[viewer] VNC 会话已在 %s 上，忽略重复拉起", uid.toUtf8().constData());
+        return;
+    }
+    m_vncUid = uid;
     if (!m_vnc) {
         m_vnc = new VncClient(this);
         connect(m_vnc, &VncClient::frameReady, this, &ViewerBackend::onVncFrame);
@@ -2408,6 +2447,7 @@ void ViewerBackend::startVnc(const QString &uid)
     logf("[viewer] 拉起 VNC 会话：uid=%s（RFB 字节走主 WS 的 vnc-data 帧）",
          uid.toUtf8().constData());
     m_vnc->start(m_vncPassword);
+    m_pendingVncUid.clear();   // 已拉起，兜底定时器不再需要动手
 
     // ⚠️ 2026-10-18 深夜实证修复：这里**不能退订**！云端 vncDataToViewer 只投给
     //    「订阅中」的管理端（谁订阅投谁），退订之后被控端的 up 帧会被云端静默丢弃
@@ -2421,6 +2461,8 @@ void ViewerBackend::stopVnc()
 {
     if (!m_vncActive && !m_vnc) return;
     m_vncActive = false;
+    m_vncUid.clear();
+    m_pendingVncUid.clear();
     m_vncBtnMask = 0;
     if (m_vnc) m_vnc->stop();
     if (m_vncProvider) m_vncProvider->clear();
@@ -2441,6 +2483,10 @@ void ViewerBackend::stopVnc()
 void ViewerBackend::onVncData(const QByteArray &data)
 {
     if (data.isEmpty()) return;
+    // 2026-10-24 诊断：vnc-data 是否真到达管理端（此前只能看被控端"已发"，到达与否是黑盒）
+    static int dbgVncIn = 0;
+    if (dbgVncIn < 8)
+        logf("[viewer] vnc-data 到达 #%d：%d 字节", ++dbgVncIn, data.size());
     if (!m_vnc) {
         logf("[viewer] WARN 收到 vnc-data 但 VNC 客户端未建立（丢弃 %d 字节）", data.size());
         return;
@@ -2470,6 +2516,14 @@ void ViewerBackend::onVncFrame(const QImage &img)
     if (m_frameCount % 30 == 1) {
         logf("[viewer] 远控画面在动[VNC]：第 %d 帧（%dx%d）",
              m_frameCount, img.width(), img.height());
+    }
+    // 取证开关（2026-10-24）：设 STE_VNC_CAPTURE=<png 路径> 时，每 60 帧把**实际解出并送屏**
+    // 的画面落盘一张。排障时"到底有没有画面"不该靠猜或靠人盯着看 —— 直接看图。
+    static const QString capPath = qEnvironmentVariable("STE_VNC_CAPTURE", QString()).trimmed();
+    if (!capPath.isEmpty() && m_frameCount % 60 == 1) {
+        if (img.save(capPath, "PNG"))
+            logf("[viewer] 取证帧已落盘：%s（第 %d 帧 %dx%d）",
+                 capPath.toUtf8().constData(), m_frameCount, img.width(), img.height());
     }
 }
 

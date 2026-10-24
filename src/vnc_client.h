@@ -114,11 +114,14 @@ private:
 
     int m_dbgOutLogged = 0;          // 出站日志计数（只打头几帧，诊断用）
     int m_dbgInLogged = 0;           // 入站日志计数（只打头几帧，诊断用）
+    int m_dbgPendingLogged = 0;      // 早到字节暂存日志计数（诊断用）
     qint64 m_lastKeepaliveMs = 0;    // 修复③：上次管理端保活时刻（每 5s 一个 1x1 增量请求）
 
 #ifdef STE_USE_LIBVNCCLIENT
     // 仅开开关时编译的 libvncclient 私有逻辑
-    bool setupClient();              // 建 rfbClient 并连本机回环端口
+    // 建 rfbClient 并连本机回环端口。announce=false 时失败只记日志、不抛 Error
+    // （重试流程里中间几次失败不该让 UI 判定"远控挂了"）。
+    bool setupClient(bool announce = true);
     void drainEvents();              // 把 m_evts 里的键鼠事件交给 libvncclient
     void onFramebufferUpdate(int x, int y, int w, int h); // 拷像素 → QImage → frameReady
     static quint32 vkToKeysym(int vk); // VK → X11 keysym（RFB 键码用 keysym）

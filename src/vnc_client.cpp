@@ -112,7 +112,15 @@ void VncClient::onLocalNewConnection()
 {
     while (m_srv && m_srv->hasPendingConnections()) {
         QTcpSocket *s = m_srv->nextPendingConnection();
-        if (m_sock) { s->abort(); s->deleteLater(); continue; }   // 只认一条（本进程自连）
+        // 2026-10-24：握手重试会重复连本机回环 —— 新连接必须**顶掉**上一次的旧 socket，
+        // 否则重试永远被"只认一条"挡掉，等于重试无效。
+        if (m_sock) {
+            m_sock->disconnect(this);
+            m_sock->abort();
+            m_sock->deleteLater();
+            m_sock = nullptr;
+            logf("[viewer-vnc] 重试：丢弃上一条回环 socket");
+        }
         m_sock = s;
         connect(m_sock, &QTcpSocket::readyRead, this, &VncClient::onLocalReadyRead);
         connect(m_sock, &QTcpSocket::disconnected, this, [this]() {
@@ -145,7 +153,10 @@ void VncClient::flushPendingInput()
         QMutexLocker l(&m_inMutex);
         pending.swap(m_pendingIn);
     }
-    if (!pending.isEmpty()) m_sock->write(pending);
+    if (!pending.isEmpty()) {
+        const qint64 n = m_sock->write(pending);
+        logf("[viewer-vnc] 补写早到字节 %d 字节（write 返回 %lld）", pending.size(), (long long)n);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,6 +180,11 @@ void VncClient::feedIncoming(const QByteArray &data)
             m_pendingIn.clear();
         }
         m_pendingIn.append(data);
+        // 2026-10-24 诊断：这条路径原来是静默的 —— 早到字节到底有没有攒下、后来有没有补写，
+        // 排障时完全看不见（生产上表现为"agent 说发了 12 字节，viewer 毫无反应"）。
+        if (m_dbgPendingLogged < 6)
+            logf("[viewer-vnc] 入站暂存 #%d：%d 字节（回环 socket 未就绪，累计 %d）",
+                 ++m_dbgPendingLogged, data.size(), m_pendingIn.size());
         return;
     }
     // 对端（libvncclient）读得慢时，Qt 写缓冲会无限涨 —— 超阈值主动断开，
@@ -214,7 +230,27 @@ void VncClient::sendKeyVk(int vk, bool down)
 void VncClient::runLoop()
 {
 #ifdef STE_USE_LIBVNCCLIENT
-    if (!setupClient()) return;
+    // 2026-10-24 实测修复（VNC 从未通过的真因 · 第二条）：
+    //   被控端收到 remote_control_start 之后要起抓屏线程、绑 5900、接桥，实测比管理端
+    //   慢 1~3 秒。而原来这里是「握一次失败就 return」——日志实证：失败后 2 秒，
+    //   被控端的 'RFB 003.008' 12 字节才到（此时会话已停，字节无人接收）。
+    //   ⇒ 生产上 VNC 永远起不来，画面只能退回 JPEG 轮询（1fps，无交互）。
+    //   改为失败重试：15 次 × 600ms ≈ 9 秒窗口，覆盖被控端起服耗时；中途不抛 Error。
+    bool ok = false;
+    for (int attempt = 1; attempt <= 15 && !m_stopReq.loadRelaxed(); ++attempt) {
+        if (setupClient(attempt == 1)) { ok = true; break; }
+        if (m_stopReq.loadRelaxed()) break;
+        if (attempt == 1 || attempt % 5 == 0)
+            logf("[viewer-vnc] 握手未成（第 %d 次），600ms 后重试 —— 被控端可能还在起 VNC",
+                 attempt);
+        for (int i = 0; i < 6 && !m_stopReq.loadRelaxed(); ++i)
+            QThread::msleep(100);
+    }
+    if (!ok) {
+        logf("[viewer-vnc] 握手重试 15 次仍未成功，本次远控放弃（退回轮询画面）");
+        if (!m_stopReq.loadRelaxed()) emit stateChanged(Error);
+        return;
+    }
     // ⚠️ 客户端主循环用 WaitForMessage + HandleRFBServerMessage：
     //    `rfbProcessEvents` 是**服务端** API（rfb.h，签名收 rfbScreenInfoPtr），
     //    客户端根本没有这个符号 —— 照抄服务端写法会链接失败。
@@ -274,7 +310,7 @@ void VncClient::runLoop()
 // rfbClientSetClientData/GetClientData 的 tag：只要求是稳定地址，不必有内容。
 static char kSelfTag = 0;
 
-bool VncClient::setupClient()
+bool VncClient::setupClient(bool announce)
 {
     // 8/3/4 只是库内部初始缓冲参数；最终像素格式由下面的 format 决定。
     m_cl = rfbGetClient(8, 3, 4);
@@ -344,9 +380,10 @@ bool VncClient::setupClient()
     if (!rfbInitClient(m_cl, nullptr, nullptr)) {
         // ⚠️ rfbInitClient 失败时**它自己已经调过 rfbClientCleanup**（内部 free(client)），
         //    这里再 cleanup 就是 double free，只能把指针丢掉。
-        logf("[viewer-vnc] rfbInitClient 失败（连接或握手未成）");
+        logf("[viewer-vnc] rfbInitClient 失败（连接或握手未成）%s",
+             announce ? "" : "（重试中，稍后再试）");
         m_cl = nullptr;
-        emit stateChanged(Error);
+        if (announce) emit stateChanged(Error);
         return false;
     }
 

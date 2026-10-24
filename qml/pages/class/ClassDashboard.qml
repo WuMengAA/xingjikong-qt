@@ -95,7 +95,7 @@ Item {
             onUnsubscribeRequested: if (dash.cs) dash.cs.unsubscribeClass()
         }
 
-        // 中：设备网格 / 班级展板（分段切换，横竖屏共用 ClassMiddlePane）
+        // 中：设备网格 / 班级展板 / 成员管理（分段切换，横竖屏共用 ClassMiddlePane）
         ClassMiddlePane {
             width: Math.max(320, dash.width - 260 - 320 - (dash.md3 ? dash.md3.spM : 16) * 2)
             height: parent.height
@@ -104,11 +104,13 @@ Item {
             subscribed: (dash.cs && dash.cs.subscribed === true)
             selectedUid: dash.selectedUid
             tab: dash.boardTab
+            classes: (typeof backend !== "undefined" && backend) ? backend.classes : []
+            classCode: (dash.cs && dash.cs.classCode) ? dash.cs.classCode : ""
             onTabActivated: function (v) { dash.boardTab = v }
             onDeviceClicked: function (uid) { dash.onTileClicked(uid) }
         }
 
-        // 右：动作 + 时间线
+        // 右：管理 + 动作 + 时间线
         Item {
             width: 320
             height: parent.height
@@ -117,6 +119,14 @@ Item {
                 anchors.fill: parent
                 spacing: 16
 
+                // 班级管理（2026-10-24 方案 B）：建/改名/删。管"班"本身；
+                // 成员（设备去留）走中栏「成员管理」tab。两处不混。
+                ClassAdminPane {
+                    width: parent.width
+                    md3: dash.md3
+                    cs: dash.cs
+                    toastFn: dash.toastFn
+                }
                 ClassActionPane {
                     width: parent.width
                     md3: dash.md3
@@ -138,62 +148,24 @@ Item {
         }
     }
 
-    // ══ 竖屏：竖排（身份 → 中栏 → 动作 → 时间线，中段以下可滚动）══
-    Column {
+    // ══ 竖屏：竖排栈（抽件 ClassPortraitStack：身份 → 中栏 → 动作 → 时间线）══
+    ClassPortraitStack {
         anchors.fill: parent
         visible: dash.portrait
-        spacing: 12
-
-        ClassIdentityPane {
-            width: parent.width
-            md3: dash.md3
-            cs: dash.cs
-            pending: dash.pending
-            onUnsubscribeRequested: if (dash.cs) dash.cs.unsubscribeClass()
-        }
-
-        Flickable {
-            width: parent.width
-            height: parent.height - 200
-            contentHeight: pCol.implicitHeight
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
-
-            Column {
-                id: pCol
-                width: parent.width
-                spacing: 12
-
-                ClassMiddlePane {
-                    width: parent.width
-                    height: 260
-                    md3: dash.md3
-                    deviceModel: dash.devModel
-                    subscribed: (dash.cs && dash.cs.subscribed === true)
-                    selectedUid: dash.selectedUid
-                    tab: dash.boardTab
-                    onTabActivated: function (v) { dash.boardTab = v }
-                    onDeviceClicked: function (uid) { dash.onTileClicked(uid) }
-                }
-
-                ClassActionPane {
-                    width: parent.width
-                    md3: dash.md3
-                    host: dash.host
-                    cs: dash.cs
-                    devices: dash.devices
-                    selectedUid: dash.selectedUid
-                    selectedName: dash.selectedName()
-                    toastFn: dash.toastFn
-                    openControlFn: dash.openControlFn
-                }
-                ClassTimelinePane {
-                    width: parent.width
-                    height: 180
-                    md3: dash.md3
-                    model: dash.evModel
-                }
-            }
-        }
+        md3: dash.md3
+        cs: dash.cs
+        host: dash.host
+        devices: dash.devices
+        devModel: dash.devModel
+        evModel: dash.evModel
+        pending: dash.pending
+        boardTab: dash.boardTab
+        selectedUid: dash.selectedUid
+        selectedName: dash.selectedName()
+        toastFn: dash.toastFn
+        openControlFn: dash.openControlFn
+        onTabActivated: function (v) { dash.boardTab = v }
+        onDeviceClicked: function (uid) { dash.onTileClicked(uid) }
+        onUnsubscribeRequested: if (dash.cs) dash.cs.unsubscribeClass()
     }
 }

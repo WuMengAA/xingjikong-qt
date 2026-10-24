@@ -37,6 +37,7 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 
 class PermissionManager;   // RBAC（2026-10-20）：前端权限镜像层，仅持裸指针，不引入头依赖
 class ClassService;        // 班级域（#460）：前向声明即可（Q_PROPERTY 指针 + 访问器）
+class ClassAdmin;          // 班级管理写操作（2026-10-24 方案 B）：前向声明即可
 
 // ── 文件推送共享符号（2026-10-13 架构拆分）──
 // viewerbackend.cpp / viewerbackend_file.cpp 两个翻译单元共享：常量用 constexpr
@@ -212,6 +213,9 @@ class ViewerBackend : public QObject
     // ClassService 持 typed Models（设备网格 + Timeline）与缩略图缓存，自己不认识 WS：
     // 出海发信号经本类 sendEnvelope 出，入站由 onClassDomainMessage 转进来。
     Q_PROPERTY(ClassService *classService READ classService CONSTANT)
+    // 班级管理（2026-10-24 方案 B）：写操作调用层（建/改名/删/移出，HTTP）。
+    // QML：backend.classAdmin.createClass("高二(3)班")，结果连 opFinished 信号。
+    Q_PROPERTY(ClassAdmin *classAdmin READ classAdmin CONSTANT)
 
     // ── 远控（VNC over WS，libvncclient）状态 ──
     // vncActive：是否正在远控（画面走 VNC）。vncState：连接状态文案（连接中/已连接/断开/错误），
@@ -560,6 +564,8 @@ public:
     // ── 班级域（#460）──
     /** 班级工作台数据面。QML：backend.classService.deviceModel / .subscribeClass(code)。 */
     ClassService *classService() const { return m_classService; }
+    /** 班级管理写操作层。QML：backend.classAdmin.createClass/renameClass/…。 */
+    ClassAdmin *classAdmin() const { return m_classAdmin; }
     /** 摄像头第二轨最新帧（2026-10-12 · 四·双画面；无则空图）。 */
     QImage camFrame() const { return m_camFrame; }
     int cameraFrameCount() const { return m_camFrameCount; }
@@ -828,6 +834,11 @@ private:
     // ── 2026-10-11「选中即远控」状态：记住现在正接管哪台，切换/清空时好收尾 ──
     bool m_remoteControlling = false;
     QString m_remoteControlUid;
+    // 2026-10-24：已点"接管"、正在等被控端确认 VNC 就绪的 uid。
+    // 不能用 m_remoteControlling 当判据 —— 被控端看门狗收口时会回一条
+    // remote_control_stop，把 m_remoteControlling 清成 false，于是一次新的接管
+    // 永远等不到 startVnc（真实踩到：会话被提前收掉，画面回到 JPEG 轮询）。
+    QString m_pendingVncUid;
     // ── 2026-10-18 远控（VNC over WebSocket · libvncclient）──────────────
     // 与旧 P2 的「第二条隧道 WS」不同：RFB 字节走**主 WS** 的 vnc-data 二进制帧。
     // m_vncActive 期间，本机鼠标/键盘经 RFB PointerEvent/KeyEvent 下发（不再走
@@ -835,6 +846,10 @@ private:
     VncClient *m_vnc = nullptr;
     VncImageProvider *m_vncProvider = nullptr;   // 非拥有（engine 持有）
     bool m_vncActive = false;
+    // 当前 VNC 会话对应的设备 uid。用于幂等：同一台重复 startVnc 不再重启会话
+    //（2026-10-24：设备表每秒刷新 + 用户点击会让"选中"抖动，每次抖动都重启会话，
+    //  正握手的连接被 abort —— VNC 永远起不来）。
+    QString m_vncUid;
     QString m_vncState = QStringLiteral("idle");   // 连接中/已连接/已断开/连接失败
     quint8 m_vncBtnMask = 0;          // 当前鼠标按键位（RFB PointerEvent 用）
     QString m_vncPassword;            // 被控端 VNC 密码（STE_VNC_PASSWORD）
@@ -973,6 +988,8 @@ private:
 
     // ── 班级域（#460 · 2026-10-23）──
     ClassService *m_classService = nullptr;   // 班级工作台数据面（ctor 创建）
+    // 班级管理写操作（2026-10-24 方案 B）：只发 HTTP，不持有班级状态
+    ClassAdmin *m_classAdmin = nullptr;
 
     // ── 2026-10-11「进后台就连不上云端」修复（#4）：半开连接探活 ──
     // Android 后台网络被系统切断时，QWebSocket 是**半开连接**（不触发 connected/
