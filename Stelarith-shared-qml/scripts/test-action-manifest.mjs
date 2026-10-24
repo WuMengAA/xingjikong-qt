@@ -59,8 +59,9 @@ function ok(c, label) { if (!c) throw new Error(label || "断言失败"); }
 
 console.log("── 一、声明合法性 ──");
 t("两份清单合并后零问题（id 跨清单唯一）", () => eq(C.validate(items), [], "validate"));
-t("条目数 = 45（动作）+ 14（面板）", () => {
-	eq(A.manifest().length, 45, "ActionDefs");
+t("条目数 = 52（动作）+ 14（面板）", () => {
+	// 2026-10-25 教室小工具第一刀：45 → 52（新增 7 条课堂工具，见 fixture note）
+	eq(A.manifest().length, 52, "ActionDefs");
 	eq(U.manifest().length, 14, "UiPlugins");
 });
 

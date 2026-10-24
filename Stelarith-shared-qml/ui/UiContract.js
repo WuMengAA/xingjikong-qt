@@ -65,6 +65,13 @@ var FIELDS = [
     { name: "danger",   type: "bool",   dflt: false },
     { name: "admin",    type: "bool",   dflt: false },
     { name: "action",   type: "string", dflt: "" },
+    // ── 2026-10-25 教室小工具第一刀：send 类动作的指令参数 ──────────────
+    // 为什么加：Main.qml 的 send 分支原来是 `backend.sendAction(p.action, {})` ——
+    // 参数硬编码空对象。于是被控端一堆**本来就带参数**的指令（set_volume 的 value、
+    // noise_monitor_start 的 intervalMs、exam_mode 的 minutes/blacklist）从管理端
+    // 发出去全是默认值，想调音量只能派学生自己动手。这是通道缺陷，不是被控端缺陷。
+    // 形状：字面量对象（{ value: 60 }）。空/null = 不发参数，行为与改造前逐字一致。
+    { name: "params",   type: "object", dflt: null },
     { name: "entry",    type: "string", dflt: "" },
     { name: "keys",     type: "list",   dflt: [] },
     { name: "tip",      type: "string", dflt: "" },
@@ -160,6 +167,13 @@ function normalize(raw) {
             out[f.name] = !!v;
         } else if (f.type === "int") {
             out[f.name] = (typeof v === "number") ? (v | 0) : (parseInt(v, 10) || 0);
+        } else if (f.type === "object") {
+            // params：只收真对象（数组不算——它是按 key 取的映射，不是清单）。
+            // null/undefined = 不发参数（保持改造前行为）；其余原样保留引用
+            // （声明是静态字面量，运行期没人改它，深拷只会白白多一份）。
+            if (v === null || v === undefined) out[f.name] = null;
+            else if (typeof v === "object" && !isArray(v)) out[f.name] = v;
+            else out[f.name] = null;   // 形状不对按"无参数"降级，由 validate 报
         } else {
             out[f.name] = (v === null || v === undefined) ? "" : String(v);
         }
