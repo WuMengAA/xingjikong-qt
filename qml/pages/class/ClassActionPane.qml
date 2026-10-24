@@ -16,6 +16,10 @@ Item {
     property var toastFn: null
     property var openControlFn: null
 
+    /** 发布中心（P1）：请求打开发布弹窗。弹窗本体在页级（ClassDashboard）——
+     *  模态要盖整页，塞进右栏 320 宽会被裁（竖屏那只还在 Flickable 里）。 */
+    signal publishRequested()
+
     readonly property bool subbed: cs && cs.subscribed === true
     readonly property string code: (cs && cs.classCode) ? cs.classCode : ""
     implicitHeight: bodyCol.implicitHeight + 32
@@ -98,6 +102,17 @@ Item {
                     text: "本班 " + pane.classOnlineUids().length + " 台在线"
                     font.pixelSize: md3.bodyS
                     color: md3.frOffDot || "#9CA3AF"
+                }
+                // 发布中心：向全班教室黑板推卡片（与锁屏/关机同属「对全班」动作，
+                // 只是它推的是内容而不是指令）。不需要选中设备 —— 对象是整班。
+                FreshBtn {
+                    md3: pane.md3
+                    text: "发布中心"
+                    icon: "monitor"
+                    variant: "tonal"
+                    enabled: pane.subbed
+                    width: parent.width
+                    onClicked: pane.publishRequested()
                 }
             }
 

@@ -37,6 +37,13 @@ public:
     Q_INVOKABLE void addMember(const QString &code, const QString &uid, const QString &role);
     Q_INVOKABLE void removeMember(const QString &code, const QString &uid);
 
+    // ── 发布中心（P1 第一刀：通知三件套 + 作业）──
+    // publish 走 POST /api/class/publish，body { classCode, card:{type,title,body} }。
+    // type ∈ {student-notice, class-notice, fullscreen-notice, homework}（云端白名单，
+    // 非法类型/空内容/无权限 都回 opFinished(false, 人话)）。成功文案带送达/在线台数。
+    Q_INVOKABLE void publish(const QString &classCode, const QString &type,
+                             const QString &title, const QString &body);
+
 signals:
     /** 操作完成。ok=false 时 message 是云端给的人话错误（网络层失败也有兜底文案）。 */
     void opFinished(const QString &op, bool ok, const QString &message);

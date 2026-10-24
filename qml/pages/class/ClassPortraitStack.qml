@@ -24,6 +24,8 @@ Column {
     signal tabActivated(string v)
     signal deviceClicked(string uid)
     signal unsubscribeRequested()
+    /** 发布中心（P1）：由窗格发起，向上冒到 ClassDashboard 打开页级模态。 */
+    signal publishRequested()
 
     spacing: 12
 
@@ -77,6 +79,7 @@ Column {
                 selectedName: stack.selectedName
                 toastFn: stack.toastFn
                 openControlFn: stack.openControlFn
+                onPublishRequested: stack.publishRequested()
             }
             ClassTimelinePane {
                 width: parent.width

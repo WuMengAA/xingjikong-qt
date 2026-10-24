@@ -137,6 +137,7 @@ Item {
                     selectedName: dash.selectedName()
                     toastFn: dash.toastFn
                     openControlFn: dash.openControlFn
+                    onPublishRequested: publishDlg.open()
                 }
                 ClassTimelinePane {
                     width: parent.width
@@ -167,5 +168,16 @@ Item {
         onTabActivated: function (v) { dash.boardTab = v }
         onDeviceClicked: function (uid) { dash.onTileClicked(uid) }
         onUnsubscribeRequested: if (dash.cs) dash.cs.unsubscribeClass()
+        onPublishRequested: publishDlg.open()
+    }
+
+    // ══ 发布中心（P1）：页级模态 ══
+    // 刻意放在 dash 末尾而不是右栏内：右栏只有 320 宽且竖屏那只还在 Flickable 里，
+    // 模态塞进去会被裁切/跟着滚。盖整页才是对的，入口仍在右栏「班级管理」。
+    ClassPublishDialog {
+        id: publishDlg
+        md3: dash.md3
+        cs: dash.cs
+        toastFn: dash.toastFn
     }
 }

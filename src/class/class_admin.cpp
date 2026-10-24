@@ -121,6 +121,61 @@ void ClassAdmin::removeMember(const QString &code, const QString &uid)
     post(QStringLiteral("member-remove"), b);
 }
 
+// ── 发布中心（P1 第一刀：通知三件套 + 作业）──
+// 与 post() 同口径但单独写：成功文案要带"送达 N / 在线 M"台数（post() 通用分支没有这些字段），
+// 重认证门 / 网络失败兜底与 post() 一致。凭据现取 backend->httpBaseUrl() / viewerToken()。
+void ClassAdmin::publish(const QString &classCode, const QString &type,
+                        const QString &title, const QString &body)
+{
+    if (!m_backend) return;
+    const QString base = m_backend->httpBaseUrl();
+    const QString token = m_backend->viewerToken();
+    if (base.isEmpty()) {
+        emit opFinished(QStringLiteral("publish"), false,
+                        QStringLiteral("云端地址未配置，无法发布"));
+        return;
+    }
+    QJsonObject card;
+    card.insert(QStringLiteral("type"), type);
+    card.insert(QStringLiteral("title"), title);
+    card.insert(QStringLiteral("body"), body);
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), classCode);
+    b.insert(QStringLiteral("card"), card);
+
+    QNetworkRequest req(QUrl(base + QStringLiteral("/api/class/publish")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    if (!token.isEmpty())
+        req.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + token.toUtf8());
+    auto *r = m_nam->post(req, QJsonDocument(b).toJson(QJsonDocument::Compact));
+    connect(r, &QNetworkReply::finished, this, [this, r] {
+        r->deleteLater();
+        const int status = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonObject o = QJsonDocument::fromJson(r->readAll()).object();
+        if (status == 200 && o.value(QStringLiteral("ok")).toBool()) {
+            const int delivered = o.value(QStringLiteral("delivered")).toInt();
+            const int online = o.value(QStringLiteral("online")).toInt();
+            emit opFinished(QStringLiteral("publish"), true,
+                            QStringLiteral("已发布（送达 %1 / 在线 %2）").arg(delivered).arg(online));
+            return;
+        }
+        // 重认证门（403 + REAUTH_REQUIRED）：会话还在，弹重登提示即可。
+        const QString sem = o.value(QStringLiteral("code")).toString();
+        if (status == 403 && sem == QLatin1String("REAUTH_REQUIRED")) {
+            const QString msg = o.value(QStringLiteral("error")).toString();
+            emit reauthRequired(msg.isEmpty() ? QStringLiteral("需要重新验证密码") : msg);
+            emit opFinished(QStringLiteral("publish"), false,
+                            msg.isEmpty() ? QStringLiteral("需要重新验证密码") : msg);
+            return;
+        }
+        QString msg = o.value(QStringLiteral("error")).toString();
+        if (msg.isEmpty())
+            msg = r->error() == QNetworkReply::NoError
+                ? QStringLiteral("HTTP %1").arg(status) : r->errorString();
+        emit opFinished(QStringLiteral("publish"), false, msg);
+    });
+}
+
 void ClassAdmin::post(const QString &action, const QJsonObject &body)
 {
     if (!m_backend) return;
