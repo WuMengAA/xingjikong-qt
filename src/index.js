@@ -2670,11 +2670,21 @@ wss.on('connection', (ws) => {
       const agentChannel = (p.payload && typeof p.payload.channel === 'string' && p.payload.channel.trim())
         ? p.payload.channel.trim() : 'stable';
       const agentOta = latestFor('agent', agentChannel);
+      // 2026-10-24 修复：回执补带 classCode/className（取 knownDevices 表，含离线期
+      // 绑班的重连设备）—— 否则「离线期被绑班」的设备 register 自报空码、云端也不回
+      // 带，端侧 classcode.txt 永不落盘 ⇒ 缩略图上报 readyCheck 门（!g_classCode.isEmpty()）
+      // 永不开 ⇒ 班级工作台设备网格「暂无画面」。端侧收到后 saveClassCode 落盘。
+      // ⚠️ 只能走 registry 导出的 getDeviceClassCode / getDevice —— knownDevices 是
+      //     registry 模块私有 Map，index.js 直接引用会 ReferenceError（实测踩过）。
+      const cac = getDeviceClassCode(uid);
+      const cknownd = getDevice(uid);
       snd(ws, ws.__v1 === true ? 'registered' : 'registration-ok', {
         uid,
         server: 'stelarith-cloud-ws/0.4.0',
         heartbeatMs: HEARTBEAT_INTERVAL_MS,
         timeoutMs: HEARTBEAT_TIMEOUT_MS,
+        classCode: cac,
+        className: (cknownd && cknownd.name) || null,
         latestVersion: agentOta ? agentOta.version : null,
         updateUrl: agentOta ? agentOta.url : null,
         updateSha256: agentOta ? agentOta.sha256 : null,
