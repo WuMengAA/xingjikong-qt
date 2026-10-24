@@ -5863,6 +5863,17 @@ void handleControlText(const QString &text)
         }
         if (to > 0) g_timeoutMs = to;
         g_lastOnlineAt = QDateTime::currentMSecsSinceEpoch();
+        // 2026-10-24（闭环断点修复）：云端 registered 回执补带 classCode/className
+        // （knownDevices 表真源，含**离线期被绑班**的设备——它 register 自报空码，
+        // 本地 classcode.txt 也还没有，只能靠回执下发）。收到即幂等落盘：
+        //   · saveClassCode 内部已判空 + 落盘 + 更新 g_classCode
+        //   · 缩略图上报 readyCheck 门（!g_classCode.isEmpty()）靠它开启
+        const QString rcClassCode = pay.value(QStringLiteral("classCode")).toString().trimmed();
+        if (!rcClassCode.isEmpty())
+            saveClassCode(rcClassCode);
+        const QString rcClassName = pay.value(QStringLiteral("className")).toString().trimmed();
+        if (!rcClassName.isEmpty())
+            saveClassName(rcClassName);
         // 连上云端 = 这一版是活的（强制升级就靠这一个信号判定"新版本起没起来"）。
         // 注意要在 applyUpdateInfo **之前**执行：applyUpdateInfo 里可能立刻触发自动升级，
         // 而升级前的成功标记必须带着"我当前这一版是好的"这个事实走。
