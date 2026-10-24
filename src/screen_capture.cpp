@@ -141,12 +141,29 @@ public:
 
         // ② 缩放（仅在源≠输出时；COLORONCOLOR 是 GDI 缩放的常规质量档，
         //    比 HALFTONE 快一个量级，720p 画质足够）
+        // ⚠️ 2026-10-24 修复（生产事故）：旧写法 `StretchBlt(m_memDc, …, m_memDc, …)`
+        //    源和目标是**同一个 DC**，而此刻该 DC 里选中的是刚创建的空白输出位图
+        //    m_bmp，不是源位图 m_srcBmp —— 等于从空白位图自读自写 ⇒ 缩放输出恒全黑。
+        //    表现为 DXGI 不可用（Win7 / RDP / 无 D3D11）回落 GDI 时，VNC 720p 与
+        //    班级缩略图 320×180 全部黑帧（ThumbnailReporter 的 looksBlack 又把它
+        //    当成"锁屏/无内容"静默跳过，症状加倍隐蔽）。探针复现 + 修复对照见
+        //    temp/stretch_probe（跨 DC 缩放 3/64 黑 vs 旧写法 64/64 全黑）。
         if (m_bmp != m_srcBmp) {
-            HGDIOBJ oldDst = SelectObject(reinterpret_cast<HDC>(m_memDc), reinterpret_cast<HBITMAP>(m_bmp));
-            if (!oldDst) return nullptr;
+            // 源位图换到独立 DC 承载，与目标不共 DC，StretchBlt 才有真实的源可读
+            HDC srcDc = CreateCompatibleDC(reinterpret_cast<HDC>(m_screenDc));
+            if (!srcDc) return nullptr;
+            HGDIOBJ oldSrcBmp = SelectObject(srcDc, reinterpret_cast<HGDIOBJ>(m_srcBmp));
+            HGDIOBJ oldDst = SelectObject(reinterpret_cast<HDC>(m_memDc), reinterpret_cast<HGDIOBJ>(m_bmp));
+            if (!oldSrcBmp || !oldDst) {
+                if (oldSrcBmp) SelectObject(srcDc, oldSrcBmp);
+                DeleteDC(srcDc);
+                return nullptr;
+            }
             const BOOL sok = StretchBlt(reinterpret_cast<HDC>(m_memDc), 0, 0, m_w, m_h,
-                                        reinterpret_cast<HDC>(m_memDc), 0, 0, m_srcW, m_srcH, SRCCOPY);
+                                        srcDc, 0, 0, m_srcW, m_srcH, SRCCOPY);
             SelectObject(reinterpret_cast<HDC>(m_memDc), oldDst);
+            SelectObject(srcDc, oldSrcBmp);
+            DeleteDC(srcDc);
             if (!sok) return nullptr;
         }
 
