@@ -39,3 +39,22 @@ scripts/_*.ps1
 # 2026-10-23 #460：班级域探针构建脚本——与 _interact_probe.py 同款"可复跑前提"，
 # 放行（不放行 = 探针只能存在于某台机器上， CI/复验全都抓瞎）
 !scripts/_class_probe.py
+
+# ── 调试残留（2026-10-24 补：AI 代跑构建/探针的一次性产出，非入库物）──
+/_tools/
+/build-vnc/
+/build-android/
+/build*.txt
+/*_run.txt
+/*probe.txt
+/diag*.txt
+/dual*.txt
+/fix_run.txt
+/study_run.txt
+/cam_run.txt
+/audit_run.txt
+/qml/_*.qmlfrag
+/qml/*_backup.qml.txt
+/scripts/_class_admin_probe.cpp
+/scripts/_class_admin_probe.qml
+/scripts/_ui_panels_probe_md3.qml
