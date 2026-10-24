@@ -216,6 +216,19 @@ function rssMB(pid) {
       if (rss1 - rss0 > 400) throw new Error(`内存增量 ${rss1 - rss0}MB 异常（缩略图疑似进历史环）`);
     });
 
+    // ── ③ 限流专项（必须在背压分级**之前**跑：分级会把订阅连接缓冲打到 >8MB，
+    //    其后的 fanout 背压会连带跳过本场景的 test.rate，造成「限流未生效」假阴性）──
+    await ok('限流专项：同 uid×kind 二连发 → 第二条被 1s 闸门拒，订阅者只收 1 条', async () => {
+      const a = agents[0];
+      const before = viewer.inbox.length;
+      a.ws.send(JSON.stringify({ v: 1, type: 'class-event', id: 'f1', payload: { kind: 'test.rate', data: { n: 1 } } }));
+      a.ws.send(JSON.stringify({ v: 1, type: 'class-event', id: 'f2', payload: { kind: 'test.rate', data: { n: 2 } } }));
+      await sleep(1200);
+      const added = viewer.inbox.slice(before).filter((m) => m.type === 'class.event' && m.payload?.kind === 'test.rate').length;
+      console.log(`   同 kind 二连发，订阅者实收 ${added} 条（应为 1）`);
+      if (added !== 1) throw new Error(`限流未生效：实收 ${added}`);
+    });
+
     // ── ②b 背压分级：绕限流（每台独立 kind）猛灌 → 8MB fanout 背压真实触发 ──
     await ok('背压分级：每台独立 kind 绕限流猛灌 → 8MB fanout 背压跳过、连接不崩', async () => {
       const before = viewer.inbox.length;
@@ -237,18 +250,6 @@ function rssMB(pid) {
       if (rss1 - rss0 > 600) throw new Error(`内存增量 ${rss1 - rss0}MB 异常（缩略图疑似进历史环）`);
       // 订阅连接仍在 = 背压只是跳过，没有掐连接
       if (viewer.ws.readyState !== 1) throw new Error('订阅连接被掐断了！');
-    });
-
-    // ── ③ 限流专项：单台同 kind 二连发 → 第二条 throttled ──
-    await ok('限流专项：同 uid×kind 二连发 → 第二条被 1s 闸门拒，订阅者只收 1 条', async () => {
-      const a = agents[0];
-      const before = viewer.inbox.length;
-      a.ws.send(JSON.stringify({ v: 1, type: 'class-event', id: 'f1', payload: { kind: 'test.rate', data: { n: 1 } } }));
-      a.ws.send(JSON.stringify({ v: 1, type: 'class-event', id: 'f2', payload: { kind: 'test.rate', data: { n: 2 } } }));
-      await sleep(1200);
-      const added = viewer.inbox.slice(before).filter((m) => m.type === 'class.event' && m.payload?.kind === 'test.rate').length;
-      console.log(`   同 kind 二连发，订阅者实收 ${added} 条（应为 1）`);
-      if (added !== 1) throw new Error(`限流未生效：实收 ${added}`);
     });
 
     // ── ④ 缩略图不进历史环：新订者快照里无 thumbnail ──
