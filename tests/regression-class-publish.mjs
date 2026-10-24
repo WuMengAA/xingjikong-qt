@@ -90,10 +90,9 @@ function startCloud() {
       CLOUD_INTERACT_DB_FILE: join(WAR_DIR, 'interact.db'),
       CLOUD_CLASS_DIR_DB_FILE: join(WAR_DIR, 'class-dir.db'),
       CLOUD_CLASS_ROOM_DB_FILE: join(WAR_DIR, 'class-room.db'),
-      // 本测试只验证「发布 → 落 Timeline」的 fanout 链路；uid×kind 1s 限流闸门
-      // （class-events 的通用四闸门之一，本为缩略图预置）单独由 class-events 自己的
-      // 回归覆盖，这里关掉以免同一个 system 发布者两次发布被限流吞掉、干扰断言。
-      CLOUD_CLASS_EVENT_MIN_MS: '0',
+      // 刻意**不**关 CLASS_EVENT_MIN_MS（用默认 1s 真实值）：本测试要覆盖的正是
+      // 「限流开启时，连发两条不同内容的发布会不会被吞」这条真实路径 ——
+      // 修好前这里必然只剩 1 条。用例⑦⑧把它钉死（改回置 0 会让⑦⑧失去意义）。
       STE_QML_PATCH_DISABLE: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -272,6 +271,34 @@ try {
     const m = await waitFor(viewer.inbox, (x) => x.type === 'class.event' && x.payload?.kind === 'publish', 2500, from);
     assert.ok(m, `订阅者没收到 publish 事件：${JSON.stringify(viewer.inbox.slice(-5))}`);
     assert.equal(m.payload?.data?.type, 'class-notice');
+  });
+
+  // ⑦ 修复验证（2026-10-25）：uid×kind 粗粒度限流会静默吞掉 1s 内的第二条发布
+  // ⇒ 卡片照样推到设备、Timeline 却没痕迹。现在限流键并入内容指纹，不同内容放行。
+  await ok('连发两条不同内容：两条都进 Timeline（1s 限流不再误吞）', async () => {
+    const from = viewer.inbox.length;
+    await Promise.all([
+      call('POST', '/api/class/publish', { auth: VIEWER_TOKEN, body: { classCode: CLASS_MAIN, card: { type: 'class-notice', title: '通知A', body: '内容A' } } }),
+      call('POST', '/api/class/publish', { auth: VIEWER_TOKEN, body: { classCode: CLASS_MAIN, card: { type: 'class-notice', title: '通知B', body: '内容B' } } }),
+    ]);
+    await sleep(800);
+    const got = viewer.inbox.slice(from)
+      .filter((x) => x.type === 'class.event' && x.payload?.kind === 'publish');
+    assert.equal(got.length, 2,
+      `期望两条不同内容都留痕，实际 ${got.length} 条：${JSON.stringify(got.map((g) => g.payload?.data?.title))}`);
+  });
+
+  // ⑧ 反向守卫：防重复刷屏的能力必须保留 —— 老师手抖连点两下不该刷两条一样的时间线。
+  await ok('同一内容连点两下：只留一条（防重复刷屏保留）', async () => {
+    const from = viewer.inbox.length;
+    const same = { type: 'class-notice', title: '重复通知', body: '同样内容' };
+    await call('POST', '/api/class/publish', { auth: VIEWER_TOKEN, body: { classCode: CLASS_MAIN, card: same } });
+    await call('POST', '/api/class/publish', { auth: VIEWER_TOKEN, body: { classCode: CLASS_MAIN, card: same } });
+    await sleep(800);
+    const got = viewer.inbox.slice(from)
+      .filter((x) => x.type === 'class.event' && x.payload?.kind === 'publish');
+    assert.equal(got.length, 1,
+      `期望相同内容只留一条，实际 ${got.length} 条：${JSON.stringify(got.map((g) => g.payload?.data?.title))}`);
   });
 } catch (e) {
   fail++;

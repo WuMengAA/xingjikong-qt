@@ -240,8 +240,12 @@ export function adminPublish(code, card = {}, ident = null) {
   };
   // 推全班在线被控端（黑板渲染由被控端按 type 分流：全屏窗 / 顶部跑马灯）
   const r = sendToClassDevices(hit.code, 'blackboard-card', payload);
-  // 落 Timeline（与管理端订阅者共享同一 class-event 通道，老师端实时可见"发了什么"）
-  pushClassEvent(hit.code, 'publish', { type: t, title, body, from }, from);
+  // 落 Timeline（与管理端订阅者共享同一 class-event 通道，老师端实时可见"发了什么"）。
+  // distinctContent：限流键并入内容指纹 ⇒ 1s 内连发两条**不同**内容都留痕；
+  // 只有**内容相同**（老师手抖连点两下）才被限流吞掉。不加这个，第二条会被
+  // uid×kind 粗粒度闸门静默吞掉 —— 设备收到了、Timeline 没痕迹（查不出发过什么）。
+  pushClassEvent(hit.code, 'publish', { type: t, title, body, from }, from,
+                 { distinctContent: true });
   pushEvent('info', '管理端向班级发布卡片', {
     classCode: hit.code, type: t, delivered: r.delivered, online: r.online, from,
   });

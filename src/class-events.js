@@ -57,7 +57,29 @@ const classSubs = new Map();           // ws -> Set<classCode>
 /** 限流表：`${uid}|${kind}` -> 上次投递时间戳。每 uid×kind 最小间隔
  *  CLASS_EVENT_MIN_MS（默认 1s）——为 #459 缩略图（每台每 1s+ 一张）预置的闸门，
  *  现在没有高频发送方也开着：先立规矩，等负载真来了不用改协议。 */
-const lastDeliverAt = new Map();       // `${uid}|${kind}` -> ts
+const lastDeliverAt = new Map();       // `${uid}|${kind}`[`|${内容指纹}`] -> ts
+
+/** 稳定序列化（键序无关）：对象键先排序，保证 {a,b} 与 {b,a} 得到同一指纹。 */
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') {
+    const s = JSON.stringify(v);
+    return s === undefined ? 'null' : s;
+  }
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  return '{' + Object.keys(v).sort()
+    .map((kk) => JSON.stringify(kk) + ':' + stableStringify(v[kk])).join(',') + '}';
+}
+
+/** 内容指纹（FNV-1a 32 位 → base36）。给「同内容才算重复」的限流键当后缀。 */
+function contentFingerprint(data) {
+  const s = stableStringify(data);
+  let h = 2166136261;
+  for (let i = 0; i < s.length; ++i) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
 
 /** 事件自增 id（班级域内单调即可，用于端侧去重/回执对账）。 */
 let evSeq = 0;
@@ -227,7 +249,7 @@ export function removeViewerClasses(ws) {
  *
  * @returns {{ok:boolean, throttled?:boolean, id?:number, viewers?:number, code?:string, message?:string}}
  */
-export function pushClassEvent(code, kind, data, uid) {
+export function pushClassEvent(code, kind, data, uid, opts = {}) {
   const k = String(kind ?? '');
   if (!KIND_RE.test(k)) {
     return { ok: false, code: 'BAD_PAYLOAD', message: 'kind 格式不合法（小写开头，≤32 位 [a-z0-9_.-]）' };
@@ -244,7 +266,17 @@ export function pushClassEvent(code, kind, data, uid) {
 
   // 限流：同 uid×kind 最小间隔。命中不投递、不回错（这是正常负载保护，不是故障），
   // 回执带 throttled:true 让端侧知道自己被收了（纪律：不许静默丢弃）。
-  const tkey = `${uid}|${k}`;
+  //
+  // 键的口径（2026-10-25 修）：默认仍是 `uid|kind` —— #459/#496 缩略图的高频流
+  // 全靠它防刷屏（压测：60 台 ×40 张同 kind 被压到 60 条），这条结论不能破。
+  // 但发布中心正受害于这个粗粒度：老师 1s 内连发两条**不同**通知，第二条被当成
+  // "重复"静默吞掉 ⇒ 卡片照样推到设备、Timeline 却没痕迹（回头查不出发过什么）。
+  // 故给「内容即身份」的调用方开 opts.distinctContent：键并入内容指纹，
+  // 只有**内容相同**才算重复 —— 防重复刷屏保留，误吞不同内容消除。
+  const baseKey = `${uid}|${k}`;
+  const tkey = (opts && opts.distinctContent === true)
+    ? `${baseKey}|${contentFingerprint(data)}`
+    : baseKey;
   const now = Date.now();
   const last = lastDeliverAt.get(tkey) || 0;
   if (now - last < CLASS_EVENT_MIN_MS) {
