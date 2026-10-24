@@ -47,6 +47,7 @@ Item {
             id: seg
             anchors.horizontalCenter: parent.horizontalCenter
             md3: pane.md3
+            fresh: true
             model: pane.segModel
             current: pane.tab
             onActivated: function (v) { pane.tabActivated(v) }

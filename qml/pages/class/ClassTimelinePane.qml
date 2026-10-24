@@ -1,4 +1,4 @@
-// 班级工作台 · 右栏下「班级动态」时间线（#461-#472）
+// 班级工作台 · 右栏下「班级动态」时间线（#461-#472，2026-10-24 清新极简改版）
 //
 // 数据真源：ClassEventModel（typed，#460，新在头、id 水位去重、cap 200）——
 // 直接当 ListView 的 model。thumbnail 事件不进本模型（那是画面数据不是动态，
@@ -12,6 +12,7 @@
 //       解析失败（脏数据）显示 "——" 而不崩、不显示 Invalid Date。
 import QtQuick
 import QtQuick.Controls          // ScrollBar
+import "../../components/fresh"    // FreshCard
 import "../../island"               // SvgIcon
 
 Item {
@@ -37,106 +38,111 @@ Item {
         return { icon: "info", tint: "info", label: "班级事件" }
     }
 
-    ListView {
-        id: list
-        anchors.fill: pane
-        model: pane.model
-        clip: true
-        spacing: 4
-        cacheBuffer: 400
+    FreshCard {
+        anchors.fill: parent
+        md3: pane.md3
 
-        delegate: Rectangle {
-            width: list.width
-            height: row.implicitHeight + 12
-            radius: md3.rS
-            color: evMa.containsMouse ? md3.cCont : "transparent"
+        ListView {
+            id: list
+            anchors.fill: parent
+            model: pane.model
+            clip: true
+            spacing: 4
+            cacheBuffer: 400
 
-            Row {
-                id: row
-                anchors.fill: parent
-                anchors.margins: 6
-                spacing: 8
+            delegate: Rectangle {
+                width: list.width
+                height: row.implicitHeight + 12
+                radius: md3.frRS || 12
+                color: evMa.containsMouse ? md3.frLine || "#EEF0F3" : "transparent"
 
-                // 时间（等宽，事件流的"刻度"）
-                Text {
-                    text: pane.hhmm(model.at)
-                    font.pixelSize: md3.bodyS
-                    font.family: "monospace"
-                    color: md3.cOutline
-                    anchors.verticalCenter: parent.verticalCenter
-                }
+                Row {
+                    id: row
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    spacing: 8
 
-                SvgIcon {
-                    property var st: pane.kindStyle(model.kind, model.isMember)
-                    name: st.icon
-                    px: 14
-                    tint: st.tint === "ok" ? md3.cOk
-                          : st.tint === "out" ? md3.cOutline
-                          : md3.cInfo
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Column {
-                    spacing: 1
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 96
-
+                    // 时间（等宽，事件流的"刻度"）
                     Text {
-                        width: parent.width
-                        text: pane.kindStyle(model.kind, model.isMember).label
-                        font.pixelSize: md3.body13
-                        color: md3.cOnSurface
-                        elide: Text.ElideRight
-                    }
-                    // 第二行：设备名位（uid）+ detail 里的人话（离线原因等）
-                    Text {
-                        width: parent.width
-                        visible: (model.uid || "") !== "" || (model.detail || "") !== ""
-                        text: (model.uid || "") !== ""
-                              ? ((model.detail || "") !== ""
-                                     ? (model.uid + " · " + model.detail)
-                                     : model.uid)
-                              : (model.detail || "")
+                        text: pane.hhmm(model.at)
                         font.pixelSize: md3.bodyS
-                        color: md3.cOnSurfaceVar
-                        elide: Text.ElideRight
+                        font.family: "monospace"
+                        color: md3.frInk2 || "#6B7280"
+                        anchors.verticalCenter: parent.verticalCenter
                     }
+
+                    SvgIcon {
+                        property var st: pane.kindStyle(model.kind, model.isMember)
+                        name: st.icon
+                        px: 14
+                        tint: st.tint === "ok" ? (md3.frGreen || "#22C55E")
+                              : st.tint === "out" ? (md3.frOffDot || "#9CA3AF")
+                              : (md3.cInfo || "#3B82F6")
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Column {
+                        spacing: 1
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - 96
+
+                        Text {
+                            width: parent.width
+                            text: pane.kindStyle(model.kind, model.isMember).label
+                            font.pixelSize: md3.body13
+                            color: md3.frInk || "#111827"
+                            elide: Text.ElideRight
+                        }
+                        // 第二行：设备名位（uid）+ detail 里的人话（离线原因等）
+                        Text {
+                            width: parent.width
+                            visible: (model.uid || "") !== "" || (model.detail || "") !== ""
+                            text: (model.uid || "") !== ""
+                                  ? ((model.detail || "") !== ""
+                                         ? (model.uid + " · " + model.detail)
+                                         : model.uid)
+                                  : (model.detail || "")
+                            font.pixelSize: md3.bodyS
+                            color: md3.frInk2 || "#6B7280"
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                MouseArea {
+                    id: evMa
+                    anchors.fill: parent
+                    hoverEnabled: true
                 }
             }
 
-            MouseArea {
-                id: evMa
-                anchors.fill: parent
-                hoverEnabled: true
+            ScrollBar.vertical: ScrollBar { width: 8 }
+        }
+
+        // 空态：订了但没事件（新班/刚上线都正常，不是故障）
+        Column {
+            anchors.centerIn: parent
+            visible: list.count === 0
+            spacing: 10
+
+            SvgIcon {
+                name: "clock"
+                px: 36
+                tint: md3.frOffDot || "#9CA3AF"
+                anchors.horizontalCenter: parent.horizontalCenter
             }
-        }
-
-        ScrollBar.vertical: ScrollBar { width: 8 }
-    }
-
-    // 空态：订了但没事件（新班/刚上线都正常，不是故障）
-    Column {
-        anchors.centerIn: parent
-        visible: list.count === 0
-        spacing: 10
-
-        SvgIcon {
-            name: "clock"
-            px: 36
-            tint: md3.cOutline
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
-        Text {
-            text: "暂无班级动态"
-            font.pixelSize: md3.body13
-            color: md3.cOnSurfaceVar
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
-        Text {
-            text: "设备上下线等事件会实时出现在这里"
-            font.pixelSize: md3.bodyS
-            color: md3.cOutline
-            anchors.horizontalCenter: parent.horizontalCenter
+            Text {
+                text: "暂无班级动态"
+                font.pixelSize: md3.body13
+                color: md3.frInk2 || "#6B7280"
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+            Text {
+                text: "设备上下线等事件会实时出现在这里"
+                font.pixelSize: md3.bodyS
+                color: md3.frOffDot || "#9CA3AF"
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
         }
     }
 }

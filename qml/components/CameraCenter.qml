@@ -112,7 +112,8 @@ Item {
         property var th: ({})
         property string icon: ""
         property string tip: ""
-        property bool enabled: true
+        // 注：enabled 复用 Item.enabled（基类已提供），重复声明会触发
+        //     "Member enabled ... overrides a member of the base object" 告警。
         signal clicked()
         width: 40
         height: 40

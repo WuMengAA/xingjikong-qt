@@ -38,10 +38,10 @@ Item {
     Rectangle {
         id: cardBg
         anchors.fill: parent
-        radius: md3.rL
-        color: md3.cContLowest
+        radius: md3.frRCard || 18
+        color: md3.frCard || "#FFFFFF"
         border.width: root.selected ? 1.5 : 1
-        border.color: root.selected ? md3.cPrimary : md3.cOutlineVar
+        border.color: root.selected ? (md3.frGreen || "#22C55E") : (md3.frLine || "#EEF0F3")
         z: 1
     }
 
@@ -65,7 +65,7 @@ Item {
     Rectangle {
         anchors.fill: cardBg
         radius: md3.rL
-        color: md3.cPrimary
+        color: md3.frGreen || "#22C55E"
         opacity: root.selected ? 0.06 : 0
         Behavior on opacity { NumberAnimation { duration: md3.durShort } }
         z: 2
@@ -93,7 +93,7 @@ Item {
         anchors.topMargin: 20
         anchors.bottomMargin: 20
         anchors.leftMargin: 5
-        color: md3.cAccent
+        color: md3.frGreen || "#22C55E"
         z: 3
     }
 
