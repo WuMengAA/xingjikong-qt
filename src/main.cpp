@@ -32,6 +32,7 @@
 #include "core/ProcessUtil.h"    // 2026-10-22 §10 第二刀：通用进程等待（跨域复用）   // 2026-10-22 §10 第 1 刀：媒体工具层     // 2026-10-22：系统媒体识别（SMTC），起工作线程 + 元数据
 #include "core/ExecOut.h"     // 2026-10-23 §10 第 3 刀：指令执行结果（跨 TU 共享）
 #include "core/AgentSettings.h" // 2026-10-23 §10 第 4 刀：本地功能开关（原嵌在匿名域内，跨不了 TU）
+#include "core/BlackboardCard.h" // 2026-10-24 P1：发布中心卡片 → 通知参数（纯映射，可单测）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -5958,6 +5959,28 @@ void handleControlText(const QString &text)
             if (!name.isEmpty()) saveClassName(name);
             qInfo().noquote() << QStringLiteral("[agent-qt] 云端下发班级绑定：%1（%2），已落盘")
                                      .arg(code, name.isEmpty() ? QStringLiteral("（未带班名）") : name);
+        }
+        return;
+    }
+
+    // 发布中心（P1 · 2026-10-24）：管理端发布的卡片 → 按类型分流到既有展示通道。
+    // 类型→形态的映射是纯逻辑（core/BlackboardCard），这里只负责把结果交给
+    // notifyFromParams —— 考试门控 / 本机通知总开关 / 托盘留存 / TTS 朗读 全在它内部，
+    // 复用即自动生效（另写一套展示必然与它漂移，两份真源铁律）。
+    if (type == QStringLiteral("blackboard-card")) {
+        QJsonObject np;
+        QString why;
+        if (!BlackboardCard::toNotifyParams(pay, np, &why)) {
+            qWarning().noquote() << QStringLiteral("[agent-qt] 忽略黑板卡片：") << why;
+            return;
+        }
+        const QString err = notifyFromParams(np);
+        if (err.startsWith(QLatin1String("skipped:"))) {
+            // 考试中门控静默丢弃 —— 与 notify 指令同口径：转 skipped，不回 failed
+            // （管理端看到 failed 会重试/报警，和「像没收到一样」正好相反）。
+            qInfo().noquote() << QStringLiteral("[agent-qt] 黑板卡片被门控丢弃：") << err.mid(8);
+        } else if (!err.isEmpty()) {
+            qWarning().noquote() << QStringLiteral("[agent-qt] 黑板卡片展示失败：") << err;
         }
         return;
     }

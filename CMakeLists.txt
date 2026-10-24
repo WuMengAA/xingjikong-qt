@@ -195,6 +195,9 @@ add_executable(stelarith-agent-qt
   # ── 通用进程工具（2026-10-22 · 第 2 刀）：同步等进程退出但不卡主线程（录像/OTA/远控/终端共用）──
   src/core/ProcessUtil.cpp
   src/core/ProcessUtil.h
+  # ── 发布中心卡片 → 通知参数（2026-10-24 · P1）：纯映射逻辑，渲染复用 notifyFromParams ──
+  src/core/BlackboardCard.cpp
+  src/core/BlackboardCard.h
   # ── 远控隧道（2026-10-18 · RFB over WS）：agent 第二条 WS + 本地 VNC 纯字节桥 ──
   src/vnc_bridge.cpp
   src/vnc_bridge.h
