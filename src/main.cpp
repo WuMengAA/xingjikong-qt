@@ -5924,6 +5924,33 @@ void handleControlText(const QString &text)
         return;
     }
 
+    // 班级绑定下发（2026-10-24 · G4）：管理端在云端给本机绑班/改绑/移出后，
+    // 云端即向**在线**设备推 class-bound（registry.js notifyClassBoundIfOnline）。
+    // 没有这条推送时，在线设备要等下次重连（register 才带新码）才知道——
+    // 缩略图上报的 readyCheck 门（!g_classCode.isEmpty()）就一直不开 ⇒
+    // 班级工作台「暂无画面」。端侧落盘 + 更新全局，下一个缩略图 tick
+    // （默认 15s，STE_THUMB_INTERVAL_MS 可调）自动开工，无需额外唤醒。
+    // code 为空 = 被移出班级：删持久化文件 + 清全局（班级域数据停报）。
+    if (type == QStringLiteral("class-bound")) {
+        const QString code = pay.value(QStringLiteral("code")).toString().trimmed();
+        const QString name = pay.value(QStringLiteral("name")).toString().trimmed();
+        if (code.isEmpty()) {
+            if (!g_classCode.isEmpty()) {
+                g_classCode.clear();
+                QFile::remove(classCodePath());
+                qInfo("[agent-qt] 云端已将本机移出班级（classCode 已清，班级域上报停止）");
+            }
+            return;
+        }
+        if (code != g_classCode) {
+            saveClassCode(code);          // 落盘 + 更新 g_classCode（幂等）
+            if (!name.isEmpty()) saveClassName(name);
+            qInfo().noquote() << QStringLiteral("[agent-qt] 云端下发班级绑定：%1（%2），已落盘")
+                                     .arg(code, name.isEmpty() ? QStringLiteral("（未带班名）") : name);
+        }
+        return;
+    }
+
     // 语音对讲（2026-10-07）：老师开始/结束讲话 —— 重置"正在讲话"提示标记。
     // （提示的实际显示在收到第一帧音频时触发；stop 后下次 start 再提示。）
     // 2026-10-09 语音通话：duplex=true → 学生开 mic 采集回传（只回发起老师）。
