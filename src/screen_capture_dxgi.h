@@ -24,6 +24,12 @@
 //     节奏重建（限流 1s 一次），重建后首帧按全屏处理；
 //   · 独占全屏 DX 游戏：DWM 不合成 ⇒ 可能长时间无帧或 ACCESS_LOST，
 //     这是 DXGI 的已知边界（GDI 兜底同样抓不到），v1 接受。
+//
+// Win7 软兼容（2026-10-24）：DXGI Desktop Duplication 是 Win8+ 的系统能力，
+// Win7 上 CreateDXGIFactory/D3D11CreateDevice 可能成功（WDDM 1.1 有 D3D11），
+// 但 DuplicateOutput 必败（hr=E_NOTIMPL/DXGI_ERROR_UNSUPPORTED）⇒ init=false，
+// 门面 ScreenCapture::init 自动回落 GdiGrabber（screen_capture.cpp），
+// 缩略图上报与 VNC 在 Win7 上稳定走 GDI 兜底——**预期行为，不是错误**。
 // ─────────────────────────────────────────────────────────────────────────────
 #include "screen_capture.h" // Grabber / GrabRect
 #include <cstdint>

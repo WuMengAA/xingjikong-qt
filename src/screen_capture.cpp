@@ -1,6 +1,12 @@
 // 屏幕采集实现：Grabber 基类析构 + GdiGrabber（BitBlt 兜底）+ ScreenCapture 门面。
 // 详见 screen_capture.h。DXGI 主实现在 screen_capture_dxgi.cpp。
 // 本文件不依赖 Qt（除 _WIN32 宏），纯 Win32 + 标准库。
+//
+// Win7 软兼容（2026-10-24）：GdiGrabber 是 Win7/Vista 原生 GDI API
+// （EnumDisplayDevicesW/EnumDisplaySettingsW/CreateDC/BitBlt/StretchBlt/
+// CreateDIBSection），零 Win8+ 依赖。DXGI 在 Win7 上 DuplicateOutput 必败，
+// 门面 init 自动回落本文件 —— 本 TU 是 Win7 抓屏的唯一兜底，改动勿引入
+// Win8+ 独占 API（GetDpiForSystem 等）。
 
 #include "screen_capture.h"
 
@@ -16,6 +22,16 @@ Grabber::~Grabber() {}
 #ifdef _WIN32
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
+// Win7 软兼容（2026-10-24）：编译期钉死 Win7 目标 API 面（0x0601）。
+// 本 TU 是 Win7 抓屏的唯一兜底（GDI BitBlt），误用 Win8+/Win10+ 独占
+// API（GetDpiForSystem 等）应在编译期报错而非运行期在 Win7 教室机暴露。
+// 全局不设（会干扰 Qt 6 头文件的 WINVER 期望）；只在本纯 Win32 TU 生效。
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+#ifndef WINVER
+#define WINVER 0x0601
+#endif
 #include <windows.h>
 #include "screen_capture_dxgi.h" // 门面要 new DxgiGrabber，需完整类型
 

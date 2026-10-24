@@ -10,6 +10,16 @@
 #ifdef _WIN32
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
+// Win7 软兼容（2026-10-24）：编译期钉死 Win7 目标 API 面（0x0601）。
+// DXGI Desktop Duplication 在 Win7 上运行期必败（E_NOTIMPL），init=false
+// 后由门面回落 GdiGrabber —— 但本 TU 仍以 0x0601 编译，防止编译期混入
+// 更高系统版本的独占 API 声明。全局不设，仅本纯 Win32 TU 生效。
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+#ifndef WINVER
+#define WINVER 0x0601
+#endif
 #include <windows.h>
 #include <objbase.h> // CoInitializeEx / CoUninitialize
 #include <d3d11.h>
