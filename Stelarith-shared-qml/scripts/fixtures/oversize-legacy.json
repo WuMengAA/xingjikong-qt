@@ -1,6 +1,6 @@
 {
-  "updated": "2026-10-22",
-  "note": "历史超限台账：白名单内未变胖=允许；再长 1 行=判红；拆完一项就删一项。plan 前缀 P1/P2/P3 是拆分优先级。",
+  "updated": "2026-10-24",
+  "note": "历史超限台账：白名单内未变胖=允许；再长 1 行=判红；拆完一项就删一项。plan 前缀 P1/P2/P3 是拆分优先级。增量归属写进 plan（哪一批 +多少行、是否已提交），回写不等于批准变胖——P 级计划仍然有效。 | 2026-10-24 注册 ClassMemberPane（班级工作台方案B 成员管理 tab，两段结构，待拆为人员/设备两子件）",
   "files": {
     "Stelarith-control-qt/src/island.cpp": {
       "lines": 2446,
@@ -17,11 +17,11 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 7559,
+      "lines": 7647,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 217,
-      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。登记 7559：+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线（2026-10-23，setCloudReporter 旁款注入点）"
+      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交）"
     },
     "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
       "lines": 870,
@@ -73,18 +73,18 @@
       "plan": "[P3] 拆下载/校验/安装三段"
     },
     "Stelarith-viewer-qt/src/viewerbackend.cpp": {
-      "lines": 2718,
+      "lines": 2772,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 89,
-      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由"
+      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交）"
     },
     "Stelarith-viewer-qt/src/viewerbackend.h": {
-      "lines": 984,
+      "lines": 1001,
       "limit": 300,
       "qInvokable": 61,
       "topLevel": 15,
-      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明"
+      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明。台账：984 → 1001（+17）：#477 ClassAdmin +8（前向声明/Q_PROPERTY/访问器/成员）；另 +9 属并行线 VNC 批次（m_pendingVncUid/m_vncUid）"
     },
     "Stelarith-control-qt/qml/shell/BroadcastScheduleSheet.qml": {
       "lines": 795,
@@ -283,18 +283,18 @@
       "plan": "[P3] 拆动画帧与路径数据"
     },
     "Stelarith-cloud/src/index.js": {
-      "lines": 2860,
+      "lines": 2873,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）"
+      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）→ 2873（2026-10-24 #475 班级管理 API 分发 +13：import handleClassAdminApi + isViewerApi 加 /api/class/ 前缀 + POST 分发点）"
     },
     "Stelarith-cloud/src/registry.js": {
-      "lines": 1190,
+      "lines": 1236,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 拆注册/心跳/清理三段"
+      "plan": "[P2] 拆注册/心跳/清理三段。台账：1190 → 1236（#475 班级管理 +47/-1）：G3 换班残留修复 +5（addToClassIndex 清旧班索引）/ notifyClassBoundIfOnline（G4 在线下发 class-bound）+21 / dropClassIndex（删班后清运行时 Map 条目，防 listClasses 吐幽灵班）+9 / bind-class 成功后调用点 +4 / import +1"
     },
     "Stelarith-viewer-qt/qml/pages/control/ControlPage.qml": {
       "lines": 913,
@@ -309,6 +309,27 @@
       "qInvokable": 0,
       "topLevel": 0,
       "plan": "[P2] 按设置分组拆子组件"
+    },
+    "Stelarith-control-qt/qml/shell/pages/BroadcastClubPage.qml": {
+      "lines": 541,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 广播社排期页（1af60e0 2026-10-23 提交时漏登记）：按 登录门/排期代理/成员列表 三段拆；先随广播社批次实弹验收后再动，避免动半成品"
+    },
+    "Stelarith-control-qt/src/agent_ui.h": {
+      "lines": 315,
+      "limit": 300,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P3] agent UI 声明头（1af60e0 同期 +15 漏登记）：随 agent_ui.cpp 拆分一并收敛"
+    },
+    "Stelarith-viewer-qt/qml/pages/class/ClassMemberPane.qml": {
+      "lines": 411,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 中栏「成员管理」tab，两段：上半班级人员（账号成员，/api/class/members，角色 owner/teacher/viewer）+ 下半设备去留（移出/换班）。拆分台账：抽 ClassMemberPeoplePane.qml（人员段：members 列表 + 添加/移除账号表单）与 ClassMemberDevicePane.qml（设备段：换班目标下拉 + 移出确认）；本件退化为段间编排器（约 60 行）。#461-#472 班级工作台收口时执行。"
     }
   }
 }

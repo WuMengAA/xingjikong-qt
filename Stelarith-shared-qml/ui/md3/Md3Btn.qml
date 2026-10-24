@@ -12,7 +12,8 @@ Item {
     property string text: ""
     property string variant: "filled"
     property string icon: ""          // emoji 占位（Lucide 接入后换 SVG）
-    property bool enabled: true
+    // 注：enabled 直接复用 Item.enabled（基类已提供），不要在此重复声明，
+    //     否则会触发 "Member enabled ... overrides a member of the base object" 告警。
     property real radius: -1          // <0 = 令牌 rFull；>=0 = 显式覆写圆角
     property string tip: ""           // 悬停说明（2026-10-19 补：与 Btn.tip 同 API）
     signal clicked()
