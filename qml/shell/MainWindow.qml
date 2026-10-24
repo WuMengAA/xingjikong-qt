@@ -451,6 +451,88 @@ Item {
         }
     }
 
+    // ── 重认证弹窗（2026-10-24 安全门）──────────────────────────────────
+    // 敏感操作被云端 REAUTH_REQUIRED 拦（长时间未验证密码）：连接**不断**，
+    // 只提示"该再验一次密码了"→ 点「重新验证」走 backend.loginWithSite()
+    // （OAuth 授权流程 = 站点验证密码）→ 新票据到位后一切自动恢复。
+    // 自绘遮罩（理由同 Toast：骨架页不依赖灵动岛/组件弹窗的挂载层级）。
+    Rectangle {
+        id: reauthLayer
+        anchors.fill: parent
+        visible: false
+        color: "#66000000"        // scrim 半透明黑（MD3 overlay 口径）
+
+        Rectangle {
+            id: reauthCard
+            width: Math.min(360, parent.width - 48)
+            anchors.centerIn: parent
+            radius: 12
+            color: shell.th ? shell.th.cSurface : "#FFFBFE"
+
+            Column {
+                width: parent.width - 32
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: 20
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 16
+                spacing: 12
+
+                Text {
+                    text: "需要重新验证密码"
+                    font.pixelSize: 14
+                    font.weight: Font.Medium
+                    color: shell.th ? shell.th.cOnSurface : "#1C1B1F"
+                }
+                Text {
+                    id: reauthMsg
+                    width: parent.width
+                    text: "长时间未验证，敏感操作被云端拦截。"
+                    font.pixelSize: 13
+                    color: shell.th ? shell.th.cOnSurfaceVar : "#49454F"
+                    wrapMode: Text.WordWrap
+                }
+                Text {
+                    width: parent.width
+                    text: "连接不会断开，重新验证一次即可恢复全部操作。"
+                    font.pixelSize: 12
+                    color: shell.th ? shell.th.cOutline : "#79747E"
+                    wrapMode: Text.WordWrap
+                }
+
+                Row {
+                    width: parent.width
+                    height: 40
+                    spacing: 12
+                    layoutDirection: Qt.RightToLeft
+
+                    Md3Btn {
+                        md3: shell.th
+                        text: "重新验证"
+                        variant: "filled"
+                        onClicked: {
+                            reauthLayer.visible = false
+                            if (backend) backend.loginWithSite()
+                        }
+                    }
+                    Md3Btn {
+                        md3: shell.th
+                        text: "稍后"
+                        variant: "text"
+                        onClicked: reauthLayer.visible = false
+                    }
+                }
+            }
+        }
+    }
+    Connections {
+        target: backend
+        function onReauthRequired(message) {
+            if (message) reauthMsg.text = message
+            reauthLayer.visible = true
+        }
+    }
+
     // ── 帧订阅：进页面订本班前 N 台在线设备，离开时退订 ────────────────
     // ⚠️ 为什么必须退订：云端按订阅推帧，不退订 = 后台一直拉流。
     function syncThumbs() {

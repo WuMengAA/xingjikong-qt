@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QNetworkAccessManager>
 #include <QString>
+#include <QVariantList>
 
 class ViewerBackend;
 
@@ -29,10 +30,22 @@ public:
     Q_INVOKABLE void deleteClass(const QString &code, const QString &strategy);
     Q_INVOKABLE void unbindDevice(const QString &code, const QString &uid);
     Q_INVOKABLE void bindDevice(const QString &code, const QString &uid);
+    // ── 班级成员（人可以被添加，2026-10-24）──
+    // members() 是同步取一次成员清单（拉完发 membersList 信号，QML 填表）；
+    // addMember/removeMember 是写操作，反馈走 opFinished（成功文案带成员账号）。
+    Q_INVOKABLE void members(const QString &code);
+    Q_INVOKABLE void addMember(const QString &code, const QString &uid, const QString &role);
+    Q_INVOKABLE void removeMember(const QString &code, const QString &uid);
 
 signals:
     /** 操作完成。ok=false 时 message 是云端给的人话错误（网络层失败也有兜底文案）。 */
     void opFinished(const QString &op, bool ok, const QString &message);
+    /** 一个班的成员清单取回（members() 的结果；空数组 = 班里没人）。 */
+    void membersList(const QString &classCode, const QVariantList &members);
+    /** 2026-10-24 重认证门：写操作被云端 REAUTH_REQUIRED 拦（403）。
+     *  此时连接/会话都还在，只是"该再验一次密码了"。UI 收到后弹提示 →
+     *  走一次重新登录（backend.loginWithSite()）→ 新票到位后重试即可。 */
+    void reauthRequired(const QString &message);
 
 private:
     void post(const QString &action, const QJsonObject &body);

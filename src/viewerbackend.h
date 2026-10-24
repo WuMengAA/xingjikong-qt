@@ -692,6 +692,10 @@ signals:
     void diagFeedbackRequested();
     /** 鉴权被拒：界面应停止重连并把原因显示出来。 */
     void authFailed(const QString &reason);
+    /** 2026-10-24 重认证门：云端对敏感操作回 REAUTH_REQUIRED（验证超时）。
+     *  close=0 ⇒ **连接不断**（一直连接红线）；界面收到后弹提示 → 重新登录换新票即可恢复。
+     *  与 authFailed 的区别：authFailed 的票已废，必须停连等重登；这个只是"该再验一次密码了"。 */
+    void reauthRequired(const QString &message);
     /** 角色变了（顶栏徽标、按钮置灰都要跟着动）。 */
     void roleChanged();
     /** 提醒开关变了（设置页那两个开关）。 */

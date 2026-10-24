@@ -1,17 +1,10 @@
-// 班级工作台 · 右栏「班级管理」面板（2026-10-24 · 方案 B）
-// 对「班」的写操作：新建 / 改名 / 删班。成员管理（移出/换班）在中栏「成员」
-// tab（ClassMemberPane）——右栏管班，中栏管设备，两处不混。
-// 铁律：
-//   · 操作对象 = 当前订阅的班（cs.classCode）；未订阅整组禁用（删错班不可逆）；
-//   · 不持有班级状态：真源是 backend.classes，写成功立即 requestClasses() 重拉；
-//   · 失败必须 toast（云端 error 是人话）——不许静默（fail-silent 红线）；
-//   · 删除用行内两段确认（不借 Md3Dialog：scrim 的 anchors.fill 会把对话框锁在
-//     本卡片内且面板自己会塌高度——踩过）；输入行抽件 ClassNameInputRow，
-//     打开时 open(t) 显式预填（用户键入会摧毁绑定，见那件头注）。
+// 班级工作台 · 右栏「班级管理」（方案 B，清新极简）：新建 / 改名 / 删班。
+// 成员管理在中栏「成员」tab（ClassMemberPane）；右栏管班、中栏管设备，两处不混。
+// 铁律：操作对象=当前班（未订阅整组禁用）；写成功 requestClasses() 重拉；
+// 失败必 toast（fail-silent 红线）；删除行内两段确认；输入行抽件 ClassNameInputRow。
 import QtQuick
-import "../../components/md3"     // Md3Card / Md3Btn
-import "../../island"             // SvgIcon
-
+import "../../components/fresh"     // FreshCard / FreshBtn
+import "../../island"              // SvgIcon
 Item {
     id: pane
 
@@ -29,7 +22,7 @@ Item {
     readonly property string name: (cs && cs.className) ? cs.className : ""
 
     implicitWidth: 320
-    implicitHeight: bodyCol.implicitHeight + 24
+    implicitHeight: bodyCol.implicitHeight + 32
 
     function toast(msg, isErr) { if (pane.toastFn) pane.toastFn(msg, isErr === true) }
 
@@ -66,36 +59,42 @@ Item {
                 if (ok) pane.toast(message === "" ? "设备已移出班级" : "设备已加入「" + message + "」", false)
                 else pane.toast("调整成员失败：" + message, true)
                 pane.refreshClasses()
+            } else if (op === "member-add" || op === "member-remove") {
+                // 人（账号）成员：成功 → toast + 重拉成员清单；失败 → toast 云端人话。
+                if (ok) {
+                    pane.toast(op === "member-add" ? "已添加成员（下次登录生效）" : "成员已移出班级", false)
+                    const a = pane.admin()
+                    const cc = (pane.cs && pane.cs.classCode) ? pane.cs.classCode : ""
+                    if (a && cc !== "") a.members(cc)
+                } else {
+                    pane.toast((op === "member-add" ? "添加成员失败：" : "移出成员失败：") + message, true)
+                }
             }
         }
     }
-
-    Md3Card {
+    FreshCard {
         anchors.fill: parent
-        variant: "elevated"
         md3: pane.md3
 
         Column {
             id: bodyCol
             width: parent.width
-            spacing: 10
-
+            spacing: 12
             // ── 标题行 ──
             Row {
                 width: parent.width
                 spacing: 8
-
                 SvgIcon {
                     name: "settings-2"
                     px: 16
-                    tint: md3.cOnSurfaceVar
+                    tint: md3.frInk2 || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "班级管理"
                     font.pixelSize: md3.body13
                     font.weight: Font.Medium
-                    color: md3.cOnSurfaceVar
+                    color: md3.frInk || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Item { width: Math.max(8, parent.width - 140); height: 1 }
@@ -103,7 +102,7 @@ Item {
                     visible: !pane.subbed
                     text: "未订阅"
                     font.pixelSize: md3.bodyS
-                    color: md3.cOutline
+                    color: md3.frOffDot || "#9CA3AF"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -114,23 +113,24 @@ Item {
                 visible: pane.subbed
                 text: "当前班：" + (pane.name !== "" ? pane.name : pane.code)
                 font.pixelSize: md3.bodyS
-                color: md3.cOnSurfaceVar
+                color: md3.frInk2 || "#6B7280"
                 elide: Text.ElideRight
             }
             Text {
                 width: parent.width
                 visible: !pane.subbed
-                text: "先在左侧选择一个班级，才能对它执行管理操作。"
+                text: "先选择左侧班级，才能执行管理操作"
                 font.pixelSize: md3.bodyS
-                color: md3.cOutline
+                color: md3.frOffDot || "#9CA3AF"
                 wrapMode: Text.WordWrap
             }
 
             // ── 新建班级（不需要先订阅：建班本就不绑设备）──
-            Md3Btn {
+            FreshBtn {
                 md3: pane.md3
                 text: pane.inputMode === "create" ? "收起" : "新建班级"
                 variant: "tonal"
+                width: parent.width
                 onClicked: {
                     pane.delArmed = false
                     if (pane.inputMode === "create") pane.inputMode = ""
@@ -154,22 +154,24 @@ Item {
                 width: parent.width
                 spacing: 8
 
-                Md3Btn {
+                FreshBtn {
                     md3: pane.md3
                     text: pane.inputMode === "rename" ? "收起" : "修改班名"
                     variant: "outlined"
                     enabled: pane.subbed
+                    width: (parent.width - 8) / 2
                     onClicked: {
                         pane.delArmed = false
                         if (pane.inputMode === "rename") pane.inputMode = ""
                         else { pane.inputMode = "rename"; renameRow.open(pane.name) }
                     }
                 }
-                Md3Btn {
+                FreshBtn {
                     md3: pane.md3
                     text: pane.delArmed ? "取消删除" : "删除班级"
-                    variant: "outlined"
+                    variant: pane.delArmed ? "danger" : "danger-ghost"
                     enabled: pane.subbed
+                    width: (parent.width - 8) / 2
                     onClicked: pane.delArmed = !pane.delArmed
                 }
             }

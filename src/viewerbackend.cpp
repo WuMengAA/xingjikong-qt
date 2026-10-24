@@ -171,6 +171,10 @@ ViewerBackend::ViewerBackend(QObject *parent)
     // 班级管理写操作（2026-10-24 方案 B）：自带 QNAM，凭据每次现取
     // httpBaseUrl()/viewerToken()（与 InteractBridge 同口径，不落第二份）。
     m_classAdmin = new ClassAdmin(this, this);
+    // 重认证门（2026-10-24）：ClassAdmin 的 HTTP 403 与 WS error 通道两路
+    // REAUTH_REQUIRED 收敛成一个信号，QML 只监听 reauthRequired 一处。
+    connect(m_classAdmin, &ClassAdmin::reauthRequired,
+            this, &ViewerBackend::reauthRequired);
     // 身份与提醒开关先落下来（QSettings），后面所有门控判断都基于它。
     loadPrefs();
     // 主题三档（E4，2026-10-11）：0 浅色 / 1 深色 / 2 跟随系统。默认浅色，读自 QSettings。
@@ -1309,6 +1313,17 @@ void ViewerBackend::onTextMessage(const QString &text)
         // #460 班级域旁路：订阅 pending 窗口内到来的 error 就是订阅被拒
         // （无权限 / 班级不存在…）。ClassService 内部只在该窗口内认领。
         if (m_classService) m_classService->onError(pay);
+        // 2026-10-24 重认证门：敏感操作超期被云端 REAUTH_REQUIRED。
+        // 与 AU1002/AU1003 的区别：**票没废，连接不断**（云端 ERR.REAUTH_REQUIRED
+        // close=0）——只提示"该重新验证密码了"，界面弹窗走一次重新登录即可恢复，
+        // 不必停机重连（这是一直连接红线在客户端这边的对应实现）。
+        if (code == QLatin1String("REAUTH_REQUIRED") || ecode == QLatin1String("REAUTH_REQUIRED")) {
+            setStatus(QStringLiteral("需要重新验证：") + message, true);
+            emit reauthRequired(message.isEmpty()
+                ? QStringLiteral("长时间未验证，敏感操作被云端拦截，请重新登录一次")
+                : message);
+            return;   // 连接保持 open，只读操作照常
+        }
         // 认证失效（AU1002 过期 / AU1003 无效）：旧令牌已不可用，直接走重登流程，
         // 避免"看起来还连着，但每条指令都被拒"的假在线状态。
         if (ecode == QLatin1String("AU1002") || ecode == QLatin1String("AU1003")) {
