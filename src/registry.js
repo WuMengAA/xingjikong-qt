@@ -935,6 +935,23 @@ export function rtcSignalToAgent(uid, type, payload = {}) {
   }
 }
 
+/**
+ * 按班把一条消息推给全班所有在线被控端（发布中心地基 P0，2026-10-24）。
+ * 遍历 getDevicesOfClass(code)，对每台在线设备 sendToAgentMsg；离线设备跳过
+ * （不报错、不计失败 —— 不在线就是不在，与指令下发同口径，见 sendInstruction）。
+ * 返回 {online, delivered}：online=班内设备总数（含离线），delivered=真送到的台数。
+ * @returns {{online:number, delivered:number}}
+ */
+export function sendToClassDevices(code, type, payload = {}) {
+  const uids = getDevicesOfClass(String(code ?? '').trim());
+  let delivered = 0;
+  for (const uid of uids) {
+    const r = sendToAgentMsg(uid, type, payload);
+    if (r.ok) delivered++;
+  }
+  return { online: uids.length, delivered };
+}
+
 /** 通用：向某台设备的**主连接**发一条文本消息（v1 信封按对端能力自动选）。
  *  与 rtcSignalToAgent 的区别只有一点：type 不做 'rtc-' 前缀加工。
  *  2026-10-18 为远控隧道（tunnel.open）加的；设备不在线时如实返回 ok:false，不假装发过。 */

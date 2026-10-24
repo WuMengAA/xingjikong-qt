@@ -17,9 +17,9 @@
 import { resolveClassCode, renameClass, deleteClass, getClass } from './class-dir.js';
 import {
   bindDeviceToClass, unbindDeviceFromClass, listClasses, notifyClassBoundIfOnline, pushEvent,
-  dropClassIndex,
+  dropClassIndex, sendToClassDevices,
 } from './registry.js';
-import { dropClassSubs } from './class-events.js';
+import { dropClassSubs, pushClassEvent } from './class-events.js';
 import {
   addMember, removeMember, listMembers, roleOf, classesOf,
   dropRoomEvents, dropRoomMembers, CLASS_ROLES,
@@ -31,7 +31,12 @@ function readJsonBody(req, cb) {
   let raw = '';
   req.on('data', (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
   req.on('end', () => {
-    try { cb(JSON.parse(raw || '{}')); } catch { cb(null); }
+    let body;
+    try { body = JSON.parse(raw || '{}'); } catch { return cb(null); }
+    // 注意：只在「解析失败」时回 cb(null)；cb 自身执行抛错不应被这里吞掉并伪装成
+    // 「请求体不是合法 JSON」——那会掩盖真实的服务端异常（如缺 import 的 ReferenceError）。
+    // 这里直接 cb(body)，执行异常交给上层/全局兜底，保证错误真实可见。
+    cb(body);
   });
 }
 
@@ -204,38 +209,87 @@ export function adminMyClasses(ident) {
   return { ok: true, uid, classes: mine };
 }
 
+/* ───────────────────── 发布中心（P1，2026-10-24）─────────────────────
+ * 把一张卡片推到全班教室黑板（被控端）。权限走 canManageMembers（admin/owner/teacher）；
+ * 重认证门由 index.js 的 /api/class/* POST 统一守（过期的票据者已被 403 拦在门外）。
+ * 推送同时落一条 class-event(kind=publish)，让管理端 Timeline 也能看到"发了什么"。
+ *
+ * 类型（type）—— 与参考 App「掌上看班」发布弹窗对齐：
+ *   student-notice     学生通知（顶部跑马灯）
+ *   class-notice      班级通知（顶部跑马灯）
+ *   fullscreen-notice 全屏通知（被控端全屏文字窗）
+ *   homework          课后作业（全屏文字窗 + Timeline 留痕）
+ */
+const PUBLISH_TYPES = ['student-notice', 'class-notice', 'fullscreen-notice', 'homework'];
+
+export function adminPublish(code, card = {}, ident = null) {
+  const c = String(code ?? '').trim();
+  const hit = getClass(c);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限向该班发布' };
+  const t = String(card?.type ?? '').trim();
+  if (!PUBLISH_TYPES.includes(t)) return { ok: false, error: `不支持的发布类型：${t || '（空）'}` };
+  const title = String(card?.title ?? '').trim().slice(0, 200);
+  const body = String(card?.body ?? '').trim().slice(0, 4000);
+  if (!title && !body) return { ok: false, error: '发布内容不能为空' };
+  const from = ident?.uid ? String(ident.uid) : 'system';
+  const payload = {
+    id: `${hit.code}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: t, title, body, from,
+    at: new Date().toISOString(),
+  };
+  // 推全班在线被控端（黑板渲染由被控端按 type 分流：全屏窗 / 顶部跑马灯）
+  const r = sendToClassDevices(hit.code, 'blackboard-card', payload);
+  // 落 Timeline（与管理端订阅者共享同一 class-event 通道，老师端实时可见"发了什么"）
+  pushClassEvent(hit.code, 'publish', { type: t, title, body, from }, from);
+  pushEvent('info', '管理端向班级发布卡片', {
+    classCode: hit.code, type: t, delivered: r.delivered, online: r.online, from,
+  });
+  return { ok: true, classCode: hit.code, type: t, delivered: r.delivered, online: r.online };
+}
+
 /**
- * HTTP 路由：POST /api/class/{create,rename,delete,unbind,member-add,member-remove,members}
- * （鉴权在 index.js 的 isViewerApi 组，与 /api/device/bind-class 同一凭据口径）。
+ * HTTP 路由：POST /api/class/{create,rename,delete,unbind,bind,member-add,member-remove,members,my-classes,publish}
+ * （鉴权在 index.js 的 isViewerApi 组，与 /api/device/bind-class 同一凭据口径；写操作过重认证门）。
  */
 export function handleClassAdminApi(req, res, u, send, ident = null) {
   const action = u.pathname.replace('/api/class/', '');
   readJsonBody(req, (body) => {
     if (body === null) return send(400, { ok: false, error: '请求体不是合法 JSON' });
-    let r;
-    if (action === 'create') {
-      r = adminCreateClass({ code: String(body.classCode ?? ''), name: String(body.className ?? '') });
-    } else if (action === 'rename') {
-      r = adminRenameClass(String(body.classCode ?? ''), String(body.className ?? ''));
-    } else if (action === 'delete') {
-      r = adminDeleteClass(String(body.classCode ?? ''), String(body.strategy ?? 'refuse'));
-    } else if (action === 'unbind') {
-      r = adminUnbindDevice(String(body.classCode ?? ''), String(body.uid ?? ''));
-    } else if (action === 'bind') {
-      r = adminBindDevice(String(body.classCode ?? ''), String(body.uid ?? ''),
-                          String(body.className ?? ''));
-    } else if (action === 'member-add') {
-      r = adminAddMember(String(body.classCode ?? ''), String(body.uid ?? ''),
-                         String(body.role ?? 'teacher'), ident);
-    } else if (action === 'member-remove') {
-      r = adminRemoveMember(String(body.classCode ?? ''), String(body.uid ?? ''), ident);
-    } else if (action === 'members') {
-      r = adminListMembers(String(body.classCode ?? ''));
-    } else if (action === 'my-classes') {
-      r = adminMyClasses(ident);
-    } else {
-      return send(404, { ok: false, error: `未知班级管理操作：${action}` });
+    try {
+      let r;
+      if (action === 'create') {
+        r = adminCreateClass({ code: String(body.classCode ?? ''), name: String(body.className ?? '') });
+      } else if (action === 'rename') {
+        r = adminRenameClass(String(body.classCode ?? ''), String(body.className ?? ''));
+      } else if (action === 'delete') {
+        r = adminDeleteClass(String(body.classCode ?? ''), String(body.strategy ?? 'refuse'));
+      } else if (action === 'unbind') {
+        r = adminUnbindDevice(String(body.classCode ?? ''), String(body.uid ?? ''));
+      } else if (action === 'bind') {
+        r = adminBindDevice(String(body.classCode ?? ''), String(body.uid ?? ''),
+                            String(body.className ?? ''));
+      } else if (action === 'member-add') {
+        r = adminAddMember(String(body.classCode ?? ''), String(body.uid ?? ''),
+                           String(body.role ?? 'teacher'), ident);
+      } else if (action === 'member-remove') {
+        r = adminRemoveMember(String(body.classCode ?? ''), String(body.uid ?? ''), ident);
+      } else if (action === 'members') {
+        r = adminListMembers(String(body.classCode ?? ''));
+      } else if (action === 'my-classes') {
+        r = adminMyClasses(ident);
+      } else if (action === 'publish') {
+        r = adminPublish(String(body.classCode ?? ''), body.card ?? {}, ident);
+      } else {
+        return send(404, { ok: false, error: `未知班级管理操作：${action}` });
+      }
+      send(r.ok ? 200 : 400, { ok: r.ok, ...r });
+    } catch (e) {
+      // 业务执行异常（如缺依赖的 ReferenceError）必须如实暴露，绝不可伪装成
+      // 「请求体不是合法 JSON」——否则真实 bug 会被静默吞掉（本项目铁律：不许 fail-silent）。
+      // 这里落日志并回 500，而不是让异常冒泡成未捕获异常把进程带崩。
+      console.error('[class-admin] 处理异常：', e && e.stack || e);
+      if (!res.headersSent) send(500, { ok: false, error: '服务器内部错误' });
     }
-    send(r.ok ? 200 : 400, { ok: r.ok, ...r });
   });
 }
