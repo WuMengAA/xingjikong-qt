@@ -65,6 +65,36 @@ QtObject {
     // 按「零硬编码」纪律收编到此处；保持既有像素不变（深浅同值）。
     property color cAccent:        "#2FB8C6"
 
+    // ═══ 清新极简 token 组（fresh · 2026-10-24 班级工作台预览点选） ═══
+    // 来源：管理端班级工作台 HTML 预览（方案 A 横屏三栏，用户点选）：
+    //   #F7F8FA 浅灰底 + 白色大圆角卡 + 绿色 accent + pill 按钮 + 微投影。
+    // 边界纪律：**新增组、不动既有令牌** —— 被控端与管理端其余页面继续用
+    //   MD3 baseline（两套并存，谁都不覆盖谁，避免一次性全端换肤的回归面）；
+    //   班级工作台页族（viewer qml/pages/class/*）+ 外壳左栏 ClassNav 切到本组。
+    // 深色同构：深灰底 + 深卡 + 同一支绿（绿在两档都够亮，不随 dark 变值）；
+    //   字阶不新造 —— 沿用上方 MD3 字阶（项目纪律 12/13/14/16）。
+    property color frBg:        dark ? "#0F1218" : "#F7F8FA"
+    property color frCard:      dark ? "#161B22" : "#FFFFFF"
+    property color frInk:       dark ? "#E5E7EB" : "#111827"
+    property color frInk2:      dark ? "#9CA3AF" : "#6B7280"
+    property color frLine:      dark ? "#232B36" : "#EEF0F3"   // 分隔线 / 输入控件底
+    property color frGreen:     "#22C55E"                      // accent 主值（深浅同值）
+    property color frGreenD:    "#16A34A"                      // accent 按下 / 深一档
+    property color frGreenSoft: dark ? "#12281B" : "#E9FBF0"   // accent 容器（选中 pill 底）
+    property color frOnGreen:   "#FFFFFF"                      // accent 上的文字
+    property color frDanger:    dark ? "#F87171" : "#EF4444"   // 危险动作（删除）
+    property color frDangerSoft:dark ? "#2A1517" : "#FEF2F2"   // 危险容器（删除确认条）
+    property color frOffDot:    dark ? "#4B5563" : "#D1D5DB"   // 离线灰点
+    // 形状：大圆角卡 + 全圆 pill（对齐预览 18/24 语言）
+    property int frRCard: 18    // 卡片
+    property int frRBig:  24    // 大卡 / 横幅
+    property int frRIn:   12    // 卡内小块（输入框 / 徽标底）
+    property int frRPill: 999   // 按钮 / 状态 pill（取值大于半高即全圆）
+    // 投影：QML 无 box-shadow，消费方用两层偏移矩形近似；色/偏移/透明度集中此处
+    property color frShadow:    dark ? "#000000" : "#101828"
+    property int   frShadowY:   6
+    property real  frShadowA:   dark ? 0.30 : 0.04
+
     // ═══ 形状（MD3 shape scale） ═══
     property int rXS: 4      // 文本框 / Snackbar
     property int rS: 8       // Chip / 小卡片

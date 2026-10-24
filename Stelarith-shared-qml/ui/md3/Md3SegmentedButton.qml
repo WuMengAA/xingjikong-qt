@@ -35,6 +35,13 @@ Item {
     property var model: []
     /** 当前选中的 value（与某段 value 严格相等即选中）。 */
     property var current: ""
+    /**
+     * 清新极简变体（2026-10-24 班级工作台方案 A）：true = 选中段用 fr* token
+     * （绿软底 + 绿字 + 全圆 pill），未选透明；false = MD3 baseline 行为
+     * （secondaryContainer 方角）。默认 false —— 既有消费方零视觉差。
+     * 颜色仍全部来自 Md3 令牌（fr 组），本件不持色值。
+     */
+    property bool fresh: false
     /** 点了哪段（value 原样带回；由调用方决定是否改变 current）。 */
     signal activated(var value)
 
@@ -54,13 +61,16 @@ Item {
                 readonly property bool on: root.current === seg.modelData.value
 
                 height: 32
-                radius: md3.rM
+                radius: root.fresh ? (md3.frRPill || 999) : md3.rM
                 // 文字段宽 = 图标16 + 间距6 + 文字 + 左右各 12 内边距；纯图标段定宽 44
                 width: (seg.modelData.label !== "")
                        ? (16 + 6 + segTx.implicitWidth + 24)
                        : 44
-                color: seg.on ? md3.cSecondaryCont
-                              : (segMa.containsMouse ? md3.cContHigh : "transparent")
+                color: seg.on
+                       ? (root.fresh ? (md3.frGreenSoft || "#E9FBF0") : md3.cSecondaryCont)
+                       : (segMa.containsMouse
+                          ? (root.fresh ? (md3.frLine || "#EEF0F3") : md3.cContHigh)
+                          : "transparent")
                 Behavior on color { ColorAnimation { duration: md3.durShort } }
 
                 Row {
@@ -69,7 +79,9 @@ Item {
                     SvgIcon {
                         name: seg.modelData.icon
                         px: 16
-                        tint: seg.on ? md3.cOnSecondaryCont : md3.cOnSurfaceVar
+                        tint: seg.on
+                               ? (root.fresh ? (md3.frGreenD || "#16A34A") : md3.cOnSecondaryCont)
+                               : md3.cOnSurfaceVar
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
@@ -77,7 +89,9 @@ Item {
                         visible: seg.modelData.label !== ""
                         text: seg.modelData.label
                         font.pixelSize: md3.labelM
-                        color: seg.on ? md3.cOnSecondaryCont : md3.cOnSurfaceVar
+                        color: seg.on
+                               ? (root.fresh ? (md3.frGreenD || "#16A34A") : md3.cOnSecondaryCont)
+                               : md3.cOnSurfaceVar
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
