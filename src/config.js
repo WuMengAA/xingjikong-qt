@@ -109,6 +109,31 @@ export const QUEUE_DB_FILE = process.env.CLOUD_QUEUE_DB_FILE || 'instruction-que
  */
 export const CLASS_DIR_DB_FILE = process.env.CLOUD_CLASS_DIR_DB_FILE || 'class-dir.db';
 
+/* 班级房间落盘（2026-10-24 · 持久房间）
+ * 「每班一个永不停息的子服务器」的落地形态：班级 = 云端一个持久房间，
+ * 消息历史与成员表都在这里（class-room.js），重启不丢。
+ * 为什么不塞进 class-dir.db：班级**身份**与班级**内容**生命周期不同——
+ * 身份要按外部体系码对齐、内容要按条数裁剪，混一库会让两边的迁移互相牵制。
+ */
+export const CLASS_ROOM_DB_FILE = process.env.CLOUD_CLASS_ROOM_DB_FILE || 'class-room.db';
+
+// 房间历史热缓存保留的班数上限。3000 班 × 200 条全塞内存 ≈ 120MB（2GB 云机扛不住），
+// 所以只缓存"最近被读/写过"的班，超出按 LRU 淘汰；未命中的班从库懒加载。
+export const CLASS_ROOM_CACHE_CLASSES = Number(process.env.CLOUD_CLASS_ROOM_CACHE_CLASSES || 64);
+
+/* 环境白名单（2026-10-24 · 内网只属于本地调试）
+ * test 设备 = 云端维护的 uid 清单；不在清单 = 生产设备（学校设备）。
+ * 设备自报 env 一律忽略（与班级归属同一信任模型）。文件即持久，重启不丢。
+ */
+export const TEST_WHITELIST_FILE = process.env.CLOUD_TEST_WHITELIST_FILE || 'test-whitelist.json';
+
+/* 管理端重认证（2026-10-24 · 静默续期 + 定期弹窗）
+ * 人（账号）上次通过验证后，超过此间隔的**敏感操作**拒绝执行（回 REAUTH_REQUIRED），
+ * 但连接不断（"一直连接"红线）。静态令牌（系统身份）不适用。
+ * 8h = 一整天两段课，弹窗频率不至于烦；敏感操作清单见 index.js reauth 分支。
+ */
+export const REAUTH_INTERVAL_MS = Number(process.env.STE_REAUTH_INTERVAL_MS || 8 * 3600 * 1000);
+
 /* ---------- 班级域事件通道（2026-10-23 · #458 班级工作台地基）----------
  * class-events.js 的四个闸门。设计动机见该文件头：班级域与 devices 广播、
  * pushEvent 流水、按设备订阅中继三条通道正交，专服务"按班"的订阅/推送/历史。

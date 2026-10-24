@@ -259,10 +259,21 @@ import {
   // 2026-10-08 分班制 + 已知设备表 + 云端存储信息
   setDeviceMeta,
   bindDeviceToClass, unbindDeviceFromClass, listClasses, getDevicesOfClass,
+  notifyClassBoundIfOnline,
   getStorageInfo, isClassCodeValid, hydrateClassesFromDir,
+  recomputeDeviceEnv,
 } from './registry.js';
 // 班级身份唯一真源（2026-10-20）：码/名/别名的解析与落盘。所有绑班入口只认它。
 import { initClassDir, resolveClassCode, registerExternalCode, listClassDir, classDirSize } from './class-dir.js';
+// 班级房间（2026-10-24 持久房间）：消息历史 + 成员表，落 class-room.db。
+// 「每班一个永不停息的子服务器」的落地形态，物理上是一个持久房间而非一个进程。
+import { initClassRoom } from './class-room.js';
+// 环境白名单（2026-10-24）：test 机由云端清单裁决。设备自报 env 一律忽略。
+import { initEnvWhitelist, setTestUid, listTestUids } from './env-gate.js';
+// 重认证门（2026-10-24）：管理端定期要求验证密码。云端不存密码，只记
+// 「上次通过验证的时刻」；过期后敏感操作拒绝但不掐连接（reauth.js 文件头）。
+import { noteVerified, isFresh } from './reauth.js';
+import { REAUTH_INTERVAL_MS } from './config.js';
 // 设备报修（2026-10-07，《设备报修-第一版设计》落地）：内存表 + repairs.json 落盘
 import { loadRepairs, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
 // 权限消费层（2026-10-15 · 契约《多校多身份-scope契约草案》§4.3：云端是唯一权限入口）
@@ -273,6 +284,8 @@ import {
   handleViewerClassMsg, handleAgentClassMsg,
   noteMemberOnline, noteMemberOffline, removeViewerClasses,
 } from './class-events.js';
+// 班级管理（2026-10-24）：建/改名/删/移出的业务与路由处理。index.js 只挂分发点
+import { handleClassAdminApi } from './class-admin.js';
 // 用户 claims 存储（2026-10-20 · RBAC 第二批）：票无 claims 时按 uid 回填身份，权限真正流动
 import { initUserClaims, applyStoredClaims, setUserClaims, deleteUserClaims, listUserClaims } from './user-claims.js';
 // CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
@@ -321,6 +334,18 @@ loadRepairs();               // 打开设备报修表（repairs.json），重启
   const r = initClassDir();
   const hydrated = hydrateClassesFromDir();
   console.log(`[cloud] 班级目录：${r.codes} 个班已就绪（class-dir.db），运行时索引灌入 ${hydrated} 条`);
+}
+// 班级房间（2026-10-24 持久房间）：消息历史 + 成员表落盘。
+// 在这之前两者一个是内存环形缓冲、一个根本不存在 ⇒ 重启即清空 / 加不进人。
+{
+  const r = initClassRoom();
+  console.log(`[cloud] 班级房间：消息历史与成员表已就绪（class-room.db），现有成员 ${r.members} 人`);
+}
+// 环境白名单（2026-10-24）：test 设备清单从文件恢复。空白名单 = 全员生产，安全侧收缩。
+{
+  const r = initEnvWhitelist();
+  if (!r.ok) pushEvent('error', '环境白名单不可用：本机全部设备按生产处理', { error: r.error });
+  console.log(`[cloud] 环境白名单：${r.testUids.length} 台测试机（不在清单 = 生产设备）`);
 }
 initInteract();              // 打开互动库（点歌/反馈/祝福三张表，2026-10-15 组件6）
 if (!interactReady()) pushEvent('error', '互动数据不可持久化：点歌/点赞/祝福提交将如实回 STORE_UNAVAILABLE');
@@ -955,7 +980,9 @@ const server = http.createServer((req, res) => {
   //    能看出「哪些站点 class_id 归到哪个班」，属于管理面信息。
   const isViewerApi = u.pathname === '/api/storage' || u.pathname === '/api/classes'
     || u.pathname === '/api/classes/dir'
-    || u.pathname === '/api/device/bind-class' || u.pathname === '/api/me/classes';
+    || u.pathname === '/api/device/bind-class' || u.pathname === '/api/me/classes'
+    || u.pathname === '/api/env/test-whitelist'   // 2026-10-24 环境白名单（viewer 面板可看可改）
+    || u.pathname.startsWith('/api/class/');   // 2026-10-24 班级管理四路由（/api/class/ 前缀不撞 /api/classes）
   if (isViewerApi) {
     const vauth = req.headers.authorization || '';
     const vtoken = vauth.toLowerCase().startsWith('bearer ') ? vauth.slice(7).trim() : '';
@@ -984,6 +1011,39 @@ const server = http.createServer((req, res) => {
     // 在线数现算（不落表，避免"不自刷新"老毛病），管理端按班下发时只发本班在线设备。
     return send(200, { ok: true, classes: listClasses() });
   }
+  if (u.pathname === '/api/env/test-whitelist') {
+    // 环境白名单（2026-10-24）：谁是测试机由云端清单裁决，设备自报 env 一律忽略。
+    // 查看：任何已鉴权 viewer。修改：静态令牌（全权）或平台超管 ——
+    // 白名单 = 调试特权发放，不是普通老师能干的事。
+    if (req.method === 'GET') {
+      return send(200, { ok: true, testUids: listTestUids() });
+    }
+    if (req.method === 'POST') {
+      const uident = identityFromAuth(req.__auth);
+      const allowed = req.__auth?.mode === 'token' || isPlatformIdent(uident);
+      if (!allowed) return send(403, { ok: false, ecode: 'AU1004', error: '只有平台管理员可修改测试机白名单' });
+      // 重认证门：加减测试机 = 发放调试特权，票据者过期必须重新验证。
+      const who = req.__auth;
+      if (who && who.mode === 'ticket' && !isFresh(who.uid, REAUTH_INTERVAL_MS)) {
+        return send(403, { ok: false, ecode: 'AU1002', code: 'REAUTH_REQUIRED', error: '需要重新验证密码后再操作' });
+      }
+      let raw = '';
+      req.on('data', (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+      req.on('end', () => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { return send(400, { ok: false, error: '请求体不是合法 JSON' }); }
+        const uid = String(body.uid ?? '').trim();
+        if (!uid) return send(400, { ok: false, error: '缺 uid' });
+        const r = setTestUid(uid, !!body.test);
+        if (!r.ok) return send(500, { ok: false, error: r.error });
+        const changed = recomputeDeviceEnv();
+        pushEvent('info', r.test ? '测试机白名单增加设备' : '测试机白名单移除设备', { uid, changed });
+        return send(200, { ok: true, uid, test: r.test, changed });
+      });
+      return;
+    }
+    return send(405, { ok: false, error: '仅支持 GET/POST' });
+  }
   if (req.method === 'POST' && u.pathname === '/api/device/bind-class') {
     // 管理端把某设备绑到某班（或改绑）。body: { uid, classCode, className? }，也兼容 query。
     // ⚠️ 2026-10-13 修：原来这行写 `JSON.parse(String(data))`，而**该作用域里根本没有 data**
@@ -1009,9 +1069,28 @@ const server = http.createServer((req, res) => {
         return send(400, { ok: false, error: msg });
       }
       const r = bindDeviceToClass(resolved.code, uid, className);
+      // G4（2026-10-24）：设备在线就立刻下发 class-bound，被控端更新 classcode.txt
+      //   ⇒ 缩略图上报随即开工（它要求 classCode 非空）。否则要等设备重连才知道。
+      if (r.ok) notifyClassBoundIfOnline(uid, r.classCode, r.class.name);
       return send(r.ok ? 200 : 400, { ok: r.ok, ...r });
     });
     return;
+  }
+
+  // 班级管理（2026-10-24）：POST /api/class/{create,rename,delete,unbind,
+  // member-add,member-remove,members,my-classes}。
+  // 鉴权在上面 isViewerApi 组（startsWith '/api/class/'）。业务全在 class-admin.js。
+  // 传 ident：成员管理要做「谁能管这个班」的第二道判定（票里 scopes ∪ 本班 owner/teacher）。
+  if (req.method === 'POST' && u.pathname.startsWith('/api/class/')) {
+    // 2026-10-24 重认证门：班级写操作（建/删/改名/绑设备/加人）都敏感，票据者过期即拒。
+    // 静态令牌（系统身份）不适用。403 → viewer 端弹密码框重登后重试。
+    const who = req.__auth;
+    if (who && who.mode === 'ticket' && !isFresh(who.uid, REAUTH_INTERVAL_MS)) {
+      pushEvent('warn', '管理端重认证拦截：HTTP 班级写操作需重新验证',
+        { uid: who.uid, path: u.pathname });
+      return send(403, { ok: false, ecode: 'AU1002', code: 'REAUTH_REQUIRED', error: '需要重新验证密码后再操作' });
+    }
+    return handleClassAdminApi(req, res, u, send, identityFromAuth(req.__auth));
   }
 
   // ── 设备绑定：二维码 + 绑定码（2026-10-20）────────────────────────────────
@@ -1884,9 +1963,26 @@ function authorizeViewer(msg) {
   return { ok: false, reason: 'auth 消息里既没有 token 也没有 ticket' };
 }
 
+/** 管理端重认证门：人（账号）的验证已过期 → 拒绝本次敏感操作并回 REAUTH_REQUIRED。
+ *  系统身份（静态令牌，mode='token'）永不拦截；连接不掐（ERR.REAUTH_REQUIRED close=0）。
+ *  客户端收到后弹密码框 → 重新登录 → 新连接新票据 → noteVerified 刷新 → 重发操作。 */
+function reauthCheck(ws, action) {
+  const who = ws.__who;
+  if (!who || who.mode !== 'ticket') return true;
+  if (isFresh(who.uid, REAUTH_INTERVAL_MS)) return true;
+  pushEvent('warn', '管理端重认证拦截：敏感操作需重新验证密码',
+    { uid: who.uid, action: String(action).slice(0, 48) });
+  sndErr(ws, 'REAUTH_REQUIRED',
+    `距离上次验证已超过 ${Math.round(REAUTH_INTERVAL_MS / 3600000)} 小时，请重新登录后再试（连接未断开）`);
+  return false;
+}
+
 /** 管理端通过鉴权之后才做的事：登记 + 补订阅 + 推初始设备表。 */
 function onViewerAuthed(ws, who) {
   addViewer(ws);
+  // 重认证门：人（账号）通过验证的时刻刷新点 = 每一次 auth 成功。
+  // 静态令牌（who.uid=null）是系统身份，noteVerified 内部直接跳过。
+  noteVerified(who.uid);
   pushEvent('info', '管理端已接入（已鉴权）', { viewers: viewerCount(), mode: who.mode, uid: who.uid || undefined });
 
   // 两条补订阅路径都要有，缺一条就黑屏：
@@ -2008,6 +2104,8 @@ viewerWss.on('connection', (ws) => {
         if (f.ok && f.header?.type === 'vnc-data') {
           const uid = String(f.header.uid ?? '').trim();
           if (!uid) { pushEvent('warn', 'vnc-data 帧缺 uid，已丢弃', { bytes: buf.length }); return; }
+          // 2026-10-24：远程控制 = 直接操纵教室机器（最高危），加重认证门。
+          if (!reauthCheck(ws, 'vnc-data')) return;
           if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid))) {
             pushEvent('warn', 'vnc-data 被拒（无权限远控该设备）', { uid });
             sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限远控设备 ${uid}`);
@@ -2133,8 +2231,10 @@ viewerWss.on('connection', (ws) => {
       }
       // 班级域（2026-10-23 · #458）：按班订阅/退订。权限判断（canAccess）在
       // class-events 模块内做，与 subscribe/instruction 同一口径（契约 §4.3）。
+      // 2026-10-24：订阅班级=拉班级设备清单（敏感），加重认证门。
       case 'subscribe_class':
       case 'unsubscribe_class':
+        if (!reauthCheck(ws, p.type)) return;
         handleViewerClassMsg(ws, p, { ident: identityFromAuth(ws.__who), snd, sndErr });
         return;
       case 'devices': {
@@ -2151,6 +2251,8 @@ viewerWss.on('connection', (ws) => {
       // 2026-10-09：params.duplex=true → 语音通话（双向）——记录发起者 ws，
       //   学生上行音频单播回它（sendAudioToTeacher），不 fan-out 全教室。
       case 'audio.start': {
+        // 2026-10-24：语音对讲=影响全部在线设备（敏感），加重认证门。
+        if (!reauthCheck(ws, p.type)) return;
         const duplex = !!p.payload.duplex;
         setAudioBroadcasting(true, duplex ? ws : null);
         snd(ws, 'audio.started', { ok: true, targets: 'all-online', duplex });
@@ -2165,6 +2267,8 @@ viewerWss.on('connection', (ws) => {
         return;
       // 屏幕广播（2026-10-07，设计文档《屏幕广播-第一版设计》）
       case 'broadcast.start':
+        // 2026-10-24：屏幕广播=影响全部在线设备（敏感），加重认证门。
+        if (!reauthCheck(ws, p.type)) return;
         setScreenBroadcasting(true);
         snd(ws, 'broadcast.started', { ok: true, targets: 'all-online' });
         pushEvent('info', '管理端开始屏幕广播（老师屏幕 → 全部在线设备）');
@@ -2180,6 +2284,8 @@ viewerWss.on('connection', (ws) => {
           sndErr(ws, 'BAD_PAYLOAD', 'instruction 缺 uid 或 action');
           return;
         }
+        // 2026-10-24：下发指令（含关机/重启/开终端）= 最高危动作，加重认证门。
+        if (!reauthCheck(ws, `instruction:${action}`)) return;
         // 2026-10-15（权限契约 §4.3 + 不变量③）：**下发指令前必须过 can()**——
         // 目标设备不在本连接 scopes 内（或设备无班级归属）直接拒，绝不下发。
         // 这是本轮「云端全权无阻止」的核心补位：此前任何持票者能对任何设备做任何动作。

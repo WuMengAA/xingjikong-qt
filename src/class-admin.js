@@ -1,0 +1,241 @@
+// 班级管理操作（2026-10-24 · 管理端「班级管理」面板的云端侧）
+//
+// 四个动作：建班（只建身份）/ 改名 / 删班（策略显式）/ 移出设备。
+// 为什么单独开文件而不长在 index.js：index.js 已是 oversize 白名单住户
+// （P1 拆 router 计划不变），班级管理是自洽的一整块，进独立 TU。
+// 路由分发只在 index.js 留一个点（/api/class/* → handleClassAdminApi）。
+//
+// 设计纪律：
+//   · canonical 码永不动（class-dir 铁律）——改名只动显示名，删班不留残留索引；
+//   · 建班只建身份不绑设备（管理端要能"先把班建好，设备慢慢绑"）；
+//   · 删班必须显式策略：默认 refuse（有设备就拒，防误删一整个班），
+//     release 才把设备全部移出后删除 —— 不给"静默默认删设备"的选项；
+//   · 改名/建班走 pushClassEvent 让该班订阅者实时可见（Timeline 一条）；
+//   · 删班走 dropClassSubs：受影响订阅者收 class-unsubscribed，本地置未订，
+//     不假装班还在（信任底线：状态不许造假）。
+
+import { resolveClassCode, renameClass, deleteClass, getClass } from './class-dir.js';
+import {
+  bindDeviceToClass, unbindDeviceFromClass, listClasses, notifyClassBoundIfOnline, pushEvent,
+  dropClassIndex,
+} from './registry.js';
+import { dropClassSubs } from './class-events.js';
+import {
+  addMember, removeMember, listMembers, roleOf, classesOf,
+  dropRoomEvents, dropRoomMembers, CLASS_ROLES,
+} from './class-room.js';
+import { canAccess } from './perms.js';
+
+/** 读 JSON body（≤16KB，与 bind-class 同款上限）。坏 JSON → cb(null) 由调用方定夺。 */
+function readJsonBody(req, cb) {
+  let raw = '';
+  req.on('data', (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+  req.on('end', () => {
+    try { cb(JSON.parse(raw || '{}')); } catch { cb(null); }
+  });
+}
+
+/** 建班：只建班级身份，不碰任何设备。已存在（同码/同名）→ 幂等返回既有班。 */
+export function adminCreateClass({ code = '', name = '' } = {}) {
+  const r = resolveClassCode({ code, name, source: 'admin' });
+  if (!r.ok) return { ok: false, error: r.error };
+  pushEvent('info', '管理端创建班级', { classCode: r.code, className: r.name });
+  return { ok: true, classCode: r.code, name: r.name, aliases: r.aliases };
+}
+
+/**
+ * 改名：只动显示名（canonical 码永不动）。
+ * 刻意**不发**班级域事件：class-event 限流表键是 uid×kind（不含班码），
+ * 同一管理员连改两个班第二个会被吞；且 Timeline 是设备动态流，班级元数据
+ * 变更混进去会让前端多一种要处理的 kind。新鲜度由管理端「写操作成功后
+ * 立即重拉 /api/classes」保证（不等 15s 轮询），运维审计走 pushEvent。
+ */
+export function adminRenameClass(code, name) {
+  const r = renameClass(code, name);
+  if (!r.ok) return r;
+  pushEvent('info', '管理端修改班级名', { classCode: r.class.code, className: r.class.name });
+  return { ok: true, classCode: r.class.code, name: r.class.name };
+}
+
+/**
+ * 删班。strategy：
+ *   · 'refuse'（默认）—— 班内还有设备时拒绝，返回设备数让管理端知道规模；
+ *   · 'release'       —— 先把设备全部移出班级（knownDevices.classCode 清空），再删。
+ * 两种情况都会清掉该班全部订阅并通知（dropClassSubs）。
+ */
+export function adminDeleteClass(code, strategy = 'refuse') {
+  const c = String(code ?? '').trim();
+  const hit = getClass(c);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  const devs = listClasses().find((x) => x.code === hit.code);
+  const uidList = devs ? devs.devices : [];
+  if (uidList.length > 0 && strategy !== 'release') {
+    return { ok: false, error: `班内还有 ${uidList.length} 台设备，确认移出后重试（strategy=release）`, deviceCount: uidList.length };
+  }
+  for (const uid of uidList) unbindDeviceFromClass(hit.code, uid);
+  // 运行时索引条目也必须清：只删 class-dir 的话，listClasses 的兜底分支会把
+  // 目录已删的班又吐出来（幽灵班：devices 空、source 空）。回归见
+  // tests/regression-class-admin.mjs ⑩。
+  dropClassIndex(hit.code);
+  const dropped = dropClassSubs(hit.code);
+  const r = deleteClass(hit.code);
+  if (!r.ok) return r;
+  // 房间内容随班一起销毁（成员表 + 消息历史）。顺序刻意放在身份删成功**之后**：
+  // 反过来先清内容再删身份，一旦身份删失败就留下"空壳但有成员"的幽灵班。
+  const ev = dropRoomEvents(r.code);
+  const mb = dropRoomMembers(r.code);
+  pushEvent('warn', '管理端删除班级', {
+    classCode: r.code, className: r.name, released: uidList.length, subsDropped: dropped,
+    eventsDropped: ev.deleted, membersDropped: mb.deleted,
+  });
+  return {
+    ok: true, code: r.code, name: r.name, releasedDevices: uidList.length,
+    subsDropped: dropped, eventsDropped: ev.deleted, membersDropped: mb.deleted,
+  };
+}
+
+/** 移出一台设备（退班）。在线设备同步收到 class-bound{code:''} 清端侧状态。 */
+export function adminUnbindDevice(code, uid) {
+  const c = String(code ?? '').trim();
+  const u = String(uid ?? '').trim();
+  if (!c || !u) return { ok: false, error: '缺班级码或 uid' };
+  const devs = listClasses().find((x) => x.code === c);
+  if (!devs || !devs.devices.includes(u)) return { ok: false, error: '该设备不在此班' };
+  unbindDeviceFromClass(c, u);
+  notifyClassBoundIfOnline(u, '', '');
+  pushEvent('info', '管理端将设备移出班级', { classCode: c, uid: u });
+  return { ok: true, classCode: c, uid: u };
+}
+
+/**
+ * 入班/换班：把一台设备绑到某班（在线即下发 class-bound，G4）。
+ * 与 index.js 的 /api/device/bind-class 同一实现；给 /api/class/bind 是为了
+ * 让管理端四个班级写操作同走 /api/class/ 前缀（QML 侧一个 ClassAdmin 打全部）。
+ */
+export function adminBindDevice(code, uid, name = '') {
+  const c = String(code ?? '').trim();
+  const u = String(uid ?? '').trim();
+  if (!c || !u) return { ok: false, error: '缺班级码或 uid' };
+  const r = bindDeviceToClass(c, u, name);
+  if (!r.ok) return r;
+  notifyClassBoundIfOnline(u, r.classCode, r.class.name);
+  pushEvent('info', '管理端将设备加入班级', { classCode: r.classCode, uid: u });
+  return { ok: true, classCode: r.classCode, name: r.class.name };
+}
+
+/* ───────────────────── 班级成员（人可以被添加） ─────────────────────
+ * 2026-10-24 用户诉求：「数据保存在云端，人可以被添加」。成员表是这条的落地：
+ * 把一个人的账号挂到班上，他下次连上来就能订这个班、看这个班的设备。
+ *
+ * 权限模型（两道）：
+ *   ① 谁能管成员 —— 票里 scopes 覆盖这个班（canAccess）**或** 本班 owner/teacher；
+ *   ② 能给出多高的角色 —— 只有拿到 ① 的 canAccess 那一路才能设 owner
+ *      （防"助教把自己提成 owner"的提权链：成员表是权限真源，能写它就等于能提权）。
+ */
+
+/** 能否管理这个班的成员。 */
+function canManageMembers(ident, code) {
+  if (!ident) return false;
+  if (canAccess(ident, code)) return true;
+  const role = ident.uid ? roleOf(code, ident.uid) : null;
+  return role === 'owner' || role === 'teacher';
+}
+
+/**
+ * 把一个人加进班（可指定 owner/teacher/viewer，缺省 teacher）。
+ * 幂等：重复加不报错、不降权（见 class-room.addMember）。
+ */
+export function adminAddMember(code, uid, role = 'teacher', ident = null) {
+  const c = String(code ?? '').trim();
+  const u = String(uid ?? '').trim();
+  const want = String(role ?? '').trim().toLowerCase();
+  if (!c || !u) return { ok: false, error: '缺班级码或成员账号' };
+  if (!CLASS_ROLES.includes(want)) return { ok: false, error: `角色不合法（可选 ${CLASS_ROLES.join('/')}）` };
+  const hit = getClass(c);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班成员' };
+  if (want === 'owner' && !canAccess(ident, hit.code)) {
+    return { ok: false, error: '只有管理员可指派 owner' };
+  }
+  const r = addMember(hit.code, { id: u, type: 'user', role: want, by: ident?.uid ?? 'system' });
+  if (!r.ok) return r;
+  pushEvent('info', r.added ? '管理端添加班级成员' : '管理端更新班级成员', {
+    classCode: hit.code, memberUid: u, role: r.role, by: ident?.uid ?? 'system',
+  });
+  // 若该成员此刻正在线且已订阅别处，前端会在他下次 subscribe_class 时拿到 myRole；
+  // 这里不主动推（他不知道有这个班，主动推等于给未知对象发通知）。
+  return { ok: true, classCode: hit.code, uid: u, role: r.role, added: r.added };
+}
+
+/** 把一个人移出班（幂等）。不给"移出最后一个 owner"——那个班就没人管了。 */
+export function adminRemoveMember(code, uid, ident = null) {
+  const c = String(code ?? '').trim();
+  const u = String(uid ?? '').trim();
+  if (!c || !u) return { ok: false, error: '缺班级码或成员账号' };
+  const hit = getClass(c);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班成员' };
+  const cur = roleOf(hit.code, u);
+  if (!cur) return { ok: true, removed: false, classCode: hit.code, uid: u };   // 幂等
+  if (cur === 'owner' && listMembers(hit.code).filter((m) => m.role === 'owner').length <= 1) {
+    return { ok: false, error: '这是该班唯一的 owner，请先指派另一位 owner' };
+  }
+  const r = removeMember(hit.code, u);
+  if (!r.ok) return r;
+  pushEvent('info', '管理端移除班级成员', { classCode: hit.code, memberUid: u, by: ident?.uid ?? 'system' });
+  return { ok: true, removed: r.removed, classCode: hit.code, uid: u };
+}
+
+/** 成员清单（含角色）。谁都能查自己有权看的班。 */
+export function adminListMembers(code) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  return { ok: true, classCode: hit.code, name: hit.name, members: listMembers(hit.code) };
+}
+
+/** 我的班级（管理端启动时用它决定"默认打开哪个班"，不用全量拉目录）。 */
+export function adminMyClasses(ident) {
+  const uid = ident?.uid ? String(ident.uid) : '';
+  if (!uid) return { ok: true, classes: [] };
+  const mine = classesOf(uid).map((x) => {
+    const hit = getClass(x.classCode);
+    return { classCode: x.classCode, role: x.role, name: hit ? hit.name : x.classCode };
+  });
+  return { ok: true, uid, classes: mine };
+}
+
+/**
+ * HTTP 路由：POST /api/class/{create,rename,delete,unbind,member-add,member-remove,members}
+ * （鉴权在 index.js 的 isViewerApi 组，与 /api/device/bind-class 同一凭据口径）。
+ */
+export function handleClassAdminApi(req, res, u, send, ident = null) {
+  const action = u.pathname.replace('/api/class/', '');
+  readJsonBody(req, (body) => {
+    if (body === null) return send(400, { ok: false, error: '请求体不是合法 JSON' });
+    let r;
+    if (action === 'create') {
+      r = adminCreateClass({ code: String(body.classCode ?? ''), name: String(body.className ?? '') });
+    } else if (action === 'rename') {
+      r = adminRenameClass(String(body.classCode ?? ''), String(body.className ?? ''));
+    } else if (action === 'delete') {
+      r = adminDeleteClass(String(body.classCode ?? ''), String(body.strategy ?? 'refuse'));
+    } else if (action === 'unbind') {
+      r = adminUnbindDevice(String(body.classCode ?? ''), String(body.uid ?? ''));
+    } else if (action === 'bind') {
+      r = adminBindDevice(String(body.classCode ?? ''), String(body.uid ?? ''),
+                          String(body.className ?? ''));
+    } else if (action === 'member-add') {
+      r = adminAddMember(String(body.classCode ?? ''), String(body.uid ?? ''),
+                         String(body.role ?? 'teacher'), ident);
+    } else if (action === 'member-remove') {
+      r = adminRemoveMember(String(body.classCode ?? ''), String(body.uid ?? ''), ident);
+    } else if (action === 'members') {
+      r = adminListMembers(String(body.classCode ?? ''));
+    } else if (action === 'my-classes') {
+      r = adminMyClasses(ident);
+    } else {
+      return send(404, { ok: false, error: `未知班级管理操作：${action}` });
+    }
+    send(r.ok ? 200 : 400, { ok: r.ok, ...r });
+  });
+}

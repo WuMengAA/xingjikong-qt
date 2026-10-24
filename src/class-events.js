@@ -28,6 +28,9 @@ import {
 import { getClass } from './class-dir.js';
 import { filterDevices, maskDevices, canAccess } from './perms.js';
 import {
+  appendEvent, recentEvents as roomRecentEvents, maybePrune, roleOf, isMemberOf,
+} from './class-room.js';
+import {
   CLASS_EVENT_LOG_KEEP, CLASS_EVENT_SNAPSHOT, CLASS_EVENT_MIN_MS,
   CLASS_EVENT_MAX_BYTES, CLASS_RELAY_BUFFER_MAX,
 } from './config.js';
@@ -45,10 +48,11 @@ const THUMB_KIND = 'thumbnail';
 /** 管理端连接 → 订阅的班级码集合。只在订阅过至少一个班时存在。 */
 const classSubs = new Map();           // ws -> Set<classCode>
 
-/** 每班一条环形事件缓冲（含成员上下线）：后订者先拿最近 N 条快照，再收实时。
- *  上限 CLASS_EVENT_LOG_KEEP（默认 200）—— Timeline 只看最近几十条，
- *  无限增长会把云端内存吃穿（噪音教训同款）。 */
-const classEventLog = new Map();       // classCode -> Array<ev>
+/** 每班历史（含成员上下线）：后订者先拿最近 N 条快照，再收实时。
+ *  2026-10-24 起**落盘**在 class-room.js（sqlite `class_events` 表），
+ *  内存只是它前面的一层 LRU 热缓存 —— 改造前这里是纯内存 Map，
+ *  云端一重启"聊天记录"就清空，与「永不停息的子服务器」直接冲突。
+ *  上限仍是 CLASS_EVENT_LOG_KEEP（默认 200），由 class-room 负责环形裁剪。 */
 
 /** 限流表：`${uid}|${kind}` -> 上次投递时间戳。每 uid×kind 最小间隔
  *  CLASS_EVENT_MIN_MS（默认 1s）——为 #459 缩略图（每台每 1s+ 一张）预置的闸门，
@@ -84,18 +88,22 @@ function fanoutClass(code, type, payload) {
   return { hits, skipped };
 }
 
-/** 入环形缓冲（超上限丢最旧的）。 */
+/** 入历史（落盘 + 热缓存），返回库内自增 id（失败回 null）。
+ *  写库失败**不静默**：返回 null 让调用方在载荷里标 persisted:false，
+ *  实时投递照走（一次磁盘故障不该让全班当场收不到消息）。 */
 function logEvent(code, ev) {
-  let arr = classEventLog.get(code);
-  if (!arr) { arr = []; classEventLog.set(code, arr); }
-  arr.push(ev);
-  if (arr.length > CLASS_EVENT_LOG_KEEP) arr.splice(0, arr.length - CLASS_EVENT_LOG_KEEP);
+  const r = appendEvent(code, ev);
+  if (!r.ok) {
+    pushEvent('warn', '班级事件落盘失败（实时投递未中断）', { classCode: code, error: r.error });
+    return null;
+  }
+  maybePrune(code);
+  return r.id;
 }
 
 /** 取一个班最近的 N 条事件（ Timeline 快照用，默认 CLASS_EVENT_SNAPSHOT 条）。 */
 function recentEvents(code, limit = CLASS_EVENT_SNAPSHOT) {
-  const arr = classEventLog.get(code) || [];
-  return arr.slice(Math.max(0, arr.length - limit)).map((e) => ({ ...e }));
+  return roomRecentEvents(code, limit);
 }
 
 /** 这个班当前有几个管理端在订（诊断/回执对账用）。 */
@@ -118,13 +126,18 @@ function classSnapshot(code, ident) {
   const devs = getDevicesOfClass(code)
     .map((u) => byUid.get(u))
     .filter((d) => !!d);
-  const visible = maskDevices(ident, filterDevices(ident, devs));
+  const isMbr = !!(ident?.uid && isMemberOf(code, ident.uid));
+  // 权限两路：票里的 scopes（站点签发）∪ 班级成员表（云端可加人）。
+  // 成员放行时**不再按 scopes 过滤设备**——"把这个老师加进班"的全部意义就是
+  // 他能看到这个班的机器；但脱敏照做（成员不是平台超管）。
+  const visible = maskDevices(ident, isMbr ? devs : filterDevices(ident, devs));
   return {
     classCode: code,
     name: (cls && cls.name) || (getClass(code) && getClass(code).name) || code,
     devices: visible,
     onlineCount: visible.filter((d) => d.online).length,
     events: recentEvents(code),
+    myRole: isMbr ? roleOf(code, ident.uid) : null,
     at: new Date().toISOString(),
   };
 }
@@ -138,8 +151,11 @@ export function subscribeClass(ws, code, ident) {
   if (!isClassCodeValid(c)) {
     return { ok: false, code: 'BAD_PAYLOAD', detail: '班级码格式不合法（需 6-16 位字母数字或 -_）' };
   }
-  // 权限：订别班的班直接拒，并留审计（与 subscribe/instruction 同口径）
-  if (!canAccess(ident, c)) {
+  // 权限两路：票里的 scopes（站点签发）∪ 班级成员表（云端加的人）。
+  // 成员表是 2026-10-24 新增的那一路 —— 没有它，"把一个人加进班"无从落地：
+  // 站点票的 scopes 是签票那一刻定死的，短期不可能为每次加人重签。
+  const mbrRole = ident?.uid ? roleOf(c, ident.uid) : null;
+  if (!canAccess(ident, c) && !mbrRole) {
     pushEvent('warn', '管理端越权：订阅班级被云端拒绝（目标不在其 scopes 内）',
       { classCode: c, who: ident?.uid ?? 'anon' });
     return { ok: false, code: 'NO_DEVICE_PERMISSION', detail: `无权限订阅班级 ${c}` };
@@ -166,6 +182,28 @@ export function unsubscribeClass(ws, code) {
     if (codes.size === 0) classSubs.delete(ws);
   }
   return { ok: true };
+}
+
+/**
+ * 清空一个班的全部订阅（删班时调，2026-10-24 班级管理）。
+ * 每个受影响的连接收一条 class-unsubscribed{reason:'class-deleted'} ——
+ * 管理端 ClassService 已有处理（本地置未订、保留数据不断线），
+ * 不另造通知类型。死连接（readyState!==1）顺手摘掉，与 fanoutClass 同口径。
+ * @returns {number} 被清出的订阅连接数
+ */
+export function dropClassSubs(code) {
+  const c = String(code ?? '').trim();
+  let dropped = 0;
+  for (const [ws, codes] of classSubs) {
+    if (!codes.has(c)) continue;
+    codes.delete(c);
+    if (codes.size === 0) classSubs.delete(ws);
+    dropped++;
+    if (ws.readyState !== 1) continue;   // 死连接：摘订阅即可，发不出去
+    try { send(ws, 'class-unsubscribed', { classCode: c, reason: 'class-deleted' }); }
+    catch { classSubs.delete(ws); }
+  }
+  return dropped;
 }
 
 /** 连接断开：摘掉它的全部班级订阅（防 classSubs 漏内存 + 往死连接投递）。 */
@@ -224,11 +262,18 @@ export function pushClassEvent(code, kind, data, uid) {
     }
   }
 
-  const ev = { id: ++evSeq, at: new Date().toISOString(), kind: k, uid: String(uid || ''), data: JSON.parse(raw) };
-  // 缩略图不进历史环（见 THUMB_KIND 注释）；实时 fanout 照旧。
-  if (k !== THUMB_KIND) logEvent(code, ev);
-  const r = fanoutClass(code, 'class.event', { classCode: code, ...ev });
-  return { ok: true, id: ev.id, viewers: r.hits };
+  const ev = { id: 0, at: new Date().toISOString(), kind: k, uid: String(uid || ''), data: JSON.parse(raw) };
+  // 缩略图不进历史（见 THUMB_KIND 注释）；实时 fanout 照旧。
+  // persisted=false 的两种来源：① 缩略图（本就不该进历史）② 写库失败（已记 warn）。
+  // 端侧靠它区分"这条能进本地历史水位"与"这条只该显示一次"。
+  let persisted = false;
+  if (k !== THUMB_KIND) {
+    const id = logEvent(code, ev);
+    if (id != null) { ev.id = id; persisted = true; }
+  }
+  if (!persisted) ev.id = ++evSeq;   // 占位序号：仅用于本次投递，不参与历史对账
+  const r = fanoutClass(code, 'class.event', { classCode: code, persisted, ...ev });
+  return { ok: true, id: ev.id, persisted, viewers: r.hits };
 }
 
 /**
@@ -242,7 +287,8 @@ export function noteMemberOnline(uid) {
     id: ++evSeq, at: new Date().toISOString(), kind: 'member.online',
     uid: String(uid || ''), data: {},
   };
-  logEvent(code, ev);
+  const id = logEvent(code, ev);
+  if (id != null) ev.id = id;
   const r = fanoutClass(code, 'class.member.online', { classCode: code, ...ev });
   return { ok: true, viewers: r.hits };
 }
@@ -258,7 +304,8 @@ export function noteMemberOffline(uid, reason = 'disconnect') {
     id: ++evSeq, at: new Date().toISOString(), kind: 'member.offline',
     uid: String(uid || ''), data: { reason: String(reason || 'disconnect').slice(0, 32) },
   };
-  logEvent(code, ev);
+  const id = logEvent(code, ev);
+  if (id != null) ev.id = id;
   const r = fanoutClass(code, 'class.member.offline', { classCode: code, ...ev });
   return { ok: true, viewers: r.hits };
 }

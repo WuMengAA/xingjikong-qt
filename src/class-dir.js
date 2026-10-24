@@ -227,3 +227,50 @@ export function listClassDir() {
 
 /** 目录规模（启动日志用）。 */
 export function classDirSize() { return dir.size; }
+
+/**
+ * 改显示名（2026-10-24 班级管理）。**只动 name，canonical 码永远不动**——
+ * 让码让位等于已绑设备的归属当场跳变（class-dir 铁律）。
+ * @returns {{ok:true, class:object} | {ok:false, error:string}}
+ */
+export function renameClass(code, newName) {
+  const c = String(code ?? '').trim();
+  const n = String(newName ?? '').trim();
+  if (!n) return { ok: false, error: '班级名不能为空' };
+  const hit = lookup.get(c);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  const rec = dir.get(hit);
+  const nn = normName(n);
+  // 新显示名已被**别的班**占用 → 拒。两个班共用一个显示名，会让 resolveClassCode
+  // 的"同名归一"把后来设备的绑定送到另一个班去（名字就是同班判定第一依据）。
+  const clash = lookup.get(nn);
+  if (clash && clash !== hit) {
+    return { ok: false, error: `显示名已被班级 ${clash} 使用，请换一个` };
+  }
+  // 旧显示名的索引摘除（仅当仍指向本班；理论上必然指向本班，防御性判断）
+  if (lookup.get(normName(rec.name)) === hit) lookup.delete(normName(rec.name));
+  rec.name = n;
+  reindex(rec);
+  persist(rec);
+  return { ok: true, class: { ...rec, aliases: rec.aliases.slice() } };
+}
+
+/**
+ * 删班（2026-10-24 班级管理）。**设备归属不在这里处理**——调用方（class-admin.js）
+ * 必须先定策略（release 移出 / refuse 有设备就拒），到这里班已经是空的。
+ * 别名记录随 canonical 一同消失（aliases 是同一班的其他写法，不是独立实体）。
+ * @returns {{ok:true, code, name} | {ok:false, error:string}}
+ */
+export function deleteClass(code) {
+  const c = String(code ?? '').trim();
+  const hit = lookup.get(c);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  const rec = dir.get(hit);
+  // 摘除该班全部索引键（canonical / 显示名 / 每个 alias），只摘指向自己的
+  for (const key of [rec.code, normName(rec.name), ...rec.aliases]) {
+    if (lookup.get(key) === hit) lookup.delete(key);
+  }
+  dir.delete(hit);
+  db.prepare('DELETE FROM classes WHERE code = ?').run(hit);
+  return { ok: true, code: hit, name: rec.name };
+}

@@ -24,6 +24,9 @@ export const ERR = {
   HEARTBEAT_TIMEOUT: { close: 4000, msg: '心跳超时，判定离线' },
   NOT_SUBSCRIBED: { close: 0, msg: '没有订阅这台设备' },
   DEVICE_OFFLINE: { close: 0, msg: '设备不在线' },
+  // 2026-10-24 重认证门：敏感操作需重新验证密码。close=0 —— **不掐连接**（红线：
+  // 管理端要一直连得上；弹窗重登只是让操作停一下，画面/心跳照常）。
+  REAUTH_REQUIRED: { close: 0, msg: '需要重新验证密码后才能执行该操作' },
 };
 
 /**

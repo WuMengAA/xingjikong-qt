@@ -14,6 +14,8 @@ import { enqueueDispatch, dropDispatch, settle as settleQueue, pendingFor, listP
 // 班级身份的唯一真源（2026-10-20）：码/名/别名的解析与落盘都在 class-dir.js。
 // 本文件只负责"设备在哪个班"的运行时索引 —— 两边职责不重叠。
 import { resolveClassCode, getClass, listClassDir } from './class-dir.js';
+// 环境白名单（2026-10-24）：设备是 test 还是 prod，云端唯一裁决（设备自报一律忽略）。
+import { isTestUid } from './env-gate.js';
 
 /** 出向统一走协议层：对端是 v1 就发信封，是旧客户端就发旧扁平格式（过渡期不断链）。 */
 function sendTo(ws, type, payload, id = '') {
@@ -221,11 +223,16 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
   if (isNewUid) pruneKnown();
   // 已知设备表：离线也留着，online 由 devices.has 派生；name/classCode 落这里，重连沿用。
   const resolvedClass = meta?.classCode ?? known.classCode ?? null;
+  // 环境：**只认云端白名单**（register 自报 env 一律忽略 —— 学校机器塞 env:"test"
+  // 就能伪装测试机；伪装的收益全在白名单给的调试特权上）。每次注册现查，
+  // 白名单更新后要等设备下次重连才生效（写注释：不是 bug，是规则）。
+  const env = isTestUid(uid) ? 'test' : 'prod';
   knownDevices.set(uid, {
     uid,
     name: meta?.name ?? known.name ?? null,
     classCode: resolvedClass,
     version: version || known.version || 'unknown',
+    env,
     lastSeen: now,
   });
   // 上限护栏：新设备才查（超限先淘汰最久未见的，避免被灌爆内存）
@@ -243,6 +250,7 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     lastError: null,
     name: knownDevices.get(uid)?.name ?? null,
     classCode: knownDevices.get(uid)?.classCode ?? null,
+    env: knownDevices.get(uid)?.env ?? 'prod',
     recentFrame: old?.recentFrame ?? null,
     // 能力清单（2026-10-06 契合度）：被控端 register 带上来，云端**原样转给管端**，
     // 管端据此把不支持的按钮置灰，别让人点下去才吃一句"未知指令"。
@@ -379,6 +387,9 @@ export function listDevices() {
       // 管端门控要用：没上报过就是 null（老版本被控端），管端照旧全放开
       caps: d ? (d.caps ?? null) : null,
       actions: d ? (d.actions ?? null) : null,
+      // 环境标签（2026-10-24）：test=白名单调试机，prod=学校生产设备。
+      // 管端可以据此显示"测试机"角标，并决定是否放行调试类功能。
+      env: kd.env ?? 'prod',
     });
   }
   return out;
@@ -450,7 +461,18 @@ function addToClassIndex(uid, code, name = '') {
   if (!c.devices.includes(uid)) c.devices.push(uid);
   let known = knownDevices.get(uid);
   if (!known) { known = { uid, name: null, classCode: code, version: 'unknown', lastSeen: 0 }; knownDevices.set(uid, known); }
-  else known.classCode = code;
+  else {
+    // G3（2026-10-24）：换班必须从**旧班**索引移除。只加不清的后果：设备从 A 班
+    // 改绑 B 班后，A 班内存索引残留该 uid ⇒ /api/classes 的 A 班 devices/onlineCount
+    // 虚高（管理端界面按 classCode 现算不受影响，但云端接口口径漂移本身就是
+    // "第二真源"事故的苗头）。knownDevices.classCode 是归属唯一口径，以它为准倒推。
+    const prev = known.classCode;
+    if (prev && prev !== code) {
+      const old = classes.get(prev);
+      if (old) old.devices = old.devices.filter((x) => x !== uid);
+    }
+    known.classCode = code;
+  }
 }
 
 export function bindDeviceToClass(code, uid, className = '', source = 'cloud') {
@@ -477,6 +499,41 @@ export function unbindDeviceFromClass(code, uid) {
   if (known && known.classCode === code) known.classCode = null;
   broadcastDevices();
   return { ok: true };
+}
+
+/**
+ * 删班后清掉运行时索引里的条目（2026-10-24 班级管理）。
+ * 不清的后果：class-dir 的记录删了，但内存 Map 的班还在 ⇒ listClasses 的
+ * 「目录没有、索引里有」兜底分支会把它又吐出来（阴魂不散，管理端看到
+ * devices 空、source 空的幽灵班）。unbindDeviceFromClass 只清设备不清条目，
+ * 所以删班路径显式调这里（先 unbind 完设备，条目自然是空的）。
+ */
+export function dropClassIndex(code) {
+  const c = classes.get(code);
+  if (!c) return { ok: true, existed: false };
+  classes.delete(code);
+  return { ok: true, existed: true, devices: c.devices.length };
+}
+
+/**
+ * 绑班成功后，若设备**正在线**，立刻经 WS 下发 class-bound（G4，2026-10-24）。
+ *
+ * 解决的断档：管理端给一台**已在线**的设备绑班/改绑，云端 knownDevices 表变了，
+ * 但设备端不知道 —— 它只有重连时 register 才带上新码。后果是被控端
+ * ThumbnailReporter 要求 classCode 非空才开工 ⇒ 缩略图一直"暂无画面"，
+ * 直到设备下次重连。这里在线即推，被控端收到就更新 classcode.txt。
+ * 离线设备无需下发：register 时自报持久化的码，云端表才是归属真源。
+ * @returns {{online:boolean, error?:string}}
+ */
+export function notifyClassBoundIfOnline(uid, code, name) {
+  const d = devices.get(uid);
+  if (!d || !d.ws || d.ws.readyState !== 1) return { online: false };
+  try {
+    sendTo(d.ws, 'class-bound', { code, name: name || '' });
+    return { online: true };
+  } catch (e) {
+    return { online: false, error: e.message };
+  }
 }
 
 export function listClasses() {
@@ -740,6 +797,20 @@ export function broadcastDevices() {
     catch { viewers.delete(ws); }
   }
   return hits;
+}
+
+/** 白名单变动后重算全部已知设备的 env 标签（改测试机身份立即生效，不用等重连）。
+ *  返回变动台数；有变动就广播新设备表，管理端当场看到 test/prod 跳变。 */
+export function recomputeDeviceEnv() {
+  let changed = 0;
+  for (const [uid, kd] of knownDevices) {
+    const e = isTestUid(uid) ? 'test' : 'prod';
+    if (kd.env !== e) { kd.env = e; changed++; }
+    const d = devices.get(uid);
+    if (d && d.env !== e) d.env = e;
+  }
+  if (changed > 0) broadcastDevices();
+  return changed;
 }
 
 /** 把任意消息广播给所有在线管理端（指令回执、执行结果等都走它）。返回命中数。 */
