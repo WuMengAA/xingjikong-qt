@@ -314,10 +314,11 @@ endif()
 #   ⚠️ 落点必须与既有相对导入逐字对齐（本工程用 `import "components"` 与
 #   `import "../components/md3"`）⇒ 消费方 QML **零改动**，与岛同一套路。
 set(STE_SHARED_UI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/ui")
-if(NOT EXISTS "${STE_SHARED_UI_DIR}/Md3.qml")
+if(NOT EXISTS "${STE_SHARED_UI_DIR}/theme/Md3.qml")
   message(FATAL_ERROR
     "[viewer] 共享 UI 基座目录缺失：${STE_SHARED_UI_DIR}\n"
-    "  Md3 设计系统真源在 Stelarith-shared-qml/ui/（两端共用）。\n"
+    "  Md3 设计系统真源在 Stelarith-shared-qml/ui/theme/（两端共用，2026-10-25 起\n"
+    "  移入 theme/ 子目录并配 qmldir 成为 pragma Singleton：`import \"../components/theme\"`）。\n"
     "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
 endif()
 
@@ -530,9 +531,15 @@ if(STE_IS_ANDROID)
   # ⚠️ 2026-10-16（U2）：必须**同时收 .js** —— UiRegistry.qml 依赖 UiContract.js（纯函数契约）。
   #   只 GLOB *.qml 的话 APK 里契约缺失，注册表整块解析失败（桌面走 copy_directory 不受影响，
   #   所以只有手机端会中招 —— 正是最不容易发现的那类）。
+  # ⚠️ 2026-10-25（Md3 改 pragma Singleton）：**必须同时收 theme/qmldir**。
+  #   Md3.qml 移入 ui/theme/ 后靠 qmldir 声明 `singleton Md3 1.0 Md3.qml`；
+  #   qrc 里少了这个文件 ⇒ `import "components/theme"` 解析不到 singleton
+  #   ⇒ 手机端启动即白屏（桌面走 copy_directory 整目录拷贝，不受影响 ——
+  #   又一类"只有手机端会中招"的坑，与上面 UiContract.js 同源）。
   file(GLOB_RECURSE STE_SHARED_UI_FILES CONFIGURE_DEPENDS
     "${STE_SHARED_UI_DIR}/*.qml"
-    "${STE_SHARED_UI_DIR}/*.js")
+    "${STE_SHARED_UI_DIR}/*.js"
+    "${STE_SHARED_UI_DIR}/*/qmldir")
   qt_add_resources(viewer-qt "viewerui" PREFIX "/components"
     BASE "${STE_SHARED_UI_DIR}" FILES ${STE_SHARED_UI_FILES})
   # ② 2026-10-18：Android 不再链 libdatachannel（WebRTC 已移除）。

@@ -8,12 +8,13 @@
 // main.cpp：Android 加载 qrc:/mobile/Main.qml（桌面仍 qml/Stelarith/Main.qml）。
 //
 // 2026-10-13：UI 转 Material 3（用户批准 MaterialLab 为唯一模板）。
-// 令牌单一真源 = ../components/Md3.qml；组件 = ../components/md3/。
+// 令牌单一真源 = ../components/theme/Md3.qml（pragma Singleton）；组件 = ../components/md3/。
 // 原 BottomNav.qml 已删除（由 Md3NavBar 取代）。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../components"      // Md3.qml 令牌单一真源
+import "../components"      // 共享 ui 组件（UiRegistry 等）
+import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 import "../components/md3"  // MD3 组件库
 import ".."          // #5：FilePushDialog.qml 在 qml/ 根目录，手机端要拿它必须相对导入上一级
 
@@ -25,7 +26,9 @@ ApplicationWindow {
     title: "星集控 · 手机端"
     color: md3Theme.cSurface
 
-    Md3 { id: md3Theme; dark: root.darkMode }
+    // Md3 = pragma Singleton（真源 shared-qml/ui/theme/）；本页是手机端独立入口，负责写全局 dark。
+    readonly property var md3Theme: Md3
+    Binding { target: Md3; property: "dark"; value: root.darkMode }
     // 迁移桥：保留 th 旧签名
     readonly property var th: md3Theme
     // E4 同步：darkMode 由 backend.themeMode 派生（0 浅色 / 1 深色 / 2 跟随系统取 backend.systemDark）。

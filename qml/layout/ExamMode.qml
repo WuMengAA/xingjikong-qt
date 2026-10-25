@@ -4,6 +4,7 @@
 // 考得怎么样（统计+名单）、怎么出去（退出需监考密码 + 求助）。
 import QtQuick
 import "../components"
+import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 import "../components/md3"
 
 Item {
@@ -14,7 +15,7 @@ Item {
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
     //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
-    readonly property var md3: Md3 { dark: root.dark }
+    readonly property var md3: Md3
     property int remainSec: 2700        // 45:00
     property var seats: [
         { no: "01", name: "王同学", state: "答题中" },

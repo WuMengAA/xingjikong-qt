@@ -13,7 +13,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
-import "components/md3"    // Md3 令牌（首启引导里复用统一登录卡时需要自建实例）
+import "components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "components/md3"    // MD3 组件库（Md3Btn/Card/…；令牌见上一行 components/theme 的 singleton）
 // 2026-10-22：全局主框架（App Scaffold · MainWindow）——原 pages/Md3Shell.qml 更名移入。
 // 它是管理端唯一应用外壳（侧栏+顶栏+内容区+状态条），业务页经它挂载；见 AGENTS.md §9。
 import "shell"
@@ -81,14 +82,17 @@ ApplicationWindow {
     readonly property bool darkMode: (backend.themeMode === 1) ? true
                                       : (backend.themeMode === 2 ? backend.systemDark : false)
 
-    // 主题 Token 单一真源：qml/components/Md3.qml（2026-10-13 UI 转 Material 3，
+    // 主题 Token 单一真源：shared-qml/ui/theme/Md3.qml（构建期拷到 components/theme/；
     // 用户批准 MaterialLab 为全项目唯一模板）。深 / 浅两套由 dark 切换。
     // Md3 提供 legacy 别名（win/panel/fg/acc/rCtrl…）⇒ 本文件 3802 行零改动换肤；
     // 组件逐个迁 md3/ 后别名块删除。原 Theme.qml 全端迁移完成后退役。
-    readonly property var darkTh:  Md3 { dark: true }
-    readonly property var lightTh: Md3 { dark: false }
-
-    readonly property var th: darkMode ? darkTh : lightTh
+    // 2026-10-25（用户点单「MD3 太难控制」）：Md3 改 pragma Singleton（真源
+    // shared-qml/ui/theme/ + qmldir），本文件是**桌面端唯一 dark 写入口**。
+    // 原先 darkTh/lightTh 两个实例只是因为 th 声明成 property var 需要预构造对象，
+    // 实际 th 只取其一（darkMode ? darkTh : lightTh），从未同时显示两套 ——
+    // 所以「需要深浅两套并存」的旧理由不成立，singleton 后全局 binding 自动随动。
+    readonly property var th: Md3
+    Binding { target: Md3; property: "dark"; value: root.darkMode }
 
     // 界面自身的状态（只跟显示有关的东西）
     // 2026-10-22（用户点单「把新界面全面替换老界面」）：默认页由 1（旧壳集控）改为
@@ -1552,7 +1556,7 @@ ApplicationWindow {
                 AccountLoginCard {
                     visible: welcomeLayer.step === 1
                     width: parent.width
-                    md3: Md3 { dark: root.darkMode }
+                    md3: Md3
                 }
 
                 // 步骤 2：启动方式（2026-10-09 · 用户清单第②条：引导里就能设自启/快捷）

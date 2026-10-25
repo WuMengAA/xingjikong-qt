@@ -13,13 +13,14 @@
 // 注：只 import 组件目录拿 Md3 令牌；屏幕由 Loader 按路径加载，各自文件管自己的 import。
 import QtQuick
 import "components"
+import "components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
     // 宿主只传 dark 布尔；各屏内部自建 Md3 实例（见各屏注释——晚赋值换实例会出事故）。
     // 本文件左侧切换轨用自己的实例（同模式）。
     property bool dark: false
-    readonly property var md3: Md3 { dark: root.dark }
+    readonly property var md3: Md3
     property int screen: 0
     readonly property var screens: [
         { name: "桌面集控台", short: "桌面", icon: "🖥", w: 1280, h: 800, src: "DesktopConsole.qml" },

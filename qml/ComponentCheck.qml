@@ -5,12 +5,13 @@
 // 与 MaterialLab（MD3 组件库验收）、LayoutLab（布局模板验收）并列的第三张验收页。
 import QtQuick
 import "components"
+import "components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
     width: 480; height: 640
     property bool dark: false
-    readonly property var md3: Md3 { dark: root.dark }
+    readonly property var md3: Md3
 
     Rectangle { anchors.fill: parent; color: md3.cSurface }
 
