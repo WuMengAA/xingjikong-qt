@@ -463,7 +463,7 @@ Item {
                                     drag.maximumY: schedList.contentHeight - height
                                     property real pressY: 0
                                     onPressed: pressY = card.y
-                                    onReleased: {
+                                    onReleased: (mouse) => { // Qt6.12：注入 mouse 形参已废弃（松手即打 deprecation qWarning），按官方形式改箭头函数显式形参，逻辑等价
                                         var idx = -1
                                         if (!root.saving) {
                                             var mp = ma.mapToItem(schedList, mouse.x, mouse.y)

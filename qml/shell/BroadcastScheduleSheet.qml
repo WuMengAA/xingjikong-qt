@@ -536,7 +536,7 @@ Item {
                                         // 改为 MouseArea 内置移动拖拽（移动超阈值自动开始）。
                                         property real pressY: 0
                                         onPressed: pressY = card.y
-                                        onReleased: {
+                                        onReleased: (mouse) => { // Qt6.12：注入 mouse 形参已废弃（松手即打 deprecation qWarning），按官方形式改箭头函数显式形参，逻辑等价
                                             // 落点换算（2026-10-23 修复，探针实证）：
                                             // 不能用 card.y+height/2 调 indexAt——拖拽中 card 与相邻行
                                             // 视觉重叠，按 card 中心查恒命中自己被拖动的那一行
