@@ -61,18 +61,25 @@ export function buildAuthorize(redirectUri) {
 
 /** 拿到 code 之后调站点换会话。失败要如实冒泡，别吞成"签票成功"。 */
 async function exchangeCode(code, redirectUri) {
-  const body = new URLSearchParams();
-  body.set('grant_type', 'authorization_code');
-  body.set('client_id', OAUTH_CLIENT_ID);
-  body.set('client_secret', OAUTH_CLIENT_SECRET);
-  body.set('code', code);
-  body.set('redirect_uri', redirectUri);
-  body.set('expires_in', String(Math.round(ADMIN_TICKET_TTL_MS / 1000)));
+  // ⚠️ 2026-10-25（Win7 现场排障同批）必须发 application/json：站点（SvelteKit）的
+  //   csrf.checkOrigin 对 form 类 Content-Type 的 POST 校验 Origin 头；Node fetch
+  //   （undici）默认不发 Origin ⇒ 一律 403（Node fetch 对生产站点实测：form→403，
+  //   JSON→直达业务逻辑 401 invalid_client）。曾用 URLSearchParams + form 编码暗断，
+  //   管理台「用网站账号登录」静默 403→502（csrf 重开后再无人走过这条链）。
+  //   站点 /oauth/token 的 toParams 双形态支持，字段名不变（含 expires_in）。
+  const body = {
+    grant_type: 'authorization_code',
+    client_id: OAUTH_CLIENT_ID,
+    client_secret: OAUTH_CLIENT_SECRET,
+    code,
+    redirect_uri: redirectUri,
+    expires_in: String(Math.round(ADMIN_TICKET_TTL_MS / 1000)),
+  };
 
   const r = await fetch(new URL('/oauth/token', SITE_URL), {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(10000),
   });
   if (!r.ok) {
