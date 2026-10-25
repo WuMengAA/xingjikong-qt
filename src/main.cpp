@@ -323,6 +323,11 @@ QWebSocket *g_ws = nullptr;
 int g_backoffMs = kFirstBackoffMs;
 // 2026-10-08：本机归属的班级码（OOBE 绑定后持久化，register 时带给云端 → 管理端按班分组）。
 QString g_classCode;
+// 2026-10-25：设备用途（classroom 教室机 / broadcast 广播机）。与班级码**并列**的第二维身份：
+//   班级码回答「这台机器属于谁」，用途回答「这台机器是什么」。
+// 为什么放全局而不是塞进 OobeWizard：register、缩略图门、外壳选择都要读它，
+// 而 OobeWizard 有明文纪律「不引用 main.cpp 任何符号」（见其头注释）。
+QString g_deviceRole = QStringLiteral("classroom");
 // 2026-10-09：班级**显示名**（站点 /api/device/activate 回喂的 className，如「1班」）。
 // 云端班级索引的 name 默认等于 code；带上它，管理端面板才显示真名而不是 class_01。
 QString g_className;
@@ -654,6 +659,9 @@ void sendRegister()
     if (!g_classCode.isEmpty()) p.insert(QStringLiteral("classCode"), g_classCode);
     // 2026-10-09：班级显示名 —— 云端班级索引 name 默认 = code，带上它管理端才显示「1班」。
     if (!g_className.isEmpty()) p.insert(QStringLiteral("className"), g_className);
+    // 2026-10-25：用途随注册上报。云端只在新登记时采纳，之后以云端为准（回执覆盖），
+    // 与 classCode 同一套「云端权威」模型 —— 后台改用途能推下来，端侧改不回去。
+    p.insert(QStringLiteral("role"), g_deviceRole);
 
     // 2026-10-10：灰度渠道 —— 设备声明自己所在的更新通道（stable / gray），云端据此下发对应通道版本。
     //   改用「持久化后的当前渠道」g_channel（main 启动时已 resolvedChannel()+persistChannel() 落盘），
@@ -1448,6 +1456,40 @@ static void loadClassName()
     }
 }
 
+// ── 设备用途持久化（2026-10-25）──────────────────────────────────
+// 与 classcode.txt 同目录同风格（单独小文件，不动 agent.env 的 4 行格式）。
+// 为什么必须落盘：用途决定外壳与云端判定，重启后靠 register 自报 —— 丢了就退回教室机。
+static QString deviceRolePath()
+{
+    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/devrole.txt");
+}
+/** 写用途（白名单外一律 classroom）。同值直接返回，不做无谓落盘。 */
+static void saveDeviceRole(const QString &role)
+{
+    const QString r = role.trimmed().toLower();
+    const QString n = (r == QStringLiteral("broadcast")) ? r : QStringLiteral("classroom");
+    if (n == g_deviceRole) return;
+    g_deviceRole = n;
+    QFile f(deviceRolePath());
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(g_deviceRole.toUtf8());
+        f.close();
+        qInfo().noquote() << QStringLiteral("[agent-qt] 设备用途 = %1").arg(g_deviceRole);
+    } else {
+        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法保存设备用途：%1").arg(f.errorString());
+    }
+}
+static void loadDeviceRole()
+{
+    QFile f(deviceRolePath());
+    if (!f.open(QIODevice::ReadOnly)) return;          // 没存过 = 教室机（向后兼容）
+    const QString r = QString::fromUtf8(f.readAll()).trimmed().toLower();
+    f.close();
+    if (r != QStringLiteral("broadcast")) return;       // 只有广播机才需要标；其余按教室机
+    g_deviceRole = QStringLiteral("broadcast");
+    qInfo("[agent-qt] 已载入设备用途：广播机");
+}
+
 /* ══════════ 班级绑定（2026-10-04：OOBE 里消费激活码，把本机绑到班级） ══════════
  * 背景：管理员生成一次性、绑班级的接入码（XJK-XXXX-XXX）；教室端在配置向导里
  * 填进去，保存时调站点 `POST /api/device/activate?code=…&uid=…` 消费，
@@ -1693,6 +1735,16 @@ void openOobeWizard()
 
     auto *wiz = new OobeWizard(dlg);
     wiz->setMachineCode(g_uid);
+    wiz->setInitialRole(g_deviceRole);   // 重开向导时默认选中上次的用途
+    // 用途在向导第一步就定，**不等绑定完成**：用户选了广播机后点「稍后配置」，
+    // 这台机器的身份也必须已经生效（否则云端按教室机对待、外壳还是教室面）。
+    QObject::connect(wiz, &OobeWizard::roleChosen, dlg, [](const QString &role) {
+        saveDeviceRole(role);
+        if (g_ws && g_ws->state() == QAbstractSocket::ConnectedState) {
+            sendRegister();   // 与绑班补发同一套（旧 register 重复发是既有用法）
+            qInfo("[oobe] 用途已补发云端（%s）", qPrintable(role));
+        }
+    });
     // 向导走"与云端同源"（二维码/绑定端点都在云端），见 bindBaseFromWsUrl
     const QString bindBase = bindBaseFromWsUrl(qEnvironmentVariable("STE_QT_WS_URL"));
     wiz->setSiteBase(bindBase);
@@ -5877,6 +5929,13 @@ void handleControlText(const QString &text)
         const QString rcClassName = pay.value(QStringLiteral("className")).toString().trimmed();
         if (!rcClassName.isEmpty())
             saveClassName(rcClassName);
+        // 2026-10-25：用途回执（云端权威）。只在新版云端下发时才有值；
+        // 老云端不带 ⇒ 保留本地值（不能当"改回教室机"，否则升级回退会把广播机打回原形）。
+        const QString rcRole = pay.value(QStringLiteral("role")).toString().trimmed();
+        if (!rcRole.isEmpty() && rcRole.toLower() != g_deviceRole) {
+            saveDeviceRole(rcRole);
+            qInfo("[agent-qt] 云端下发用途 = %s（下次打开面板生效）", qPrintable(g_deviceRole));
+        }
         // 连上云端 = 这一版是活的（强制升级就靠这一个信号判定"新版本起没起来"）。
         // 注意要在 applyUpdateInfo **之前**执行：applyUpdateInfo 里可能立刻触发自动升级，
         // 而升级前的成功标记必须带着"我当前这一版是好的"这个事实走。
@@ -6522,6 +6581,8 @@ void agentUiFill(AgentUi *ui)
     ui->m_appVersion = QString::fromLatin1(kAppVersion);
     ui->m_uid = g_uid;
     ui->m_cloudUrl = qEnvironmentVariable("STE_QT_WS_URL");
+    ui->m_deviceRole = g_deviceRole;
+    ui->m_classCode = g_classCode;
     ui->m_connState = g_registered ? QStringLiteral("已连接（云端已确认）")
                                    : QStringLiteral("未连接 / 正在重连");
     ui->m_dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
@@ -6910,7 +6971,60 @@ int main(int argc, char *argv[])
     qInfo("[agent-qt] SMTC 系统媒体识别已启动（800ms 轮询，独立 MTA 线程）");    const int envN = loadEnvFile(agentEnvPath());
     if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（%s）", envN, qPrintable(agentEnvPath()));
     loadClassCode();   // 2026-10-08：载入持久化的班级码，register 时带给云端
+    loadDeviceRole();  // 2026-10-25：载入用途（决定 register 自报与外壳），默认教室机
     loadClassName();   // 2026-10-09：载入班级显示名（同上，register 一起带给云端）
+
+    // ── Win7 渲染兜底（2026-10-25 · 现场实证）────────────────────────────
+    // 现象：Win7+VxKex 上，灵动岛等**无边框透明窗口**整块窗口矩形被填成不透明黑底
+    //   （rc.4 现场，用户报「黑色不透明背景显示出来」，属渲染通病不是单个界面）。
+    //
+    // 实证（同一台 Win7 实机，非推演）：
+    //   · 0.6.48 + agent.env 写 QT_QUICK_BACKEND=software ⇒ `set qt` 回读确认生效；
+    //     灵动岛压在**纯黑 cmd 窗口**上做像素采样：岛本体黑占 0.8%（主色 rgb(240,240,240)），
+    //     岛四角包围盒黑占 0.0%（100% 透出背景）—— 透明合成完全正常，黑底消失。
+    //   · rc.4 → 0.6.48 之间**没有任何渲染相关改动**（只加了日志埋点/退出埋点/QML 守卫），
+    //     所以唯一变量就是那个 env ⇒ Win7 的 GPU 后端（d3d11/opengl）在 alpha 合成上有缺陷，
+    //     software 后端（光栅）正常。
+    //
+    // 所以这里**兜底**，让每台 Win7 自动拿到正确后端，不必逐台手配 agent.env：
+    //   · 只认真实内核 6.1 —— 走 ntdll!RtlGetVersion。**不能用 QOperatingSystemVersion /
+    //     QSysInfo**：VxKex 补了版本查询 API，Win7 在 Qt 眼里会谎报成 Win10，用它判断
+    //     会恰好漏掉这批最需要兜底的机器。（RtlGetVersion 读的是内核真值，VxKex 只补用户态 API）
+    //   · 绝不覆盖部署侧的显式选择：agent.env / 真环境里只要写了 QT_QUICK_BACKEND、QT_OPENGL
+    //     或 QSG_RHI_BACKEND 任一项，就原样尊重（灰度机要做 A/B 时不至于被代码抢走控制权）。
+    //   · Win8+ 一概不动：那边 GPU 后端没问题，套 software 只是白丢性能（教室机几十台的量级）。
+    {
+        struct OsVersionInfoW_ {
+            ULONG dwOSVersionInfoSize;
+            ULONG dwMajorVersion;
+            ULONG dwMinorVersion;
+            ULONG dwBuildNumber;
+            ULONG dwPlatformId;
+            WCHAR szCSDVersion[128];
+        };
+        bool isRealWin7 = false;
+        HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        if (ntdll) {
+            using FnRtlGetVersion = LONG(WINAPI *)(OsVersionInfoW_ *);
+            FnRtlGetVersion fn = (FnRtlGetVersion)GetProcAddress(ntdll, "RtlGetVersion");
+            if (fn) {
+                OsVersionInfoW_ vi = {};
+                vi.dwOSVersionInfoSize = sizeof(vi);
+                if (fn(&vi) == 0)
+                    isRealWin7 = (vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1);
+            }
+        }
+        const bool backendPinned = !qEnvironmentVariableIsEmpty("QT_QUICK_BACKEND")
+                                || !qEnvironmentVariableIsEmpty("QT_OPENGL")
+                                || !qEnvironmentVariableIsEmpty("QSG_RHI_BACKEND");
+        if (isRealWin7 && !backendPinned) {
+            qputenv("QT_QUICK_BACKEND", "software");
+            qInfo("[render] Win7 内核 6.1 且未显式指定渲染后端 → 兜底 QT_QUICK_BACKEND=software"
+                  "（Win7 GPU 后端透明合成有缺陷，software 实测正常）");
+        } else if (isRealWin7) {
+            qInfo("[render] Win7 内核 6.1，但部署侧已显式指定后端 → 不覆盖（尊重配置）");
+        }
+    }
 
     // ── 渲染诊断（2026-10-25 · Win7 黑底排查）──────────────────────────
     // 被控端透明窗口（灵动岛/弹幕）在 Win7+VxKex 上出现「黑色不透明背景」。
@@ -7211,7 +7325,11 @@ int main(int argc, char *argv[])
         g_ws->sendTextMessage(makeEnvelope(QStringLiteral("class-event"), payload));
     });
     ThumbnailReporter::setReadyCheck([] {
+        // ⚠️ 广播机不参与班级域（2026-10-25）：它的 classCode 是**站码**，
+        // 上报缩略图会让班级工作台的设备网格里多出一台"广播机"，
+        // 而它根本没有教室画面语义。用途是第二维身份，门禁必须读它。
         return !g_classCode.isEmpty()
+            && g_deviceRole == QStringLiteral("classroom")
             && g_ws && g_ws->state() == QAbstractSocket::ConnectedState;
     });
     // 定时器归 app（主线程单线程跑 tick：DXGI timeout=0 非阻塞 + 首帧一次性
