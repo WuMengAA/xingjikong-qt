@@ -250,15 +250,24 @@ void OAuthBind::onReadyRead()
     QUrl tokenUrl(QStringLiteral("%1/oauth/token").arg(m_siteUrl));
     // 公开客户端（xjk_device_public）**整个不带** client_secret：
     // 站点那条 PUBLIC 分支判的是「参数不存在」，带一个空串过去反而会被判成"带错 secret"。
-    QStringList form;
-    form << QStringLiteral("grant_type=authorization_code");
-    form << QStringLiteral("client_id=%1").arg(QUrl::toPercentEncoding(m_clientId));
-    form << QStringLiteral("code=%1").arg(QUrl::toPercentEncoding(code));
-    form << QStringLiteral("redirect_uri=%1").arg(QUrl::toPercentEncoding(m_redirectUri));
+    //
+    // ⚠️ 2026-10-25（Win7 现场排障）：必须发 **application/json**，不能发
+    //   x-www-form-urlencoded。站点（SvelteKit）的 csrf.checkOrigin 对 **form 类
+    //   Content-Type** 的 POST 校验 Origin 头，而 QNAM 不发 Origin ⇒ 站点直接
+    //   403 "Cross-site POST form submissions are forbidden"（Win7 现场日志同款；
+    //   已对生产站点 curl 对照实证：form→403、JSON→直达业务逻辑）。
+    //   SvelteKit 的 is_form_content_type 只认 form/multipart/text-plain，
+    //   JSON 不触发该校验。站点 /oauth/token 的 toParams 同时支持两种形态
+    //   （见 +server.ts），改 JSON 无需站点配合。
+    QJsonObject body;
+    body.insert(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
+    body.insert(QStringLiteral("client_id"), m_clientId);
+    body.insert(QStringLiteral("code"), code);
+    body.insert(QStringLiteral("redirect_uri"), m_redirectUri);
 
     QNetworkRequest req(tokenUrl);
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
-    QNetworkReply *reply = m_nam->post(req, form.join(QLatin1Char('&')).toUtf8());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     QObject::connect(reply, &QNetworkReply::finished, this, &OAuthBind::onTokenFinished);
 }
 
