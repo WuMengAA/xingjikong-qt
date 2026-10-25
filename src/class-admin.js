@@ -29,6 +29,9 @@ import {
   listStudents, addStudent, updateStudent, removeStudent, importStudents,
   getTimetable, saveTimetable, dropClassData,
 } from './class-data.js';
+// 2026-10-25：ClassIsland 档案 → 归一化课表信封（CIMS 退役后课表回落到我们自己的库，
+// 但格式保持与 ClassIsland 互通：老师手里的档案能直接导进来）。
+import { normalizeClassIslandProfile, listClassIslandGroups, TIMETABLE_SCHEMA } from './class-timetable.js';
 // 2026-10-25：班级接入码收归我方 —— 票据系统本就在 bind-qr.js（与设备自助码同一套码表、
 // 同一套 normalizeCode/过期清理），这里只做「按班签发」这一层，不另造码表。
 import { issueClassBind, getTicket, revokeTicket } from './bind-qr.js';
@@ -413,10 +416,52 @@ export function adminSaveTimetable(code, profile, ident = null) {
   return r;
 }
 
+/* ───────────── 课表导入：ClassIsland 档案（2026-10-25）─────────────
+ * 为什么要在云端做归一化（而不是让每个客户端各写一份解析）：
+ *   · 老师的档案来自 ClassIsland，桌面端 / 平板端 / 以后的小程序都要能吃；
+ *   · 解析规则（第 N 节课 ↔ 作息第 N 个上课时段）一旦两端各写，必然漂；
+ *   · 归一化是纯函数，单测好写、出错能回人话。
+ * 多课表群（一份档案含多个班）时必须显式指定 —— 猜错就是把 8 班课表挂到 1 班。
+ */
+export function adminImportTimetable(code, rawProfile, groupKey = '', ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限修改该班课表' };
+  const norm = normalizeClassIslandProfile(rawProfile, groupKey);
+  if (!norm.ok) {
+    // groups 回给 UI：让老师自己选，而不是我们猜
+    return { ok: false, error: norm.error, groups: norm.groups || [] };
+  }
+  const r = saveTimetable(hit.code, norm.normalized, ident?.uid ?? 'system');
+  if (r.ok) {
+    pushEvent('info', '管理端导入 ClassIsland 课表', {
+      classCode: hit.code, group: norm.normalized.group.name,
+      days: norm.normalized.days.length, bytes: r.bytes, by: ident?.uid ?? 'system',
+    });
+    pushClassEvent(hit.code, 'timetable', {
+      group: norm.normalized.group.name, days: norm.normalized.days.length,
+      schema: TIMETABLE_SCHEMA,
+    }, ident?.uid ?? 'system');
+  }
+  return { ...r, group: norm.normalized.group, days: norm.normalized.days.length,
+           lessons: norm.normalized.days.reduce((n, d) => n + d.lessons.length, 0) };
+}
+
+/** 列一份档案里的课表群（UI 在导入前预览用；不落库）。 */
+export function adminListTimetableGroups(rawProfile) {
+  const groups = listClassIslandGroups(rawProfile);
+  return groups.length
+    ? { ok: true, groups }
+    : { ok: false, error: '档案里没有任何日课表（ClassPlan 为空或格式不对）', groups: [] };
+}
+
 /**
  * HTTP 路由：POST /api/class/{create,rename,delete,unbind,bind,member-add,member-remove,members,my-classes,publish,
- *                        students,student-add,student-update,student-remove,students-import,timetable,timetable-save}
+ *    students,student-add,student-update,student-remove,students-import,
+ *    timetable,timetable-save,timetable-import,timetable-groups}
  * （鉴权在 index.js 的 isViewerApi 组，与 /api/device/bind-class 同一凭据口径；写操作过重认证门）。
+ * timetable-import 收 **ClassIsland 原始档案** + 可选 group（多群时必填），云端归一化后落库；
+ * timetable-groups 只预览档案里的课表群，不落库（导入前的选择器用）。
  */
 export function handleClassAdminApi(req, res, u, send, ident = null) {
   const action = u.pathname.replace('/api/class/', '');
@@ -466,6 +511,11 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
         r = adminGetTimetable(String(body.classCode ?? ''), ident);
       } else if (action === 'timetable-save') {
         r = adminSaveTimetable(String(body.classCode ?? ''), body.profile ?? null, ident);
+      } else if (action === 'timetable-import') {
+        r = adminImportTimetable(String(body.classCode ?? ''), body.profile ?? null,
+                                 String(body.group ?? ''), ident);
+      } else if (action === 'timetable-groups') {
+        r = adminListTimetableGroups(body.profile ?? null);
       } else {
         return send(404, { ok: false, error: `未知班级管理操作：${action}` });
       }

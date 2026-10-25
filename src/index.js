@@ -230,7 +230,7 @@ import {
   noteMemberOnline, noteMemberOffline, removeViewerClasses,
 } from './class-events.js';
 // 班级管理（2026-10-24）：建/改名/删/移出的业务与路由处理。index.js 只挂分发点
-import { handleClassAdminApi } from './class-admin.js';
+import { handleClassAdminApi, adminMyClasses } from './class-admin.js';
 // 用户 claims 存储（2026-10-20 · RBAC 第二批）：票无 claims 时按 uid 回填身份，权限真正流动
 import { initUserClaims, applyStoredClaims, setUserClaims, deleteUserClaims, listUserClaims } from './user-claims.js';
 // CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
@@ -948,7 +948,22 @@ const server = http.createServer((req, res) => {
     return send(200, { ok: true, ...getStorageInfo() });
   }
   if (req.method === 'GET' && u.pathname === '/api/classes') {
-    return send(200, { ok: true, classes: listClasses() });
+    const all = listClasses();
+    const who = req.__auth || {};
+    // 2026-10-25（用户点单「接 my-classes 过滤」）：登录票据者只返回**自己带的班**。
+    // 静态令牌（系统身份 / 运维）与未登录 → 仍给全量（运维要看得见全校）。
+    // 兜底：该用户一条 membership 都没有时返回全量 + filtered:false ——
+    //   照字面过滤会让"还没加成员"的部署看到空列表，那不是安全，是把人锁在门外。
+    if (who.mode === 'ticket' && who.uid) {
+      const mine = adminMyClasses({ uid: who.uid });
+      if (mine.ok && mine.classes.length > 0) {
+        const roleMap = new Map(mine.classes.map((x) => [x.classCode, x.role]));
+        const own = all.filter((c) => roleMap.has(c.code))
+                       .map((c) => ({ ...c, myRole: roleMap.get(c.code) }));
+        return send(200, { ok: true, classes: own, filtered: true });
+      }
+    }
+    return send(200, { ok: true, classes: all, filtered: false });
   }
   if (req.method === 'GET' && u.pathname === '/api/classes/dir') {
     // 班级目录（身份真源，2026-10-20）：每个班的 canonical 码 / 显示名 / 别名 / 来源。
