@@ -101,11 +101,13 @@ Item {
 
         // 班级空态放在 ListView **之前**：fillHeight 的列表会把后置文案推到页面
         // 中间，看起来像"空态飘在半空"，实际应紧贴「班级」标题。
+        // 2026-10-25（用户点单「班级创建繁琐，没有引导」）：原文案"登录后由云端
+        // 下发"会让新手以为不用自己建班 ⇒ 改成指明入口（工作台有「上手三步」）。
         Text {
             Layout.fillWidth: true
             Layout.leftMargin: nav.padX
             visible: classList.count === 0
-            text: "还没有班级名单\n登录后由云端下发"
+            text: "还没有班级\n去「班级工作台」新建"
             font.pixelSize: md3 ? md3.bodyS : 12
             wrapMode: Text.WordWrap
             color: md3 ? md3.cOutline : "#79747E"

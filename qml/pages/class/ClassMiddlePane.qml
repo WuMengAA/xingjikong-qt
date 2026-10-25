@@ -1,12 +1,19 @@
-// 班级工作台 · 中栏（设备网格 ↔ 班级展板）· #472 拆件
+// 班级工作台 · 中栏（设备网格 ↔ 班级展板 ↔ 学生 ↔ 成员）· #472 拆件
 //
 // 从 ClassDashboard 抽出来的原因：横屏三栏和竖屏竖排都要这一块，
 // 原来两处各写一遍（分段按钮 model + StackLayout + 两个子件），
 // 一处改字段另一处忘记改就是"竖屏和横屏不一样"的经典 bug。
 //
 // 本件只管中栏的**视图切换**，不持有任何数据：
-//   · 设备数据从 deviceModel（ClassDeviceModel）进来；
-//   · 选中态、分段态都由宿主传，事件原样抛回（deviceClicked）。
+//   · 设备/事件数据从 deviceModel / evModel（ClassDeviceModel / ClassEventModel）进来；
+//   · 选中态、分段态都由宿主传，事件原样抛回。
+//
+// 2026-10-25 两处修：
+//   ① 四段文字自然宽 ≈300，窄中栏（240~290）会把「展板/成员」段裁到可视区外 ⇒
+//      用户报「展板按钮按了没反应」（本质是按钮在可视区外，不是信号没接）。
+//      现在宽度 < 320 自动切**纯图标段**（Md3SegmentedButton 已支持：label="" 定宽 44，
+//      四段 4×44+3×4=188 < 240），tooltip 仍带完整说明 ⇒ 每一段都在可视区、都能点。
+//   ② 展板从「说明卡」换成真视图 ⇒ 需要把 evModel / 班名 / 展开态透传下去。
 import QtQuick
 import QtQuick.Layouts
 import "../../components/md3"     // Md3SegmentedButton
@@ -17,29 +24,40 @@ Item {
 
     property var md3: ({})
     property var deviceModel: null
+    property var evModel: null
     property bool subscribed: false
     property string selectedUid: ""
-    /** 当前段：devices / board / members（宿主持有，切段不改数据）。
-     *  members = 成员管理（2026-10-24 方案 B）：设备移出/换班。 */
+    /** 当前段：devices / students / board / members（宿主持有，切段不改数据）。 */
     property string tab: "devices"
     /** members 段用：换班目标名单（backend.classes）。 */
     property var classes: []
     /** members 段用：当前班码。 */
     property string classCode: ""
+    /** 展板用：当前班显示名（顶栏"班级展板 · 高二(3)班"）。 */
+    property string className: ""
+    /** 展板用：宿主是否已进入页内全屏展示。 */
+    property bool boardExpanded: false
     /** students 段用：外壳页级 toast（写操作成功/失败都要说话）。 */
-    /** members 段用：外壳页级 toast。 */
     property var toastFn: null
 
     signal deviceClicked(string uid)
     signal tabActivated(string tab)
+    /** 展板请求宿主切换页内全屏（由 ClassDashboard 收口，横竖屏同一个入口）。 */
+    signal boardExpandToggled()
 
-    // 分段定义只写一份（横竖屏共用）
-    // 2026-10-25：加「学生」段（云端名单）。四段自然宽超过中栏 ⇒ 依赖下面那个
-    // 横向 Flickable 滑动；文案压短，避免一进来就只看到半个词。
-    readonly property var segModel: [
+    /** 窄栏放不下四段文字 → 纯图标段（见文件头 ①）。 */
+    readonly property bool compactSeg: pane.width < 320
+
+    // 分段定义只写一份（横竖屏共用）。窄栏用纯图标（label=""），宽栏带文字。
+    readonly property var segModel: pane.compactSeg ? [
+        { value: "devices",  label: "", icon: "layout-grid",  tip: "设备 · 本班设备实时画面" },
+        { value: "students", label: "", icon: "users",        tip: "学生 · 本班学生名单（存云端）" },
+        { value: "board",    label: "", icon: "tv",           tip: "展板 · 教室大屏常亮视图" },
+        { value: "members",  label: "", icon: "circle-check", tip: "成员 · 老师/助教账号与设备去留" }
+    ] : [
         { value: "devices",  label: "设备", icon: "layout-grid",  tip: "本班设备实时画面" },
         { value: "students", label: "学生", icon: "users",        tip: "本班学生名单（存云端）" },
-        { value: "board",    label: "展板", icon: "tv",           tip: "教室大屏常亮视图（规划中）" },
+        { value: "board",    label: "展板", icon: "tv",           tip: "教室大屏常亮视图" },
         { value: "members",  label: "成员", icon: "circle-check", tip: "老师/助教账号与设备去留" }
     ]
 
@@ -47,8 +65,8 @@ Item {
         anchors.fill: parent
         spacing: 12
 
-        // 分段条：三段的自然宽 ≈330，窄栏（<330）时原来会溢出到邻栏压住按钮
-        // （2026-10-25「按钮按不动」的成因之一）—— 改为横向可滑 + 居中夹紧。
+        // 分段条：窄栏会自动切纯图标（见 compactSeg），仍放进 Flickable 兜底 ——
+        // 万一未来再加段，至少还能横向滑，不会溢出压住邻栏。
         Flickable {
             width: parent.width
             height: 32
@@ -72,7 +90,7 @@ Item {
 
         StackLayout {
             width: parent.width
-            height: parent.height - seg.height - 12
+            height: parent.height - 32 - 12
             currentIndex: pane.tab === "students" ? 1
                           : (pane.tab === "board" ? 2 : (pane.tab === "members" ? 3 : 0))
 
@@ -89,7 +107,16 @@ Item {
                 subscribed: pane.subscribed
                 toastFn: pane.toastFn
             }
-            ClassBoardPane { md3: pane.md3 }
+            ClassBoardPane {
+                md3: pane.md3
+                deviceModel: pane.deviceModel
+                evModel: pane.evModel
+                subscribed: pane.subscribed
+                className: pane.className
+                classCode: pane.classCode
+                expanded: pane.boardExpanded
+                onToggleExpanded: pane.boardExpandToggled()
+            }
             ClassMemberPane {
                 md3: pane.md3
                 deviceModel: pane.deviceModel

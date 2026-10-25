@@ -1,130 +1,162 @@
-// 班级工作台 · 中栏「班级展板」说明卡（#461-#472）
+// 班级工作台 · 中栏「班级展板」—— 真·常亮展示视图（2026-10-25 重做）
 //
-// 点单项⑤「展板段先说明卡」：中栏 SegmentedButton 的「展板」段当前**不装假画面**，
-// 给一张说明卡讲清楚它是什么、现在到哪一步 —— 真源原则：没做的事就说没做，
-// 不用占位图冒充已上线（用户点单「不要塑料感」的延伸：不糊弄）。
+// 之前这里是一张「规划中」说明卡：用户点中栏「展板」段什么都看不到，
+// 反映为「按钮按了没反应」。现在做成可用的**旁观视图**（只展示、不操作）：
+//   · 主区：本班设备实时画面（本件自带只读网格：无 MouseArea、不选中、不下发）
+//   · 右区：班级动态（复用 ClassTimelinePane；最新在上）
+//   · 顶栏：班名 + 实时时钟 + 「全屏展示 / 退出展示」（宿主控制页内展开）
 //
-// 展板定位（蓝图口径）：把本班设备画面与班级动态并排常亮，供教室大屏/一体机
-// 公开展示。与工作台的区别：工作台是老师操作视图，展板是旁观视图（无操作）。
-// 落地顺序：设备网格（已上线）→ 事件流（已上线）→ 展板常亮模式（规划中）。
-//
-// 本卡纯展示，零信号零动作 —— 没有可交互的东西就不发信号（宁缺毋滥）。
+// 为什么自带网格而不复用 ClassDeviceGrid：那件带"点了选中"的交互语义（手型光标
+// + hover + 选中描边），展板是给大屏看的、不该能点 —— 复用会再次制造"点了没反应"。
 import QtQuick
-import "../../components/md3"     // Md3Card
-import "../../island"             // SvgIcon
+import "../../island"           // SvgIcon
+import "../../components/fresh" // FreshBtn
 
 Item {
     id: pane
 
     property var md3: ({})
+    property var deviceModel: null    // ClassDeviceModel
+    property var evModel: null        // ClassEventModel
+    property bool subscribed: false
+    property string className: ""
+    property string classCode: ""
+    /** 宿主是否已进入页内全屏展示（隐藏左右栏）；本件只据此改按钮文案。 */
+    property bool expanded: false
 
-    implicitWidth: 480
-    implicitHeight: card.implicitHeight
+    /** 请求宿主切换页内全屏（展开 / 收起）。 */
+    signal toggleExpanded()
 
-    Md3Card {
-        id: card
+    // ── 顶部时钟：只展示、不参与业务；15s 走一次，跨分钟即更新 ──
+    property string clockText: "--:--"
+    function tickClock() {
+        const d = new Date()
+        const p = function (n) { return (n < 10 ? "0" : "") + n }
+        pane.clockText = p(d.getHours()) + ":" + p(d.getMinutes())
+    }
+    Component.onCompleted: pane.tickClock()
+    Timer { interval: 15000; running: true; repeat: true; onTriggered: pane.tickClock() }
+
+    /** 右区事件栏只在够宽时出现（窄栏先保设备画面）。 */
+    readonly property bool showEvents: pane.width >= 560
+
+    Column {
         anchors.fill: parent
-        variant: "elevated"
-        md3: pane.md3
+        spacing: 12
 
-        Column {
-            anchors.fill: parent
-            spacing: 16
+        // ── 顶栏：标题 + 班名 | 时钟 + 全屏 ──
+        Item {
+            id: head
+            width: parent.width
+            height: 32
 
             Row {
-                width: parent.width
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 8
+
+                SvgIcon {
+                    name: "tv"
+                    px: 18
+                    tint: md3.frGreen || "#22C55E"
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                    text: "班级展板"
+                    font.pixelSize: md3.titleM
+                    font.weight: Font.Medium
+                    color: md3.frInk || "#111827"
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                    text: pane.className !== ""
+                          ? pane.className
+                          : (pane.classCode !== "" ? pane.classCode : "未选择班级")
+                    font.pixelSize: md3.body13
+                    color: md3.frInk2 || "#6B7280"
+                    elide: Text.ElideRight
+                    width: Math.max(60, pane.width - 360)
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+
+            Row {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
                 spacing: 12
 
-                Rectangle {
-                    width: 44
-                    height: 44
-                    radius: md3.rM
-                    color: md3.cSecondaryCont
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    SvgIcon {
-                        name: "tv"
-                        px: 22
-                        tint: md3.cOnSecondaryCont
-                        anchors.centerIn: parent
-                    }
-                }
-
-                Column {
-                    spacing: 2
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    Text {
-                        text: "班级展板"
-                        font.pixelSize: md3.titleM
-                        font.weight: Font.Medium
-                        color: md3.cOnSurface
-                    }
-                    Text {
-                        text: "教室大屏常亮视图 · 规划中"
-                        font.pixelSize: md3.body13
-                        color: md3.cOnSurfaceVar
-                    }
-                }
-            }
-
-            Text {
-                width: parent.width
-                text: "展板把本班设备画面与班级动态并排常亮，适合投在教室一体机大屏上，"
-                      + "供全班观看。它与工作台的区别是：工作台由老师操作，展板只展示、不操作。"
-                font.pixelSize: md3.body13
-                color: md3.cOnSurfaceVar
-                wrapMode: Text.WordWrap
-                lineHeight: 1.4
-            }
-
-            // 规划能力清单（没上线的就明说，不画开关不画按钮）
-            Column {
-                width: parent.width
-                spacing: 10
-
                 Text {
-                    text: "规划中的能力"
-                    font.pixelSize: md3.bodyS
-                    font.weight: Font.Medium
-                    color: md3.cOnSurfaceVar
+                    text: pane.clockText
+                    font.pixelSize: md3.titleM
+                    font.family: "monospace"
+                    color: md3.frInk2 || "#6B7280"
+                    anchors.verticalCenter: parent.verticalCenter
                 }
-
-                Repeater {
-                    model: [
-                        { icon: "layout-grid", label: "设备画面自动轮播", note: "已上线：工作台设备网格" },
-                        { icon: "clock",      label: "班级事件滚动展示", note: "已上线：工作台时间线" },
-                        { icon: "eye",        label: "大屏常亮与全屏",   note: "规划中，随下个版本" }
-                    ]
-
-                    delegate: Row {
-                        required property var modelData
-                        width: parent.width
-                        spacing: 10
-
-                        SvgIcon {
-                            name: modelData.icon
-                            px: 16
-                            tint: md3.cOutline
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Text {
-                            text: modelData.label
-                            font.pixelSize: md3.body13
-                            color: md3.cOnSurface
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Text {
-                            text: "· " + modelData.note
-                            font.pixelSize: md3.bodyS
-                            color: md3.cOutline
-                            elide: Text.ElideRight
-                            width: parent.width - 120
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
+                FreshBtn {
+                    md3: pane.md3
+                    text: pane.expanded ? "退出展示" : "全屏展示"
+                    variant: "tonal"
+                    onClicked: pane.toggleExpanded()
                 }
             }
+        }
+
+        // ── 主区：设备画面（只读）+ 班级动态 ──
+        Row {
+            width: parent.width
+            height: Math.max(80, parent.height - head.height - 12)
+            spacing: 12
+
+            // 只读网格：无 MouseArea，格子点了没有任何反应是"设计如此"。
+            GridView {
+                id: board
+                width: pane.showEvents ? parent.width - 252 : parent.width
+                height: parent.height
+                clip: true
+                model: pane.deviceModel
+                cellHeight: 150
+                readonly property int cols: Math.max(2, Math.floor(width / 180))
+                cellWidth: Math.floor((width - (cols - 1) * 12) / cols)
+
+                delegate: ClassBoardTile {
+                    width: board.cellWidth
+                    height: 150
+                    md3: pane.md3
+                    uid: model.uid
+                    name: model.name
+                    online: model.online
+                    hasThumb: model.hasThumb
+                    thumbRev: model.thumbRev
+                }
+            }
+
+            ClassTimelinePane {
+                visible: pane.showEvents
+                width: 240
+                height: parent.height
+                md3: pane.md3
+                model: pane.evModel
+            }
+        }
+    }
+
+    // 空态（订了但没设备 / 还没选班）——说人话，不摆假画面
+    Column {
+        anchors.centerIn: parent
+        visible: board.count === 0
+        spacing: 8
+
+        SvgIcon {
+            name: "monitor"
+            px: 36
+            tint: md3.cOutline
+            anchors.horizontalCenter: parent.horizontalCenter
+        }
+        Text {
+            text: pane.subscribed ? "这个班暂时没有设备" : "从左侧选择一个班级"
+            font.pixelSize: md3.body13
+            color: md3.cOnSurfaceVar
+            anchors.horizontalCenter: parent.horizontalCenter
         }
     }
 }

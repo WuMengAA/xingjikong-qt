@@ -33,8 +33,14 @@ Item {
     property string selectedName: ""
     property var toastFn: null
     property var openControlFn: null
+    /** 班级总数（backend.classes 长度）：给「上手引导」决定第①步文案。 */
+    property int classCount: 0
 
     signal publishRequested()
+    /** 上手引导里的「新建班级」→ 宿主开 ClassCreateDialog。 */
+    signal createRequested()
+
+    readonly property bool subbed: rail.cs && rail.cs.subscribed === true
 
     implicitWidth: 300
 
@@ -51,6 +57,16 @@ Item {
             id: col
             width: parent.width
             spacing: 16
+
+            // 上手引导（2026-10-25 用户点单「班级创建繁琐，没有引导」）：
+            // 还没选/还没建班时置顶，三步讲清怎么从零把设备接进来。
+            ClassOnboardGuide {
+                visible: !rail.subbed
+                width: parent.width
+                md3: rail.md3
+                classCount: rail.classCount
+                onCreateRequested: rail.createRequested()
+            }
 
             // 班级管理（2026-10-24 方案 B）：建/改名/删。管"班"本身；
             // 成员（人员与设备去留）走中栏「成员管理」tab。两处不混。
