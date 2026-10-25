@@ -209,10 +209,16 @@ export function adminRemoveMember(code, uid, ident = null) {
   return { ok: true, removed: r.removed, classCode: hit.code, uid: u };
 }
 
-/** 成员清单（含角色）。谁都能查自己有权看的班。 */
-export function adminListMembers(code) {
+/** 成员清单（含角色）。
+ *  ⚠️ 2026-10-26：这里原本**完全没有鉴权**（签名里连 ident 都没有），
+ *  而成员清单带 uid + 角色，等于"任何已鉴权连接都能把全校每个班的负责人名单拉走"。
+ *  与 adminListStudents / adminGetTimetable 同档：读权限走 canReadClass
+ *  （本班任一角色、或 scopes 覆盖、或全权/平台超管）。
+ *  全权身份（静态令牌 / 无 scopes 旧票）在 canAccess 里恒真 ⇒ 运维视角不受影响。 */
+export function adminListMembers(code, ident = null) {
   const hit = getClass(String(code ?? '').trim());
   if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canReadClass(ident, hit.code)) return { ok: false, error: '无权限查看该班成员' };
   return { ok: true, classCode: hit.code, name: hit.name, members: listMembers(hit.code) };
 }
 
@@ -492,7 +498,8 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
       } else if (action === 'member-remove') {
         r = adminRemoveMember(String(body.classCode ?? ''), String(body.uid ?? ''), ident);
       } else if (action === 'members') {
-        r = adminListMembers(String(body.classCode ?? ''));
+        // ident 必须传：成员清单带 uid+角色，不能无鉴权可读（见 adminListMembers 注释）
+        r = adminListMembers(String(body.classCode ?? ''), ident);
       } else if (action === 'my-classes') {
         r = adminMyClasses(ident);
       } else if (action === 'bindcode') {
