@@ -2157,20 +2157,28 @@ void ViewerBackend::requestClasses()
     if (wsIdx > 0) httpUrl.truncate(wsIdx);
     httpUrl += QStringLiteral("/api/classes");
     QNetworkRequest req{ QUrl(httpUrl) };
-    // ⚠️ 2026-10-10：云端把 /api/classes 与 /api/storage 归在**只认静态令牌**的严格组
-    //   （index.js 的 isViewerApi 分支，票据不认）。原来这里"有票优先发票" ⇒ 登录后用票据拉必 401
-    //   （日志里成片的 [class] 拉班级列表失败（HTTP 401））。改成静态令牌（STE_VIEWER_TOKEN）
-    //   优先、票据兜底。
-    const QByteArray token = !m_token.isEmpty()
-        ? m_token.toUtf8() : m_cloudTicket.toUtf8();
+    // 凭据选择：**登录票据优先，静态令牌兜底**。
+    //   2026-10-10 曾是反过来的（静态优先），当时的理由是「云端 isViewerApi 只认静态令牌，
+    //   拿票据拉必 401」。但云端后来已改成两种都认（index.js 的 vStatic || vTicket），
+    //   于是静态优先从"修 bug"变成了**功能障碍**：云端把每次请求都当运维身份
+    //   （mode=token、uid=null），/api/classes 的按班过滤永远不触发 —— 老师端看到全校班级。
+    //   现在票据优先 ⇒ 云端认得出「这个人是谁」，只回他带的班（响应带 filtered:true）；
+    //   未登录 / 票据过期时退回静态令牌（系统身份，仍给全量，运维要看得见全校）。
+    const bool useTicket = !m_cloudTicket.isEmpty() && ticketUsable();
+    const QByteArray token = useTicket ? m_cloudTicket.toUtf8() : m_token.toUtf8();
     if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);
     QNetworkReply *reply = m_nam->get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, httpUrl]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, httpUrl, useTicket]() {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (status == 200) {
             const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
             if (doc.isObject() && doc.object().value(QStringLiteral("ok")).toBool()) {
-                m_classes = doc.object().value(QStringLiteral("classes")).toArray();
+                const QJsonObject o = doc.object();
+                m_classes = o.value(QStringLiteral("classes")).toArray();
+                // 2026-10-25：票据优先之后，云端对「我带的班」会回 filtered:true（无成员时
+                // 兜底给全量 + false）。界面靠它说明"为什么只列出这几个班"，别让老师以为
+                // 班级数据丢了。静态令牌 / 未登录恒为 false。
+                m_classesFiltered = o.value(QStringLiteral("filtered")).toBool(false);
                 emit classesChanged();
                 if (m_classErrStatus != -1) { m_classErrStatus = -1; logf("[class] 班级列表恢复正常"); }
             }
@@ -2182,13 +2190,13 @@ void ViewerBackend::requestClasses()
             // 还是和云端 .env 的 VIEWER_TOKEN 对不上。
             logf("[class] 拉班级列表失败 HTTP %d；本次凭据＝%s（长 %d），URL=%s",
                  status,
-                 !m_token.isEmpty() ? "静态令牌 STE_VIEWER_TOKEN"
-                                    : (m_cloudTicket.isEmpty() ? "完全没有凭据" : "登录票据"),
-                 (int)(!m_token.isEmpty() ? m_token.size() : m_cloudTicket.size()),
+                 useTicket ? "登录票据" : (m_token.isEmpty() ? "完全没有凭据" : "静态令牌 STE_VIEWER_TOKEN"),
+                 (int)(useTicket ? m_cloudTicket.size() : m_token.size()),
                  httpUrl.toUtf8().constData());
             if (status == 401)
-                logf("[class] 401 的修法：把 viewer.env 里的 STE_VIEWER_TOKEN 改成云端 .env 的"
-                     " VIEWER_TOKEN（两边必须逐字一致）；/api/classes 只认静态令牌，登录票据在这条路上不认");
+                logf("[class] 401 的修法：① 未登录时用的是 viewer.env 的 STE_VIEWER_TOKEN，"
+                     "须与云端 .env 的 VIEWER_TOKEN 逐字一致；② 已登录则可能是票据过期，"
+                     "到设置页「账户与登录」重新登录即可");
         }
         reply->deleteLater();
     });
@@ -2204,7 +2212,8 @@ void ViewerBackend::requestStorage()
     if (wsIdx > 0) httpUrl.truncate(wsIdx);
     httpUrl += QStringLiteral("/api/storage");
     QNetworkRequest req{ QUrl(httpUrl) };
-    // 同 requestClasses：严格组只认静态令牌（见那里的说明）。
+    // 存储概况不带个人身份（磁盘/在线数都是全校口径），故沿用静态令牌优先；
+    // 未配静态令牌时用票据兜底。与 requestClasses 的差别是有意的，别顺手统一。
     const QByteArray token = !m_token.isEmpty()
         ? m_token.toUtf8() : m_cloudTicket.toUtf8();
     if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token);

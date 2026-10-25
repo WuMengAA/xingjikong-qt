@@ -24,6 +24,9 @@ Item {
     property var devices: []          // backend.devices（算每班在线数）
     property string currentClass: ""  // backend.currentClass
     property string section: ""       // 系统组选中：dash / classes / control / monitor / settings
+    /** 列表是否只含「我带的班」（backend.classesFiltered）。true 时标题右侧标一行小字——
+     *  登录后云端按 class_members 过滤，若不说清，老师会以为班级数据丢了。 */
+    property bool classesFiltered: false
     /** 系统组菜单源：外壳的 navItems（{key,icon,label}），与 BottomNav 同一份。 */
     property var navItems: []
 
@@ -91,12 +94,25 @@ Item {
         }
 
         // ── 班级分组 ──
-        Text {
+        RowLayout {
+            Layout.fillWidth: true
             Layout.leftMargin: nav.padX
+            Layout.rightMargin: nav.padX
             Layout.topMargin: 8
-            text: "班级"
-            font.pixelSize: Md3.labelS
-            color: Md3.cOutline
+            spacing: 6
+
+            Text {
+                text: "班级"
+                font.pixelSize: Md3.labelS
+                color: Md3.cOutline
+            }
+            Item { Layout.fillWidth: true }
+            Text {
+                visible: nav.classesFiltered
+                text: "仅我带的班"
+                font.pixelSize: Md3.labelS
+                color: Md3.cPrimary
+            }
         }
 
         // 班级空态放在 ListView **之前**：fillHeight 的列表会把后置文案推到页面

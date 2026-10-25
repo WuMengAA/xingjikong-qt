@@ -214,6 +214,10 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QJsonArray classes READ classes NOTIFY classesChanged)
     /** 当前选中的班级筛选（空串 = 全部）。界面切班时写它，设备列表按它过滤。 */
     Q_PROPERTY(QString currentClass READ currentClass WRITE setCurrentClass NOTIFY classesChanged)
+    /** classes 是「全校」还是「我带的班」：true = 云端按 class_members 过滤过。
+     *  2026-10-25：登录票据拉到的是"自己的班"，界面需要说清这点 —— 否则老师看到
+     *  只有 3 个班会以为班级数据丢了。未登录/无成员（云端兜底给全量）时为 false。 */
+    Q_PROPERTY(bool classesFiltered READ classesFiltered NOTIFY classesChanged)
     /** 首启引导：false = 还没走完引导（主窗应叠 WelcomeOverlay）；true = 已走过。 */
     Q_PROPERTY(bool firstRunDone READ firstRunDone NOTIFY firstRunDoneChanged)
     // ── 开机自启 / 桌面快捷方式（2026-10-09 · 当前用户范围、免提权）──
@@ -291,6 +295,7 @@ public:
     QString currentUid() const { return m_currentUid; }
 
     QJsonArray classes() const { return m_classes; }
+    bool classesFiltered() const { return m_classesFiltered; }
     QString currentClass() const { return m_currentClass; }
     // 2026-10-12 修：必须 Q_INVOKABLE —— 它是 Q_PROPERTY currentClass 的 WRITE，
     // 但 QML 里写的是 `backend.setCurrentClass(code)`（**当函数调**），WRITE 只在
@@ -920,7 +925,8 @@ private:
 
     QJsonArray m_devices;
     PermissionManager *m_perms = nullptr;   // RBAC（2026-10-20）：前端权限镜像层（裸指针，生命周期由 main 托管）
-    QJsonArray m_classes;            // 2026-10-08 分班制：云端返回的全部班级
+    QJsonArray m_classes;            // 2026-10-08 分班制：云端返回的班级（登录后=我带的班）
+    bool m_classesFiltered = false;   // 2026-10-25 云端 filtered 标志（true=已按成员过滤）
     QString m_currentClass;          // 2026-10-08 当前班级筛选（空=全部）
     QTimer *m_refreshTimer = nullptr; // 2026-10-08 设备表兜底轮询（15s，云端推送之外的保险）
     QJsonObject m_storage;            // 2026-10-08 云端存储概况（/api/storage 返回）

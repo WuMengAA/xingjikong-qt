@@ -91,6 +91,7 @@ Item {
                         anchors.left: k2.right
                         anchors.right: parent.right
                         text: ((backend.classes ? backend.classes.length : 0)) + " 个班级"
+                              + (backend.classesFiltered ? "（我带的）" : "")
                         color: page.th ? page.th.cPrimary : "#6750A4"
                         font.pixelSize: 13
                     }
@@ -98,7 +99,9 @@ Item {
                 Text {
                     width: parent.width
                     wrapMode: Text.Wrap
-                    text: "班级归属由云端下发（设备首次配置时扫码绑定班级）。要加/换班找管理员。"
+                    text: backend.classesFiltered
+                          ? "已按你的成员身份过滤：只列你带的班。退出登录后可见全校班级。要加/换班找管理员。"
+                          : "班级归属由云端下发（设备首次配置时扫码绑定班级）。要加/换班找管理员。"
                     color: page.th ? page.th.cOnSurfaceVar : "#49454F"
                     font.pixelSize: 12
                 }

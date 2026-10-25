@@ -236,6 +236,7 @@ Item {
                 visible: !shell.portrait
                 ctx: shell.ctx
                 classes: backend ? backend.classes : []
+                classesFiltered: backend ? backend.classesFiltered : false
                 devices: backend ? backend.devices : []
                 currentClass: backend ? backend.currentClass : ""
                 section: shell.section
