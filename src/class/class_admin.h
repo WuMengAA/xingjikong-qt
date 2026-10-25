@@ -6,6 +6,8 @@
 #include <QString>
 #include <QVariantList>
 
+#include <functional>
+
 class ViewerBackend;
 
 // 班级管理调用层（2026-10-24 · 管理端「班级管理」面板 · 方案 B）
@@ -44,9 +46,30 @@ public:
     Q_INVOKABLE void publish(const QString &classCode, const QString &type,
                              const QString &title, const QString &body);
 
+    // ── 学生名单（2026-10-25 · 云端数据库，用户裁决"不要本机了"）──
+    // 与「成员」（老师/助教账号）是两回事：学生不是登录账号，是班级事务的对象。
+    // students() 拉一次名单发 studentsList；写操作走 opFinished（成功文案带姓名）。
+    Q_INVOKABLE void students(const QString &code);
+    Q_INVOKABLE void addStudent(const QString &code, const QString &name,
+                                const QString &studentNo, const QString &seat);
+    Q_INVOKABLE void updateStudent(const QString &code, const QString &studentId,
+                                   const QString &name, const QString &studentNo,
+                                   const QString &seat, const QString &note);
+    Q_INVOKABLE void removeStudent(const QString &code, const QString &studentId);
+
+    // ── 班级课表（同批：整份 profile 存云端，不再只存在本机）──
+    // timetable() 拉一次发 timetableLoaded（profileJson 为空串 = 这个班还没排课，
+    // 界面必须显示"还没排课"而不是空白表）；saveTimetable 写整份档案。
+    Q_INVOKABLE void timetable(const QString &code);
+    Q_INVOKABLE void saveTimetable(const QString &code, const QString &profileJson);
+
 signals:
     /** 操作完成。ok=false 时 message 是云端给的人话错误（网络层失败也有兜底文案）。 */
     void opFinished(const QString &op, bool ok, const QString &message);
+    /** 一个班的学生名单（students() 结果；空数组 = 还没录入）。 */
+    void studentsList(const QString &classCode, const QVariantList &students);
+    /** 一个班的课表档案（profileJson 为空串 = 还没排课；updatedAt = 毫秒时间戳）。 */
+    void timetableLoaded(const QString &classCode, const QString &profileJson, qint64 updatedAt);
     /** 一个班的成员清单取回（members() 的结果；空数组 = 班里没人）。 */
     void membersList(const QString &classCode, const QVariantList &members);
     /** 2026-10-24 重认证门：写操作被云端 REAUTH_REQUIRED 拦（403）。
@@ -55,7 +78,11 @@ signals:
     void reauthRequired(const QString &message);
 
 private:
-    void post(const QString &action, const QJsonObject &body);
+    /** okText 非空时用作成功回执文案（学生操作要能说清"加了谁"，不能说"高二3班"）。 */
+    void post(const QString &action, const QJsonObject &body, const QString &okText = QString());
+    /** 取 JSON 列表类接口（students/timetable 共用）：成功走 onOk，失败静默发空。 */
+    void fetchJson(const QString &action, const QJsonObject &body,
+                   std::function<void(const QJsonObject &)> onOk);
 
     ViewerBackend *m_backend = nullptr;
     QNetworkAccessManager *m_nam = nullptr;

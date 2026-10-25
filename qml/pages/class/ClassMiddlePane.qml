@@ -26,6 +26,7 @@ Item {
     property var classes: []
     /** members 段用：当前班码。 */
     property string classCode: ""
+    /** students 段用：外壳页级 toast（写操作成功/失败都要说话）。 */
     /** members 段用：外壳页级 toast。 */
     property var toastFn: null
 
@@ -33,10 +34,13 @@ Item {
     signal tabActivated(string tab)
 
     // 分段定义只写一份（横竖屏共用）
+    // 2026-10-25：加「学生」段（云端名单）。四段自然宽超过中栏 ⇒ 依赖下面那个
+    // 横向 Flickable 滑动；文案压短，避免一进来就只看到半个词。
     readonly property var segModel: [
-        { value: "devices", label: "设备网格", icon: "layout-grid", tip: "本班设备实时画面" },
-        { value: "board",   label: "班级展板", icon: "tv",          tip: "教室大屏常亮视图（规划中）" },
-        { value: "members", label: "成员管理", icon: "users",        tip: "设备移出本班 / 换到别的班" }
+        { value: "devices",  label: "设备", icon: "layout-grid",  tip: "本班设备实时画面" },
+        { value: "students", label: "学生", icon: "users",        tip: "本班学生名单（存云端）" },
+        { value: "board",    label: "展板", icon: "tv",           tip: "教室大屏常亮视图（规划中）" },
+        { value: "members",  label: "成员", icon: "circle-check", tip: "老师/助教账号与设备去留" }
     ]
 
     Column {
@@ -69,7 +73,8 @@ Item {
         StackLayout {
             width: parent.width
             height: parent.height - seg.height - 12
-            currentIndex: pane.tab === "board" ? 1 : (pane.tab === "members" ? 2 : 0)
+            currentIndex: pane.tab === "students" ? 1
+                          : (pane.tab === "board" ? 2 : (pane.tab === "members" ? 3 : 0))
 
             ClassDeviceGrid {
                 md3: pane.md3
@@ -77,6 +82,12 @@ Item {
                 subscribed: pane.subscribed
                 selectedUid: pane.selectedUid
                 onDeviceClicked: function (uid) { pane.deviceClicked(uid) }
+            }
+            ClassStudentPane {
+                md3: pane.md3
+                classCode: pane.classCode
+                subscribed: pane.subscribed
+                toastFn: pane.toastFn
             }
             ClassBoardPane { md3: pane.md3 }
             ClassMemberPane {

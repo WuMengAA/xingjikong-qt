@@ -176,7 +176,142 @@ void ClassAdmin::publish(const QString &classCode, const QString &type,
     });
 }
 
-void ClassAdmin::post(const QString &action, const QJsonObject &body)
+// ── 学生名单 + 班级课表（2026-10-25 · 云端数据库）──────────────────────
+// 用户裁决「云端数据库存储，不要本机了」：名单和课表都跟班走，不再存在本机档案里。
+//
+// 为什么列表类另走 fetchJson 而不用 post：post 的语义是"写操作回执"（成功就弹 toast），
+// 而拉名单/拉课表是**读**——失败不该打断用户，只该把表清空并记日志。
+
+void ClassAdmin::fetchJson(const QString &action, const QJsonObject &body,
+                           std::function<void(const QJsonObject &)> onOk)
+{
+    if (!m_backend) return;
+    const QString base = m_backend->httpBaseUrl();
+    const QString token = m_backend->viewerToken();
+    if (base.isEmpty()) {
+        logf("[viewer] FAIL 班级数据读取跳过（%s）：云端地址未配置", action.toUtf8().constData());
+        if (onOk) onOk(QJsonObject());
+        return;
+    }
+    QNetworkRequest req(QUrl(base + QStringLiteral("/api/class/") + action));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    if (!token.isEmpty())
+        req.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + token.toUtf8());
+
+    auto *r = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(r, &QNetworkReply::finished, this, [this, r, action, onOk] {
+        r->deleteLater();
+        const int status = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonObject o = QJsonDocument::fromJson(r->readAll()).object();
+        if (status == 200 && o.value(QStringLiteral("ok")).toBool()) {
+            if (onOk) onOk(o);
+            return;
+        }
+        const QString sem = o.value(QStringLiteral("code")).toString();
+        const QString msg = o.value(QStringLiteral("error")).toString();
+        if (status == 403 && sem == QLatin1String("REAUTH_REQUIRED")) {
+            emit reauthRequired(msg.isEmpty() ? QStringLiteral("需要重新验证密码") : msg);
+        } else if (!msg.isEmpty()) {
+            logf("[viewer] FAIL 班级数据读取失败（%s / HTTP %d）：%s",
+                 action.toUtf8().constData(), status, msg.toUtf8().constData());
+        }
+        if (onOk) onOk(QJsonObject());
+    });
+}
+
+void ClassAdmin::students(const QString &code)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    fetchJson(QStringLiteral("students"), b, [this, code](const QJsonObject &o) {
+        QVariantList list;
+        const QJsonArray arr = o.value(QStringLiteral("students")).toArray();
+        for (const QJsonValue &v : arr) {
+            if (v.isObject()) list.append(v.toObject().toVariantMap());
+        }
+        emit studentsList(code, list);
+    });
+}
+
+void ClassAdmin::addStudent(const QString &code, const QString &name,
+                            const QString &studentNo, const QString &seat)
+{
+    QJsonObject st;
+    st.insert(QStringLiteral("name"), name);
+    if (!studentNo.trimmed().isEmpty()) st.insert(QStringLiteral("studentNo"), studentNo);
+    if (!seat.trimmed().isEmpty()) st.insert(QStringLiteral("seat"), seat);
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    b.insert(QStringLiteral("student"), st);
+    const QString tip = seat.trimmed().isEmpty()
+        ? QStringLiteral("已加入学生：%1").arg(name.trimmed())
+        : QStringLiteral("已加入学生：%1（座位 %2）").arg(name.trimmed(), seat.trimmed());
+    post(QStringLiteral("student-add"), b, tip);
+}
+
+void ClassAdmin::updateStudent(const QString &code, const QString &studentId,
+                               const QString &name, const QString &studentNo,
+                               const QString &seat, const QString &note)
+{
+    QJsonObject patch;
+    patch.insert(QStringLiteral("name"), name);
+    patch.insert(QStringLiteral("studentNo"), studentNo);
+    patch.insert(QStringLiteral("seat"), seat);
+    patch.insert(QStringLiteral("note"), note);
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    b.insert(QStringLiteral("studentId"), studentId);
+    b.insert(QStringLiteral("patch"), patch);
+    post(QStringLiteral("student-update"), b,
+         QStringLiteral("已更新学生：%1").arg(name.trimmed()));
+}
+
+void ClassAdmin::removeStudent(const QString &code, const QString &studentId)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    b.insert(QStringLiteral("studentId"), studentId);
+    post(QStringLiteral("student-remove"), b, QStringLiteral("已移出该学生"));
+}
+
+void ClassAdmin::timetable(const QString &code)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    fetchJson(QStringLiteral("timetable"), b, [this, code](const QJsonObject &o) {
+        // 没排过课时 profile 是 null —— 这里显式转成空串，QML 只判 isEmpty，
+        // 不用去区分 undefined/null/缺失三种"空"（少一个坑）。
+        QString json;
+        if (o.value(QStringLiteral("profile")).isObject()
+            || o.value(QStringLiteral("profile")).isArray()) {
+            json = QString::fromUtf8(QJsonDocument(
+                o.value(QStringLiteral("profile")).isObject()
+                    ? QJsonDocument(o.value(QStringLiteral("profile")).toObject())
+                    : QJsonDocument(o.value(QStringLiteral("profile")).toArray()))
+                .toJson(QJsonDocument::Compact));
+        }
+        emit timetableLoaded(code,
+                             json,
+                             static_cast<qint64>(o.value(QStringLiteral("updatedAt")).toDouble()));
+    });
+}
+
+void ClassAdmin::saveTimetable(const QString &code, const QString &profileJson)
+{
+    QJsonDocument doc = QJsonDocument::fromJson(profileJson.toUtf8());
+    if (doc.isNull() || (!doc.isObject() && !doc.isArray())) {
+        emit opFinished(QStringLiteral("timetable-save"), false,
+                        QStringLiteral("课表内容为空或格式不对，没有保存"));
+        return;
+    }
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    b.insert(QStringLiteral("profile"), doc.isObject() ? QJsonValue(doc.object())
+                                                       : QJsonValue(doc.array()));
+    post(QStringLiteral("timetable-save"), b, QStringLiteral("课表已保存到云端"));
+}
+
+void ClassAdmin::post(const QString &action, const QJsonObject &body, const QString &okText)
 {
     if (!m_backend) return;
     const QString base = m_backend->httpBaseUrl();
@@ -192,13 +327,18 @@ void ClassAdmin::post(const QString &action, const QJsonObject &body)
         req.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + token.toUtf8());
 
     auto *r = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(r, &QNetworkReply::finished, this, [this, r, action] {
+    connect(r, &QNetworkReply::finished, this, [this, r, action, okText] {
         r->deleteLater();
         const int code = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QJsonObject o = QJsonDocument::fromJson(r->readAll()).object();
         const bool ok = (code == 200 && o.value(QStringLiteral("ok")).toBool());
         if (ok) {
-            // 成功文案带上班级名/码，QML toast 直接显示（不用再猜是哪次操作）
+            // 2026-10-25：学生操作要能说清"加了谁" —— 传了 okText 就用它，
+            // 否则退回"班级名/码"（建班改名删班这类操作，班名就是最好的回执）。
+            if (!okText.isEmpty()) {
+                emit opFinished(action, true, okText);
+                return;
+            }
             const QString name = o.value(QStringLiteral("name")).toString();
             const QString cc = o.value(QStringLiteral("classCode")).toString();
             const QString shown = !name.isEmpty() ? name : cc;
