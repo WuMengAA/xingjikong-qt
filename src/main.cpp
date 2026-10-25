@@ -7673,6 +7673,14 @@ int main(int argc, char *argv[])
         }
     }
 
+    // 2026-10-25（Win7 现场排障埋点）：Win7 rc.4 首启后进程在 OOBE 打开不久即结束、
+    // 日志里没有任何退出线索（无法区分「用户/设计路径有序退出」与「静默崩溃」）。
+    // 有序退出（app.quit/托盘退出/OOBE 收尾）必定经过 aboutToQuit；硬崩溃则不会
+    // ⇒ 下轮现场看到这行=有序退出，看不到=崩溃，扳机范围立减一半。
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, [] {
+        qInfo("[agent-qt] 退出事件循环（aboutToQuit——有序退出路径）");
+    });
+
     const int rc = app.exec();
     // 释放单例锁（2026-10-05）：正常退出才放，进程结束前交给系统/OS 清理兜底。
     // 老实现这行 CloseHandle(g_singletonMutex) 引用的变量早删了，改成守卫自己的 release()。
