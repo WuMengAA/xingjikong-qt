@@ -120,6 +120,8 @@
 // 2026-10-20：首次启动引导（OOBE Wizard）——QML 向导 + 绑定数据面（详见 oobe_wizard.h）。
 #include "oobe_wizard.h"
 #include <QQuickWidget>          // 向导宿主（与 AgentShell 同款：QQuickWidget 顶格承载 QML）
+#include <QQuickWindow>          // 2026-10-25：渲染诊断埋点（sceneGraphBackend 决议值）
+#include <QSysInfo>              // 2026-10-25：渲染诊断埋点（VxKex 谎报后的 OS 版本）
 #include <QPointer>              // 向导窗口单例（窗口被关掉后指针自动置空）
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -6909,6 +6911,33 @@ int main(int argc, char *argv[])
     if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（%s）", envN, qPrintable(agentEnvPath()));
     loadClassCode();   // 2026-10-08：载入持久化的班级码，register 时带给云端
     loadClassName();   // 2026-10-09：载入班级显示名（同上，register 一起带给云端）
+
+    // ── 渲染诊断（2026-10-25 · Win7 黑底排查）──────────────────────────
+    // 被控端透明窗口（灵动岛/弹幕）在 Win7+VxKex 上出现「黑色不透明背景」。
+    // 日志打三行，下轮现场日志一锤定音：
+    //   ① sceneGraphBackend() 实际决议值 —— Qt 会读 env；本程序从不 setSceneGraphBackend，
+    //      这里的读取不会提前烧死任何后端配置，只是「问」Qt 已怎么定。
+    //   ② 相关 env 现值 —— agent.env 可在部署侧预设 QT_QUICK_BACKEND=software 做 A/B。
+    //   ③ OS 版本（VxKex 谎报后 Qt 看到的）+ DWM 合成状态（Win7 Aero 关闭=透明链另一大嫌疑）。
+    // 必须排在此处：loadEnvFile（上方 6908）已把 agent.env 读入；任何 QQuickWidget/岛窗口
+    // 尚未创建 —— 早于这里调用 sceneGraphBackend() 会看到空的 env；晚于岛窗口则已成定局。
+    qInfo("[render] sceneGraphBackend=%s | env QT_QUICK_BACKEND=%s QT_OPENGL=%s QSG_RHI_BACKEND=%s",
+          qPrintable(QQuickWindow::sceneGraphBackend()),
+          qEnvironmentVariable("QT_QUICK_BACKEND").constData(),
+          qEnvironmentVariable("QT_OPENGL").constData(),
+          qEnvironmentVariable("QSG_RHI_BACKEND").constData());
+    qInfo("[render] OS=%s Qt=%s", qPrintable(QSysInfo::prettyProductName()), qVersion());
+    {
+        BOOL dwmOn = FALSE;
+        using FnDwm = BOOL(WINAPI *)(BOOL *);
+        HMODULE dwm = LoadLibraryA("dwmapi.dll");   // 动态加载，不新增链接依赖
+        if (dwm) {
+            FnDwm f = (FnDwm)GetProcAddress(dwm, "DwmIsCompositionEnabled");
+            if (f) f(&dwmOn);
+            FreeLibrary(dwm);
+        }
+        qInfo("[render] DWM composition=%s", dwmOn ? "ON" : "OFF");
+    }
 
     // 2026-10-10：解析并持久化灰度渠道（发现①修复）—— 见 resolvedChannel / persistChannel。
     // 落盘 channel.txt 后，后续任何重启 / OTA 升级都自动沿用当前通道，无需启动器注入环境变量。
