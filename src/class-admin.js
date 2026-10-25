@@ -29,6 +29,9 @@ import {
   listStudents, addStudent, updateStudent, removeStudent, importStudents,
   getTimetable, saveTimetable, dropClassData,
 } from './class-data.js';
+// 2026-10-25：班级接入码收归我方 —— 票据系统本就在 bind-qr.js（与设备自助码同一套码表、
+// 同一套 normalizeCode/过期清理），这里只做「按班签发」这一层，不另造码表。
+import { issueClassBind, getTicket, revokeTicket } from './bind-qr.js';
 
 /** 读 JSON body（≤16KB，与 bind-class 同款上限）。坏 JSON → cb(null) 由调用方定夺。 */
 function readJsonBody(req, cb) {
@@ -220,6 +223,68 @@ export function adminMyClasses(ident) {
   return { ok: true, uid, classes: mine };
 }
 
+/* ───────────────── 班级接入码（2026-10-25 · 收归我方管理）─────────────────
+ * 用户裁决：「班级接入码收归我方管理，作为班级管理面板的入口码，所以去掉 CIMS
+ * 时期的旧方式」。
+ *
+ * 语义：**这台设备凭它进入这个班**。一次性、绑班级、带 TTL（24h，够贴一天课）。
+ * 与「设备自助码」的分工（见 bind-qr.js 头注释，同一个码表两种来路）：
+ *   · 本码 kind=class，**码里带班级** ⇒ 设备输码直接绑（POST /api/device/activate）
+ *   · 自助码 kind=device，码里无班级 ⇒ 手机扫码后选班 + 确认
+ *
+ * ⚠️ 为什么删掉 CIMS 那条（XJK-XXXX-XXX → 云端代兑换站点 /api/device/activate）：
+ *   旧路要跨一个服务、要配 STE_SITE_URL、还要靠 class-dir 把站点 class_id 归一成
+ *   云端 cls-xxxx —— 一条链上两个班级真源，出问题时分不清是谁的码不对。现在班级
+ *   真源就在云端，设备端只认识云端一个地址，没必要再绕一圈。
+ *
+ * 权限：能管成员 = 能发码（能把设备领进这个班的人，就是能管这个班的人）——
+ * 与 member-add / member-remove 同口径，不另发明一套。
+ * 不复用 /api/admin/bindcode：那是管理面路由、全项目零调用者，已随本批删除；
+ * 班级域的事归 /api/class/*，鉴权口径也才和面板其他地方一致。
+ */
+export function adminIssueBindCode(code, ident = null) {
+  const c = String(code ?? '').trim();
+  if (!c) return { ok: false, error: '缺班级码' };
+  const hit = getClass(c);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限为该班生成接入码' };
+  const issued = issueClassBind(hit.code, hit.name || '');
+  if (!issued.ok) return issued;
+  const t = issued.ticket;
+  pushEvent('info', '已生成班级接入码', {
+    classCode: hit.code, code: t.code, by: ident?.uid ?? 'system',
+  });
+  // 不回 matrix：接入码是给**设备输**的（6 位无歧义字符），手机扫它也没有设备身份
+  // 可用（bind.html 对 kind=class 只把码显示出来）。少算一次 QR = 少一处能错的地方。
+  return {
+    ok: true,
+    classCode: hit.code,
+    className: hit.name || '',
+    code: t.code,
+    expiresAt: t.expireAt,
+    // 供 UI 显示"还剩多久"：秒数比时间戳好渲染，且不受两端时钟漂移影响太大。
+    ttlSec: Math.max(0, Math.round((t.expireAt - Date.now()) / 1000)),
+  };
+}
+
+/** 作废一张接入码（发错班了就撤回；TTL 内也立刻失效）。 */
+export function adminRevokeBindCode(code, ident = null) {
+  const c = String(code ?? '').trim();
+  if (!c) return { ok: false, error: '缺接入码' };
+  const t = getTicket(c);
+  if (!t) return { ok: false, error: '接入码无效或已过期' };
+  // 票里带着班级 ⇒ 用班级校验权限（拿不到班级的码不许人乱撤）。
+  if (t.classCode) {
+    const hit = getClass(t.classCode);
+    if (hit && !canManageMembers(ident, hit.code)) {
+      return { ok: false, error: '无权限作废该班的接入码' };
+    }
+  }
+  const r = revokeTicket(c);
+  if (r.ok) pushEvent('info', '已作废班级接入码', { classCode: t.classCode || '', code: t.code });
+  return r;
+}
+
 /* ───────────────────── 发布中心（P1，2026-10-24）─────────────────────
  * 把一张卡片推到全班教室黑板（被控端）。权限走 canManageMembers（admin/owner/teacher）；
  * 重认证门由 index.js 的 /api/class/* POST 统一守（过期的票据者已被 403 拦在门外）。
@@ -379,6 +444,11 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
         r = adminListMembers(String(body.classCode ?? ''));
       } else if (action === 'my-classes') {
         r = adminMyClasses(ident);
+      } else if (action === 'bindcode') {
+        // 班级接入码（2026-10-25 收归我方）：发码 / 作废。权限同 member-*。
+        r = adminIssueBindCode(String(body.classCode ?? ''), ident);
+      } else if (action === 'bindcode-revoke') {
+        r = adminRevokeBindCode(String(body.code ?? ''), ident);
       } else if (action === 'publish') {
         r = adminPublish(String(body.classCode ?? ''), body.card ?? {}, ident);
       } else if (action === 'students') {

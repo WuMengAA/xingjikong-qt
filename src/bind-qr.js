@@ -470,6 +470,17 @@ export function getTicket(code) {
   return { ...t };
 }
 
+/** 作废一张票（2026-10-25 · 班级接入码收归我方后管理端要能撤回）。
+ *  与「过期」同效但立刻生效：码表里删掉即查不到，设备输码会拿到"无效或已过期"。
+ *  幂等：已过期/不存在的码回 ok:false，不做"假成功"。 */
+export function revokeTicket(code) {
+  const c = normalizeCode(code);
+  if (!c) return { ok: false, error: '接入码无效或已过期' };
+  if (!tickets.has(c)) return { ok: false, error: '接入码无效或已过期' };
+  tickets.delete(c);
+  return { ok: true, code: c };
+}
+
 /** 标记已绑定（幂等：重复 confirm 返回第一次的班级）。 */
 export function markBound(code, { classCode, className, uid } = {}) {
   const c = normalizeCode(code);

@@ -3,7 +3,7 @@
 // 守的是"设备端只有一个入口、云端只有一个班级身份"这条线：
 //   ① 管理台按班名开码 → 设备敲码       → 班级码 A
 //   ② 同一台/另一台设备按同名班绑        → 必须还是 A（不能长出新码）
-//   ③ 站点式接入码 XJK-… → 云端代兑换    → 站点的 class_id 成为该班身份（或别名）
+//   ③ 站点式接入码 XJK-… → **已废弃**（2026-10-25 收归我方）→ 必须明确拒绝，不代兑换
 //   ④ 云端重启后                        → 班级与别名原样还在，同名解析还给 A
 //
 // 为什么要起真服务：班级目录是**落盘 + 进程级缓存**，纯单测（unit-class-dir）验不了
@@ -24,11 +24,9 @@ const CLOUD_ENTRY = join(__dirname, '..', 'src', 'index.js');
 const WAR_DIR = mkdtempSync(join(tmpdir(), 'cls-unify-'));
 
 const CLOUD_PORT = 8797;
-const SITE_PORT = 8796;
 const VIEWER_TOKEN = 'test-viewer-token';
+// 站点签发的旧码形：只留一个样本，用于验证「旧路确实被拒绝」（云端不再跨服务兑换）。
 const SITE_CODE = 'XJK-TEST-001';
-const SITE_CLASS_ID = 'class_01';
-const SITE_CLASS_NAME = '高一(1)班';
 
 let pass = 0; let fail = 0;
 function ok(name, fn) {
@@ -76,8 +74,8 @@ function startCloud() {
       CLOUD_QUEUE_DB_FILE: join(WAR_DIR, 'queue.db'),
       CLOUD_INTERACT_DB_FILE: join(WAR_DIR, 'interact.db'),
       CLOUD_CLASS_DIR_DB_FILE: join(WAR_DIR, 'class-dir.db'),
-      STE_SITE_URL: `http://127.0.0.1:${SITE_PORT}`,
-      STE_SITE_ACTIVATE_TIMEOUT_MS: '3000',
+      // 2026-10-25：不再给云端喂 STE_SITE_URL / STE_SITE_ACTIVATE_TIMEOUT_MS ——
+      // 那两项原本只服务「XJK 码代兑换站点」，接入码收归我方后该路已删（config.js 同步移除）。
       STE_QML_PATCH_DISABLE: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -111,65 +109,67 @@ function stopCloud(c) {
   });
 }
 
-/** 假站点：只实现 /api/device/activate，回站点自己的 class_id / className（模拟 stelarith 站点） */
-function startFakeSite() {
-  const srv = http.createServer((req, res) => {
-    const u = new URL(req.url, `http://127.0.0.1:${SITE_PORT}`);
-    if (u.pathname !== '/api/device/activate') {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ ok: false, error: 'not found' }));
-    }
-    const code = u.searchParams.get('code') || '';
-    if (code !== SITE_CODE) {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ ok: false, error: '接入码无效' }));
-    }
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({
-      ok: true, classId: SITE_CLASS_ID, classCode: SITE_CLASS_ID,
-      className: SITE_CLASS_NAME, uid: u.searchParams.get('uid'),
-    }));
-  });
-  return new Promise((r) => srv.listen(SITE_PORT, '127.0.0.1', () => r(srv)));
-}
 
 // ── 开跑 ─────────────────────────────────────────────────────────────
 console.log('班级真源统一 · 端到端回归');
 
-const site = await startFakeSite();
 let cloud = startCloud();
 let codeA = '';
-let codeFromSite = '';
+let bindCode = '';
 
 try {
   await waitUp();
 
-  // ① 管理台按班名开码（不给班级码，只有名字 —— 走 resolveClassCode 派生）
-  let issued = null;
+  // ① 建班（班级真源在云端；面板发码前班必须已存在 —— 面板里是从列表里选班）
   await (async () => {
-    const r = await call('POST', '/api/admin/bindcode', {
+    const r = await call('POST', '/api/class/create', {
       auth: VIEWER_TOKEN, body: { className: '高二(3)班' },
     });
-    ok('管理台按班名开码成功，回班级码', () => {
-      assert.equal(r.status, 200, `HTTP ${r.status}`);
+    ok('班级面板建班成功，回 canonical 班级码', () => {
+      assert.equal(r.status, 200, `HTTP ${r.status} ${JSON.stringify(r.json)}`);
       assert.equal(r.json.ok, true);
       assert.match(r.json.classCode, /^cls-[0-9a-f]{10}$/);
     });
-    issued = r.json;
+    codeA = r.json.classCode;
   })();
-  codeA = issued.classCode;
 
-  // ② 设备敲这枚码
+  // ② 班级面板发接入码（2026-10-25 收归我方：POST /api/class/bindcode）
   await (async () => {
-    const r = await call('POST', `/api/device/activate?code=${issued.code}&uid=dev-A`, { body: {} });
-    ok('设备敲码绑定 → 得到同一个班级码', () => {
+    const r = await call('POST', '/api/class/bindcode', {
+      auth: VIEWER_TOKEN, body: { classCode: codeA },
+    });
+    ok('班级面板发接入码 → 6 位无歧义、绑到该班、带 24h 有效期', () => {
+      assert.equal(r.status, 200, `HTTP ${r.status} ${JSON.stringify(r.json)}`);
+      assert.equal(r.json.ok, true);
+      assert.equal(r.json.classCode, codeA, '接入码没绑到目标班');
+      // 字符集去掉 I/O/0/1（老师照着念不会错）—— 断言到这个精度才算守住约定
+      assert.match(r.json.code, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/, '接入码不是 6 位无歧义字符');
+      assert.ok(r.json.expiresAt > Date.now(), '有效期不是未来时间');
+      assert.ok(r.json.ttlSec > 23 * 3600, `TTL 不足 24h（${r.json.ttlSec}s）`);
+    });
+    bindCode = r.json.code;
+  })();
+
+  // ③ 设备敲这枚码
+  await (async () => {
+    const r = await call('POST', `/api/device/activate?code=${bindCode}&uid=dev-A`, { body: {} });
+    ok('设备敲接入码 → 得到同一个班级码', () => {
       assert.equal(r.status, 200, `HTTP ${r.status} ${JSON.stringify(r.json)}`);
       assert.equal(r.json.classCode, codeA);
       assert.equal(r.json.className, '高二(3)班');
     });
   })();
 
-  // ③ 另一台设备按**同名班**绑定（管理端老路）→ 必须复用它，不能新长一个
+  // ④ 接入码必须**一次性**：同一枚码用在第二台设备上要被拒（否则整个班能被路人领走）
+  await (async () => {
+    const r = await call('POST', `/api/device/activate?code=${bindCode}&uid=dev-OTHER`, { body: {} });
+    ok('同一枚接入码绑第二台设备 → 明确拒绝（一次性）', () => {
+      assert.ok(r.status >= 400, `竟然回了 ${r.status}`);
+      assert.equal(r.json.ok, false);
+    });
+  })();
+
+  // ⑤ 另一台设备按**同名班**绑定（管理端老路）→ 必须复用它，不能新长一个
   await (async () => {
     const r = await call('POST', '/api/device/bind-class', {
       auth: VIEWER_TOKEN, body: { uid: 'dev-B', className: '高二(3)班' },
@@ -180,53 +180,40 @@ try {
     });
   })();
 
-  // ④ 站点接入码走云端代兑换
+  // ⑥ 站点 XJK 接入码已废弃（2026-10-25 收归我方）：必须明确拒绝，不许再代兑换
   await (async () => {
     const r = await call('POST', `/api/device/activate?code=${SITE_CODE}&uid=dev-C`, { body: {} });
-    ok('站点接入码 XJK-… 由云端兑换 → 班级码=站点 class_id、名字对齐', () => {
-      assert.equal(r.status, 200, `HTTP ${r.status} ${JSON.stringify(r.json)}`);
-      assert.equal(r.json.classCode, SITE_CLASS_ID);
-      assert.equal(r.json.className, SITE_CLASS_NAME);
-      assert.equal(r.json.source, 'site');
+    ok('站点接入码 XJK-… 已废弃 → 明确拒绝（不静默、不代兑换）', () => {
+      assert.ok(r.status >= 400, `竟然回了 ${r.status}（旧路又长回来了？）`);
+      assert.equal(r.json.ok, false);
+      assert.ok(String(r.json.error || '').length > 0);
     });
-    codeFromSite = SITE_CLASS_ID;
   })();
 
-  // ⑤ 站点班与云端班必须互不串（不同名字 → 两个班）
+  // ⑦ 班级目录只能有**一个**班：单真源，站点来源已废，不可能再长出第二套码
   await (async () => {
     const r = await call('GET', '/api/classes/dir', { auth: VIEWER_TOKEN });
-    ok('班级目录可查且只有两个班（云端派生的 + 站点登记的）', () => {
+    ok('班级目录只有一个班（单真源，无站点班）', () => {
       assert.equal(r.status, 200);
       assert.equal(r.json.ok, true);
       const codes = r.json.classes.map((c) => c.code).sort();
-      assert.deepEqual(codes, [codeA, codeFromSite].sort());
+      assert.deepEqual(codes, [codeA]);
     });
   })();
 
-  // ⑥ 站点码的班按名字再解析 → 命中 class_01，不新造
-  await (async () => {
-    const r = await call('POST', '/api/device/bind-class', {
-      auth: VIEWER_TOKEN, body: { uid: 'dev-D', className: SITE_CLASS_NAME },
-    });
-    ok('站点班的同名绑定 → 归一到 class_01（别名体系生效）', () => {
-      assert.equal(r.status, 200, `HTTP ${r.status}`);
-      assert.equal(r.json.classCode, SITE_CLASS_ID);
-    });
-  })();
-
-  // ⑦ 重启：班级目录与别名必须原样还在
+  // ⑧ 重启：班级目录必须原样还在
   await stopCloud(cloud);
   cloud = startCloud();
   await waitUp();
 
   await (async () => {
     const r = await call('GET', '/api/classes/dir', { auth: VIEWER_TOKEN });
-    ok('重启后班级目录原样恢复（码/名/别名都在）', () => {
+    ok('重启后班级目录原样恢复（码/名都在）', () => {
       assert.equal(r.status, 200);
-      assert.equal(r.json.classes.length, 2);
-      const site1 = r.json.classes.find((c) => c.code === SITE_CLASS_ID);
-      assert.ok(site1, '重启后站点班丢了');
-      assert.equal(site1.name, SITE_CLASS_NAME);
+      assert.equal(r.json.classes.length, 1);
+      const c1 = r.json.classes.find((c) => c.code === codeA);
+      assert.ok(c1, '重启后班级丢了');
+      assert.equal(c1.name, '高二(3)班');
     });
   })();
 
@@ -234,7 +221,7 @@ try {
     const r = await call('POST', '/api/device/bind-class', {
       auth: VIEWER_TOKEN, body: { uid: 'dev-E', className: '高二(3)班' },
     });
-    ok('重启后同名解析仍还给原来的码（不派生第三套）', () => {
+    ok('重启后同名解析仍还给原来的码（不派生第二套）', () => {
       assert.equal(r.json.classCode, codeA, '重启后又长出了新码');
     });
   })();
@@ -243,20 +230,11 @@ try {
     const r = await call('GET', '/api/classes', { auth: VIEWER_TOKEN });
     ok('重启后 /api/classes 仍列出班级（不是空列表）', () => {
       assert.equal(r.status, 200);
-      assert.equal(r.json.classes.length, 2, `列了 ${r.json.classes.length} 个班`);
+      assert.equal(r.json.classes.length, 1, `列了 ${r.json.classes.length} 个班`);
       assert.ok(r.json.classes.every((c) => typeof c.code === 'string' && c.code));
     });
   })();
 
-  // ⑧ 错误路径不能假装成功
-  await (async () => {
-    const r = await call('POST', '/api/device/activate?code=XJK-NOPE-999&uid=dev-F', { body: {} });
-    ok('站点拒绝的接入码 → 明确失败（不静默成功）', () => {
-      assert.ok(r.status >= 400, `竟然回了 ${r.status}`);
-      assert.equal(r.json.ok, false);
-      assert.ok(String(r.json.error || '').length > 0);
-    });
-  })();
 } catch (e) {
   fail++;
   console.error(`  FAIL 运行期异常：${e.message}`);
@@ -264,7 +242,6 @@ try {
   console.error('--- cloud stderr ---\n' + (cloud.log.err || ''));
 } finally {
   await stopCloud(cloud);
-  await new Promise((r) => site.close(r));
   try { rmSync(WAR_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
 }
 

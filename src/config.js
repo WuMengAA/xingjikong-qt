@@ -159,13 +159,9 @@ export const CLASS_EVENT_MAX_BYTES = Number(process.env.CLOUD_CLASS_EVENT_MAX_BY
 export const CLASS_RELAY_BUFFER_MAX = Number(
   process.env.CLOUD_CLASS_RELAY_BUFFER_MAX || 8 * 1024 * 1024);
 
-/* 站点基址（用于把站点签发的「接入码 XJK-…」兑换成班级身份）。
- * 云端是设备侧的唯一入口；站点继续持有它自己的班级库，由云端代为兑换并归一，
- * 设备端因此**只需要认识一个地址**。
- * 留空 = 不启用兑换（此时 XJK 码会被明确拒绝，不静默）。
- */
-export const SITE_BASE_URL = (process.env.STE_SITE_URL || 'https://www.245959623.xyz').replace(/\/+$/, '');
-export const SITE_ACTIVATE_TIMEOUT_MS = Number(process.env.STE_SITE_ACTIVATE_TIMEOUT_MS || 6000);
+// 2026-10-25：`SITE_BASE_URL` / `SITE_ACTIVATE_TIMEOUT_MS` 已随「班级接入码收归我方」
+// 一并删除 —— 它们唯一的用途是把站点签发的 XJK 码代兑换成班级身份，那条路已废。
+// ⚠️ 上面的 SITE_URL（OAuth 换取用户身份）**不是**同一件事，继续保留。
 
 // 未回执指令的存活上限（TTL）：超过就作废、不再补发。
 // 取 24 小时的理由：覆盖单次断电/断网/夜间维护这类"短暂离线"；再久的指令多半已经失效甚至有害

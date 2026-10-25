@@ -4,6 +4,9 @@
 // 在这之前「一个班」的身份有两个互不相识的发行方：
 //   ① 云端 `deriveClassCode(name)` → `cls-<sha256(name) 前10>`（OOBE 向导 / 二维码绑定走这里）
 //   ② 站点 `stelarith_classes.class_id` → `class_01`（老配置窗「接入码 XJK-…」走站点 activate）
+//      ⚠️ 2026-10-25 起②那条**发码路已废**（接入码收归我方，见 class-admin.js 的
+//      adminIssueBindCode）：不再有新的 site 码进来。`source:'site'` 只留作历史数据的
+//      归一依据，别当成还在用的活路径。
 // 两条路各写各的键 ⇒ 同一个班能长出两个码；而 registry.js 的 classes 又只是**内存 Map**，
 // 云端一重启班级名与归属关系全丢 ⇒ 重启后再绑定会派生出**第三套**码。三重漂移。
 //

@@ -29,69 +29,13 @@ import { makeQrMatrix, issueDeviceBind, issueClassBind, getTicket, markBound, po
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
-  INTERACT_SWEEP_INTERVAL_MS, SITE_BASE_URL, SITE_ACTIVATE_TIMEOUT_MS } from './config.js';
+  INTERACT_SWEEP_INTERVAL_MS } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENV_FILE = join(__dirname, '..', '.env');
 const ADMIN_HTML = join(__dirname, 'admin.html');
 const BIND_HTML = join(__dirname, 'bind.html');   // 手机扫码落地页（/bind?c=CODE）
 
-/**
- * 兑换**站点签发的接入码**（`XJK-XXXX-XXX`，管理员在站点后台生成、一次性）。
- *
- * ── 为什么要云端代劳（2026-10-20 班级真源统一）──────────────────────────
- * 在这之前设备端有两条绑定路：向导打云端、老配置窗打站点。两边的班级码不是一个体系
- * （云端 `cls-<hash>` vs 站点 `class_id`），同一个班因此能长出两个码。
- * 现在设备端**只认识云端一个地址**；站点那份班级库由云端代为兑换，
- * 拿回来的 `class_id` 交给 class-dir 归一（同名/同码合并到同一个 canonical 班）。
- * 站点不需要改一行代码，它继续做自己班级库的权威。
- *
- * 纪律：只在 code 明确是 `XJK-` 前缀时才走这里；其它码一律按云端自己的票据处理。
- * 任何失败都**明确回错**，绝不静默当成"绑定成功"。
- *
- * @param {(r:{ok:boolean, status?:number, body?:object, error?:string})=>void} cb 只回调一次
- */
-function exchangeSiteActivationCode(code, uid, cb) {
-  let done = false;
-  const finish = (r) => { if (done) return; done = true; cb(r); };
-
-  let base;
-  try { base = new URL(SITE_BASE_URL); } catch { return finish({ ok: false, error: '站点地址配置不合法（STE_SITE_URL）' }); }
-  const isHttps = base.protocol === 'https:';
-  const q = new URLSearchParams({ code: String(code), uid: String(uid) }).toString();
-  const path = `${base.pathname.replace(/\/+$/, '')}/api/device/activate?${q}`;
-
-  const mod = isHttps ? https : http;
-  const r = mod.request({
-    hostname: base.hostname,
-    port: base.port || (isHttps ? 443 : 80),
-    path,
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'content-length': 2 },
-    timeout: SITE_ACTIVATE_TIMEOUT_MS,
-  }, (sres) => {
-    let raw = '';
-    sres.setEncoding('utf8');
-    sres.on('data', (c) => {
-      raw += c;
-      if (raw.length > 20000) { try { sres.destroy(); } catch { /* 已断 */ } }
-    });
-    sres.on('end', () => {
-      let body = {};
-      try { body = JSON.parse(raw || '{}'); } catch { /* 站点可能回 HTML 错误页 */ }
-      if (sres.statusCode !== 200) {
-        const msg = String(body && body.error ? body.error : '').trim()
-          || `站点拒绝了这枚接入码（HTTP ${sres.statusCode}），请确认它没过期、没被用过`;
-        return finish({ ok: false, status: sres.statusCode, error: msg });
-      }
-      finish({ ok: true, body });
-    });
-  });
-
-  r.on('timeout', () => { try { r.destroy(new Error('timeout')); } catch { /* 已断 */ } });
-  r.on('error', (e) => finish({ ok: false, error: `连不上站点兑换接入码：${e.message}`, status: 502 }));
-  r.end('{}');
-}
 
 /** 管理台「用网站账号登录」的回跳 server（127.0.0.1 临时端口）。没配全站点就一直是 null。 */
 let adminOAuth = null;
@@ -673,8 +617,6 @@ const server = http.createServer((req, res) => {
     // 2026-10-18 · 班级点歌凭据：能写 Key 等于能冒用该班身份点歌，必须走管理面鉴权。
     // ⚠️ 用 startsWith 覆盖全部子路由（同上方 provision 的教训：精确相等会漏掉子路由）。
     u.pathname.startsWith('/api/admin/songkeys') ||
-    // 2026-10-20 · 班级绑定码：能开码 = 能把任一台设备领进某个班，必须管理面鉴权
-    u.pathname.startsWith('/api/admin/bindcode') ||
     // 2026-10-20 · RBAC 第二批·用户权限（user-claims）：能改=能给别人提权，必须管理面鉴权
     u.pathname.startsWith('/api/admin/user-claims') ||
     // 2026-10-23 · 广播社成员管理（仅全权/平台超管）
@@ -1115,7 +1057,9 @@ const server = http.createServer((req, res) => {
   // 鉴权口径：
   //   · 设备侧三个端点**开放**（此时设备还没绑班、也没有管理端身份，只能开放）；
   //     防滥用靠票的 TTL + 一次性 + 码表上限 + uid 绑定校验；
-  //   · /api/admin/bindcode 走管理面鉴权（见上方 isAdminApi 列表）。
+  //   · 管理端按班发码走 POST /api/class/bindcode（班级域：viewer 令牌 + 按班权限，
+  //     见 class-admin.js 的 adminIssueBindCode）。2026-10-25 收归我方后，
+  //     原 /api/admin/bindcode 与「站点 XJK 码代兑换」两条旧路已删除。
 
   // 扫出来的地址必须是**手机能访问**的公网地址。优先用请求自己的 Host（反代会带
   // x-forwarded-proto），必要时用 STE_BIND_PUBLIC_ORIGIN 显式覆盖（自建/内网调试）。
@@ -1184,34 +1128,6 @@ const server = http.createServer((req, res) => {
     const uid = String(u.searchParams.get('uid') || '').trim();
     if (!code) return send(400, { ok: false, error: '请输入 6 位绑定码' });
     if (!uid) return send(400, { ok: false, error: '缺少设备标识' });
-
-    // ⓪ 站点签发的接入码（XJK-XXXX-XXX）：云端代兑换 → 归一 → 绑班（见 exchangeSiteActivationCode）
-    if (/^XJK-/i.test(code)) {
-      return exchangeSiteActivationCode(code, uid, (r) => {
-        if (!r.ok) {
-          return send(r.status === 404 || r.status === 403 ? 400 : 502, { ok: false, error: r.error });
-        }
-        const b = r.body || {};
-        const siteCode = String(b.classCode || b.classId || '').trim();
-        const siteName = String(b.className || '').trim();
-        if (!siteCode) {
-          // 站点受理成功却没回班级码 —— 这是站点契约问题，不能假装绑上了
-          return send(502, { ok: false, error: '站点已受理，但没有返回班级码，请联系管理员' });
-        }
-        const reg = registerExternalCode(siteCode, siteName, 'site');
-        if (!reg.ok) return send(400, { ok: false, error: reg.error });
-        const bind = bindDeviceToClass(reg.code, uid, siteName, 'site');
-        if (!bind.ok) return send(400, { ok: false, error: bind.error });
-        pushEvent('info', '站点接入码已兑换', { uid, siteCode, classCode: reg.code, merged: !!reg.merged });
-        return send(200, {
-          ok: true,
-          classCode: reg.code,
-          className: bind.class.name || siteName || reg.code,
-          source: 'site',
-          merged: !!reg.merged,
-        });
-      });
-    }
 
     const t = getTicket(code);
     if (!t) return send(400, { ok: false, error: '绑定码无效或已过期，请向管理员再要一个' });
@@ -1311,42 +1227,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'POST' && u.pathname === '/api/admin/bindcode') {
-    // 管理台：按班生成"含班级"的绑定码（老师直接输，或手机扫码点确认）
-    let raw = '';
-    req.on('data', (c) => { raw += c; if (raw.length > 4e3) req.destroy(); });
-    req.on('end', () => {
-      let body = {};
-      try { body = JSON.parse(raw || '{}'); } catch { /* 允许 query */ }
-      let classCode = String(body.classCode ?? u.searchParams.get('classCode') ?? '').trim();
-      const className = String(body.className ?? u.searchParams.get('className') ?? '').trim();
-      // 统一解析：管理员既可以给已有班级码、也可以只给班名（自动归一/派生）。
-      // 这一步保证「管理台开的码」与「向导/站点绑进来的班」是同一个身份，不会开出平行班。
-      const resolved = resolveClassCode({ code: classCode, name: className, source: 'admin' });
-      if (!resolved.ok) {
-        const msg = (classCode || className) ? '班级码格式不合法（需 6-16 位字母数字或 -_）' : '请指定班级（班级码或班级名）';
-        return send(400, { ok: false, error: msg });
-      }
-      classCode = resolved.code;
-      const issued = issueClassBind(classCode, className);
-      if (!issued.ok) return send(400, { ok: false, error: issued.error });
-      const origin = bindOrigin();
-      const scanUrl = origin ? `${origin}/bind?c=${issued.ticket.code}` : '';
-      let matrix = [];
-      try { matrix = makeQrMatrix(scanUrl || issued.ticket.code).rows; } catch { matrix = []; }
-      pushEvent('info', '已生成班级绑定码', { classCode, className, code: issued.ticket.code });
-      return send(200, {
-        ok: true,
-        code: issued.ticket.code,
-        classCode,
-        className,
-        scanUrl,
-        matrix,
-        expiresAt: issued.ticket.expireAt,
-      });
-    });
-    return;
-  }
 
   // ── 互动数据（2026-10-15 · 灵动岛扩展组件6）──
   // 点歌/祝福待审队列 + 反馈汇总 + 审批动作（HTTP 版）。管理端面板（候选，等用户点单）
