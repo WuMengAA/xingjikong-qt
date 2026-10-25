@@ -107,7 +107,11 @@ t("kind 枚举合法（send/panel/special/app）", () => {
 });
 t("★ kind=special 的 id 与宿主 runSpecial 的 case 一一对应", () => {
 	const host = fs.readFileSync(path.join(ROOT, "..", "Stelarith-viewer-qt", "qml", "Main.qml"), "utf8");
-	const body = host.match(/function runSpecial\(id\) \{([\s\S]*?)\n    \}\n/);
+	// ⚠️ 行尾必须 \r?\n：本仓 core.autocrlf=true，工作树按 CRLF 检出
+	//    （git stash/pop、全新 clone 都会把 LF blob 写成 CRLF 工作树文件）。
+	//    写死 \n 会在 CRLF 工作树上静默失配 ⇒ ok(body) 假阴性。
+	//    同目录 test-ui-terms / test-ui-contract / test-manifest-scope 用的都是 \r?\n。
+	const body = host.match(/function runSpecial\(id\) \{([\s\S]*?)\r?\n    \}\r?\n/);
 	ok(body, "找不到 runSpecial");
 	const cases = new Set([...body[1].matchAll(/case "([^"]+)":/g)].map((m) => m[1]));
 	const need = A.specialIds();
