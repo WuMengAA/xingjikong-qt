@@ -17,11 +17,11 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 7837,
+      "lines": 7838,
       "limit": 600,
       "qInvokable": 0,
-      "topLevel": 217,
-      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交） | 2026-10-25 回写 7647→7681：#479 class-bound +27 与 #480 BlackboardCard 接线 +23（均 10-24/25 已提交），+11 属并行线存量 | 2026-10-25 回写 7681→7718：+29 渲染诊断埋点（651311b，Win7 黑底排查：sceneGraphBackend/env/OS/DWM 四行 qInfo），另 +8 属并行线存量未回写 | 2026-10-25 回写 7718→7836：**本批只提交 +66**（设备用途链路：g_deviceRole + 持久化 saveDeviceRole/loadDeviceRole + register 上报 role + 回执权威覆盖 + 缩略图门加用途判定 + 向导 setInitialRole/roleChosen 接线 + agentUiFill 快照）；**另 +52 属并行线 13:13 写入的 Win7 渲染兜底块（未提交、非本批，按纪律不替其提交）** —— 若该块被回退，请把本值回写为 7784 | 2026-10-25 回写 7836→7837：+1 为本批删除 XJK 接入码路径（仅 6 位票走 /api/device/activate，旧 XJK 分支与站点代兑换注释移除）"
+      "topLevel": 204,
+      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交） | 2026-10-25 回写 7647→7681：#479 class-bound +27 与 #480 BlackboardCard 接线 +23（均 10-24/25 已提交），+11 属并行线存量 | 2026-10-25 回写 7681→7718：+29 渲染诊断埋点（651311b，Win7 黑底排查：sceneGraphBackend/env/OS/DWM 四行 qInfo），另 +8 属并行线存量未回写 | 2026-10-25 回写 7718→7836：**本批只提交 +66**（设备用途链路：g_deviceRole + 持久化 saveDeviceRole/loadDeviceRole + register 上报 role + 回执权威覆盖 + 缩略图门加用途判定 + 向导 setInitialRole/roleChosen 接线 + agentUiFill 快照）；**另 +52 属并行线 13:13 写入的 Win7 渲染兜底块（未提交、非本批，按纪律不替其提交）** —— 若该块被回退，请把本值回写为 7784 | 2026-10-25 回写 7836→7837：+1 为本批删除 XJK 接入码路径（仅 6 位票走 /api/device/activate，旧 XJK 分支与站点代兑换注释移除） | 2026-10-25 回写 7837→7838（+1，顶层定义仍 204）：+1 属**并行线在途**改动（非本批），此处只据实回写台账使门禁可读，不代其提交代码"
     },
     "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
       "lines": 870,
@@ -73,18 +73,18 @@
       "plan": "[P3] 拆下载/校验/安装三段"
     },
     "Stelarith-viewer-qt/src/viewerbackend.cpp": {
-      "lines": 2795,
+      "lines": 2813,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 90,
-      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交） | 2026-10-25 回写 2772→2787：登记值滞后（#460/#477 增量未回写），本批未改此文件 | 2026-10-25 回写 2787→2795（+8，顶层定义 89→90）：registerUrl 属性与注册页说明（提交 61e4495，未认证链路批次）"
+      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交） | 2026-10-25 回写 2772→2787：登记值滞后（#460/#477 增量未回写），本批未改此文件 | 2026-10-25 回写 2787→2795（+8，顶层定义 89→90）：registerUrl 属性与注册页说明（提交 61e4495，未认证链路批次） | 2026-10-25 回写 2795→2813（+18，顶层定义仍 90）：设备表按 scope 裁剪 —— m_devices 改 scopedDevices→maskDevices 两级、默认选中改从裁剪后的表取（不拿云端原始 arr）、设备表日志改口径（可见/原始 双数）"
     },
     "Stelarith-viewer-qt/src/viewerbackend.h": {
-      "lines": 1020,
+      "lines": 1027,
       "limit": 300,
       "qInvokable": 61,
       "topLevel": 16,
-      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明。台账：984 → 1001（+17）：#477 ClassAdmin +8（前向声明/Q_PROPERTY/访问器/成员）；另 +9 属并行线 VNC 批次（m_pendingVncUid/m_vncUid） | 2026-10-25 回写 1001→1005：登记值滞后，本批未改此文件 | 2026-10-25 回写 1005→1010：+5 为本批 roleLocked Q_PROPERTY + 注释（个人中心：服务端锁身份时隐藏『换身份』假按钮，原行为是点了静默失败） | 2026-10-25 回写 1010→1020（+10，顶层定义 15→16）：verified + registerUrl 两个 Q_PROPERTY 与访问器（提交 61e4495）"
+      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明。台账：984 → 1001（+17）：#477 ClassAdmin +8（前向声明/Q_PROPERTY/访问器/成员）；另 +9 属并行线 VNC 批次（m_pendingVncUid/m_vncUid） | 2026-10-25 回写 1001→1005：登记值滞后，本批未改此文件 | 2026-10-25 回写 1005→1010：+5 为本批 roleLocked Q_PROPERTY + 注释（个人中心：服务端锁身份时隐藏『换身份』假按钮，原行为是点了静默失败） | 2026-10-25 回写 1010→1020（+10，顶层定义 15→16）：verified + registerUrl 两个 Q_PROPERTY 与访问器（提交 61e4495） | 2026-10-25 回写 1020→1027（+7，顶层定义仍 16）：classesFiltered Q_PROPERTY + 成员 m_classesFiltered + 访问器 + 说明注释（提交 ef44f86，班级名单走登录票据）"
     },
     "Stelarith-control-qt/qml/shell/BroadcastScheduleSheet.qml": {
       "lines": 795,
@@ -234,11 +234,11 @@
       "plan": "[P3] 拆参数区"
     },
     "Stelarith-viewer-qt/qml/shell/MainWindow.qml": {
-      "lines": 596,
+      "lines": 613,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 骨架壳：已抽仪表盘三件（718→458，#473）；旧界面迁移把监控/集控内嵌成 section（458→480→495，2026-10-24）；第三刀加 sectionHook 与栏目驱动拉流；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav | 2026-10-25 回写 496→582：其中 +4 为本批 runBulk label 修复（原二元组会把「全班静音」显示成「远程重启」）；其余 +82 属 #461 班级工作台接线等历史增量未回写，非本批批准变胖 | 2026-10-25 回写 582→596：+14 为个人中心接入（sectionIndex/sectionTitle 各 +2、账户页 Loader +9、头像落点改指个人中心 +2 —— 原来头像跳系统设置，teacher 被门禁挡住＝个人中心进不去）"
+      "plan": "[P2] 骨架壳：已抽仪表盘三件（718→458，#473）；旧界面迁移把监控/集控内嵌成 section（458→480→495，2026-10-24）；第三刀加 sectionHook 与栏目驱动拉流；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav | 2026-10-25 回写 496→582：其中 +4 为本批 runBulk label 修复（原二元组会把「全班静音」显示成「远程重启」）；其余 +82 属 #461 班级工作台接线等历史增量未回写，非本批批准变胖 | 2026-10-25 回写 582→596：+14 为个人中心接入（sectionIndex/sectionTitle 各 +2、账户页 Loader +9、头像落点改指个人中心 +2 —— 原来头像跳系统设置，teacher 被门禁挡住＝个人中心进不去） | 2026-10-25 回写 596→613（+17）：集控页管理员门禁 —— navItemsAll 全集 + 按身份过滤的 navItems、canControlPage 判据、navActivated 拦 control、身份变化时从集控页退回仪表盘、班级看板的「去集控页」改走 openSection（不改会绕过门禁）"
     },
     "Stelarith-viewer-qt/qml/shell/SideSheet.qml": {
       "lines": 289,
