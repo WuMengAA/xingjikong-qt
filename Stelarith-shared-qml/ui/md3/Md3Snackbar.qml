@@ -1,9 +1,9 @@
 // MD3 Snackbar：inverseSurface 底、圆角 4、高 48，可选 action 按钮，4s 自动消失。
 import QtQuick
+import "../theme"
 
 Item {
     id: root
-    property var md3: ({})
     property alias text: snackText.text
     property string actionText: ""
     property bool opened: false
@@ -28,8 +28,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: md3.rXS
-        color: md3.cInverseSurf
+        radius: Md3.rXS
+        color: Md3.cInverseSurf
         Row {
             id: snackRow
             anchors.verticalCenter: parent.verticalCenter
@@ -38,8 +38,8 @@ Item {
             spacing: 8
             Text {
                 id: snackText
-                font.pixelSize: md3.bodyM
-                color: md3.cInverseOn
+                font.pixelSize: Md3.bodyM
+                color: Md3.cInverseOn
                 maximumLineCount: 2
                 elide: Text.ElideRight
                 width: Math.min(implicitWidth, 480)
@@ -48,9 +48,9 @@ Item {
             Text {
                 visible: root.actionText !== ""
                 text: root.actionText
-                font.pixelSize: md3.labelL
+                font.pixelSize: Md3.labelL
                 font.weight: Font.Medium
-                color: md3.cPrimaryCont
+                color: Md3.cPrimaryCont
                 anchors.verticalCenter: parent.verticalCenter
                 MouseArea {
                     anchors.fill: parent

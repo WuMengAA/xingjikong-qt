@@ -13,16 +13,16 @@
 //    不许覆写 color/radius（既有消费方已核实无一覆写）。
 // 内边距 16。用法：Md3Card { md3: …; variant: "elevated" } { 子项 }
 import QtQuick
+import "../theme"
 
 Rectangle {
     id: root
-    property var md3: ({})
     property string variant: "filled"   // elevated | filled | outlined
     default property alias content: inner.data
 
     implicitWidth: 200
     implicitHeight: inner.implicitHeight + 32
-    radius: md3.rL
+    radius: Md3.rL
     color: "transparent"                // 根透明：卡片面在 cardFace，阴影才压得下去
     border.width: 0
 
@@ -50,10 +50,10 @@ Rectangle {
         anchors.fill: parent
         radius: root.radius
         z: 1
-        color: root.variant === "filled" ? md3.cContHigh
-                                         : (root.variant === "outlined" ? md3.cSurface : md3.cContLow)
+        color: root.variant === "filled" ? Md3.cContHigh
+                                         : (root.variant === "outlined" ? Md3.cSurface : Md3.cContLow)
         border.width: root.variant === "outlined" ? 1 : 0
-        border.color: md3.cOutlineVar
+        border.color: Md3.cOutlineVar
 
         Item {
             id: inner

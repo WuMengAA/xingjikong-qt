@@ -20,11 +20,11 @@
 import QtQuick
 import QtQuick.Controls          // ToolTip（段说明）
 import "../../island"            // SvgIcon
+import "../theme"
 
 Item {
     id: root
 
-    property var md3: ({})
     /**
      * 段定义：[{ value, label, icon, tip }]
      *   value —— 任意值（字符串/数字），activated 原样带回；
@@ -51,7 +51,7 @@ Item {
     Row {
         id: segRow
         anchors.centerIn: parent
-        spacing: md3.spXS
+        spacing: Md3.spXS
 
         Repeater {
             model: root.model
@@ -61,17 +61,17 @@ Item {
                 readonly property bool on: root.current === seg.modelData.value
 
                 height: 32
-                radius: root.fresh ? (md3.frRPill || 999) : md3.rM
+                radius: root.fresh ? (Md3.frRPill || 999) : Md3.rM
                 // 文字段宽 = 图标16 + 间距6 + 文字 + 左右各 12 内边距；纯图标段定宽 44
                 width: (seg.modelData.label !== "")
                        ? (16 + 6 + segTx.implicitWidth + 24)
                        : 44
                 color: seg.on
-                       ? (root.fresh ? (md3.frGreenSoft || "#E9FBF0") : md3.cSecondaryCont)
+                       ? (root.fresh ? (Md3.frGreenSoft || "#E9FBF0") : Md3.cSecondaryCont)
                        : (segMa.containsMouse
-                          ? (root.fresh ? (md3.frLine || "#EEF0F3") : md3.cContHigh)
+                          ? (root.fresh ? (Md3.frLine || "#EEF0F3") : Md3.cContHigh)
                           : "transparent")
-                Behavior on color { ColorAnimation { duration: md3.durShort } }
+                Behavior on color { ColorAnimation { duration: Md3.durShort } }
 
                 Row {
                     anchors.centerIn: parent
@@ -80,18 +80,18 @@ Item {
                         name: seg.modelData.icon
                         px: 16
                         tint: seg.on
-                               ? (root.fresh ? (md3.frGreenD || "#16A34A") : md3.cOnSecondaryCont)
-                               : md3.cOnSurfaceVar
+                               ? (root.fresh ? (Md3.frGreenD || "#16A34A") : Md3.cOnSecondaryCont)
+                               : Md3.cOnSurfaceVar
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         id: segTx
                         visible: seg.modelData.label !== ""
                         text: seg.modelData.label
-                        font.pixelSize: md3.labelM
+                        font.pixelSize: Md3.labelM
                         color: seg.on
-                               ? (root.fresh ? (md3.frGreenD || "#16A34A") : md3.cOnSecondaryCont)
-                               : md3.cOnSurfaceVar
+                               ? (root.fresh ? (Md3.frGreenD || "#16A34A") : Md3.cOnSecondaryCont)
+                               : Md3.cOnSurfaceVar
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }

@@ -1,10 +1,10 @@
 // MD3 文本框（filled）：浮动标签 + 聚焦底线 2dp + 错误态。
 // 铁律：不设 background —— 暗色下系统白底白字（#94 事故教训），用 Rectangle 自绘底。
 import QtQuick
+import "../theme"
 
 Item {
     id: root
-    property var md3: ({})
     property string text: ""
     property string placeholder: ""
     property string helper: ""
@@ -17,26 +17,26 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: md3.rXS
-        color: md3.cSurfaceVar
+        radius: Md3.rXS
+        color: Md3.cSurfaceVar
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: 2
-            color: root.errorMode ? md3.cError
-                                  : (input.activeFocus ? md3.cPrimary : md3.cOnSurfaceVar)
+            color: root.errorMode ? Md3.cError
+                                  : (input.activeFocus ? Md3.cPrimary : Md3.cOnSurfaceVar)
         }
         Text {
             id: lbl
             x: 16
             y: (input.activeFocus || input.text !== "") ? 8 : 22
-            font.pixelSize: (input.activeFocus || input.text !== "") ? md3.labelS : md3.bodyL
-            color: root.errorMode ? md3.cError
-                                  : (input.activeFocus ? md3.cPrimary : md3.cOnSurfaceVar)
+            font.pixelSize: (input.activeFocus || input.text !== "") ? Md3.labelS : Md3.bodyL
+            color: root.errorMode ? Md3.cError
+                                  : (input.activeFocus ? Md3.cPrimary : Md3.cOnSurfaceVar)
             text: root.placeholder
-            Behavior on y { NumberAnimation { duration: md3.durShort; easing.type: Easing.Bezier; easing.bezierCurve: md3.easeStd } }
-            Behavior on font.pixelSize { NumberAnimation { duration: md3.durShort } }
+            Behavior on y { NumberAnimation { duration: Md3.durShort; easing.type: Easing.Bezier; easing.bezierCurve: Md3.easeStd } }
+            Behavior on font.pixelSize { NumberAnimation { duration: Md3.durShort } }
         }
         TextInput {
             id: input
@@ -46,8 +46,8 @@ Item {
             anchors.leftMargin: 16
             anchors.rightMargin: 16
             anchors.bottomMargin: 10
-            font.pixelSize: md3.bodyL
-            color: md3.cOnSurface
+            font.pixelSize: Md3.bodyL
+            color: Md3.cOnSurface
             echoMode: root.password ? TextInput.Password : TextInput.Normal
             // 双向同步（2026-10-24 修复）：此前 TextInput 只有下面那行 onTextChanged，
             // 外部预填 root.text（如改名行预填当前班名）**根本不显示**到可见输入框 ——
@@ -63,8 +63,8 @@ Item {
         anchors.leftMargin: 16
         anchors.top: parent.bottom
         anchors.topMargin: 4
-        font.pixelSize: md3.bodyS
-        color: root.errorMode ? md3.cError : md3.cOnSurfaceVar
+        font.pixelSize: Md3.bodyS
+        color: root.errorMode ? Md3.cError : Md3.cOnSurfaceVar
         text: root.helper
     }
 

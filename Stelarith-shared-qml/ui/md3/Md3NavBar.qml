@@ -1,10 +1,10 @@
 // MD3 底部导航：高 80，激活项 pill 指示器 64×32（secondaryContainer）+ badge。
 // items: [{icon, label, badge}]；currentIndex 双向。
 import QtQuick
+import "../theme"
 
 Item {
     id: root
-    property var md3: ({})
     property var items: []
     property int currentIndex: 0
     signal activated(int index)
@@ -14,7 +14,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: md3.cCont
+        color: Md3.cCont
     }
     Row {
         anchors.fill: parent
@@ -30,8 +30,8 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: 12
                     width: 64; height: 32; radius: 16
-                    color: root.currentIndex === index ? md3.cSecondaryCont : "transparent"
-                    Behavior on color { ColorAnimation { duration: md3.durShort } }
+                    color: root.currentIndex === index ? Md3.cSecondaryCont : "transparent"
+                    Behavior on color { ColorAnimation { duration: Md3.durShort } }
                     Text {
                         anchors.centerIn: parent
                         text: modelData.icon
@@ -42,13 +42,13 @@ Item {
                         anchors.right: parent.right
                         anchors.top: parent.top
                         width: 16; height: 16; radius: 8
-                        color: md3.cError
+                        color: Md3.cError
                         Text {
                             anchors.centerIn: parent
                             text: modelData.badge !== undefined ? modelData.badge : ""
                             font.pixelSize: 9
                             font.weight: Font.Bold
-                            color: md3.cOnError
+                            color: Md3.cOnError
                         }
                     }
                 }
@@ -56,9 +56,9 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: 48
                     text: modelData.label
-                    font.pixelSize: md3.labelM
+                    font.pixelSize: Md3.labelM
                     font.weight: Font.Medium
-                    color: root.currentIndex === index ? md3.cOnSurface : md3.cOnSurfaceVar
+                    color: root.currentIndex === index ? Md3.cOnSurface : Md3.cOnSurfaceVar
                 }
                 MouseArea {
                     anchors.fill: parent

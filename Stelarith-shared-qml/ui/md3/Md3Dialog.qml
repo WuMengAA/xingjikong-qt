@@ -9,10 +9,10 @@
 // 动效时长走令牌 durShort（200ms）；md3 缺省 ({}) 时回落 200，不让动画静默失效。
 import QtQuick
 import "."          // 同目录的 Md3Btn（QML 同目录类型需显式导入才稳）
+import "../theme"
 
 Item {
     id: root
-    property var md3: ({})
     property bool opened: false
     property string title: ""
     property string text: ""
@@ -20,7 +20,7 @@ Item {
     signal actionClicked(int index, string role)
 
     /** 动效时长：令牌优先，({}) 兜底 200（规范值）。 */
-    readonly property int animDur: (root.md3 && root.md3.durShort !== undefined) ? root.md3.durShort : 200
+    readonly property int animDur: (Md3 && Md3.durShort !== undefined) ? Md3.durShort : 200
 
     visible: opened
     anchors.fill: parent
@@ -54,8 +54,8 @@ Item {
         anchors.centerIn: parent
         width: Math.min(parent.width - 48, 312)
         height: dialogCol.implicitHeight + 48
-        radius: md3.rXL
-        color: md3.cContHigh
+        radius: Md3.rXL
+        color: Md3.cContHigh
         Column {
             id: dialogCol
             anchors.left: parent.left
@@ -65,14 +65,14 @@ Item {
             spacing: 16
             Text {
                 text: root.title
-                font.pixelSize: md3.headlineS
-                color: md3.cOnSurface
+                font.pixelSize: Md3.headlineS
+                color: Md3.cOnSurface
                 width: parent.width
             }
             Text {
                 text: root.text
-                font.pixelSize: md3.bodyM
-                color: md3.cOnSurfaceVar
+                font.pixelSize: Md3.bodyM
+                color: Md3.cOnSurfaceVar
                 width: parent.width
                 wrapMode: Text.Wrap
             }
@@ -88,7 +88,6 @@ Item {
                 delegate: Md3Btn {
                     required property var modelData
                     required property int index
-                    md3: root.md3
                     text: modelData.text
                     variant: modelData.role === "cancel" ? "text"
                            : (modelData.role === "danger" ? "error" : "filled")

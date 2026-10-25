@@ -5,10 +5,10 @@
 //             同批加 tip（悬停说明）——需要 QtQuick.Controls 的 ToolTip。
 import QtQuick
 import QtQuick.Controls
+import "../theme"
 
 Item {
     id: root
-    property var md3: ({})
     property string text: ""
     property string variant: "filled"
     property string icon: ""          // emoji 占位（Lucide 接入后换 SVG）
@@ -23,31 +23,31 @@ Item {
     opacity: enabled ? 1 : 0.38
 
     function bgColor() {
-        if (variant === "filled") return md3.cPrimary
-        if (variant === "tonal") return md3.cSecondaryCont
-        if (variant === "elevated") return md3.cContLow
-        if (variant === "error") return md3.cError
+        if (variant === "filled") return Md3.cPrimary
+        if (variant === "tonal") return Md3.cSecondaryCont
+        if (variant === "elevated") return Md3.cContLow
+        if (variant === "error") return Md3.cError
         return "transparent"
     }
     function fgColor() {
-        if (variant === "filled") return md3.cOnPrimary
-        if (variant === "tonal") return md3.cOnSecondaryCont
-        if (variant === "elevated") return md3.cPrimary
-        if (variant === "error") return md3.cOnError
-        return md3.cPrimary            // outlined / text
+        if (variant === "filled") return Md3.cOnPrimary
+        if (variant === "tonal") return Md3.cOnSecondaryCont
+        if (variant === "elevated") return Md3.cPrimary
+        if (variant === "error") return Md3.cOnError
+        return Md3.cPrimary            // outlined / text
     }
 
     Rectangle {
         anchors.fill: parent
-        radius: root.radius >= 0 ? root.radius : md3.rFull
+        radius: root.radius >= 0 ? root.radius : Md3.rFull
         color: root.bgColor()
         border.width: variant === "outlined" ? 1 : 0
-        border.color: md3.cOutline
+        border.color: Md3.cOutline
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
             color: root.fgColor()
-            opacity: ma.pressed ? md3.stPress : (ma.containsMouse ? md3.stHover : 0)
+            opacity: ma.pressed ? Md3.stPress : (ma.containsMouse ? Md3.stHover : 0)
             Behavior on opacity { NumberAnimation { duration: 120 } }
         }
     }
@@ -64,7 +64,7 @@ Item {
         }
         Text {
             text: root.text
-            font.pixelSize: md3.labelL
+            font.pixelSize: Md3.labelL
             font.weight: Font.Medium
             color: root.fgColor()
             anchors.verticalCenter: parent.verticalCenter

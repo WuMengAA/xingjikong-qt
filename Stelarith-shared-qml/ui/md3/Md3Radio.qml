@@ -1,9 +1,9 @@
 // MD3 单选：20 圆，选中 primary 描边 + 10 实心点；未选 outline 描边。
 import QtQuick
+import "../theme"
 
 Item {
     id: root
-    property var md3: ({})
     property bool checked: false
     signal toggled(bool value)
 
@@ -14,15 +14,15 @@ Item {
         radius: 10
         color: "transparent"
         border.width: 2
-        border.color: root.checked ? md3.cPrimary : md3.cOutline
-        Behavior on border.color { ColorAnimation { duration: md3.durShort } }
+        border.color: root.checked ? Md3.cPrimary : Md3.cOutline
+        Behavior on border.color { ColorAnimation { duration: Md3.durShort } }
         Rectangle {
             anchors.centerIn: parent
             width: root.checked ? 10 : 0
             height: width
             radius: width / 2
-            color: md3.cPrimary
-            Behavior on width { NumberAnimation { duration: md3.durShort; easing.type: Easing.Bezier; easing.bezierCurve: md3.easeEmph } }
+            color: Md3.cPrimary
+            Behavior on width { NumberAnimation { duration: Md3.durShort; easing.type: Easing.Bezier; easing.bezierCurve: Md3.easeEmph } }
         }
     }
     MouseArea {
