@@ -15,6 +15,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "ClassSort.js" as ClassSort
 
 Item {
     id: nav
@@ -33,6 +34,9 @@ Item {
     signal classPicked(string code)
     signal systemActivated(string key)
     signal classicRequested()
+
+    /** 班级显示序：1班<2班<…<12班（规则在 ClassSort.js，TopBar 共用；只排序不动身份码）。 */
+    readonly property var sortedClasses: ClassSort.byName(nav.classes)
 
     readonly property int navWidth: 240
     readonly property int padX: Md3.spM
@@ -135,7 +139,7 @@ Item {
             Layout.fillHeight: true
             clip: true
             spacing: 2
-            model: nav.classes
+            model: nav.sortedClasses
             boundsBehavior: Flickable.StopAtBounds
 
             delegate: ClassNavClassRow {

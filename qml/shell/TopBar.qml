@@ -19,6 +19,7 @@ import QtQuick.Layouts
 import "../components/md3"
 import "../island"          // SvgIcon
 import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "ClassSort.js" as ClassSort
 
 Item {
     id: root
@@ -36,6 +37,8 @@ Item {
     readonly property var _classes: (root.classes && root.classes.length)
                                    ? root.classes
                                    : ((backend && backend.classes) ? backend.classes : [])
+    /** 下拉里的**显示顺序**：1班 < 2班 < … < 10班 < 12班（规则见 ClassSort.js）。 */
+    readonly property var _classesSorted: ClassSort.byName(root._classes)
     /** 实际使用的当前班（注入优先）。 */
     readonly property string _cur: (root.currentClass !== "")
                                    ? root.currentClass
@@ -108,7 +111,7 @@ Item {
             id: classMenu
             y: classBtn.height
             Repeater {
-                model: root._classes
+                model: root._classesSorted
                 delegate: MenuItem {
                     required property var modelData
                     text: modelData.name || modelData.code

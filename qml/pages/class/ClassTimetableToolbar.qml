@@ -3,8 +3,12 @@
 // 拆件原因：ClassTimetablePane 已 287 行（红线 200）。工具栏是纯展示 + 两个意图信号，
 // 抽出来之后 Pane 只留状态与网络回执。
 //
-// 选群条只在档案含多个课表群时出现（真实档案：1班课表群 / 8班课表群）——
-// 群不猜，必须由人点选：猜错就是把别班课表挂到这个班。
+// 选群条只在档案含多个课表群时出现。**完整档案有 12 个群、而且 12 个群全叫
+// 「新课表群」**（1~12 班全校课表）—— 靠名字分不出谁是谁，云端已按「ClassPlans 首次
+// 出现顺序」回 label（1班…12班）并标 inferred。所以：
+//   · 名字可信（1班课表群/8班课表群）→ 显示群名；
+//   · 名字不可信（12 个同名）→ 显示推断班名 + 明确提示"请核对"，绝不假装知道。
+// 群不猜：猜错就是把 3 班课表挂到 4 班。
 import QtQuick
 import "../../components/fresh"  // FreshBtn
 import "../../components/theme"  // Md3 令牌（pragma Singleton）
@@ -16,6 +20,8 @@ Column {
     property string subtitle: ""
     property bool canImport: false
     property var groups: []
+    /** true = 班名是按档案顺序推的（12 群同名），界面必须提示人工核对。 */
+    property bool nameInferred: false
 
     signal importRequested()
     signal refreshRequested()
@@ -77,9 +83,13 @@ Column {
 
         Text {
             width: parent.width
-            text: "这份档案有 " + bar.groups.length + " 个课表群，选一个导入本班："
+            wrapMode: Text.WordWrap
+            text: bar.nameInferred
+                  ? ("这份档案有 " + bar.groups.length + " 个课表群、而且群名都一样："
+                     + "下面按档案顺序编号为 1班…" + bar.groups.length + "班，导入前请对照课表核对。")
+                  : ("这份档案有 " + bar.groups.length + " 个课表群，选一个导入本班：")
             font.pixelSize: Md3.bodyS
-            color: Md3.frInk2 || "#6B7280"
+            color: bar.nameInferred ? (Md3.frDanger || "#DC2626") : (Md3.frInk2 || "#6B7280")
         }
         Flow {
             width: parent.width
@@ -94,7 +104,11 @@ Column {
                     Text {
                         id: gTxt
                         anchors.centerIn: parent
-                        text: (modelData.name || "") + " · " + (modelData.days || 0) + "天"
+                        // 推断时群名是 12 个「新课表群」，显示出来只会误导 ⇒ 只显示「X班」
+                        text: (modelData.inferred === true
+                               ? (modelData.label || "")
+                               : (modelData.name || modelData.label || ""))
+                              + " · " + (modelData.days || 0) + "天"
                         font.pixelSize: Md3.body13
                         color: Md3.frInk || "#111827"
                     }

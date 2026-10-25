@@ -9,7 +9,9 @@
 //     lessons:[{index,subject,initial,teacher,start,end}]}], layouts:[{id,name,items}] }
 //
 // 导入语义（刻意的）：先预览群、再由人点选（ClassTimetableToolbar 的选群条）。
-// 一个 ClassIsland 档案通常含多个班（真实档案：1班 / 8班课表群），猜错=挂错班。
+// **完整档案含 12 个班**（72 个 ClassPlan = 12 群 × 6 天），且 12 个群全叫「新课表群」；
+// 云端按「ClassPlans 首次出现顺序」回 label（1班…12班）+ inferred，界面据此提示核对。
+// 猜错=挂错班，所以：群不猜、名字不可信时明说不可信。
 import QtQuick
 import "../../components/fresh"  // FreshCard
 import "../../components/theme"  // Md3 令牌（pragma Singleton）
@@ -27,6 +29,11 @@ Item {
     property var groups: []         // 待选课表群
     property string rawText: ""     // 最近一次选中的档案原文（选群时复用）
     property int dayIdx: 0
+
+    /** 待选群里班名是"按顺序推的"（12 群同名）⇒ 选群条必须提示核对。 */
+    readonly property bool groupsInferred: pane.groups.length > 1
+                                          && pane.groups[0] !== undefined
+                                          && pane.groups[0].inferred === true
 
     readonly property var days: (pane.profile && pane.profile.days) ? pane.profile.days : []
     readonly property var curDay: (pane.dayIdx >= 0 && pane.dayIdx < pane.days.length)
@@ -122,10 +129,12 @@ Item {
         ClassTimetableToolbar {
             id: toolBar
             subtitle: pane.profile
-                      ? ((pane.profile.group ? pane.profile.group.name : "") + " · " + pane.days.length + " 天")
+                      ? (((pane.profile.group || {}).label
+                          || (pane.profile.group || {}).name || "") + " · " + pane.days.length + " 天")
                       : "还没导入"
             canImport: pane.subscribed && pane.classCode !== ""
             groups: pane.groups
+            nameInferred: pane.groupsInferred
             onImportRequested: pane.pickProfile()
             onRefreshRequested: pane.reload()
             onGroupPicked: function (id) { pane.doImport(id) }
