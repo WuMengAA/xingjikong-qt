@@ -179,14 +179,23 @@ Item {
     //    必须经中间 property var（setProperty 可写、绑定可重算）。
     property var voicehubObj: null
     readonly property var vhRef: root.voicehubObj
-    readonly property bool vhOn: root._expanded && root.vhRef !== null && root.vhRef.active
+    // ⚠️ 2026-10-25（Win7 现场排障）：以下所有 vhRef 守卫一律用**真值**判断
+    // （`root.vhRef` / `!root.vhRef`），禁写 `!== null` / `=== null`：
+    //   C++ 侧清空（island.cpp setQmlObjectProperty 销毁回调）一旦写出**无效
+    //   QVariant**，var 属性读成的是 **undefined 而非 null**（var 语义探针实证，
+    //   Qt 6.12）——`undefined !== null` 按严格比较为**真**，守卫被穿透，绑定
+    //   重算读 .active/.nextTitle 连报 TypeError（Win7 rc.4 退出日志三连报
+    //   同款），且这正是 10-19 远控崩溃链（绑定重算→Repeater→野指针）的入口。
+    //   真值判断对 null / undefined / 活对象三态全兼容。行 45 bridgeRef 的
+    //   typeof 双保险是同一动机的更早样板。
+    readonly property bool vhOn: root._expanded && root.vhRef && root.vhRef.active
         // 搜索/投稿页打开时让位（§七 一次只展开一件事；那两页锚 mediaRow.bottom
         // 且高度预算 searchH/submitH 已按 vhH=0 收敛——vhOn 条件里必须排掉，
         // 否则行与页面在同一块空间里重叠）。
         && !root.searchOn && !root.submitOn
     // 展开态高度预算 vhH 与下方 mediaH 同区块定义（行高 30/44 + 上边距 8）。
     // 第二行（接下来 / 人数）有条件出现 ⇒ 预算跟着条件走，不写死。
-    readonly property bool vhLine2: root.vhRef !== null
+    readonly property bool vhLine2: root.vhRef
         && (root.vhRef.nextTitle !== "" || root.vhRef.listeners > 0)
     // 进度文本：在播 "m:ss / m:ss"；暂停冻在 position；无时长只给已播。
     function vhTimeText() {
@@ -225,7 +234,7 @@ Item {
     //   · 用户主动选过 ⇒ 失效就**彻底回概览**（尊重用户最后一次选择，不被拽回）。
     property int faceUserPick: -1
     readonly property bool mediaFaceOn: root._mediaActive || root.mediaIsContent
-        || (root.vhRef !== null && root.vhRef.active)
+        || (root.vhRef && root.vhRef.active)
     readonly property bool histFaceOn: root._history.length > 0
     readonly property var faceModel: {
         var fs = [{ id: 0, label: "概" }];
@@ -271,7 +280,7 @@ Item {
         const rows = [
             { k: "当前形态", v: formName },
             { k: "媒体", v: root.facePhaseText() },
-            { k: "VoiceHub", v: root.vhRef === null ? "模块未注入"
+            { k: "VoiceHub", v: !root.vhRef ? "模块未注入"
                                      : (root.vhRef.active ? "在播：" + root.vhRef.title
                                                           : root.vhRef.statusText) },
             { k: "历史通知", v: root._history.length + " 条" }
