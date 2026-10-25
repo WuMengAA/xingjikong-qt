@@ -283,11 +283,11 @@
       "plan": "[P3] 拆动画帧与路径数据"
     },
     "Stelarith-cloud/src/index.js": {
-      "lines": 2976,
+      "lines": 2983,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）→ 2873（2026-10-24 #475 班级管理 API 分发 +13：import handleClassAdminApi + isViewerApi 加 /api/class/ 前缀 + POST 分发点） | 2026-10-25 回写 2873→2976：登记值滞后（班级域/发布中心增量），本批未改此文件"
+      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）→ 2873（2026-10-24 #475 班级管理 API 分发 +13：import handleClassAdminApi + isViewerApi 加 /api/class/ 前缀 + POST 分发点） | 2026-10-25 回写 2873→2976：登记值滞后（班级域/发布中心增量），本批未改此文件 | 2026-10-25 回写 2976→2983：+7 为班级数据（学生/课表）接线 —— 一行 import + 建表与启动日志；业务全在新 TU src/class-data.js（307 行，红线 600 内），index.js 只留启动钩子"
     },
     "Stelarith-cloud/src/registry.js": {
       "lines": 1278,
