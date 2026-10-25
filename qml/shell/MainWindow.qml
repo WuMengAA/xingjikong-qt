@@ -75,13 +75,28 @@ Item {
     //   原来是 goPage(3) 把整页甩给旧壳——旧壳那页有自己的底部标签栏和背景，
     //   点进去像"出了这个软件"。现在 MonitorPage 直接内嵌在内容区（同一个 TopBar /
     //   同一个状态条），旧壳 page 3 保留但仍可用（同一份 QML，靠 backFn 区分出口）。
-    readonly property var navItems: [
+    /** 设备集控面向管理员（用户裁决 2026-10-25：班级页可含本班设备管控、集控页面向管理员）。
+     *  服务端下发受限身份（applyServerRole 把非 admin 一律落成 teacher）时不摆这个入口；
+     *  未登录 / 全权令牌下 role 恒为 admin（见 ViewerBackend::loadPrefs），运维视角不受影响。 */
+    readonly property bool canControlPage: !backend || backend.role !== "teacher"
+
+    /** 身份在停留期间变了（例如在集控页上登录了一个老师账号）⇒ 立刻退回仪表盘。
+     *  只隐藏菜单不够：section 已经是 control 的话页面还挂在那儿。 */
+    onCanControlPageChanged: if (!shell.canControlPage && shell.section === "control") shell.section = "dash"
+
+    /** 菜单全集：加页只改这一处。 */
+    readonly property var navItemsAll: [
         { key: "dash",     icon: "monitor",     label: "仪表盘" },
         { key: "classes",  icon: "users",       label: "班级看板" },
         { key: "control",  icon: "layout-grid", label: "设备集控" },
         { key: "monitor",  icon: "eye",          label: "运行监控" },
         { key: "settings", icon: "settings",    label: "系统设置" }
     ]
+
+    /** 侧栏菜单：按身份裁剪（过滤，不是另抄一份表 —— 否则加页又会漏一边）。 */
+    readonly property var navItems: navItemsAll.filter(function (it) {
+        return it.key !== "control" || shell.canControlPage
+    })
 
     /** 当前栏目：dash / classes / control / monitor / settings。 */
     property string section: "dash"
@@ -150,6 +165,12 @@ Item {
     function navActivated(key) {
         if (key === "settings" && (typeof perms === "undefined" || !perms.can("system:settings"))) {
             shell.toast("当前身份不能进系统设置", true)
+            return
+        }
+        // 2026-10-25：集控页 = 多班/全校视角，只给管理员。老师仍能在班级看板里
+        // 管本班设备（功能不削，只换入口），所以这里连菜单项一起隐藏，双保险。
+        if (key === "control" && !shell.canControlPage) {
+            shell.toast("设备集控面向管理员；本班设备的管控在班级看板里", true)
             return
         }
         shell.section = key
@@ -338,7 +359,8 @@ Item {
                             cs: backend ? backend.classService : null
                             devices: backend ? backend.devices : []
                             toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
-                            openControlFn: function () { shell.section = "control" }
+                            // 走 openSection 统一入口，门禁才生效（直接写 section 会绕过 navActivated）
+                            openControlFn: function () { shell.openSection("control") }
                         }
 
                         // ③ 设备集控（旧界面迁移 2026-10-24 · 用户裁决 A「先搬后拆」）：

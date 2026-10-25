@@ -1677,13 +1677,19 @@ void ViewerBackend::refreshDevices(const QJsonArray &arr)
 
     const int onlineNow = arr.size();
     const int offlineNow = offline.size();
-    const bool countChanged = (full.size() != m_devices.size());
     // RBAC（2026-10-20）：体验层字段脱敏兜底——非平台超管/非全权时剥离敏感字段（ip/mac 系）。
     // 最终以云端「字段脱敏」为准；m_devLedger 保留原始值供内部逻辑（按 uid 路由），仅展示数组脱敏。
-    m_devices = m_perms ? m_perms->maskDevices(full) : full;
+    // 2026-10-25：先按 scope **裁剪**再脱敏 —— 设备表是十几次 QML 消费的唯一入口，
+    //   在这一处裁掉越界设备，才不会出现"某个页面还看得见别班设备"的漏网。
+    //   全权 / 平台超管原样返回（scopedDevices 内部判，别在调用点再写一遍）。
+    const QJsonArray visible = m_perms ? m_perms->maskDevices(m_perms->scopedDevices(full)) : full;
+    // 变化判定必须用**裁剪后**的表：拿 full 比 m_devices，受限身份下两者恒不等 ⇒ 每轮都刷日志。
+    const bool countChanged = (visible.size() != m_devices.size());
+    const int rawCount = (int)full.size();
+    m_devices = visible;
     if (countChanged || offlineNow > 0) {
-        logf("[viewer] 设备表更新：在线 %d 台，离线台账 %d 台（共 %d 条）",
-             onlineNow, offlineNow, (int)full.size());
+        logf("[viewer] 设备表更新：在线 %d 台，离线台账 %d 台（可见 %d / 原始 %d 条）",
+             onlineNow, offlineNow, (int)m_devices.size(), rawCount);
     }
     refreshCapActions();          // 设备一变（新增/掉线/换 uid），能力表就要重算
     emit devicesChanged();
@@ -1697,9 +1703,11 @@ void ViewerBackend::refreshDevices(const QJsonArray &arr)
         }
         return;
     }
-    // 第一台上线就默认看它（和云端 autoSubscribe 一个口径）
-    if (m_currentUid.isEmpty()) {
-        setCurrentUid(arr.first().toObject().value(QStringLiteral("uid")).toString());
+    // 第一台上线就默认看它（和云端 autoSubscribe 一个口径）。
+    // ⚠️ 必须从 m_devices（已按 scope 裁剪）里取，不能拿云端原始 arr：受限身份下
+    //    arr.first() 很可能是别人的设备 —— 选中它等于替用户越权订阅了一路画面。
+    if (m_currentUid.isEmpty() && !m_devices.isEmpty()) {
+        setCurrentUid(m_devices.first().toObject().value(QStringLiteral("uid")).toString());
     }
 }
 void ViewerBackend::applyFrameBytes(const QByteArray &jpeg, const QJsonObject &header,

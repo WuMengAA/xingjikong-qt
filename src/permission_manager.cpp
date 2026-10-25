@@ -1,5 +1,6 @@
 #include "permission_manager.h"
 
+#include <QDebug>
 #include <QLatin1Char>
 
 PermissionManager::PermissionManager(QObject *parent) : QObject(parent) {}
@@ -92,6 +93,23 @@ QJsonArray PermissionManager::maskDevices(const QJsonArray &devices) const {
     for (const QJsonValue &v : devices) {
         if (v.isObject()) out.append(maskedDevice(v.toObject()));
         else out.append(v);
+    }
+    return out;
+}
+
+QJsonArray PermissionManager::scopedDevices(const QJsonArray &devices) const {
+    // 全权 / 平台超管：不筛（与 canAccess 的放行分支同口径，别在这儿另立一套）。
+    if (m_full || isPlatformAdmin()) return devices;
+    QJsonArray out;
+    int dropped = 0;
+    for (const QJsonValue &v : devices) {
+        if (!v.isObject()) continue;
+        if (canAccessDevice(v.toObject())) out.append(v);
+        else ++dropped;
+    }
+    if (dropped != m_lastScopedOut) {
+        m_lastScopedOut = dropped;
+        qInfo("[perms] 按 scope 裁剪设备表：保留 %d 台，隐藏 %d 台", int(out.size()), dropped);
     }
     return out;
 }

@@ -147,6 +147,42 @@ int main() {
               "rebind: 全权不脱敏");
     }
 
+    // 11) 集合裁剪 scopedDevices（2026-10-25：设备表在 C++ 单一入口按 scope 裁）
+    {
+        QJsonArray arr;
+        arr.append(devWith("class_xlzx_2028_08", "10.0.0.1", "aa:bb"));
+        arr.append(devWith("class_xlzx_2029_01", "10.0.0.2", "aa:cc"));
+        arr.append(devWith(nullptr, "10.0.0.3", "aa:dd"));   // 无班级归属
+
+        // 全权：一台都不许少（含无归属的）
+        PermissionManager full;
+        full.setFullAccess();
+        CHECK(full.scopedDevices(arr).size() == 3, "scoped full: 原样 3 台");
+
+        // 老师 scope=class：只留本班，他班与无归属都裁掉
+        PermissionManager t;
+        t.setIdentity(QStringLiteral("u9"), QStringLiteral("schoolA"),
+                      {QStringLiteral("teacher")}, makeScope("class", "class_xlzx_2028_08"));
+        QJsonArray tOut = t.scopedDevices(arr);
+        CHECK(tOut.size() == 1, "scoped teacher: 只剩本班 1 台");
+        CHECK(tOut.at(0).toObject().value(QStringLiteral("classCode")).toString()
+                  == QStringLiteral("class_xlzx_2028_08"),
+              "scoped teacher: 留下的是本班那台");
+
+        // 平台超管：不裁
+        PermissionManager p;
+        p.setIdentity(QStringLiteral("u10"), QString(), {QStringLiteral("platform_admin")}, QJsonArray());
+        CHECK(p.scopedDevices(arr).size() == 3, "scoped platform: 不裁");
+
+        // 未鉴权（reset）：全部拒（最低权限，与 canAccess 同口径）
+        PermissionManager none;
+        none.reset();
+        CHECK(none.scopedDevices(arr).size() == 0, "scoped reset: 全拒");
+
+        // 空表不炸
+        CHECK(none.scopedDevices(QJsonArray()).size() == 0, "scoped: 空表安全");
+    }
+
     if (g_fail == 0) {
         std::printf("\nALL PASS (%d checks)\n", g_total);
         return 0;

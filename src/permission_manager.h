@@ -58,6 +58,12 @@ public:
     Q_INVOKABLE QJsonObject maskedDevice(const QJsonObject &device) const;
     QJsonArray maskDevices(const QJsonArray &devices) const;
 
+    // ---- 行级裁剪（集合形态）----
+    // 2026-10-25：把 canAccessDevice 的判定**批量**应用一次 —— 设备表在 C++ 单一入口
+    // 裁剪，QML 十几处 `backend.devices` 消费点不必各写一份过滤（写一份就漂一份）。
+    // 全权 / 平台超管原样返回（契约 §4.4）；受限身份按 scope 保留可见设备。
+    QJsonArray scopedDevices(const QJsonArray &devices) const;
+
     // ---- 组件级鉴权（QML 用）----
     // cap 形如 "domain:action"，例："device:ip-view" / "class:manage" / "system:settings"。
     // 前端镜像：platform_admin / fullAccess 放行一切；其余按内置 role→caps 策略
@@ -75,6 +81,9 @@ private:
     QString m_schoolId;
     QStringList m_roles;
     QList<Scope> m_scopes;
+    /** scopedDevices 上次隐藏了几台（-1 = 没算过）。设备表 15s 轮询一次，
+     *  只在数量**变化**时打日志，避免把"被裁剪"刷成日志噪音、也避免完全不吭声。 */
+    mutable int m_lastScopedOut = -1;
 
     bool scopeCovers(const QString &classCode) const;
     bool shouldMask() const { return !m_full && !isPlatformAdmin(); }
