@@ -48,7 +48,7 @@ Item {
             width: parent.width
             spacing: 14
 
-            AccountIdentityCard {
+            AccountLoginCard {
                 width: col.width
                 md3: page.th
                 ctx: page.ctx

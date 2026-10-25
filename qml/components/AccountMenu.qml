@@ -97,7 +97,8 @@ Item {
                     anchors.centerIn: parent
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6
-                    text: backend.role === "admin" ? "管理员" : "教师"
+                    text: backend.role === "admin" ? "管理员"
+                      : (backend.role === "broadcast" ? "广播室" : "教师")
                     color: acct.theme.op || "#C8C8C8"
                     font.pixelSize: 12
                 }
@@ -174,7 +175,8 @@ Item {
                 anchors.rightMargin: 10
                 text: backend.loggedIn
                       ? (backend.role === "admin" ? "管理员：可看画面、操作设备"
-                                                  : "教师：可看画面、广播通知，操作类动作需管理员")
+                          : backend.role === "broadcast" ? "广播室：仅广播与排期相关功能"
+                                                          : "教师：可看画面、广播通知，操作类动作需管理员")
                       : "登录后自动接入设备"
                 wrapMode: Text.Wrap
                 color: acct.theme.fg3 || "#8A8A8A"

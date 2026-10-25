@@ -1,21 +1,26 @@
-// 个人中心 · 账户卡（2026-10-25 从 AccountCenterPage 抽出，拆件过 200 行红线）
+// 账户与登录（统一卡 · 2026-10-25 抽出合并）
 //
-// 三态：未登录（登录/注册两个出口）→ 登录中（一句进度）→ 已登录（账号 + 身份徽标
-// + 换身份 + 退出登录）。身份文案三档，第三档为广播室预留。
+// 一处定义、三处复用，保证「身份」与「登录」的口径只有一份：
+//   ① 个人中心（身份标明）
+//   ② 首启引导第二步（oobe）
+//   ③ 设置-账户与登录
+//
+// 注册在主站跨域完成（本系统不运营自建注册服务，openRegisterPage 打开 siteUrl/register）；
+// 登录走星璃账号 OAuth 授权（OAuthLogin → 站点 authorizeViewer），本机被授权为「主站的项目子服务」，
+// 不需要用户填密钥 / token，本机只留会话凭据，下次自动接入。
 import QtQuick
 import QtQuick.Layouts
-
-import "../../components"
 
 SettingsCard {
     id: card
 
-    title: "账户"
-    subtitle: backend.loggedIn ? card.roleDesc(backend.role) : ""
+    title: backend.loggedIn ? "账户与身份" : "登录星璃账号"
+    subtitle: backend.loggedIn
+              ? card.roleDesc(backend.role)
+              : "本系统不运营自建注册服务，账号需到主站跨域注册；注册后回此登录，本机即被授权为「主站的项目子服务」，自动接入、无需填密钥。"
 
     property var ctx
 
-    /** 身份文案：管理员 / 教师（含班主任）/ 广播室。 */
     function roleText(r) {
         if (r === "admin") return "管理员"
         if (r === "broadcast") return "广播室"
@@ -27,7 +32,7 @@ SettingsCard {
         return "可查看本班设备、发布通知与作业、管理班级事务；系统配置由管理员负责。"
     }
 
-    // ── 未登录 ──
+    // ── 未登录：引导 + 登录 / 注册 ──
     Column {
         width: parent.width
         spacing: 10
@@ -38,7 +43,7 @@ SettingsCard {
             wrapMode: Text.Wrap
             text: backend.accountBusy
                   ? "正在等浏览器里授权…（授权完会自动接上）"
-                  : "还没登录。点登录会用星璃账号授权，之后这台设备自动拿到接入票，不用填密钥。"
+                  : "两步接入：① 点「注册新账号」去主站创建账号（跨域）；② 点「登录」在此完成 OAuth 授权，本机即被登记为「主站的项目子服务」，自动拿到接入票。"
             color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
             font.pixelSize: 13
         }
@@ -61,9 +66,25 @@ SettingsCard {
                 onClicked: backend.openRegisterPage()
             }
         }
+        Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            visible: backend.registerUrl !== ""
+            text: "注册页将打开：" + backend.registerUrl
+            color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
+            font.pixelSize: 11
+        }
+        Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            visible: backend.accountText !== ""
+            text: backend.accountText
+            color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
+            font.pixelSize: 12
+        }
     }
 
-    // ── 已登录 ──
+    // ── 已登录：身份 + 切身份 + 退出 ──
     Column {
         width: parent.width
         spacing: 10
@@ -92,6 +113,39 @@ SettingsCard {
                     font.pixelSize: 12
                 }
             }
+            // 未认证用户：邮箱未验证时的身份标识（与角色徽标并列，一眼可见）
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: !backend.verified
+                height: 22
+                width: unverifiedBadge.implicitWidth + 16
+                radius: 11
+                color: card.md3 ? card.md3.cErrorCont : "#FFDAD6"
+                Text {
+                    id: unverifiedBadge
+                    anchors.centerIn: parent
+                    text: "未认证用户"
+                    color: card.md3 ? card.md3.cOnErrorCont : "#410E0B"
+                    font.pixelSize: 12
+                }
+            }
+        }
+        Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            visible: backend.loggedIn && !backend.verified
+            text: "邮箱尚未验证。建议到主站（站点「账号」页）完成邮箱验证，以解除未认证限制。"
+            color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
+            font.pixelSize: 12
+        }
+
+        Text {
+            width: parent.width
+            wrapMode: Text.Wrap
+            visible: backend.roleLocked
+            text: "身份由服务器下发，本机不能切换。"
+            color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
+            font.pixelSize: 12
         }
 
         // 服务端锁定身份时不给"换身份"按钮 —— 点了必然被拒，那是假按钮
@@ -121,15 +175,6 @@ SettingsCard {
                 disabled: backend.role === "teacher"
                 onClicked: backend.setRole("teacher")
             }
-        }
-
-        Text {
-            width: parent.width
-            wrapMode: Text.Wrap
-            visible: backend.roleLocked
-            text: "身份由服务器下发，本机不能切换。"
-            color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
-            font.pixelSize: 12
         }
 
         Btn {

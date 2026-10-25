@@ -170,6 +170,10 @@ class ViewerBackend : public QObject
     Q_PROPERTY(bool loggedIn READ loggedIn NOTIFY accountChanged)
     /** 已登录时显示谁（没登录就是空串）。 */
     Q_PROPERTY(QString accountName READ accountName NOTIFY accountChanged)
+    /** 邮箱是否已认证：false = 未认证用户（可登录，界面应标出）。默认 true，
+     *  仅在站点换票响应里明确回传 verified=false 时才置 false，避免老静态令牌路径误标。 */
+    Q_PROPERTY(bool verified READ verified NOTIFY accountChanged)
+    bool verified() const { return m_verified; }
     /** 当前身份："admin"（管理员）／"teacher"（教师）。未登录时也是 teacher（按最低权限看）。 */
     Q_PROPERTY(QString role READ role NOTIFY roleChanged)
     /** 身份是否由**服务端**下发锁定（2026-10-25）。锁定后本地切换一律被拒 ——
@@ -177,6 +181,11 @@ class ViewerBackend : public QObject
      *  （用户报的"按钮按不动"里，这类静默失败最招人烦）。 */
     Q_PROPERTY(bool roleLocked READ roleLocked NOTIFY roleChanged)
     bool roleLocked() const { return m_roleLocked; }
+    /** 注册页地址：本系统不运营自建注册服务，注册在主站（跨域）完成。
+     *  默认 m_siteUrl + "/register"，可用 STE_REGISTER_URL 环境变量覆盖（站点改了路由时不动代码）。
+     *  界面把它直接显示出来，用户能核对「注册会去哪个域名」，避免黑盒。 */
+    Q_PROPERTY(QString registerUrl READ registerUrl NOTIFY accountChanged)
+    QString registerUrl() const;
     // ── 提醒（设置页那两个开关，以前是画的假开关，2026-10-06 做成真的）──
     Q_PROPERTY(bool notifyOnDone READ notifyOnDone NOTIFY notifyPrefChanged
                WRITE setNotifyOnDone)
@@ -814,6 +823,7 @@ private:
     QString m_cloudTicket;              // 云端接入票（30 天，WS 握手用）
     qint64 m_ticketExp = 0;             // 接入票到期时刻（ms）
     QString m_accountUser;              // 登录的是哪个网站账号（审计/显示用）
+    bool m_verified = true;             // 邮箱是否已认证（站点换票响应回传；默认 true 不误标）
     QString m_accountText;              // 状态行原文
     bool m_accountBusy = false;         // 登录/换票进行中
     bool m_accountFatal = false;        // 已明确失败：文本里带原因，别让人以为还在转

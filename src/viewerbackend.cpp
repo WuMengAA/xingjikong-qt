@@ -493,6 +493,14 @@ void ViewerBackend::openRegisterPage()
     logf("[viewer] 打开站点注册页 %s", u.toString().toUtf8().constData());
     steOpenUrlExternal(u);   // 提权安全（oauthlogin.h）
 }
+QString ViewerBackend::registerUrl() const
+{
+    // 站点改了注册路由时，用 STE_REGISTER_URL 覆盖即可，不动代码
+    const QString override = qEnvironmentVariable("STE_REGISTER_URL", QString()).trimmed();
+    if (!override.isEmpty()) return override;
+    if (m_siteUrl.isEmpty()) return QString();
+    return QStringLiteral("%1/register").arg(m_siteUrl);
+}
 void ViewerBackend::openExternal(const QString &url)
 {
     if (url.isEmpty()) return;

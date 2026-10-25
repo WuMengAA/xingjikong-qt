@@ -13,6 +13,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
+import "components/md3"    // Md3 令牌（首启引导里复用统一登录卡时需要自建实例）
 // 2026-10-22：全局主框架（App Scaffold · MainWindow）——原 pages/Md3Shell.qml 更名移入。
 // 它是管理端唯一应用外壳（侧栏+顶栏+内容区+状态条），业务页经它挂载；见 AGENTS.md §9。
 import "shell"
@@ -1547,19 +1548,11 @@ ApplicationWindow {
                     }
                 }
 
-                // 步骤 1：登录绑定
-                Column {
+                // 步骤 1：登录绑定（复用统一登录卡，与个人中心、设置页同一实现）
+                AccountLoginCard {
                     visible: welcomeLayer.step === 1
-                    width: parent.width; spacing: 12
-                    Text { width: parent.width; wrapMode: Text.Wrap
-                        text: "登录网站账号即可连接设备。"; color: th.fg3; font.pixelSize: 13 }
-                    Rectangle {
-                        width: 200; height: 32; radius: th.rCtrl; color: th.inv
-                        Text { anchors.centerIn: parent; text: "登录网站账号"; color: th.win; font.pixelSize: 13 }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: backend.loginWithSite() }
-                    }
-                    Text { width: parent.width; wrapMode: Text.Wrap
-                        text: backend.accountText; color: th.fg4; font.pixelSize: 12; visible: backend.accountText !== "" }
+                    width: parent.width
+                    md3: Md3 { dark: root.darkMode }
                 }
 
                 // 步骤 2：启动方式（2026-10-09 · 用户清单第②条：引导里就能设自启/快捷）

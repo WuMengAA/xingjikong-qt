@@ -87,6 +87,7 @@ void ViewerBackend::clearAccount()
     m_ticketExp = 0;
     m_accountUser.clear();
     m_accountFatal = false;
+    m_verified = true;   // 退出后重置为默认（已认证），下次登录以站点回传为准
     QFile::remove(QString::fromLocal8Bit(accountFilePath()));
 }
 void ViewerBackend::refreshAccountText()
@@ -285,6 +286,14 @@ void ViewerBackend::onSessionTicketFinished()
     m_cloudTicket = o.value(QStringLiteral("ticket")).toString();
     m_ticketExp = (qint64)o.value(QStringLiteral("exp")).toDouble();
     m_accountUser = o.value(QStringLiteral("user")).toString();
+    // 邮箱认证状态：站点明确回传 verified=false 才置 false，其余（缺省/true）按已认证，
+    // 避免老静态令牌路径（拿不到该字段）被误标为「未认证用户」。
+    const QJsonValue vv = o.value(QStringLiteral("verified"));
+    const bool newVerified = !(vv.isBool() && vv.toBool() == false);
+    if (newVerified != m_verified) {
+        m_verified = newVerified;
+        emit accountChanged();
+    }
     m_accountFatal = false;
     if (m_cloudTicket.isEmpty()) {
         m_accountText = QStringLiteral("取云端接入票失败：站点没返回 ticket");

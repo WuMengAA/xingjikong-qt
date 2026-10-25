@@ -24,6 +24,7 @@ Item {
     /** 分类表：key 决定内容页，icon 必须是 resources/icons 里实存的（calendar 不存在，用 clock）。 */
     readonly property var cats: [
         { key: "conn",  icon: "wifi",     label: "连接" },
+        { key: "acct",  icon: "users",    label: "账户与登录" },
         { key: "sched", icon: "clock",    label: "课表" },
         { key: "upd",   icon: "download", label: "更新" },
         { key: "about", icon: "info",     label: "关于与诊断" }
@@ -32,6 +33,7 @@ Item {
     property string cat: "conn"
 
     function srcOf(k) {
+        if (k === "acct") return "SecAccount.qml"
         if (k === "sched") return "SecSchedule.qml"
         if (k === "upd") return "SecUpdate.qml"
         if (k === "about") return "SecAbout.qml"
