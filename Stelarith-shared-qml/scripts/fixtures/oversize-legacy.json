@@ -150,11 +150,11 @@
       "plan": "[P3] 拆终端输出区 | 2026-10-25 +1：Md3 改 pragma Singleton（真源 ui/theme/ + qmldir），本文件仅加 1 行 import \"../components/theme\""
     },
     "Stelarith-viewer-qt/qml/Main.qml": {
-      "lines": 1637,
+      "lines": 1634,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 外壳保留：旧壳 0-5 页 + 顶条 + 底标签已删（2263→1594，2026-10-24 迁移第三刀）；余 goPage 兼容层与弹窗/面板装配待继续抽 | 2026-10-25 课堂工具第一刀 1594→1626（+32）：params 透参 + 7 个 pick case 表驱动分派 + actionLabel() | 2026-10-25 回写 1626→1637：+6 为 openDiagnostics 收口（修 SettingsPage 裸调 diagDlg 的 ReferenceError＝按钮静默失灵），另 +5 属 7ecfbcc pickActionLabel 改名的漏回写"
+      "plan": "[P1] 外壳保留：旧壳 0-5 页 + 顶条 + 底标签已删（2263→1594，2026-10-24 迁移第三刀）；余 goPage 兼容层与弹窗/面板装配待继续抽 | 2026-10-25 课堂工具第一刀 1594→1626（+32）：params 透参 + 7 个 pick case 表驱动分派 + actionLabel() | 2026-10-25 回写 1626→1637：+6 为 openDiagnostics 收口（修 SettingsPage 裸调 diagDlg 的 ReferenceError＝按钮静默失灵），另 +5 属 7ecfbcc pickActionLabel 改名的漏回写 | 2026-10-26 回写 1637→1634：本批 +1（import shell/ClassSort.js，引导第一步班级 chip 走自然序）；另 -4 属并行线删行未回写，按实测值回写使门禁可读"
     },
     "Stelarith-viewer-qt/qml/MaterialLab.qml": {
       "lines": 820,
@@ -297,11 +297,11 @@
       "plan": "[P2] 拆注册/心跳/清理三段。台账：1190 → 1236（#475 班级管理 +47/-1）：G3 换班残留修复 +5（addToClassIndex 清旧班索引）/ notifyClassBoundIfOnline（G4 在线下发 class-bound）+21 / dropClassIndex（删班后清运行时 Map 条目，防 listClasses 吐幽灵班）+9 / bind-class 成功后调用点 +4 / import +1 | 2026-10-25 回写 1236→1278：其中 +17 为本批 sendToClassDevices（发布中心 P0 地基）；其余为 #459 缩略图等历史增量未回写 | 2026-10-25 回写 1278→1312：+34 为设备用途模型（DEVICE_ROLES/normalizeDeviceRole 12、markConnected 首次采纳+已有则权威优先 6、listDevices 输出 2、setDeviceMeta 支持改用途 8、getDeviceRole 4、注释 2）；归一规则与端侧 AgentPages.manifestFor 逐字对齐（trim+lower，探针实测过 ' broadcast ' 的空格分裂坑）"
     },
     "Stelarith-viewer-qt/qml/pages/control/ControlPage.qml": {
-      "lines": 913,
+      "lines": 915,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 拆设备卡/动作栏/批量操作"
+      "plan": "[P1] 拆设备卡/动作栏/批量操作 | 2026-10-26 回写 913→915：+2 为 import ClassSort.js + 一行注释（设备集控页班级筛选格按 1班<…<12班 显示；原顺序同云端 cls-<hash> 乱序，与 ClassNav/TopBar 共用同一份规则）"
     },
     "Stelarith-viewer-qt/qml/pages/settings/SettingsPage.qml": {
       "lines": 598,
