@@ -316,10 +316,11 @@ endif()
 #   存量界面后续迁移要 import 它 ⇒ 仍按同模式拷回 qml/components/，让 `import "components"`
 #   / `import "../components/md3"` 之类的既有写法在将来搬过来时不需要改路径。
 set(STE_SHARED_UI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/ui")
-if(NOT EXISTS "${STE_SHARED_UI_DIR}/Md3.qml")
+if(NOT EXISTS "${STE_SHARED_UI_DIR}/theme/Md3.qml")
   message(FATAL_ERROR
     "[agent] 共享 UI 基座目录缺失：${STE_SHARED_UI_DIR}\n"
-    "  Md3 设计系统真源在 Stelarith-shared-qml/ui/（两端共用）。\n"
+    "  Md3 设计系统真源在 Stelarith-shared-qml/ui/theme/（两端共用，2026-10-25 起\n"
+    "  移入 theme/ 子目录并配 qmldir 成为 pragma Singleton：`import \"../components/theme\"`）。\n"
     "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
 endif()
 

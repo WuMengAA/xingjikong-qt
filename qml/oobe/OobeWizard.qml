@@ -14,13 +14,21 @@
 import QtQuick
 import QtQuick.Controls
 import "../components"
+import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 import "steps"
 
 Rectangle {
     id: wizardRoot
     color: tok.cSurface
 
-    Md3 { id: tok; dark: false }
+    // Md3 = pragma Singleton（2026-10-25）。OOBE 向导固定浅色（首启视觉基线）：
+    // 用 Binding + RestoreBindingOrValue 临时覆盖全局 dark，向导销毁时自动恢复原值，
+    // 不破坏主外壳 AgentShell 的 dark 绑定。
+    readonly property var tok: Md3
+    Binding {
+        target: Md3; property: "dark"; value: false
+        restoreMode: Binding.RestoreBindingOrValue
+    }
 
     // 状态常量（与 OobeWizard::BindingState 对齐；写死数值是为了 QML 侧不依赖类型注册）
     readonly property int stIdle: 0

@@ -1,5 +1,6 @@
 import QtQuick
-import "../components"            // Md3 令牌 + UiRegistry / UiPageHost（共享 ui，构建期拷到 qml/components/）
+import "../components"            // UiRegistry / UiPageHost 等共享 ui（构建期拷到 qml/components/）
+import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 import "../components/md3" as M   // MD3 组件（Md3NavBar 等）
 import "AgentPages.js" as AgentPages
 
@@ -19,7 +20,10 @@ Rectangle {
     color: tok.cSurface
     property bool sheetOpen: false   // 广播站排期中心是否展开（2026-10-22）
 
-    Md3 { id: tok; dark: !agentUi.lightMode }
+    // Md3 = pragma Singleton（真源 shared-qml/ui/theme/，2026-10-25）。
+    // 被控端主外壳是全局 dark 的唯一写入口；子页/组件只读，不再自建实例。
+    readonly property var tok: Md3
+    Binding { target: Md3; property: "dark"; value: !agentUi.lightMode }
 
     UiRegistry {
         id: reg
