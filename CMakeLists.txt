@@ -129,8 +129,13 @@ add_executable(stelarith-agent-qt
   src/modules/voicehubmodule.cpp
   src/modules/voicehubmodule.h
   # ── 广播社成员（2026-10-23 #广播站移交）：独立身份登录 + 排期代理 ──
-  src/modules/broadcastclubmodule.cpp
-  src/modules/broadcastclubmodule.h
+  # ⚠️ 2026-10-26 从 src/modules/ 移到 src/：**它不是插件模块**。
+  #    BroadcastClubModule 只继承 QObject、不实现 ModuleInterface（没有 manifest()），
+  #    也不走 registerModule —— 是 main.cpp 直接 new 出来挂给 AgentShell 的业务对象。
+  #    放在 src/modules/ 里会被 module-registry 门禁按「插件模块」扫描，恒报
+  #    「manifest 缺 id / 没 registerModule」（7 通过 3 失败的既有红）。
+  src/broadcastclub.cpp
+  src/broadcastclub.h
   src/schedule/profile.h
   # ── 远程终端（2026-10-06 加：REPL 命令行，需确认 + 单会话）──
   src/terminal_console.cpp

@@ -128,7 +128,7 @@
 #include "modules/modulehost.h"  // 2026-10-16：内置模块层（编译进 agent 的官方模块，与进程外插件共用门控）
 #include "modules/usbmodule.h"
 #include "modules/voicehubmodule.h"  // 2026-10-17：VoiceHub 联动（只读展示权威广播状态）
-#include "modules/broadcastclubmodule.h"  // 2026-10-23：广播社成员独立身份登录通道
+#include "broadcastclub.h"  // 2026-10-23：广播社成员独立身份登录通道（非插件模块，2026-10-26 移出 src/modules/）
 #include <QMessageBox>         // P2：插件市场对话框
 #include <QListWidget>         // P2：插件市场列表
 #include <QUrlQuery>
