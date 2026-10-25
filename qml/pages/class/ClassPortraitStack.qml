@@ -35,6 +35,8 @@ Column {
     signal boardExpandToggled()
     /** 上手引导的「新建班级」→ 宿主开 ClassCreateDialog。 */
     signal createRequested()
+    /** 学生行「编辑」→ 宿主开页级编辑弹窗（竖屏同样走页级，避免被中段裁掉）。 */
+    signal editStudentRequested(var student)
 
     readonly property bool subbed: stack.cs && stack.cs.subscribed === true
     spacing: 12
@@ -83,6 +85,7 @@ Column {
                 onDeviceClicked: function (uid) { stack.deviceClicked(uid) }
                 onBoardExpandToggled: stack.boardExpandToggled()
                 onPublishRequested: stack.publishRequested()
+                onEditStudentRequested: function (st) { stack.editStudentRequested(st) }
             }
 
             ClassAdminPane {

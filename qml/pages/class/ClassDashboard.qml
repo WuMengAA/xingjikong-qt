@@ -2,12 +2,10 @@
 // 点单项②：三栏 = 左身份 / 中设备网格+展板 / 右动作+Timeline。本文件只做编排与
 // 状态接线，可见内容全在同目录窗格件里（各守 200 行，AGENTS.md §10）。
 // ── 状态真源（不自己另存一份）──
-//   · 订阅态：backend.classService（#460）—— subscribed/classCode/className/
-//     onlineCount/deviceCount/lastError + 两个 typed model；
-//   · 班级选择**双写**：setCurrentClass（旧筛选，TopBar/仪表盘/集控页消费）+
-//     subscribeClass（新班级域），两套机制并存到集控页迁移完成；
-//   · 选中设备：host.pickDevice(uid,0,0)（宿主唯一选择路径，currentUid + picked
-//     双写；危险动作由宿主按 currentUid 快照下发，不会发错机器）。
+//   · 订阅态：backend.classService（#460）—— subscribed/classCode/className/onlineCount/
+//     deviceCount/lastError + 两个 typed model；
+//   · 班级选择**双写**：setCurrentClass（旧筛选）+ subscribeClass（新班级域），并存到集控页迁移完成；
+//   · 选中设备：host.pickDevice(uid,0,0)（唯一选择路径，currentUid + picked 双写；危险动作按快照下发）。
 // ── pending ── activateClass 置 true；subscribedChanged/classError/subscribeFailed 收口置 false。
 // ── 竖屏：三栏竖排，中段以下进 Flickable；去集控页走 openControlFn（未注入回落 goPage(1)）。
 // ── 展板 ── 全屏=boardMode 隐藏左右栏；「发布到展板」与右栏共用同一个页级弹窗。
@@ -127,6 +125,7 @@ Item {
             onDeviceClicked: function (uid) { dash.onTileClicked(uid) }
             onBoardExpandToggled: dash.boardMode = !dash.boardMode
             onPublishRequested: publishDlg.open()
+            onEditStudentRequested: function (st) { studentDlg.open(st) }
         }
 
         // 右：管理 + 本班设备管控 + 课堂工具 + 时间线（2026-10-25 抽件 ClassRightRail，
@@ -173,6 +172,7 @@ Item {
         onBoardExpandToggled: dash.boardMode = !dash.boardMode
         onUnsubscribeRequested: if (dash.cs) dash.cs.unsubscribeClass()
         onPublishRequested: publishDlg.open()
+        onEditStudentRequested: function (st) { studentDlg.open(st) }
         onCreateRequested: dash.openCreateDialog()
     }
 
@@ -188,6 +188,13 @@ Item {
     // ══ 新建班级（2026-10-25）：页级模态，与发布中心同层 ══
     ClassCreateDialog {
         id: createDlg
+        toastFn: dash.toastFn
+    }
+
+    // ══ 学生编辑（2026-10-25）：页级模态（卡片 420 宽，中栏窄时塞进去必被裁）══
+    ClassStudentEditDialog {
+        id: studentDlg
+        classCode: (dash.cs && dash.cs.classCode) ? dash.cs.classCode : ""
         toastFn: dash.toastFn
     }
 }

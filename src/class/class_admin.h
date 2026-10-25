@@ -63,6 +63,25 @@ public:
     Q_INVOKABLE void timetable(const QString &code);
     Q_INVOKABLE void saveTimetable(const QString &code, const QString &profileJson);
 
+    // ── ClassIsland 档案导入（2026-10-25 · CIMS 退役后课表回落到云端）──
+    // 解析规则单点在云端 src/class-timetable.js（第 N 节课 ↔ 作息第 N 个 type=0 时段），
+    // 客户端只上传**原始档案文本**，不再各写一份解析（两套口径必然漂）。
+    // 档案常含多个课表群（一个年级多个班）：先 timetableGroups() 预览，让老师选，
+    // 绝不猜 —— 猜错就是把 8 班课表挂到 1 班。
+    Q_INVOKABLE void importTimetable(const QString &code, const QString &profileJson,
+                                     const QString &group);
+    /** 只预览档案里的课表群（不落库），结果走 timetableGroupsList。 */
+    Q_INVOKABLE void timetableGroups(const QString &profileJson);
+
+    // ── 学生名单批量导入（CSV 在 QML 侧解析成 rows；云端按学号幂等 upsert）──
+    Q_INVOKABLE void importStudents(const QString &code, const QVariantList &rows);
+
+    /** 读本地文本文件（选课表档案 / CSV 用）。
+     *  为什么放在这里而不是 backend：班级域自包含（Android 上 pickFile 是异步的，
+     *  拿不到同步路径就返回空串，由调用方提示"该端暂不支持导入"）。 */
+    Q_INVOKABLE QString readTextFile(const QString &path, int maxBytes = 4 * 1024 * 1024);
+    Q_INVOKABLE QString lastFileError() const { return m_fileError; }
+
     // ── 班级接入码（2026-10-25 · 收归我方后班级管理面板的入口码）──
     // 用户裁决：「班级接入码收归我方管理，作为班级管理面板的入口码，所以去掉 CIMS
     // 时期的旧方式」。语义：**设备凭这串码进入这个班**（一次性、绑班、24h）。
@@ -92,16 +111,24 @@ signals:
      *  此时连接/会话都还在，只是"该再验一次密码了"。UI 收到后弹提示 →
      *  走一次重新登录（backend.loginWithSite()）→ 新票到位后重试即可。 */
     void reauthRequired(const QString &message);
+    /** 档案里的课表群清单（importTimetable/timetableGroups 的答复）。
+     *  item = { id, name, days }；空列表 = 档案里没有可用日课表。 */
+    void timetableGroupsList(const QVariantList &groups);
 
 private:
     /** okText 非空时用作成功回执文案（学生操作要能说清"加了谁"，不能说"高二3班"）。 */
     void post(const QString &action, const QJsonObject &body, const QString &okText = QString());
+    /** 需要读响应字段的写操作（课表导入 / 学生批量导入）走这条：
+     *  成功时回调拿到响应 JSON（失败一律走 opFinished / reauthRequired，不重复回调）。 */
+    void postJson(const QString &action, const QJsonObject &body,
+                  std::function<void(const QJsonObject &)> done);
     /** 取 JSON 列表类接口（students/timetable 共用）：成功走 onOk，失败静默发空。 */
     void fetchJson(const QString &action, const QJsonObject &body,
                    std::function<void(const QJsonObject &)> onOk);
 
     ViewerBackend *m_backend = nullptr;
     QNetworkAccessManager *m_nam = nullptr;
+    QString m_fileError;      ///< readTextFile 的失败原因（空 = 上次读成功）
 };
 
 #endif // CLASS_ADMIN_H

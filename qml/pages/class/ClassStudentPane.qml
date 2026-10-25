@@ -1,9 +1,7 @@
 // 班级工作台 · 中栏「学生名单」（2026-10-25 · 云端数据库）
 //
-// 用户裁决「云端数据库存储，不要本机了」——名单跟班走：换台管理端、重装系统都还在。
-// 与「成员管理」不是一回事：成员是**登录账号**（老师/助教），学生不是账号，
+// 名单跟班走（换管理端、重装系统都还在）。成员是**登录账号**，学生不是账号，
 // 是班级事务的对象（考勤/座位/个人信息都挂在它上面）。
-//
 // 数据面全在云端：backend.classAdmin.students(code) → studentsList(code, list)。
 // 本件不缓存、不猜：拉不到就显示"还没录入"，绝不摆一张假名单。
 import QtQuick
@@ -12,6 +10,7 @@ import QtQuick.Layouts
 import "../../components"
 import "../../components/md3"
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "StudentCsv.js" as StudentCsv   // CSV 解析（逗号/制表符/表头自适应）
 
 Item {
     id: pane
@@ -19,6 +18,9 @@ Item {
     property string classCode: ""
     property bool subscribed: false
     property var toastFn: null
+
+    /** 编辑请求 → 页级弹窗（宿主 ClassDashboard 收口，与发布弹窗同层）。 */
+    signal editStudentRequested(var student)
 
     /** 名单（云端回填，[{id,name,studentNo,seat,note}]）。 */
     property var students: []
@@ -54,6 +56,23 @@ Item {
 
     onSubscribedChanged: reload()
     onClassCodeChanged: reload()
+
+    /** CSV 导入：本地解析 → 云端按学号幂等 upsert（同号视为同一人更新）。
+     *  列约定见 StudentCsv.js；空姓名行跳过，不塞"无名氏"。 */
+    function importCsv() {
+        const a = pane.admin()
+        if (!a || pane.classCode === "" || typeof backend === "undefined" || !backend) return
+        const path = backend.pickFile()
+        if (!path) return                       // 取消选择：不报错
+        const text = a.readTextFile(path, 2 * 1024 * 1024)
+        if (!text) { pane.toast(a.lastFileError() || "读不到文件内容", true); return }
+        const res = StudentCsv.parse(text)
+        if (res.rows.length === 0) {
+            pane.toast("CSV 里没有可导入的行（第一列应为姓名）", true)
+            return
+        }
+        a.importStudents(pane.classCode, res.rows)
+    }
 
     // 首次就位也要拉一次：进班级看板时 subscribed/classCode 往往**在实例化前就已是
     // 真值**，两个 onChanged 都不会触发 ⇒ 名单会一直空着（看着像"没录入"）。
@@ -96,6 +115,16 @@ Item {
                 color: Md3.cOnSurfaceVar
                 font.pixelSize: 12
             }
+            Item { width: Math.max(8, parent.width - 208); height: 1 }
+            Btn {
+                width: 88
+                height: 26
+                theme: Md3
+                text: "导入 CSV"
+                tip: "列：姓名,学号,座位,备注（有表头自动认列；学号重复=更新同一人）"
+                disabled: !pane.subscribed
+                onClicked: pane.importCsv()
+            }
         }
 
         // ── 输入行（未订阅时整块禁用，而不是点了没反应）──
@@ -135,13 +164,6 @@ Item {
                     onClicked: pane.addOne()
                 }
             }
-            Text {
-                width: parent.width
-                wrapMode: Text.Wrap
-                text: "同班同学号重复 = 更新那一条（不会长出两个一样的学生）。"
-                color: Md3.cOnSurfaceVar
-                font.pixelSize: 12
-            }
         }
 
         // ── 名单 ──
@@ -155,6 +177,7 @@ Item {
             delegate: ClassStudentRow {
                 width: ListView.view.width
                 student: modelData
+                onEditRequested: function (st) { pane.editStudentRequested(st) }
                 onRemoveRequested: function (id, name) {
                     const a = pane.admin()
                     if (a) a.removeStudent(pane.classCode, id)

@@ -15,6 +15,8 @@ Item {
     property bool hovered: false
 
     signal removeRequested(string studentId, string name)
+    /** 编辑请求：带上整行数据（弹窗要预填四个字段，不根据 id 再查一次）。 */
+    signal editRequested(var student)
 
     implicitHeight: 40
 
@@ -43,7 +45,7 @@ Item {
                 font.pixelSize: 13
             }
             Text {
-                Layout.preferredWidth: 84
+                Layout.preferredWidth: 72
                 text: (row.student.studentNo === undefined || row.student.studentNo === "")
                       ? "无学号" : row.student.studentNo
                 elide: Text.ElideRight
@@ -51,7 +53,15 @@ Item {
                 font.pixelSize: 12
             }
             Btn {
-                Layout.preferredWidth: 52
+                Layout.preferredWidth: 44
+                Layout.preferredHeight: 26
+                theme: Md3
+                text: "编辑"
+                tip: "改姓名/学号/座位/备注（学号重复 = 同一个人，不会长出两条）"
+                onClicked: row.editRequested(row.student)
+            }
+            Btn {
+                Layout.preferredWidth: 44
                 Layout.preferredHeight: 26
                 theme: Md3
                 text: "移出"

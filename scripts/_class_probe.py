@@ -41,7 +41,8 @@ CL = MSVC + r"\bin\Hostx64\x64\cl.exe"
 LINK = MSVC + r"\bin\Hostx64\x64\link.exe"
 
 INCS = []
-for sub in ["", r"\QtCore", r"\QtGui", r"\QtQml", r"\QtQuick", r"\QtQmlMeta", r"\QtQmlModels"]:
+for sub in ["", r"\QtCore", r"\QtGui", r"\QtQml", r"\QtQuick", r"\QtQmlMeta",
+            r"\QtQmlModels", r"\QtNetwork"]:
     INCS += ["/I", QT + r"\include" + sub]
 INCS += ["/I", os.path.join(ROOT, "src")]
 
@@ -49,12 +50,12 @@ FLAGS = ["/nologo", "/TP", "/utf-8", "/Zc:__cplusplus", "/permissive-", "-MD",
          "/std:c++17", "/EHsc"] + INCS
 
 LIBS = ["qt6quick.lib", "qt6qml.lib", "qt6qmlmeta.lib", "qt6qmlmodels.lib",
-        "qt6gui.lib", "qt6core.lib",
+        "qt6gui.lib", "qt6network.lib", "qt6core.lib",
         "user32.lib", "gdi32.lib", "shell32.lib", "ole32.lib", "winmm.lib"]
 
 RUNTIME_DLLS = [
     "Qt6Core.dll", "Qt6Gui.dll", "Qt6Qml.dll", "Qt6QmlMeta.dll", "Qt6QmlModels.dll",
-    "Qt6Quick.dll", "Qt6OpenGL.dll",
+    "Qt6Quick.dll", "Qt6Network.dll", "Qt6OpenGL.dll",
 ]
 PLUGIN_DIRS = ["platforms", "imageformats"]
 
@@ -147,12 +148,24 @@ def main():
     if not moc_dir:
         return 2
 
-    # 编译清单：探针 + class 四 TU + 三个 moc 产物
+    # 编译清单：探针 + class 全部 TU + 每个 Q_OBJECT 头对应的 moc
+    # （moc 清单按"头文件里有没有 Q_OBJECT"推导，别再写死 —— 加了 class_admin
+    #   之后写死清单会漏 moc，症状是 link 期 undefined vtable，极难看出根因）
     srcs = [PROBE_SRC]
-    srcs += sorted(glob.glob(os.path.join(CLASS_SRC, "*.cpp")))
-    srcs += [os.path.join(moc_dir, "moc_class_device_model.cpp"),
-             os.path.join(moc_dir, "moc_class_event_model.cpp"),
-             os.path.join(moc_dir, "moc_class_service.cpp")]
+    # class_admin*.cpp 排除在外：它们回调 ViewerBackend::httpBaseUrl / viewerToken
+    # （网络写操作层），而本探针刻意不链 viewerbackend —— 模块独立性本身就是 #460 的验收项。
+    # 2026-10-25：class_admin.cpp 拆出 class_admin_import.cpp，排除规则改成前缀匹配，
+    # 否则新 TU 会被 glob 进来、链接期报一堆 ViewerBackend 未定义（现象极像真 bug）。
+    srcs += [p for p in sorted(glob.glob(os.path.join(CLASS_SRC, "*.cpp")))
+             if not os.path.basename(p).startswith("class_admin")]
+    for h in sorted(glob.glob(os.path.join(CLASS_SRC, "*.h"))):
+        base = os.path.basename(h)[:-2]
+        if base == "class_admin":        # 与上面同一理由：不链它的 TU，也就不要它的 moc
+            continue
+        with open(h, "r", encoding="utf-8", errors="replace") as f:
+            if "Q_OBJECT" not in f.read():
+                continue
+        srcs.append(os.path.join(moc_dir, "moc_" + base + ".cpp"))
 
     objs = []
     for s in srcs:

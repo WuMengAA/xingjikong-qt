@@ -45,21 +45,25 @@ Item {
     signal boardExpandToggled()
     /** 展板「发布到展板」→ 宿主打开页级发布弹窗（真发请求，不做装饰按钮）。 */
     signal publishRequested()
+    /** 学生行「编辑」→ 宿主打开页级编辑弹窗（弹窗要 420px 宽，塞不进中栏）。 */
+    signal editStudentRequested(var student)
 
     /** 窄栏放不下四段文字 → 纯图标段（见文件头 ①）。 */
     readonly property bool compactSeg: pane.width < 320
 
     // 分段定义只写一份（横竖屏共用）。窄栏用纯图标（label=""），宽栏带文字。
     readonly property var segModel: pane.compactSeg ? [
-        { value: "devices",  label: "", icon: "layout-grid",  tip: "设备 · 本班设备实时画面" },
-        { value: "students", label: "", icon: "users",        tip: "学生 · 本班学生名单（存云端）" },
-        { value: "board",    label: "", icon: "tv",           tip: "展板 · 教室大屏常亮视图" },
-        { value: "members",  label: "", icon: "circle-check", tip: "成员 · 老师/助教账号与设备去留" }
+        { value: "devices",   label: "", icon: "layout-grid",  tip: "设备 · 本班设备实时画面" },
+        { value: "students",  label: "", icon: "users",        tip: "学生 · 本班学生名单（存云端）" },
+        { value: "board",     label: "", icon: "tv",           tip: "展板 · 教室大屏常亮视图" },
+        { value: "timetable", label: "", icon: "clock",        tip: "课表 · 本班周课表与作息" },
+        { value: "members",   label: "", icon: "circle-check", tip: "成员 · 老师/助教账号与设备去留" }
     ] : [
-        { value: "devices",  label: "设备", icon: "layout-grid",  tip: "本班设备实时画面" },
-        { value: "students", label: "学生", icon: "users",        tip: "本班学生名单（存云端）" },
-        { value: "board",    label: "展板", icon: "tv",           tip: "教室大屏常亮视图" },
-        { value: "members",  label: "成员", icon: "circle-check", tip: "老师/助教账号与设备去留" }
+        { value: "devices",   label: "设备", icon: "layout-grid",  tip: "本班设备实时画面" },
+        { value: "students",  label: "学生", icon: "users",        tip: "本班学生名单（存云端）" },
+        { value: "board",     label: "展板", icon: "tv",           tip: "教室大屏常亮视图" },
+        { value: "timetable", label: "课表", icon: "clock",        tip: "本班周课表与作息（可导入 ClassIsland 档案）" },
+        { value: "members",   label: "成员", icon: "circle-check", tip: "老师/助教账号与设备去留" }
     ]
 
     Column {
@@ -92,7 +96,9 @@ Item {
             width: parent.width
             height: parent.height - 32 - 12
             currentIndex: pane.tab === "students" ? 1
-                          : (pane.tab === "board" ? 2 : (pane.tab === "members" ? 3 : 0))
+                          : (pane.tab === "board" ? 2
+                          : (pane.tab === "members" ? 3
+                          : (pane.tab === "timetable" ? 4 : 0)))
 
             ClassDeviceGrid {
                 model: pane.deviceModel
@@ -104,6 +110,7 @@ Item {
                 classCode: pane.classCode
                 subscribed: pane.subscribed
                 toastFn: pane.toastFn
+                onEditStudentRequested: function (st) { pane.editStudentRequested(st) }
             }
             ClassBoardPane {
                 deviceModel: pane.deviceModel
@@ -120,6 +127,14 @@ Item {
                 classes: pane.classes
                 classCode: pane.classCode
                 subscribed: pane.subscribed
+            }
+            // 索引 4 = 课表（见上面 currentIndex 映射）；声明顺序 = StackLayout 序号，
+            // 所以课表放在成员之后（顺序错了会"点课表弹出成员页"）。
+            ClassTimetablePane {
+                classCode: pane.classCode
+                className: pane.className
+                subscribed: pane.subscribed
+                toastFn: pane.toastFn
             }
         }
     }
