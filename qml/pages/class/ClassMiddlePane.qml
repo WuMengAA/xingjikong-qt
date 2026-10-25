@@ -43,14 +43,27 @@ Item {
         anchors.fill: parent
         spacing: 12
 
-        Md3SegmentedButton {
-            id: seg
-            anchors.horizontalCenter: parent.horizontalCenter
-            md3: pane.md3
-            fresh: true
-            model: pane.segModel
-            current: pane.tab
-            onActivated: function (v) { pane.tabActivated(v) }
+        // 分段条：三段的自然宽 ≈330，窄栏（<330）时原来会溢出到邻栏压住按钮
+        // （2026-10-25「按钮按不动」的成因之一）—— 改为横向可滑 + 居中夹紧。
+        Flickable {
+            width: parent.width
+            height: 32
+            contentWidth: seg.implicitWidth
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+
+            Md3SegmentedButton {
+                id: seg
+                // Flickable 不按 implicitWidth 布局子项：显式给宽，否则所有段叠在 0 宽处
+                width: implicitWidth
+                x: Math.max(0, (parent.width - width) / 2)
+                md3: pane.md3
+                fresh: true
+                model: pane.segModel
+                current: pane.tab
+                onActivated: function (v) { pane.tabActivated(v) }
+            }
         }
 
         StackLayout {

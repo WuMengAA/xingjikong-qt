@@ -299,11 +299,13 @@ Item {
 
                     // ── 内容区（距操作区 spacing.md=16）──
                     StackLayout {
+                        id: mainStack
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         Layout.topMargin: shell.th ? shell.th.spM : 16
                         Layout.bottomMargin: shell.th ? shell.th.spM : 16
                         currentIndex: shell.sectionIndex
+
 
                         // ① 仪表盘（S1/S2/S3/S4/S5/S7 全在 pages/dashboard/）
                         // 抽件原因：本文件已到登记上限（710 行），内联 270 行不允许再长。

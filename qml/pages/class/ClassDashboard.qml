@@ -31,9 +31,19 @@ Item {
     /** 当前选中设备（UI 态；真执行目标看 host.pickDevice 双写后的 currentUid）。 */
     property string selectedUid: ""
 
-    readonly property bool portrait: dash.width < dash.height
+    /** 竖屏（宽<高）或**宽度不够三栏**时走竖排栈。
+     *  2026-10-25 修「右栏被裁、按钮按不动」：原判据只看宽高比 —— 1180×700 的默认窗口
+     *  是横屏，但内容区只有 892 逻辑宽，三栏硬性最小 260+320+320+32=932 ⇒ 溢出 40，
+     *  右栏 320 被推出窗口右缘（用户实测：窗口 1201 逻辑宽时右栏起点 1151，只露 50px）。
+     *  现在加宽度阈值：内容区 < 860 直接切竖排栈（可滚动），不再硬挤三栏。 */
+    readonly property bool narrow: dash.width < 860
+    readonly property bool portrait: dash.width < dash.height || dash.narrow
     readonly property var devModel: (dash.cs && dash.cs.deviceModel) ? dash.cs.deviceModel : null
     readonly property var evModel: (dash.cs && dash.cs.deviceModel) ? dash.cs.eventModel : null
+
+    // 溢出内容不许画到页面外（QML 默认不裁剪 → 会盖住邻栏、吞掉点击）
+    clip: true
+
 
     /** 选中设备名：从 backend.devices 现查（云端名单口径），查不到回落 uid。 */
     function selectedName() {
@@ -84,10 +94,10 @@ Item {
         visible: !dash.portrait
         spacing: dash.md3 ? dash.md3.spM : 16
 
-        // 左：身份与订阅态
+        // 左：身份与订阅态（260→240：给中栏让 20px，见 narrow 注释）
         ClassIdentityPane {
             id: idPaneL
-            width: 260
+            width: 240
             height: parent.height
             md3: dash.md3
             cs: dash.cs
@@ -97,7 +107,8 @@ Item {
 
         // 中：设备网格 / 班级展板 / 成员管理（分段切换，横竖屏共用 ClassMiddlePane）
         ClassMiddlePane {
-            width: Math.max(320, dash.width - 260 - 320 - (dash.md3 ? dash.md3.spM : 16) * 2)
+            id: midPane
+            width: Math.max(240, dash.width - 240 - 300 - (dash.md3 ? dash.md3.spM : 16) * 2)
             height: parent.height
             md3: dash.md3
             deviceModel: dash.devModel
@@ -110,51 +121,70 @@ Item {
             onDeviceClicked: function (uid) { dash.onTileClicked(uid) }
         }
 
-        // 右：管理 + 动作 + 时间线
+        // 右：管理 + 动作 + 课堂工具 + 时间线
+        // ⚠️ 2026-10-25：原来是一个 Column 直接 anchors.fill —— 四块面板自然高合计
+        // ≈880，而窗口内容区只有 ~700 ⇒ 下半截（课堂工具 / 时间线）被窗口裁掉，
+        // 用户看到的就是「一堆按钮按不动」（按钮在可视区外）。改成 Flickable 竖滚：
+        // 内容多高都能滚到，时间线高度也不再用 parent.height 反推（那会随窗口变化
+        // 把 contentHeight 算成负数）。
         Item {
-            width: 320
+            id: rightHost
+            width: 300
             height: parent.height
 
-            Column {
+            Flickable {
+                id: rightScroll
                 anchors.fill: parent
-                spacing: 16
+                contentWidth: width
+                contentHeight: rightCol.implicitHeight
+                flickableDirection: Flickable.VerticalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                clip: true
 
-                // 班级管理（2026-10-24 方案 B）：建/改名/删。管"班"本身；
-                // 成员（设备去留）走中栏「成员管理」tab。两处不混。
-                ClassAdminPane {
+                Column {
+                    id: rightCol
                     width: parent.width
-                    md3: dash.md3
-                    cs: dash.cs
-                    toastFn: dash.toastFn
-                }
-                ClassActionPane {
-                    width: parent.width
-                    md3: dash.md3
-                    host: dash.host
-                    cs: dash.cs
-                    devices: dash.devices
-                    selectedUid: dash.selectedUid
-                    selectedName: dash.selectedName()
-                    toastFn: dash.toastFn
-                    openControlFn: dash.openControlFn
-                    onPublishRequested: publishDlg.open()
-                }
-                // 课堂工具（2026-10-25 教室小工具第一刀）：对全班一键的音量档位 /
-                // 专注 / 噪音监测。独立面板而不是塞进 ClassActionPane —— 那个已顶
-                // 200 行红线，且语义不同（那边是电源类危险动作，这边是教学常用）。
-                ClassToolPane {
-                    width: parent.width
-                    md3: dash.md3
-                    host: dash.host
-                    cs: dash.cs
-                    devices: dash.devices
-                    toastFn: dash.toastFn
-                }
-                ClassTimelinePane {
-                    width: parent.width
-                    height: Math.max(120, parent.height - 220)
-                    md3: dash.md3
-                    model: dash.evModel
+                    spacing: 16
+
+                    // 班级管理（2026-10-24 方案 B）：建/改名/删。管"班"本身；
+                    // 成员（设备去留）走中栏「成员管理」tab。两处不混。
+                    ClassAdminPane {
+                        width: parent.width
+                        md3: dash.md3
+                        cs: dash.cs
+                        toastFn: dash.toastFn
+                    }
+                    ClassActionPane {
+                        width: parent.width
+                        md3: dash.md3
+                        host: dash.host
+                        cs: dash.cs
+                        devices: dash.devices
+                        selectedUid: dash.selectedUid
+                        selectedName: dash.selectedName()
+                        toastFn: dash.toastFn
+                        openControlFn: dash.openControlFn
+                        onPublishRequested: publishDlg.open()
+                    }
+                    // 课堂工具（2026-10-25 教室小工具第一刀）：对全班一键的音量档位 /
+                    // 专注 / 噪音监测。独立面板而不是塞进 ClassActionPane —— 那个已顶
+                    // 200 行红线，且语义不同（那边是电源类危险动作，这边是教学常用）。
+                    ClassToolPane {
+                        width: parent.width
+                        md3: dash.md3
+                        host: dash.host
+                        cs: dash.cs
+                        devices: dash.devices
+                        toastFn: dash.toastFn
+                    }
+                    ClassTimelinePane {
+                        width: parent.width
+                        // 固定高（不再 parent.height - 220）：滚动容器里父高是视口高，
+                        // 反推会把 contentHeight 算错，且小窗口下会算出负数被 clamp 成 120。
+                        height: 240
+                        md3: dash.md3
+                        model: dash.evModel
+                    }
                 }
             }
         }
