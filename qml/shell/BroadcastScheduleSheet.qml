@@ -9,7 +9,7 @@ import QtQuick 2.15
 //     （AgentPlaySchedulePage 已踩过：引 Controls 会整页解析失败），故不复用 Controls。
 //   · 数据来自上下文属性 `voicehub`（AgentShell 已注入）：
 //       voicehub.schedule（QVariantList，每条 = 一首排期曲）
-//       voicehub.scheduleCount / voicehub.controlEnabled / voicehub.canRequest()
+//       voicehub.scheduleCount / voicehub.controlEnabled / voicehub.canRequest
 //       voicehub.requestSong(title, artist, platform, musicId)
 //       voicehub.controlFinished(bool, msg) 信号
 //     voicehub.schedule 每条字段：id sequence played isPlaying broadcastPosition
@@ -270,7 +270,7 @@ Item {
                         text: {
                             if (!voicehub) return "未连接"
                             if (voicehub.baseUrl === "") return "未配置服务地址"
-                            if (voicehub.canRequest()) return "已连接 · 点歌通道就绪"
+                            if (voicehub.canRequest) return "已连接 · 点歌通道就绪"
                             return "已连接 · 点歌通道未授权"
                         }
                     }
@@ -560,7 +560,7 @@ Item {
                                                     var it = dayModel.get(k)
                                                     pairs.push({ id: it.sid, sequence: k + 1 })
                                                 }
-                                                if (voicehub && voicehub.canRequest()) {
+                                                if (voicehub && voicehub.canRequest) {
                                                     root.saving = true
                                                     voicehub.reorderSchedule(pairs)
                                                 } else {
@@ -654,13 +654,13 @@ Item {
                                 // 提交按钮
                                 Rectangle {
                                     anchors.left: parent.left; anchors.right: parent.right; height: 44; radius: st.rFull
-                                    color: (voicehub && voicehub.canRequest() && tiTitle.text.trim() !== "") ? st.primary : st.containerHigh
-                                    Text { anchors.centerIn: parent; text: "提交点歌"; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: (voicehub && voicehub.canRequest() && tiTitle.text.trim() !== "") ? st.fgPrimary : st.fgSurfaceVariant }
+                                    color: (voicehub && voicehub.canRequest && tiTitle.text.trim() !== "") ? st.primary : st.containerHigh
+                                    Text { anchors.centerIn: parent; text: "提交点歌"; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: (voicehub && voicehub.canRequest && tiTitle.text.trim() !== "") ? st.fgPrimary : st.fgSurfaceVariant }
                                     MouseArea {
                                         anchors.fill: parent
                                         onClicked: {
                                             if (!voicehub) return
-                                            if (!voicehub.canRequest()) { snack.show("点歌通道未就绪（检查地址与 API Key）", false); return }
+                                            if (!voicehub.canRequest) { snack.show("点歌通道未就绪（检查地址与 API Key）", false); return }
                                             if (tiTitle.text.trim() === "") { snack.show("歌名不能为空", false); return }
                                             voicehub.requestSong(tiTitle.text, tiArtist.text, reqPlatform, "")
                                             tiTitle.text = ""; tiArtist.text = ""
