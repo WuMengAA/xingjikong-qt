@@ -10,6 +10,8 @@
 // accountFilePath()（%LOCALAPPDATA%/Stelarith Viewer/account.json）。
 
 #include "viewerbackend.h"
+#include "permission_manager.h"   // 2026-10-26：登出要复位权限镜像（m_perms->setFullAccess/reset），
+                                  // viewerbackend.h 里只有前向声明，本 TU 必须自己引全类型
 #include "oauthlogin.h"
 
 #include <QDateTime>
@@ -200,6 +202,34 @@ void ViewerBackend::forgetAccount()
     m_authed = false;
     emit authedChanged();
     if (m_ws) m_ws->close();
+
+    // ── 2026-10-26：登出要把「上一个账号看到的班级」也收掉 ─────────────
+    //   与设备表同一口径：上面清了 m_devices，但 m_classes 一直没清 ⇒ 退出后
+    //   班级下拉还挂着上一个账号的班，点进去订阅的是别人的班（云端会拒，但界面
+    //   先骗了一轮）。顺带把班级筛选复位到「全部班级」。
+    if (!m_classes.isEmpty() || m_classesFiltered) {
+        m_classes = QJsonArray();
+        m_classesFiltered = false;
+        emit classesChanged();
+    }
+    if (!m_currentClass.isEmpty()) m_currentClass.clear();
+
+    // ── 2026-10-26：权限镜像与服务端身份锁，登出即解除 ────────────────
+    //   · m_perms 只在 auth-ok 里被 setIdentity / setFullAccess，**登出没人复位**
+    //     ⇒ 设备表会一直按**上一个账号**的 scope 裁剪（换人登录前永远看不到别人的班，
+    //       换人登录后也要等下一次 auth-ok 才纠正）。
+    //   · m_roleLocked 由 applyServerRole 置真，用来防「本地切回 admin 绕门控」；
+    //     登出后连接已断、凭据已删，这把锁不该继续生效 —— 否则本机永久停在
+    //     teacher（集控页永远隐藏，连切身份都切不动）。
+    if (m_perms) {
+        if (!m_token.isEmpty()) {
+            m_perms->setFullAccess();   // 还有静态令牌 ⇒ 系统身份（运维视角，全量）
+        } else {
+            m_perms->reset();           // 什么凭据都没有 ⇒ 最低权限（不暴露任何数据）
+        }
+    }
+    m_roleLocked = false;
+
     setStatus(QStringLiteral("已退出登录。点右上角账户 → 登录，可换一个网站账号"), false);
     logf("[account] 已忘记本机账号（凭据已删、云端连接已断开%s）",
          hadStaticToken ? "，静态令牌本次会话内一并作废（重启程序会从 viewer.env 读回）" : "");

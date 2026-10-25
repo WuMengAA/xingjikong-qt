@@ -2187,6 +2187,16 @@ void ViewerBackend::requestClasses()
                 // 兜底给全量 + false）。界面靠它说明"为什么只列出这几个班"，别让老师以为
                 // 班级数据丢了。静态令牌 / 未登录恒为 false。
                 m_classesFiltered = o.value(QStringLiteral("filtered")).toBool(false);
+                // 2026-10-26：过滤生效时，若**当前选中的班已经不在名单里**必须把它清掉。
+                //   场景：运维/未登录时选了 3 班，随后登录的老师只带 8 班 ⇒ 设备列表按
+                //   currentClass=3班 过滤后**一台都没有**，界面显示"暂无设备"却不解释
+                //   原因 —— 用户只会以为设备全掉了。清空 ⇒ 落到"全部班级"（=我带的班）。
+                if (m_classesFiltered && !m_currentClass.isEmpty()
+                    && !m_classes.contains(m_currentClass)) {
+                    logf("[class] 当前班 %s 已不在我带的班里 ⇒ 复位为「全部班级」",
+                         m_currentClass.toUtf8().constData());
+                    m_currentClass.clear();
+                }
                 emit classesChanged();
                 if (m_classErrStatus != -1) { m_classErrStatus = -1; logf("[class] 班级列表恢复正常"); }
             }
