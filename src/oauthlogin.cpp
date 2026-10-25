@@ -401,22 +401,28 @@ void OAuthLogin::onReadyRead()
     // 公开客户端（没配密钥）就**整个不带** client_secret —— 站点那条 PUBLIC 分支判的是
     // "参数不存在"，不是 "参数为空字符串"。带着一个空的 client_secret 发过去反而会被判成
     // 「带错 secret」，授权白走一遍还给一句看不懂的错。
-    QStringList form;
-    form << QStringLiteral("grant_type=authorization_code");
-    form << QStringLiteral("client_id=%1").arg(QUrl::toPercentEncoding(m_clientId));
+    QJsonObject bodyObj;
+    bodyObj.insert(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
+    bodyObj.insert(QStringLiteral("client_id"), m_clientId);
     if (!m_clientSecret.isEmpty()) {
-        form << QStringLiteral("client_secret=%1").arg(QUrl::toPercentEncoding(m_clientSecret));
+        bodyObj.insert(QStringLiteral("client_secret"), m_clientSecret);
     }
-    form << QStringLiteral("code=%1").arg(QUrl::toPercentEncoding(code));
-    form << QStringLiteral("redirect_uri=%1").arg(QUrl::toPercentEncoding(m_redirectUri));
-    const QByteArray body = form.join(QLatin1Char('&')).toUtf8();
+    bodyObj.insert(QStringLiteral("code"), code);
+    bodyObj.insert(QStringLiteral("redirect_uri"), m_redirectUri);
 
     QNetworkRequest req(tokenUrl);
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+    // ⚠️ 2026-10-25（Win7 现场排障同批）：必须发 **application/json**，不能发
+    //    x-www-form-urlencoded。站点（SvelteKit）的 csrf.checkOrigin 对 **form 类
+    //    Content-Type** 的 POST 校验 Origin 头；QNetworkAccessManager 默认不发 Origin ⇒
+    //    一律 403「Cross-site POST form submissions are forbidden」（Win7 现场实锤）。
+    //    application/json 不触发该校验；站点 /oauth/token 的 toParams 同时支持两种形态，
+    //    字段名不变（含不带 client_secret 的公开客户端分支）。
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     // ⚠️ 2026-10-13 三端审计修复：此前没设传输超时 —— 站点挂住（半开连接 / 中间设备黑洞）时
     //    QNetworkReply 永不 finished ⇒ onTokenFinished 不触发 ⇒ m_busy 不复位 ⇒ 登录按钮
     //    **永久变灰**，只能重启软件。15s 后强制失败，让用户能重试。
     req.setTransferTimeout(15000);
+    const QByteArray body = QJsonDocument(bodyObj).toJson(QJsonDocument::Compact);
     QNetworkReply *reply = m_nam->post(req, body);
     QObject::connect(reply, &QNetworkReply::finished, this, &OAuthLogin::onTokenFinished);
 }
