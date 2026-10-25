@@ -1,5 +1,5 @@
 // Step 2B · 输入绑定码（2026-10-20）
-// 两种码都收：6 位字母数字（云端按班开）与 `XJK-XXXX-XXX`（站点后台的班级接入码）。
+// 收云端发的 6 位一次性码（2026-10-25 起旧站点 XJK-XXXX-XXX 已废止）。
 // 格式判定一律走 C++ 的 isCodeFormatValid —— 前后端同一份规则，避免 QML 里再抄一遍正则各自漂移。
 import QtQuick
 import ".."

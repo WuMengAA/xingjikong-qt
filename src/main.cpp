@@ -1490,13 +1490,14 @@ static void loadDeviceRole()
     qInfo("[agent-qt] 已载入设备用途：广播机");
 }
 
-/* ══════════ 班级绑定（2026-10-04：OOBE 里消费激活码，把本机绑到班级） ══════════
- * 背景：管理员生成一次性、绑班级的接入码（XJK-XXXX-XXX）；教室端在配置向导里
- * 填进去，保存时调站点 `POST /api/device/activate?code=…&uid=…` 消费，
- * 站点落库 device_bindings（uid→class）。这就是"被控端绑定界面"。
- * 站点地址从云端 ws 地址推导：ws://host:8788/ws/agent → http://host:8090
- * （站点与云端同机部署；端口默认 8090，可用 STE_QT_SITE_PORT 覆盖）。
+/* ══════════ 班级绑定（2026-10-04：OOBE 里消费绑定码，把本机绑到班级） ══════════
+ * 背景：管理员在管理面板生成一次性、绑班级的接入码（云端 6 位票）；教室端在配置向导里
+ * 填进去，保存时调云端 `POST /api/device/activate?code=…&uid=…` 消费，
+ * 云端把它落进班级目录（uid→class）。这就是"被控端绑定界面"。
+ * 绑定接口地址从云端 ws 地址推导（与 WS 同源，见 bindBaseFromWsUrl）；
+ * 自建场景可用 STE_QT_BIND_URL 覆盖。
  * 消费失败不阻断保存——绑定是可选项，配错了以后还能在面板改。
+ * （2026-10-25：原站点 XJK-XXXX-XXX 码路径已整体废止，云端不再做代兑换。）
  */
 
 // 云端 ws 地址 → 站点 http 基址（nullptr = 推导不出）
@@ -1605,9 +1606,9 @@ void consumeActivationCodeAsync(const QString &siteBase, const QString &code, co
             const QJsonDocument doc = QJsonDocument::fromJson(body, &pe);
             const QJsonObject o = (pe.error == QJsonParseError::NoError) ? doc.object() : QJsonObject();
             const QString cls = o.value(QStringLiteral("className")).toString().trimmed();
-            // 2026-10-09：把**站点权威班级码**回存，替掉先前存进去的一次性接入码 ——
-            //   否则云端班级索引的键会是那串 XJK-xxxx-xxx（不稳定、重发还会换新）。
-            //   站点回 classCode（真源 class_id，如 class_01）；老站点不回则回退 classId。
+            // 2026-10-09：把**云端权威班级码**回存，替掉先前存进去的一次性接入码 ——
+            //   否则云端班级索引的键会用得不稳定的码。
+            //   云端回 classCode（真源 class_id，如 class_01）；云端不回则回退 classId。
             QString authoritative = o.value(QStringLiteral("classCode")).toString().trimmed();
             if (authoritative.isEmpty()) authoritative = o.value(QStringLiteral("classId")).toString().trimmed();
             const bool changed = !authoritative.isEmpty() && authoritative != g_classCode;
@@ -1630,7 +1631,7 @@ void consumeActivationCodeAsync(const QString &siteBase, const QString &code, co
     });
 }
 
-// 班级绑定的**唯一入口**（2026-10-09 抽出来）。
+// 班级绑定的**唯一入口**（2026-10-09 抽出来，2026-10-25 收紧）。
 // 为什么抽：这段逻辑原来只长在「保存并连接」按钮里，于是**「用星璃账号绑定」这条路压根不走班级绑定**
 // —— 用户填了班级码、点了账号绑定，班级就是不绑（本轮补的缺口）。两条路各写一遍必然漂移，
 // 这就是第一次漂移的实例，所以只留一份实现。
@@ -1638,13 +1639,12 @@ void consumeActivationCodeAsync(const QString &siteBase, const QString &code, co
 // 一个输入框吃两种取值，不让用户去分辨自己手里是哪一种：
 //   · **班级码**（云端班级索引的键，6-16 位字母数字或 -_）→ 直接持久化，
 //     下次 register 带上 classCode → 云端按班归组（云端 registry.js 的班级索引）。
-//   · **接入码**（XJK-XXXX-XXX，管理员生成、一次性、带 TTL）→ 也打**云端**的
-//     `/api/device/activate`；云端代为向站点兑换，并把站点 `class_id` 纳进班级目录归一
+//   · **接入码**（云端按班开的 6 位一次性票，见 Stelarith-cloud/src/bind-qr.js）→
+//     打**云端**的 `/api/device/activate` 消费，云端把它绑到对应班级
 //     （2026-10-20 班级真源统一，见 Stelarith-cloud/src/class-dir.js）。
-//     ⚠️ 统一之前这里打的是站点（www.*），于是同一个班在云端记 `cls-xxxx`、在站点记
-//        `class_01` —— 两套码并存，重启后还能长出第三套。现在设备端只认识一个地址。
-//     ⚠️ 自建站点 / 站点直连（云端没升级）时，把 `STE_QT_BIND_URL` 显式指到站点即可，
-//        走的还是这条唯一的代码路径，不再有第二条分支。
+//   旧的站点 XJK-XXXX-XXX 码已于 2026-10-25 废止（云端不再做站点代兑换），
+//   设备端也不再识别 —— 这类码现在会被当成无效码由云端拒掉。
+//   ⚠️ 自建场景（云端没升级）时把 `STE_QT_BIND_URL` 显式指到绑定服务，仍走这条唯一路径。
 static void applyClassBinding(const QString &rawCode, const QString &wsUrl, const QString &uid)
 {
     const QString code = rawCode.trimmed();
@@ -1652,13 +1652,14 @@ static void applyClassBinding(const QString &rawCode, const QString &wsUrl, cons
 
     saveClassCode(code);   // 持久化 → 下一次 register 带上 classCode
 
-    // 只有接入码需要去兑换；班级码没有可消费的东西。
-    if (!code.startsWith(QStringLiteral("XJK-"), Qt::CaseInsensitive)) {
+    // 只有 6 位一次性票需要去云端兑换；班级码没有可消费的东西。
+    static const QRegularExpression ticket(QStringLiteral("^[A-Z0-9]{6}$"));
+    if (!ticket.match(code).hasMatch()) {
         qInfo().noquote() << QStringLiteral("[agent-qt] 已记录班级码 %1（register 时带给云端按班归组）").arg(code);
         return;
     }
 
-    // 唯一入口：云端（含站点的兑换由云端代劳，见 exchangeSiteActivationCode）
+    // 唯一入口：云端（绑定接口与 WS 同源，见 bindBaseFromWsUrl）
     const QString bindBase = bindBaseFromWsUrl(wsUrl);
     if (bindBase.isEmpty()) {
         qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 没有可用的绑定服务地址，跳过接入码兑换（班级码已存，register 仍会带给云端）");
@@ -3243,11 +3244,11 @@ void openConfigDialog()
     //    （两个按钮共用同一份绑定逻辑，见 applyClassBinding）
     //    ⚠️ 这里只赋值，**不重新声明** —— 指针已在上面（OAuth 回调之前）声明过，见那段注释。
     codeEdit = new QLineEdit();
-    codeEdit->setPlaceholderText(QStringLiteral("班级码，或 XJK-XXXX-XXX 接入码"));
+    codeEdit->setPlaceholderText(QStringLiteral("班级码，或 6 位接入码"));
     form->addRow(QStringLiteral("班级（可选）"), codeEdit);
     auto *codeHint = new QLabel(QStringLiteral(
         "「保存并连接」与「用星璃账号绑定」两个按钮都会带上它："
-        "接入码（XJK-…）会去站点换班级，班级码直接上报云端按班归组。"
+        "接入码（6 位）会去云端换成班级，班级码直接上报云端按班归组。"
         "拿不准就留空，之后在管理面板里也能绑。"));
     codeHint->setWordWrap(true);
     codeHint->setStyleSheet(hintStyle);

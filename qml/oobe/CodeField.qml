@@ -1,10 +1,8 @@
 // 首次启动引导 · 绑定码输入框（2026-10-20）
 // 为什么不用共享 Md3TextField：那是 68 高的表单行，字号 14；本页要求「正中间一个**大尺寸**
 // 输入框」，字号 32、字符间距拉开。
-// 收两种码（2026-10-20 班级真源统一）：
-//   ① 6 位字母数字（云端按班开的一次性码）
-//   ② `XJK-XXXX-XXX`（站点后台的班级接入码，云端代为兑换）
-// ⇒ 上限放宽到 13 位、允许连字符；格式合法性由 C++ 的 isCodeFormatValid 单点判定。
+// 收云端发的 6 位一次性码（2026-10-25 班级接入码收归我方后，旧站点 XJK-XXXX-XXX 已废止）。
+// ⇒ 上限 6 位；格式合法性由 C++ 的 isCodeFormatValid 单点判定。
 // ⚠️ 不用 Qt TextField（项目纪律）；TextInput 是 QtQuick 核心项，Md3TextField 内部也用它。
 import QtQuick
 
@@ -19,8 +17,8 @@ Item {
     implicitWidth: 320
 
     function forceUpper() {
-        // 保留连字符（XJK-XXXX-XXX 需要），其余非字母数字一律清掉
-        var cleaned = input.text.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+        // 只保留大写字母数字（接入码为 6 位纯字母数字）
+        var cleaned = input.text.toUpperCase().replace(/[^A-Z0-9]/g, "");
         if (cleaned !== input.text) input.text = cleaned;
     }
 
@@ -39,16 +37,16 @@ Item {
             anchors.rightMargin: 20
             verticalAlignment: TextInput.AlignVCenter
             horizontalAlignment: TextInput.AlignHCenter
-            // 两种码长度差一倍：输入长了就把字号收一档，避免顶到边框
-            font.pixelSize: input.text.length > 6 ? 22 : 32
-            font.letterSpacing: input.text.length > 6 ? 3 : 8
+            // 6 位接入码：固定大字号居中
+            font.pixelSize: 32
+            font.letterSpacing: 8
             color: tk.cOnSurface
             selectionColor: tk.cPrimaryCont
             selectedTextColor: tk.cOnSurface
-            maximumLength: 13
+            maximumLength: 6
             // 手机/触屏：只弹大写字母数字键盘
             inputMethodHints: Qt.ImhUppercaseOnly | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
-            validator: RegularExpressionValidator { regularExpression: /[A-Z0-9-]{0,13}/ }
+            validator: RegularExpressionValidator { regularExpression: /[A-Z0-9]{0,6}/ }
             onTextChanged: root.forceUpper()
             onAccepted: root.accepted()
             Keys.onReturnPressed: root.accepted()

@@ -23,17 +23,13 @@ constexpr int kPollLimit = 150;
 // 单请求超时：8 秒。断网/后端挂掉时不至于让界面「转圈」到天荒地老。
 constexpr int kTimeoutMs = 8000;
 
-/** 绑定码格式：两种都收（2026-10-20 班级真源统一后，向导与老配置窗吃同一批码）。
- *   ① 6 位大写字母/数字（云端按班开的一次性码，去掉易混的 0/O、1/I 由发码方保证）
- *   ② `XJK-XXXX-XXX`（站点后台生成的班级接入码）—— 统一之前向导不认它，
- *      学校手里拿着老码在向导里敲会直接被格式校验挡掉，只能退回老配置窗，
- *      于是又走回"两套真源"。现在云端代为兑换，向导直接收。
+/** 绑定码格式：云端发的 6 位一次性票（2026-10-25 班级接入码收归我方后，
+ *  旧站点 `XJK-XXXX-XXX` 码已废止，不再识别）。易混字符由发码方保证去除。
  */
 bool codeFormatOk(const QString &code)
 {
     static const QRegularExpression six(QStringLiteral("^[A-Z0-9]{6}$"));
-    static const QRegularExpression site(QStringLiteral("^XJK-[A-Z0-9]{4}-[A-Z0-9]{3}$"));
-    return six.match(code).hasMatch() || site.match(code).hasMatch();
+    return six.match(code).hasMatch();
 }
 
 /**
@@ -256,7 +252,7 @@ void OobeWizard::submitBindingCode(const QString &code)
     if (m_done) return;
     const QString c = code.trimmed().toUpper();
     if (!codeFormatOk(c)) {
-        fail(QStringLiteral("绑定码是 6 位字母数字，或管理员发的「XJK-」开头的接入码，请对一下那串字符。"));
+        fail(QStringLiteral("绑定码是 6 位字母数字，请对一下那串字符。"));
         return;
     }
     if (m_siteBase.isEmpty()) {
