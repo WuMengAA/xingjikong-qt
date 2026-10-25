@@ -91,7 +91,7 @@ Item {
                 FreshBtn {
                     md3: pane.md3
                     text: "静音"
-                    icon: "volume-x"
+                    icon: "ban"
                     variant: "danger"
                     enabled: pane.subbed
                     width: (parent.width - 16) / 3

@@ -893,12 +893,17 @@ ApplicationWindow {
         return false
     }
 
-    /** 取动作的展示名（供批量 toast / 确认框用）。
+    /** 取**批量动作**的展示名（pick-* 系列，供批量 toast / 确认框用）。
+     *  为什么单独一个函数：Main.qml:726 已有一个 actionLabel（操作日志的英文→中文
+     *  硬编码映射，键是 lock/set_volume 这类动作名）—— QML 里同名函数 = 整页崩溃
+     *  （Duplicate method name，2026-10-25 离屏冒烟实证，静态检查全放过）。
+     *  两者键域不同不能合并：日志侧键是设备回执里的 action 名，这里键是注册表 id
+     *  （pick-volume-mute…），故改名 pickActionLabel 各管一头。
      *  为什么要有它：MainWindow.runBulk 原来是
      *  `(actionId === "pick-lock") ? "锁定桌面" : "远程重启"` 的二元组 —— 只有两个
      *  批量动作时恰好蒙对，加第三个（课堂工具）就会把"全班静音"显示成"远程重启"。
      *  回执上写错动作名 = 骗人，故 label 也收敛到注册表这唯一真源。 */
-    function actionLabel(id) {
+    function pickActionLabel(id) {
         const p = uiReg.byId(id)
         return (p && p.title) ? p.title : id
     }

@@ -164,15 +164,15 @@ Item {
      *  ⚠️ actionId 必须是 **pick 系列批量 id**（pick-lock / pick-shutdown / pick-volume-* …）：
      *    单台 id（lock/reboot）在 runActionById 的 danger 分支只看 backend.currentUid，
      *    批量会被「先在控制页选中一台设备」拦截，或只锁那一台。
-     *  2026-10-25：label 改问宿主要（actionLabel）—— 原来是
+     *  2026-10-25：label 改问宿主要（pickActionLabel）—— 原来是
      *  `(actionId === "pick-lock") ? "锁定桌面" : "远程重启"`，两个动作时恰好蒙对，
      *  课堂工具加进来后会把"全班静音"显示成"远程重启"（骗人的回执）。 */
     function runBulk(actionId) {
         if (!shell.ctx) return
         const n = shell.pickAllOnline()
         if (n === 0) { shell.toast("当前班没有在线设备，无法批量下发", true); return }
-        const label = shell.ctx.window.actionLabel
-                       ? shell.ctx.window.actionLabel(actionId) : actionId
+        const label = shell.ctx.window.pickActionLabel
+                       ? shell.ctx.window.pickActionLabel(actionId) : actionId
         shell.ctx.window.runActionById(actionId)
         shell.toast("已对 " + n + " 台在线设备下发「" + label + "」")
     }

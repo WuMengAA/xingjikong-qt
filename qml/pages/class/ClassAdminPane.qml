@@ -85,7 +85,9 @@ Item {
                 width: parent.width
                 spacing: 8
                 SvgIcon {
-                    name: "settings-2"
+                    // 2026-10-25：原 "settings-2" 在图标集里不存在（image://svgicon 取图
+                    // 失败 ⇒ 空白，离屏冒烟实证），改回实存的 "settings"。
+                    name: "settings"
                     px: 16
                     tint: md3.frInk2 || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
