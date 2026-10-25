@@ -9,18 +9,33 @@
 // 外部规范里的 Theme.qml（Singleton）在本项目的落地**就是本文件**：不新建第二个令牌文件，
 // 避免两份真源漂移（历史：旧 Theme.qml 已退役并入此处，见下方迁移桥注释）。
 //
-// 用法：
-//   Md3 { id: md3; dark: root.darkMode }     // 深浅两实例并存、运行期切换
-//   color: md3.cSurface   font.pixelSize: md3.titleM   radius: md3.rM
+// 用法（2026-10-25 起 = pragma Singleton，用户点单「MD3 太难控制」）：
+//   任意 `import "components"`（或 `import "../components"`）的文件直接写：
+//     color: Md3.cSurface   font.pixelSize: Md3.titleM   radius: Md3.rM
+//   深浅：各端主外壳**唯一写入口** `Md3.dark = darkMode`（viewer Main.qml /
+//   control AgentShell.qml）。需要临时固定浅色的模态窗口（如 control OOBE）
+//   进入前保存原值、关闭时恢复，不要长期覆盖。
 //
-// 为什么不是 pragma Singleton：同 Theme.qml —— 单例只能持一份值，而本应用
-// 需要深浅两套并存按 darkMode 切，故用「共享组件 + 两个实例」达到单一真源。
+// 为什么改 singleton（2026-10-25）：
+//   旧实现是「共享组件 + 每页自建实例」⇒ 全端 278 处 `md3:` 手工透传、
+//   48 处 `property var md3` 声明、605 处 `md3.xxx` 引用；忘传即回落到组件内
+//   硬编码色（如 th ? th.fg : "#1C1B1F"），出现「局部颜色不对」且不跟换肤。
+//   旧理由「单例只能持一份值，需要深浅两套并存」经核查**不成立**：
+//   Main.qml 的 darkTh/lightTh 仅因 th 声明成 property var 需预构造对象，
+//   th 只取其一（darkMode ? darkTh : lightTh），从未同时显示两套。
+//   singleton 后 dark 变化会触发全部令牌 binding 重算 —— 正是所需的全局随动。
+//
+// ⚠️ 兼容期约定（阶段 1，2026-10-25）：存量 `md3: Md3` / `md3.xxx` 写法继续可用
+//   （单例对象可赋给 property var），阶段 2/3 再删透传、把 `md3.` 改 `Md3.`。
+//   禁止再新增 `Md3 { ... }` 实例化写法（singleton 不可实例化，直接报错）。
 //
 // ── 迁移桥（legacy 别名，2026-10-13）─────────────────────────────
 // 存量界面（桌面 Main.qml 3802 行 + Btn/InputField/Card/ToggleRow/RtcVideoSurface
 // 等既有组件）读的是旧 Theme 令牌名（win/panel/fg/acc/rCtrl…）。本文件提供
 // **同名别名**映射到 MD3 值：把 `Theme {}` 换成 `Md3 {}` 即整域换肤，无需逐页
 // 重写。⚠️ 这是迁移桥不是长期 API——全端组件迁移完成后删除别名块。
+pragma Singleton
+
 import QtQuick 2.15
 
 QtObject {
