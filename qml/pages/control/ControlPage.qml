@@ -9,6 +9,7 @@ import "../../components"     // Btn / ToggleRow 等本端自有通用组件
 import "../../components/md3"
 import "../../island"         // SvgIcon（唯一真源在共享岛目录，构建期拷到 qml/island/）
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../shell/ClassSort.js" as ClassSort   // 班级显示序（1班<…<12班；规则唯一真源）
 
 // 控制页（整屏页 · U5「两端同 shell」A-2 第二页）
 //
@@ -131,7 +132,8 @@ Item {
                     byCls[c] = (byCls[c] || 0) + 1
                 }
                 var arr = [{ code: "", name: "全部班级", cnt: devs.length }]
-                var cs = backend.classes || []
+                // ClassSort：云端 cls-<hash> 是身份序，不排的话 13 个班在网格里成乱序
+                var cs = ClassSort.byName(backend.classes)
                 for (var j = 0; j < cs.length; ++j) {
                     arr.push({ code: cs[j].code, name: (cs[j].name || cs[j].code), cnt: byCls[cs[j].code] || 0 })
                 }

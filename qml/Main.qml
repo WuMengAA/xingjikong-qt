@@ -18,6 +18,7 @@ import "components/md3"    // MD3 组件库（Md3Btn/Card/…；令牌见上一�
 // 2026-10-22：全局主框架（App Scaffold · MainWindow）——原 pages/Md3Shell.qml 更名移入。
 // 它是管理端唯一应用外壳（侧栏+顶栏+内容区+状态条），业务页经它挂载；见 AGENTS.md §9。
 import "shell"
+import "shell/ClassSort.js" as ClassSort   // 引导第一步的班级 chip 顺序（1班<…<12班）
 // 2026-10-18：截图预览窗直接声明在本文件（回执驱动，不走 UiPanelHost 清单）
 // ⇒ 必须 import "panels" 才能按类型名实例化 panels/ScreenshotPreviewDialog.qml。
 import "panels"
@@ -1524,7 +1525,7 @@ ApplicationWindow {
                             Repeater {
                                 model: (function () {
                                     var arr = [{ code: "", name: "全部班级" }]
-                                    var cs = backend.classes || []
+                                    var cs = ClassSort.byName(backend.classes)
                                     for (var i = 0; i < cs.length; ++i) arr.push({ code: cs[i].code, name: (cs[i].name || cs[i].code) })
                                     return arr
                                 })()
