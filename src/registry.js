@@ -202,6 +202,23 @@ export function pushEvent(level, msg, extra = {}) {
   return ev;
 }
 
+/* ───────── 设备用途（2026-10-25）─────────
+ * 用户裁决：「独立界面要在 OOBE 阶段完成」。用途是**设备身份的第二维**，与班级归属并列：
+ *   · classroom —— 教室机（默认）：绑班，收黑板卡/通知/屏幕广播，呈现班级面。
+ *   · broadcast —— 广播机：绑广播站（站码与班码同一命名空间，见 broadcast-club.js
+ *                   「station（班级/广播站码）」），呈现广播台，不参与班级域上报。
+ * ⚠️ 为什么不在设备表里存自由文本：用途决定云端**能不能**给它下发班级域指令。
+ *    自由文本等于把权限模型交给客户端自报，和「设备自报 env」是同一类漏洞。
+ * ⚠️ 白名单外的值一律归一成 classroom（向后兼容：老被控端不带 role）。
+ */
+export const DEVICE_ROLES = Object.freeze(['classroom', 'broadcast']);
+
+/** 把任意输入归一成合法用途；未知值 → 'classroom'（宁可当教室机，也不放行未知能力）。 */
+export function normalizeDeviceRole(v) {
+  const t = String(v ?? '').trim().toLowerCase();
+  return DEVICE_ROLES.includes(t) ? t : 'classroom';
+}
+
 /**
  * @param caps 被控端 register 里的能力对象（含 actions 指令全集），可空（老版本被控端不带）。
  * @param meta 设备展示元数据 { name?, classCode?, className? }，来自 register 的辅助字段；
@@ -223,6 +240,10 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
   if (isNewUid) pruneKnown();
   // 已知设备表：离线也留着，online 由 devices.has 派生；name/classCode 落这里，重连沿用。
   const resolvedClass = meta?.classCode ?? known.classCode ?? null;
+  // 用途：register 自报只在「云端没有记录」时被采纳（首次登记）；
+  // 之后一律以云端为准 —— 否则改过用途的机器一重连就被自己改回去。
+  const resolvedRole = known.role ? normalizeDeviceRole(known.role)
+                                  : normalizeDeviceRole(meta?.role);
   // 环境：**只认云端白名单**（register 自报 env 一律忽略 —— 学校机器塞 env:"test"
   // 就能伪装测试机；伪装的收益全在白名单给的调试特权上）。每次注册现查，
   // 白名单更新后要等设备下次重连才生效（写注释：不是 bug，是规则）。
@@ -231,6 +252,7 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     uid,
     name: meta?.name ?? known.name ?? null,
     classCode: resolvedClass,
+    role: resolvedRole,
     version: version || known.version || 'unknown',
     env,
     lastSeen: now,
@@ -371,6 +393,8 @@ export function listDevices() {
       // 设备名：没上报过就是 null，管端照旧回退显示 uid（不是 undefined）。
       name: kd.name ?? null,
       classCode: kd.classCode ?? null,
+      // 用途（2026-10-25）：管端据此显示「教室机 / 广播机」并按用途决定可用动作。
+      role: normalizeDeviceRole(kd.role),
       version: d ? d.version : (kd.version || 'unknown'),
       // online 由「在线表里有没有且 socket 还活着」派生 —— 不写死 true（根因修复）。
       online,
@@ -420,9 +444,11 @@ export function setDeviceMeta(uid, meta = {}) {
       uid,
       name: meta.name ?? null,
       classCode: meta.classCode ?? null,
+      role: normalizeDeviceRole(meta.role),
       version: 'unknown',
       lastSeen: Date.now(),
     });
+    if (meta.classCode) addToClassIndex(uid, meta.classCode);
     return;
   }
   if (meta.name !== undefined) known.name = meta.name ?? null;
@@ -430,6 +456,14 @@ export function setDeviceMeta(uid, meta = {}) {
     known.classCode = meta.classCode ?? null;
     if (meta.classCode) addToClassIndex(uid, meta.classCode);
   }
+  // 用途可改（管理端「这台改成广播机」）。改完不主动推：被控端下次 register
+  // 的回执里会拿到权威值 —— 与 classCode 反向下发同一套机制，少一条推送路径。
+  if (meta.role !== undefined) known.role = normalizeDeviceRole(meta.role);
+}
+
+/** 按 uid 查用途（含离线设备）。权限/下发判定用，默认 classroom。 */
+export function getDeviceRole(uid) {
+  return normalizeDeviceRole(knownDevices.get(uid)?.role);
 }
 
 /* ---------- 分班制（2026-10-08）----------

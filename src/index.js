@@ -257,7 +257,7 @@ import {
   duplexActive, sendAudioToTeacher,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
   // 2026-10-08 分班制 + 已知设备表 + 云端存储信息
-  setDeviceMeta,
+  setDeviceMeta, getDeviceRole,
   bindDeviceToClass, unbindDeviceFromClass, listClasses, getDevicesOfClass,
   notifyClassBoundIfOnline,
   getStorageInfo, isClassCodeValid, hydrateClassesFromDir,
@@ -2658,6 +2658,9 @@ wss.on('connection', (ws) => {
         name: (p.payload && typeof p.payload.name === 'string' && p.payload.name.trim()) ? p.payload.name.trim().slice(0, 64) : null,
         classCode: (p.payload && typeof p.payload.classCode === 'string' && p.payload.classCode.trim()) ? p.payload.classCode.trim() : null,
         className: (p.payload && typeof p.payload.className === 'string' && p.payload.className.trim()) ? p.payload.className.trim().slice(0, 64) : null,
+        // 2026-10-25：设备用途（classroom / broadcast）。只在新登记时被采纳，
+        // 之后以云端 knownDevices 为准 —— 归一逻辑在 registry.normalizeDeviceRole。
+        role: (p.payload && typeof p.payload.role === 'string') ? p.payload.role : null,
       };
       markConnected(uid, String(version || ''), ws, regCaps, regMeta);
       // 班级域（2026-10-23 · #458）：该设备所在班的订阅者收到 member.online
@@ -2692,6 +2695,9 @@ wss.on('connection', (ws) => {
         timeoutMs: HEARTBEAT_TIMEOUT_MS,
         classCode: cac,
         className: (cknownd && cknownd.name) || null,
+        // 2026-10-25：用途回执 —— 与 classCode 同款「云端权威、端侧落盘」，
+        // 后台把一台教室机改成广播机后，设备重连即切外壳（不需要单独推送通道）。
+        role: getDeviceRole(uid),
         latestVersion: agentOta ? agentOta.version : null,
         updateUrl: agentOta ? agentOta.url : null,
         updateSha256: agentOta ? agentOta.sha256 : null,
