@@ -121,8 +121,9 @@ Item {
             onDeviceClicked: function (uid) { dash.onTileClicked(uid) }
         }
 
-        // 右：管理 + 动作 + 课堂工具 + 时间线（2026-10-25 抽件 ClassRightRail，
-        // 起因是本文件撞 200 行红线；改造「班级看板去集控化」时只动那个文件）
+        // 右：管理 + 本班设备管控 + 课堂工具 + 时间线（2026-10-25 抽件 ClassRightRail，
+        // 起因是本文件撞 200 行红线；班级页保留设备管控面板，与设备集控页共用动作、
+        // 仅作用域限定本班，不做去集控化）
         ClassRightRail {
             width: 300
             height: parent.height

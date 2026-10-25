@@ -371,3 +371,82 @@ void ClassAdmin::post(const QString &action, const QJsonObject &body, const QStr
         emit opFinished(action, false, msg);
     });
 }
+
+/* ── 班级接入码（2026-10-25 · 收归我方管理）─────────────────────────────
+ * 为什么不复用 post()：那个只发 opFinished（成功时给一句文案），而接入码要的是
+ * **结构化结果**（码 / 班级 / 剩余秒）——QML 得把这串码放大显示，让老师照着敲到
+ * 设备上，所以必须单独一个信号把码带出去。
+ * 失败路径与 post() 保持同一套口径（403 REAUTH_REQUIRED 走重认证门、其余吐云端
+ * 人话、json 空时用 errorString 兜底），不另造第二套错误语义。
+ */
+void ClassAdmin::issueBindCode(const QString &classCode)
+{
+    if (!m_backend) return;
+    const QString base = m_backend->httpBaseUrl();
+    const QString token = m_backend->viewerToken();
+    if (base.isEmpty()) {
+        emit opFinished(QStringLiteral("bindcode"), false,
+                        QStringLiteral("云端地址未配置，无法生成接入码"));
+        return;
+    }
+    const QString cc = classCode.trimmed();
+    if (cc.isEmpty()) {
+        emit opFinished(QStringLiteral("bindcode"), false, QStringLiteral("先选一个班级"));
+        return;
+    }
+
+    QNetworkRequest req(QUrl(base + QStringLiteral("/api/class/bindcode")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    if (!token.isEmpty())
+        req.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + token.toUtf8());
+    QJsonObject body;
+    body.insert(QStringLiteral("classCode"), cc);
+
+    auto *r = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(r, &QNetworkReply::finished, this, [this, r] {
+        r->deleteLater();
+        const int http = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonObject o = QJsonDocument::fromJson(r->readAll()).object();
+        if (http == 200 && o.value(QStringLiteral("ok")).toBool()) {
+            const QString newCode = o.value(QStringLiteral("code")).toString();
+            const QString ccode = o.value(QStringLiteral("classCode")).toString();
+            const QString cname = o.value(QStringLiteral("className")).toString();
+            const qint64 exp = static_cast<qint64>(o.value(QStringLiteral("expiresAt")).toDouble());
+            const int ttl = o.value(QStringLiteral("ttlSec")).toInt();
+            emit bindCodeIssued(ccode, cname, newCode, exp, ttl);
+            emit opFinished(QStringLiteral("bindcode"), true, newCode);
+            return;
+        }
+        const QString sem = o.value(QStringLiteral("code")).toString();
+        if (http == 403 && sem == QLatin1String("REAUTH_REQUIRED")) {
+            QString msg = o.value(QStringLiteral("error")).toString();
+            emit reauthRequired(msg.isEmpty()
+                ? QStringLiteral("长时间未验证，操作被拦截，请重新登录一次")
+                : msg);
+            emit opFinished(QStringLiteral("bindcode"), false, msg.isEmpty()
+                ? QStringLiteral("需要重新验证密码") : msg);
+            return;
+        }
+        QString msg = o.value(QStringLiteral("error")).toString();
+        if (msg.isEmpty()) {
+            msg = r->error() == QNetworkReply::NoError
+                ? QStringLiteral("HTTP %1").arg(http)
+                : r->errorString();
+        }
+        emit opFinished(QStringLiteral("bindcode"), false, msg);
+    });
+}
+
+void ClassAdmin::revokeBindCode(const QString &code)
+{
+    // 作废不需要结构化结果：走通用 post（成功文案直接用码本身，人能对上号）。
+    const QString c = code.trimmed();
+    if (c.isEmpty()) {
+        emit opFinished(QStringLiteral("bindcode-revoke"), false,
+                        QStringLiteral("没有可作废的接入码"));
+        return;
+    }
+    QJsonObject body;
+    body.insert(QStringLiteral("code"), c);
+    post(QStringLiteral("bindcode-revoke"), body, c);
+}

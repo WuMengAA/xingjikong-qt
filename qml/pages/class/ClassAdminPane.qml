@@ -16,9 +16,22 @@ Item {
     /** 删除两段确认：false → 只显示按钮；true → 行内变红字确认条。 */
     property bool delArmed: false
 
+    // ── 班级接入码（2026-10-25 · 收归我方：设备凭它进入当前班）────────────
+    /** 最近生成的那枚 6 位码（空串 = 还没生成 / 已作废 → 展示区隐藏）。 */
+    property string bindCode: ""
+    /** 请求在飞：按钮置灰防连点 —— 云端每次都发一枚新票，连点纯属白烧码表。 */
+    property bool issuing: false
+
     readonly property bool subbed: cs && cs.subscribed === true
     readonly property string code: (cs && cs.classCode) ? cs.classCode : ""
     readonly property string name: (cs && cs.className) ? cs.className : ""
+
+    /** 切班就丢掉上一枚码：**绝不把 A 班的码留在 B 班的界面上**，
+     *  那种错会让人拿错码去绑设备，排查时最难看出（码本身是合法的）。 */
+    onCodeChanged: {
+        pane.bindCode = ""
+        pane.issuing = false
+    }
 
     implicitWidth: 320
     implicitHeight: bodyCol.implicitHeight + 32
@@ -39,7 +52,25 @@ Item {
     Connections {
         target: pane.admin()
         ignoreUnknownSignals: true
+        /** 接入码生成成功：结构化结果走这条（码 + 有效期），
+         *  opFinished 那条只负责把 issuing 收尾 / 报失败，两处分工不重复弹 toast。 */
+        function onBindCodeIssued(classCode, className, code, expiresAt, ttlSec) {
+            pane.issuing = false
+            pane.bindCode = code
+            pane.toast("接入码已生成：" + code, false)
+        }
         function onOpFinished(op, ok, message) {
+            if (op === "bindcode") {
+                // 成功已由 onBindCodeIssued 处理（带结果）；这里只管失败收尾。
+                pane.issuing = false
+                if (!ok) pane.toast("生成接入码失败：" + message, true)
+                return
+            }
+            if (op === "bindcode-revoke") {
+                if (ok) { pane.bindCode = ""; pane.toast("接入码已作废，设备再也用不了这串", false) }
+                else pane.toast("作废失败：" + message, true)
+                return
+            }
             if (op === "create") {
                 if (ok) { pane.inputMode = ""; pane.toast("已创建班级「" + message + "」", false) }
                 else pane.toast("新建班级失败：" + message, true)
@@ -194,6 +225,91 @@ Item {
                 targetName: pane.name !== "" ? pane.name : pane.code
                 onConfirmed: { const a = pane.admin(); if (a) a.deleteClass(pane.code, "release") }
                 onCancelled: pane.delArmed = false
+            }
+
+            // ── 班级接入码（2026-10-25 · 收归我方：设备凭它进入这个班）──────
+            // 这是**设备入班的唯一入口**（取代原来站点后台发的 XJK 码）：
+            // 老师在这里点一下拿到 6 位码，到设备 OOBE 的「输入绑定码」敲进去即入班。
+            // 一次性 + 24 小时有效；发错班了点「作废」立刻失效。
+            Rectangle {
+                width: parent.width
+                height: 1
+                visible: pane.subbed
+                color: md3.frOffDot || "#9CA3AF"
+                opacity: 0.3
+            }
+            FreshBtn {
+                md3: pane.md3
+                text: pane.issuing ? "生成中…" : "生成班级接入码"
+                variant: "tonal"
+                width: parent.width
+                enabled: pane.subbed && !pane.issuing
+                onClicked: {
+                    pane.bindCode = ""
+                    pane.issuing = true
+                    const a = pane.admin()
+                    if (a) a.issueBindCode(pane.code)
+                    else pane.issuing = false
+                }
+            }
+            Column {
+                width: parent.width
+                visible: pane.bindCode !== ""
+                spacing: 6
+                Text {
+                    width: parent.width
+                    text: "把这串给这台设备（一次性，24 小时内有效）："
+                    font.pixelSize: md3.bodyS
+                    color: md3.frInk2 || "#6B7280"
+                    wrapMode: Text.WordWrap
+                }
+                Rectangle {
+                    width: parent.width
+                    height: 44
+                    radius: 8
+                    color: md3.frOffDot || "#9CA3AF"
+                    opacity: 0.14
+                }
+                // 码叠在上面单独一层：父 Rectangle 用低透明度做底，字才不会被一起调淡。
+                TextEdit {
+                    id: codeText
+                    width: parent.width
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: -44 - 6 + 12          // 压回上面那个底框内（Column 里没有叠加布局）
+                    readOnly: true
+                    selectByMouse: true
+                    text: pane.bindCode
+                    font.pixelSize: md3.bodyL || 16
+                    font.family: "Consolas"
+                    font.letterSpacing: 4
+                    color: md3.frInk || "#111827"
+                    horizontalAlignment: TextEdit.AlignHCenter
+                }
+                Row {
+                    width: parent.width
+                    spacing: 8
+                    FreshBtn {
+                        md3: pane.md3
+                        text: "复制"
+                        variant: "outlined"
+                        width: (parent.width - 8) / 2
+                        onClicked: {
+                            codeText.selectAll()
+                            codeText.copy()
+                            pane.toast("接入码已复制", false)
+                        }
+                    }
+                    FreshBtn {
+                        md3: pane.md3
+                        text: "作废"
+                        variant: "danger-ghost"
+                        width: (parent.width - 8) / 2
+                        onClicked: {
+                            const a = pane.admin()
+                            if (a) a.revokeBindCode(pane.bindCode)
+                        }
+                    }
+                }
             }
         }
     }

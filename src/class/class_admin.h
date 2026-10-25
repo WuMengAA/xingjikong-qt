@@ -63,6 +63,17 @@ public:
     Q_INVOKABLE void timetable(const QString &code);
     Q_INVOKABLE void saveTimetable(const QString &code, const QString &profileJson);
 
+    // ── 班级接入码（2026-10-25 · 收归我方后班级管理面板的入口码）──
+    // 用户裁决：「班级接入码收归我方管理，作为班级管理面板的入口码，所以去掉 CIMS
+    // 时期的旧方式」。语义：**设备凭这串码进入这个班**（一次性、绑班、24h）。
+    //
+    // issueBindCode 走 POST /api/class/bindcode（班级域，与上面八件同一套鉴权）：
+    //   成功 → bindCodeIssued（码 + 有效期，QML 直接"把这串给老师"）
+    //   失败 → opFinished("bindcode", false, 云端人话)
+    // revokeBindCode 走 bindcode-revoke：发错班了就撤回，TTL 内也立刻失效。
+    Q_INVOKABLE void issueBindCode(const QString &classCode);
+    Q_INVOKABLE void revokeBindCode(const QString &code);
+
 signals:
     /** 操作完成。ok=false 时 message 是云端给的人话错误（网络层失败也有兜底文案）。 */
     void opFinished(const QString &op, bool ok, const QString &message);
@@ -72,6 +83,11 @@ signals:
     void timetableLoaded(const QString &classCode, const QString &profileJson, qint64 updatedAt);
     /** 一个班的成员清单取回（members() 的结果；空数组 = 班里没人）。 */
     void membersList(const QString &classCode, const QVariantList &members);
+    /** 一枚新生成的班级接入码（2026-10-25）。
+     *  expiresAt = 毫秒时间戳；ttlSec = 剩余秒数（云端算好，免得两端时钟漂移）；
+     *  className 可能为空串（班没改过名时云端给 code 兜底），UI 显示要能容错。 */
+    void bindCodeIssued(const QString &classCode, const QString &className,
+                        const QString &code, qint64 expiresAt, int ttlSec);
     /** 2026-10-24 重认证门：写操作被云端 REAUTH_REQUIRED 拦（403）。
      *  此时连接/会话都还在，只是"该再验一次密码了"。UI 收到后弹提示 →
      *  走一次重新登录（backend.loginWithSite()）→ 新票到位后重试即可。 */
