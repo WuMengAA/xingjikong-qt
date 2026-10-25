@@ -64,7 +64,6 @@ Item {
                     model: backend.devices
                     delegate: Md3Chip {
                         // Md3Chip 自带 implicitWidth（text + 32），横条里随内容撑
-                        md3: th
                         text: (modelData.name && modelData.name !== "") ? modelData.name : modelData.uid
                         selected: backend.currentUid === modelData.uid
                         onClicked: {
@@ -169,20 +168,18 @@ Item {
             Layout.fillWidth: true
             spacing: 10
 
-            Md3Btn { md3: th; text: "截图"; variant: "tonal"; onClicked: ctx.window.runActionById("screenshot") }
+            Md3Btn { text: "截图"; variant: "tonal"; onClicked: ctx.window.runActionById("screenshot") }
             Md3Btn {
-                md3: th; text: "摄像头"; variant: "tonal"
                 visible: backend.capActions.indexOf("camera_list") >= 0
                 onClicked: ctx.window.openOnly("camera")
             }
-            Md3Btn { md3: th; text: "多班墙"; variant: "tonal"; onClicked: ctx.window.openOnly("multiband") }
-            Md3Btn { md3: th; text: "远程控制"; variant: "tonal"; onClicked: ctx.window.runActionById("remote-start") }
+            Md3Btn { text: "多班墙"; variant: "tonal"; onClicked: ctx.window.openOnly("multiband") }
+            Md3Btn { text: "远程控制"; variant: "tonal"; onClicked: ctx.window.runActionById("remote-start") }
             // #370：监控页直接推文件给当前看的这台（file_push 面板走 openOnly("file")）
-            Md3Btn { md3: th; text: "推文件"; variant: "tonal"; onClicked: ctx.window.runActionById("file_push") }
+            Md3Btn { text: "推文件"; variant: "tonal"; onClicked: ctx.window.runActionById("file_push") }
             // #370：显式「返回」跳回集控（page=1），不必去点顶部标签
             // 新外壳内嵌时 backFn 由外壳注入（切回仪表盘），旧壳仍跳 page 1。
             Md3Btn {
-                md3: th; text: "← 返回"; variant: "text"
                 onClicked: {
                     if (page.backFn) page.backFn()
                     else ctx.window.goPage(1)
@@ -192,7 +189,6 @@ Item {
             // 停止看当前设备（outlined 弱化；Md3Btn 无 error 变体色的 text 写法，
             // 用 outlined + 红色 icon 近似 —— 语义仍清楚）
             Md3Btn {
-                md3: th; text: "⏹ 停止"; variant: "outlined"
                 onClicked: { backend.currentUid = ""; ctx.window.currentUid = "" }
             }
         }

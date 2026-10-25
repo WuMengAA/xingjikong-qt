@@ -5,11 +5,11 @@
 import QtQuick
 import "../components/md3"
 import "../island"          // SvgIcon
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Rectangle {
     id: row
 
-    property var md3: ({})
     property string icon: ""
     property string label: ""
     property bool active: false
@@ -17,15 +17,15 @@ Rectangle {
     signal clicked()
 
     readonly property int rowH: 56
-    readonly property int padX: md3 ? md3.spM : 16
+    readonly property int padX: Md3.spM
     readonly property int iconPx: 20
 
     height: rowH
-    radius: md3 ? md3.rFull : 999
+    radius: Md3.rFull
     color: active
-           ? (md3 ? md3.cSecondaryCont : "#E8DEF8")
-           : (ma.containsMouse ? (md3 ? md3.cContHigh : "#ECE6F0") : "transparent")
-    Behavior on color { ColorAnimation { duration: md3 ? md3.durShort : 200 } }
+           ? (Md3.cSecondaryCont)
+           : (ma.containsMouse ? (Md3.cContHigh) : "transparent")
+    Behavior on color { ColorAnimation { duration: Md3.durShort} }
 
     Row {
         anchors.left: parent.left
@@ -37,17 +37,17 @@ Rectangle {
             name: row.icon
             px: row.iconPx
             tint: row.active
-                  ? (md3 ? md3.cOnSecondaryCont : "#1D192B")
-                  : (md3 ? md3.cOnSurfaceVar : "#49454F")
+                  ? (Md3.cOnSecondaryCont)
+                  : (Md3.cOnSurfaceVar)
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {
             text: row.label
-            font.pixelSize: md3 ? md3.bodyM : 14
+            font.pixelSize: Md3.bodyM
             font.weight: row.active ? Font.Medium : Font.Normal
             color: row.active
-                   ? (md3 ? md3.cOnSecondaryCont : "#1D192B")
-                   : (md3 ? md3.cOnSurfaceVar : "#49454F")
+                   ? (Md3.cOnSecondaryCont)
+                   : (Md3.cOnSurfaceVar)
             anchors.verticalCenter: parent.verticalCenter
         }
     }

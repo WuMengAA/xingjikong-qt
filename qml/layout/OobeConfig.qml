@@ -15,19 +15,18 @@ Item {
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
     //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
-    readonly property var md3: Md3
     property string code: ""
     property string status: "idle"     // idle | connecting | ok | error
     property bool advanced: false
 
     // 背板（模拟桌面，凸显窗口）
-    Rectangle { anchors.fill: parent; color: md3.cContLowest }
+    Rectangle { anchors.fill: parent; color: Md3.cContLowest }
     // 窗口卡（MD3 28 圆角）
     Rectangle {
         anchors.fill: parent
         anchors.margins: 16
-        radius: md3.rXL
-        color: md3.cContLow
+        radius: Md3.rXL
+        color: Md3.cContLow
         Column {
             anchors.left: parent.left; anchors.right: parent.right
             anchors.top: parent.top; anchors.margins: 32
@@ -38,20 +37,19 @@ Item {
                 spacing: 14
                 Rectangle {
                     width: 44; height: 44; radius: 22
-                    color: md3.cPrimaryCont
+                    color: Md3.cPrimaryCont
                     Text { anchors.centerIn: parent; text: "🐋"; font.pixelSize: 22 }
                 }
                 Column {
                     spacing: 2
                     anchors.verticalCenter: parent.verticalCenter
-                    Text { text: "配置教室"; font.pixelSize: md3.headlineS; font.weight: Font.Medium; color: md3.cOnSurface }
-                    Text { text: "输入管理员发放的接入码，自动连接云端"; font.pixelSize: md3.bodyS; color: md3.cOnSurfaceVar }
+                    Text { text: "配置教室"; font.pixelSize: Md3.headlineS; font.weight: Font.Medium; color: Md3.cOnSurface }
+                    Text { text: "输入管理员发放的接入码，自动连接云端"; font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar }
                 }
             }
 
             // 接入码输入（唯一必填项）
             Md3TextField {
-                md3: root.md3
                 width: parent.width
                 placeholder: "班级接入码"
                 helper: "形如 XJK-XXXX-XXX，由管理员发放；填错可改"
@@ -62,9 +60,9 @@ Item {
             // 状态行
             Rectangle {
                 width: parent.width; height: 44
-                radius: md3.rS
-                color: root.status === "error" ? md3.cErrorCont
-                     : (root.status === "ok" ? root.okContIfAny() : md3.cContHigh)
+                radius: Md3.rS
+                color: root.status === "error" ? Md3.cErrorCont
+                     : (root.status === "ok" ? root.okContIfAny() : Md3.cContHigh)
                 visible: root.status !== "idle"
                 Text {
                     anchors.left: parent.left; anchors.leftMargin: 14
@@ -72,14 +70,13 @@ Item {
                     text: root.status === "connecting" ? "正在连接云端…"
                         : root.status === "ok" ? "✓ 已连接，正在进入教室"
                         : "✗ 接入码无效或云端不可达（错误码 E-OTA-02）"
-                    font.pixelSize: md3.bodyM
-                    color: root.status === "error" ? md3.cOnErrorCont : md3.cOnSurface
+                    font.pixelSize: Md3.bodyM
+                    color: root.status === "error" ? Md3.cOnErrorCont : Md3.cOnSurface
                 }
             }
 
             // 主按钮
             Md3Btn {
-                md3: root.md3
                 width: parent.width
                 text: root.status === "connecting" ? "连接中…" : "保存并连接"
                 variant: "filled"
@@ -96,7 +93,7 @@ Item {
                     Text { text: "⚙️"; font.pixelSize: 14 }
                     Text {
                         text: root.advanced ? "收起高级选项" : "展开高级选项"
-                        font.pixelSize: md3.labelL; font.weight: Font.Medium; color: md3.cPrimary
+                        font.pixelSize: Md3.labelL; font.weight: Font.Medium; color: Md3.cPrimary
                     }
                     MouseArea { anchors.fill: parent; onClicked: root.advanced = !root.advanced }
                 }
@@ -104,8 +101,8 @@ Item {
                     width: parent.width
                     spacing: 12
                     visible: root.advanced
-                    Md3TextField { md3: root.md3; width: parent.width; placeholder: "云端地址（默认内置）" }
-                    Md3TextField { md3: root.md3; width: parent.width; placeholder: "设备令牌（可选）"; password: true }
+                    Md3TextField { width: parent.width; placeholder: "云端地址（默认内置）" }
+                    Md3TextField { width: parent.width; placeholder: "设备令牌（可选）"; password: true }
                 }
             }
 
@@ -113,10 +110,10 @@ Item {
                 width: parent.width
                 text: "被控端只认接入码：URL 与令牌由接入码在云端兑换，本机不手填。"
                 wrapMode: Text.Wrap
-                font.pixelSize: md3.bodyS; color: md3.cOutline
+                font.pixelSize: Md3.bodyS; color: Md3.cOutline
             }
         }
     }
     // ok 容器兜底（Md3 令牌没有 ok container，用 outline 组合表达）
-    function okContIfAny() { return md3.cContHigh }
+    function okContIfAny() { return Md3.cContHigh }
 }

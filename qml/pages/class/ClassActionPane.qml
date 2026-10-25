@@ -4,10 +4,10 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
 import "../../island"              // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: pane
-    property var md3: ({})
     property var host: null
     property var cs: null
     property var devices: []
@@ -48,7 +48,6 @@ Item {
 
     FreshCard {
         anchors.fill: parent
-        md3: pane.md3
 
         Column {
             id: bodyCol
@@ -56,7 +55,6 @@ Item {
             spacing: 14
 
             FreshBtn {
-                md3: pane.md3
                 text: "按住说话"
                 icon: "mic"
                 variant: "primary"
@@ -73,15 +71,14 @@ Item {
 
                 Text {
                     text: "全班"
-                    font.pixelSize: md3.body13
+                    font.pixelSize: Md3.body13
                     font.weight: Font.Medium
-                    color: md3.frInk2 || "#6B7280"
+                    color: Md3.frInk2 || "#6B7280"
                 }
                 Row {
                     width: parent.width
                     spacing: 8
                     FreshBtn {
-                        md3: pane.md3
                         text: "锁定桌面"
                         variant: "danger"
                         enabled: pane.subbed
@@ -89,7 +86,6 @@ Item {
                         onClicked: pane.runBulk("pick-lock")
                     }
                     FreshBtn {
-                        md3: pane.md3
                         text: "远程关机"
                         variant: "danger"
                         enabled: pane.subbed
@@ -100,13 +96,12 @@ Item {
                 Text {
                     width: parent.width
                     text: "本班 " + pane.classOnlineUids().length + " 台在线"
-                    font.pixelSize: md3.bodyS
-                    color: md3.frOffDot || "#9CA3AF"
+                    font.pixelSize: Md3.bodyS
+                    color: Md3.frOffDot || "#9CA3AF"
                 }
                 // 发布中心：向全班教室黑板推卡片（与锁屏/关机同属「对全班」动作，
                 // 只是它推的是内容而不是指令）。不需要选中设备 —— 对象是整班。
                 FreshBtn {
-                    md3: pane.md3
                     text: "发布中心"
                     icon: "monitor"
                     variant: "tonal"
@@ -122,16 +117,16 @@ Item {
 
                 Text {
                     text: "单台"
-                    font.pixelSize: md3.body13
+                    font.pixelSize: Md3.body13
                     font.weight: Font.Medium
-                    color: md3.frInk2 || "#6B7280"
+                    color: Md3.frInk2 || "#6B7280"
                 }
                 Text {
                     width: parent.width
                     visible: pane.selectedUid === ""
                     text: "点选一台设备以操作"
-                    font.pixelSize: md3.bodyS
-                    color: md3.frOffDot || "#9CA3AF"
+                    font.pixelSize: Md3.bodyS
+                    color: Md3.frOffDot || "#9CA3AF"
                 }
                 Column {
                     width: parent.width
@@ -144,20 +139,19 @@ Item {
                         SvgIcon {
                             name: "circle-check"
                             px: 16
-                            tint: md3.frGreen || "#22C55E"
+                            tint: Md3.frGreen || "#22C55E"
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
                             text: "已选中：" + (pane.selectedName !== "" ? pane.selectedName : pane.selectedUid)
-                            font.pixelSize: md3.body13
-                            color: md3.frInk || "#111827"
+                            font.pixelSize: Md3.body13
+                            color: Md3.frInk || "#111827"
                             elide: Text.ElideRight
                             width: parent.width - 24
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
                     FreshBtn {
-                        md3: pane.md3
                         text: "屏幕截图"
                         variant: "tonal"
                         width: parent.width
@@ -167,14 +161,12 @@ Item {
                         width: parent.width
                         spacing: 8
                         FreshBtn {
-                            md3: pane.md3
                             text: "锁定桌面"
                             variant: "danger-ghost"
                             width: (parent.width - 8) / 2
                             onClicked: if (pane.host) pane.host.runActionById("lock")
                         }
                         FreshBtn {
-                            md3: pane.md3
                             text: "远程重启"
                             variant: "danger-ghost"
                             width: (parent.width - 8) / 2
@@ -182,7 +174,6 @@ Item {
                         }
                     }
                     FreshBtn {
-                        md3: pane.md3
                         text: "在集控页打开"
                         variant: "outlined"
                         width: parent.width

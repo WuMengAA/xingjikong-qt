@@ -50,14 +50,12 @@ Item {
 
             AccountLoginCard {
                 width: col.width
-                md3: page.th
                 ctx: page.ctx
             }
 
             // ── 我的班级 ──
             SettingsCard {
                 width: col.width
-                md3: page.th
                 title: "我的班级"
 
                 Item {
@@ -115,14 +113,12 @@ Item {
             // ── 偏好（提醒 / 外观 / 启动）──
             AccountPrefsCard {
                 width: col.width
-                md3: page.th
                 ctx: page.ctx
             }
 
             // ── 系统设置入口（只给管理员；老师这一卡整块不可见，不是灰按钮）──
             SettingsCard {
                 width: col.width
-                md3: page.th
                 title: "系统"
                 subtitle: "云端连接、课表、更新与诊断"
                 visible: page.canSettings

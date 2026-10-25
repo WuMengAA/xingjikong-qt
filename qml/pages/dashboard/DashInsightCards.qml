@@ -8,20 +8,20 @@
 import QtQuick
 import QtQuick.Layouts
 import "../../components/md3"     // Md3Card
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 GridLayout {
     id: cards
 
-    property var md3: ({})
     property var host: null           // ctx.window（actionTitleOf / results）
     property bool portrait: false
     property var toastFn: null
 
     columns: cards.portrait ? 1 : 2
-    columnSpacing: md3 ? md3.spM : 16
-    rowSpacing: md3 ? md3.spM : 16
+    columnSpacing: Md3.spM
+    rowSpacing: Md3.spM
     Layout.fillWidth: true
-    Layout.bottomMargin: md3 ? md3.spS : 8
+    Layout.bottomMargin: Md3.spS
 
     /** 动作名 → 中文（复用宿主映射表，不另建一份）。 */
     function actionLabel(a) {
@@ -42,26 +42,25 @@ GridLayout {
     Md3Card {
         Layout.fillWidth: true
         Layout.preferredHeight: 208
-        md3: cards.md3
         variant: "elevated"
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: cards.md3 ? cards.md3.spS : 8
+            spacing: Md3.spS
 
             RowLayout {
                 Layout.fillWidth: true
                 Text {
                     text: "动作排行 · 近 7 天"
-                    font.pixelSize: cards.md3 ? cards.md3.titleS : 14
+                    font.pixelSize: Md3.titleS
                     font.weight: Font.Medium
-                    color: cards.md3 ? cards.md3.cOnSurface : "#1D1B20"
+                    color: Md3.cOnSurface
                 }
                 Item { Layout.fillWidth: true }
                 Text {
                     text: "刷新"
-                    font.pixelSize: cards.md3 ? cards.md3.bodyS : 12
-                    color: cards.md3 ? cards.md3.cPrimary : "#6750A4"
+                    font.pixelSize: Md3.bodyS
+                    color: Md3.cPrimary
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
@@ -87,25 +86,25 @@ GridLayout {
                 delegate: RowLayout {
                     required property var modelData
                     Layout.fillWidth: true
-                    spacing: cards.md3 ? cards.md3.spS : 8
+                    spacing: Md3.spS
                     Text {
                         text: modelData.rank
-                        font.pixelSize: cards.md3 ? cards.md3.bodyS : 12
+                        font.pixelSize: Md3.bodyS
                         font.weight: modelData.rank <= 3 ? Font.Bold : Font.Normal
-                        color: modelData.rank <= 3 ? (cards.md3 ? cards.md3.cPrimary : "#6750A4")
-                                                   : (cards.md3 ? cards.md3.cOnSurfaceVar : "#49454F")
+                        color: modelData.rank <= 3 ? (Md3.cPrimary)
+                                                   : (Md3.cOnSurfaceVar)
                     }
                     Text {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         text: cards.actionLabel(modelData.action)
-                        font.pixelSize: cards.md3 ? cards.md3.bodyS : 12
-                        color: cards.md3 ? cards.md3.cOnSurface : "#1D1B20"
+                        font.pixelSize: Md3.bodyS
+                        color: Md3.cOnSurface
                     }
                     Text {
                         text: "成功 " + modelData.ok + " / " + modelData.total
-                        font.pixelSize: cards.md3 ? cards.md3.labelS : 11
-                        color: cards.md3 ? cards.md3.cOnSurfaceVar : "#49454F"
+                        font.pixelSize: Md3.labelS
+                        color: Md3.cOnSurfaceVar
                     }
                 }
             }
@@ -114,9 +113,9 @@ GridLayout {
                 Layout.fillWidth: true
                 visible: !backend.actionRanking || backend.actionRanking.length === 0
                 text: "还没有排行数据（连上云端后自动统计）"
-                font.pixelSize: cards.md3 ? cards.md3.bodyS : 12
+                font.pixelSize: Md3.bodyS
                 wrapMode: Text.WordWrap
-                color: cards.md3 ? cards.md3.cOutline : "#79747E"
+                color: Md3.cOutline
             }
             Item { Layout.fillHeight: true }
         }
@@ -126,35 +125,34 @@ GridLayout {
     Md3Card {
         Layout.fillWidth: true
         Layout.preferredHeight: 208
-        md3: cards.md3
         variant: "elevated"
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: cards.md3 ? cards.md3.spS : 8
+            spacing: Md3.spS
 
             Text {
                 text: "云端存储概况"
-                font.pixelSize: cards.md3 ? cards.md3.titleS : 14
+                font.pixelSize: Md3.titleS
                 font.weight: Font.Medium
-                color: cards.md3 ? cards.md3.cOnSurface : "#1D1B20"
+                color: Md3.cOnSurface
             }
             Text {
                 Layout.fillWidth: true
                 text: "已知设备 " + (backend.storage.knownDevices !== undefined ? backend.storage.knownDevices : "—")
                       + " · 班级 " + (backend.storage.classes !== undefined ? backend.storage.classes : "—")
                       + " · 事件文件 " + (backend.storage.eventsFiles !== undefined ? backend.storage.eventsFiles : "—")
-                font.pixelSize: cards.md3 ? cards.md3.bodyS : 12
+                font.pixelSize: Md3.bodyS
                 wrapMode: Text.WordWrap
-                color: cards.md3 ? cards.md3.cOnSurfaceVar : "#49454F"
+                color: Md3.cOnSurfaceVar
             }
             Text {
                 Layout.fillWidth: true
                 text: "最近回执"
-                font.pixelSize: cards.md3 ? cards.md3.bodyS : 12
+                font.pixelSize: Md3.bodyS
                 font.weight: Font.Medium
-                color: cards.md3 ? cards.md3.cOnSurface : "#1D1B20"
-                topPadding: cards.md3 ? cards.md3.spXS : 4
+                color: Md3.cOnSurface
+                topPadding: Md3.spXS
             }
 
             Repeater {
@@ -162,26 +160,26 @@ GridLayout {
                 delegate: RowLayout {
                     required property var modelData
                     Layout.fillWidth: true
-                    spacing: cards.md3 ? cards.md3.spS : 8
+                    spacing: Md3.spS
 
                     Text {
                         text: modelData.t || ""
-                        font.pixelSize: cards.md3 ? cards.md3.labelS : 11
-                        color: cards.md3 ? cards.md3.cOutline : "#79747E"
+                        font.pixelSize: Md3.labelS
+                        color: Md3.cOutline
                     }
                     Text {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         text: cards.actionLabel(modelData.action) + " · " + (modelData.uid || "")
-                        font.pixelSize: cards.md3 ? cards.md3.labelS : 11
-                        color: cards.md3 ? cards.md3.cOnSurfaceVar : "#49454F"
+                        font.pixelSize: Md3.labelS
+                        color: Md3.cOnSurfaceVar
                     }
                     Text {
                         text: modelData.ok ? "成功" : "失败"
-                        font.pixelSize: cards.md3 ? cards.md3.labelS : 11
+                        font.pixelSize: Md3.labelS
                         color: modelData.ok
-                               ? (cards.md3 ? cards.md3.cPrimary : "#6750A4")
-                               : (cards.md3 ? cards.md3.cError : "#B3261E")
+                               ? (Md3.cPrimary)
+                               : (Md3.cError)
                     }
                 }
             }
@@ -190,9 +188,9 @@ GridLayout {
                 Layout.fillWidth: true
                 visible: cards.recentResults().length === 0
                 text: "还没有回执（下发动作后这里会显示执行结果）"
-                font.pixelSize: cards.md3 ? cards.md3.bodyS : 12
+                font.pixelSize: Md3.bodyS
                 wrapMode: Text.WordWrap
-                color: cards.md3 ? cards.md3.cOutline : "#79747E"
+                color: Md3.cOutline
             }
             Item { Layout.fillHeight: true }
         }

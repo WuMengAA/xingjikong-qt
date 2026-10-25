@@ -18,11 +18,11 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../components/md3"
 import "../island"          // SvgIcon
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: root
 
-    property var md3: null      // 必须可假：默认 {} 恒真会让 `md3 ? md3.x : 兜底` 取到 undefined
     /** 宿主上下文（与本端 pages/ 下各页同一份 _pageCtx 契约）。 */
     property var ctx: null
     /** 顶部标题（宿主可覆写，默认「设备监控」）。 */
@@ -83,14 +83,14 @@ Item {
             spacing: 2
             Text {
                 text: root.title
-                font.pixelSize: root.md3 ? root.md3.titleM : 16
+                font.pixelSize: Md3.titleM
                 font.weight: Font.Medium
-                color: root.md3 ? root.md3.cOnSurface : "#1C1B1B"
+                color: Md3.cOnSurface
             }
             Text {
                 text: root.headCount
-                font.pixelSize: root.md3 ? root.md3.bodyS : 12
-                color: root.md3 ? root.md3.cOnSurfaceVar : "#49454F"
+                font.pixelSize: Md3.bodyS
+                color: Md3.cOnSurfaceVar
             }
         }
 
@@ -99,7 +99,6 @@ Item {
         // ── 班级切换下拉框（原生 Menu）──────────────────────────────
         Md3Btn {
             id: classBtn
-            md3: root.md3
             text: root.currentClassName + " 切换"
             variant: "outlined"
             radius: 12
@@ -121,7 +120,6 @@ Item {
         // ── H8：未登录态暴露「登录」入口（骨架页没有旧壳那颗登录态头像下拉）──
         Md3Btn {
             visible: !root.loggedIn
-            md3: root.md3
             text: "登录"
             variant: "filled"
             radius: 12
@@ -136,13 +134,13 @@ Item {
             width: 32
             height: 32
             radius: 16
-            color: root.md3 ? root.md3.cSecondaryCont : "#E8DEF8"
+            color: Md3.cSecondaryCont
             Text {
                 anchors.centerIn: parent
                 text: root.avatarInitial
-                font.pixelSize: root.md3 ? root.md3.body13 : 13
+                font.pixelSize: Md3.body13
                 font.weight: Font.Medium
-                color: root.md3 ? root.md3.cOnSecondaryCont : "#1D192B"
+                color: Md3.cOnSecondaryCont
             }
             MouseArea {
                 anchors.fill: parent
@@ -158,7 +156,7 @@ Item {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: 1
-            color: root.md3 ? root.md3.cOutlineVar : "#CAC4D0"
+            color: Md3.cOutlineVar
             opacity: 0.5
         }
 

@@ -14,10 +14,10 @@ import QtQuick
 import QtQuick.Layouts
 import "../components"
 import "../components/md3"
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: page
-    property var md3: ({})
 
     // 推文件：把目标机塞进 backend.currentUid，由壳（Main/MobileShell）开 FilePushDialog
     signal filePushRequested(var uid)
@@ -43,15 +43,15 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         height: 60
-        color: page.md3.cSurface
+        color: Md3.cSurface
         Row {
             anchors.fill: parent
             anchors.margins: 12
             spacing: 8
             Text {
                 text: "看哪台："
-                color: page.md3.cOnSurfaceVar
-                font.pixelSize: page.md3.labelL
+                color: Md3.cOnSurfaceVar
+                font.pixelSize: Md3.labelL
                 anchors.verticalCenter: parent.verticalCenter
             }
             ListView {
@@ -64,7 +64,6 @@ Item {
                 model: backend.devices
                 spacing: 8
                 delegate: Md3Chip {
-                    md3: page.md3
                     text: (modelData.name && modelData.name !== "") ? modelData.name : modelData.uid
                     selected: backend.currentUid === modelData.uid
                     onClicked: {
@@ -89,8 +88,8 @@ Item {
         anchors.bottom: actions.top
         anchors.bottomMargin: 10
         radius: 12
-        color: page.md3.cCont
-        border.color: page.md3.cOutlineVar
+        color: Md3.cCont
+        border.color: Md3.cOutlineVar
         border.width: 1
         clip: true
 
@@ -131,8 +130,8 @@ Item {
                 return ""
             }
             visible: text !== ""
-            color: page.md3.cOnSurfaceVar
-            font.pixelSize: page.md3.labelM
+            color: Md3.cOnSurfaceVar
+            font.pixelSize: Md3.labelM
         }
 
         // 链路徽标
@@ -143,8 +142,8 @@ Item {
             anchors.margins: 10
             height: 20
             radius: 4
-            color: backend.frameSource === "vnc" ? page.md3.cPrimary
-                 : (page.frameReady ? page.md3.cOk : page.md3.cOutlineVar)
+            color: backend.frameSource === "vnc" ? Md3.cPrimary
+                 : (page.frameReady ? Md3.cOk : Md3.cOutlineVar)
             Text {
                 anchors.centerIn: parent
                 text: backend.frameSource === "vnc" ? "远控中"
@@ -167,21 +166,18 @@ Item {
         columnSpacing: 10
 
         Md3Btn {
-            md3: page.md3; text: "截图"; variant: "tonal"; Layout.fillWidth: true
             onClicked: {
                 if (backend.currentUid !== "") { backend.sendAction("screenshot", {}); page.toastMsg("已请求截图") }
                 else page.toastMsg("先选一台设备")
             }
         }
         Md3Btn {
-            md3: page.md3; text: "远程控制"; variant: "tonal"; Layout.fillWidth: true
             onClicked: {
                 if (backend.currentUid !== "") { backend.sendAction("remote_control_start", {}); page.toastMsg("正在接管 " + backend.currentUid) }
                 else page.toastMsg("先选一台设备")
             }
         }
         Md3Btn {
-            md3: page.md3; text: "推文件"; variant: "tonal"; Layout.fillWidth: true
             onClicked: {
                 if (backend.currentUid !== "") page.filePushRequested(backend.currentUid)
                 else page.toastMsg("先选一台设备")
@@ -189,7 +185,6 @@ Item {
         }
         // 停止/退出：真正清流（本地 watching 标志），在 VNC 模式顺手收掉远控
         Md3Btn {
-            md3: page.md3; text: "⏹ 停止"; variant: "outlined"; Layout.fillWidth: true
             onClicked: {
                 if (backend.frameSource === "vnc") { backend.sendAction("remote_control_stop", {}); page.toastMsg("已停止远控") }
                 else { page.watching = false; backend.setScreenActive(false); page.toastMsg("已停止监控") }

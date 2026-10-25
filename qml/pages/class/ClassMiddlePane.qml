@@ -22,7 +22,6 @@ import "../../island"             // （SvgIcon 由子件自带，这里不直�
 Item {
     id: pane
 
-    property var md3: ({})
     property var deviceModel: null
     property var evModel: null
     property bool subscribed: false
@@ -44,6 +43,8 @@ Item {
     signal tabActivated(string tab)
     /** 展板请求宿主切换页内全屏（由 ClassDashboard 收口，横竖屏同一个入口）。 */
     signal boardExpandToggled()
+    /** 展板「发布到展板」→ 宿主打开页级发布弹窗（真发请求，不做装饰按钮）。 */
+    signal publishRequested()
 
     /** 窄栏放不下四段文字 → 纯图标段（见文件头 ①）。 */
     readonly property bool compactSeg: pane.width < 320
@@ -80,7 +81,6 @@ Item {
                 // Flickable 不按 implicitWidth 布局子项：显式给宽，否则所有段叠在 0 宽处
                 width: implicitWidth
                 x: Math.max(0, (parent.width - width) / 2)
-                md3: pane.md3
                 fresh: true
                 model: pane.segModel
                 current: pane.tab
@@ -95,20 +95,17 @@ Item {
                           : (pane.tab === "board" ? 2 : (pane.tab === "members" ? 3 : 0))
 
             ClassDeviceGrid {
-                md3: pane.md3
                 model: pane.deviceModel
                 subscribed: pane.subscribed
                 selectedUid: pane.selectedUid
                 onDeviceClicked: function (uid) { pane.deviceClicked(uid) }
             }
             ClassStudentPane {
-                md3: pane.md3
                 classCode: pane.classCode
                 subscribed: pane.subscribed
                 toastFn: pane.toastFn
             }
             ClassBoardPane {
-                md3: pane.md3
                 deviceModel: pane.deviceModel
                 evModel: pane.evModel
                 subscribed: pane.subscribed
@@ -116,9 +113,9 @@ Item {
                 classCode: pane.classCode
                 expanded: pane.boardExpanded
                 onToggleExpanded: pane.boardExpandToggled()
+                onPublishRequested: pane.publishRequested()
             }
             ClassMemberPane {
-                md3: pane.md3
                 deviceModel: pane.deviceModel
                 classes: pane.classes
                 classCode: pane.classCode

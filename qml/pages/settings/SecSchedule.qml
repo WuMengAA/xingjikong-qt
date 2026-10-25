@@ -5,6 +5,7 @@
 import QtQuick
 
 import "../../components"
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -17,7 +18,7 @@ SettingsCard {
 
     Btn {
         width: 148
-        theme: card.md3
+        theme: Md3
         text: "打开课表编辑器"
         tip: "编辑本机课表档案；保存后设备大屏按它显示今日课表"
         onClicked: if (card.ctx) card.ctx.window.openScheduleEditor()

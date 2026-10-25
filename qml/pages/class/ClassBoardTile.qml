@@ -7,11 +7,11 @@
 // 数据真源：ClassDeviceModel（typed）—— 本件只收标量属性，不碰 backend。
 import QtQuick
 import "../../island"          // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: root
 
-    property var md3: ({})
     property string uid: ""
     property string name: ""
     property bool online: false
@@ -21,10 +21,10 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.margins: 4
-        radius: md3.rS
-        color: md3.frCard || "#FFFFFF"
+        radius: Md3.rS
+        color: Md3.frCard || "#FFFFFF"
         border.width: 1
-        border.color: md3.frLine || "#EEF0F3"
+        border.color: Md3.frLine || "#EEF0F3"
 
         Column {
             anchors.fill: parent
@@ -35,8 +35,8 @@ Item {
             Rectangle {
                 width: parent.width
                 height: Math.max(48, parent.height - 30)
-                radius: md3.rS
-                color: md3.cCont
+                radius: Md3.rS
+                color: Md3.cCont
                 clip: true
 
                 Image {
@@ -58,13 +58,13 @@ Item {
                     SvgIcon {
                         name: "monitor"
                         px: 18
-                        tint: md3.cOutline
+                        tint: Md3.cOutline
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
                     Text {
                         text: root.online ? "暂无画面" : "未开机"
-                        font.pixelSize: md3.bodyS
-                        color: md3.cOutline
+                        font.pixelSize: Md3.bodyS
+                        color: Md3.cOutline
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
@@ -74,7 +74,7 @@ Item {
                     width: 8
                     height: 8
                     radius: 4
-                    color: root.online ? md3.cOk : md3.cOutline
+                    color: root.online ? Md3.cOk : Md3.cOutline
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.margins: 6
@@ -84,9 +84,9 @@ Item {
             Text {
                 width: parent.width
                 text: root.name !== "" ? root.name : root.uid
-                font.pixelSize: md3.bodyS
+                font.pixelSize: Md3.bodyS
                 font.weight: Font.Medium
-                color: md3.frInk || "#111827"
+                color: Md3.frInk || "#111827"
                 elide: Text.ElideRight
             }
         }

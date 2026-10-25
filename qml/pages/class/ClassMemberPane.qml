@@ -17,11 +17,11 @@
 import QtQuick
 import "../../components/md3"     // Md3Btn / Md3Card
 import "../../island"             // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: pane
 
-    property var md3: ({})
     property var deviceModel: null     // ClassDeviceModel（本班设备）
     property var classes: []           // backend.classes（换班目标）
     property string classCode: ""      // 当前班码（本班）
@@ -79,8 +79,8 @@ Item {
             width: parent.width
             visible: !pane.subscribed
             text: "未订阅班级：先选择一个班，才能管理它的成员。"
-            font.pixelSize: md3.body13
-            color: md3.cOutline
+            font.pixelSize: Md3.body13
+            color: Md3.cOutline
             wrapMode: Text.WordWrap
         }
 
@@ -89,7 +89,6 @@ Item {
             width: parent.width
             visible: pane.subscribed
             variant: "filled"
-            md3: pane.md3
 
             Column {
                 width: parent.width
@@ -103,20 +102,19 @@ Item {
                     SvgIcon {
                         name: "users"
                         px: 14
-                        tint: md3.cOnSurfaceVar
+                        tint: Md3.cOnSurfaceVar
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         id: addHead
                         text: "班级人员（" + pane.memberModel.length + "）"
-                        font.pixelSize: md3.body13
+                        font.pixelSize: Md3.body13
                         font.weight: Font.Medium
-                        color: md3.cOnSurfaceVar
+                        color: Md3.cOnSurfaceVar
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Item { width: Math.max(6, parent.width - 156 - 46); height: 1 }
                     Md3Btn {
-                        md3: pane.md3
                         text: "刷新"
                         variant: "text"
                         enabled: !pane.membersLoading
@@ -133,7 +131,7 @@ Item {
                         width: Math.max(96, parent.width - 6 - 96 - 6 - 58)
                         height: 32
                         radius: 6
-                        color: md3.cSurfaceVar
+                        color: Md3.cSurfaceVar
 
                         TextInput {
                             id: addUid
@@ -141,8 +139,8 @@ Item {
                             anchors.leftMargin: 8
                             anchors.rightMargin: 8
                             verticalAlignment: TextInput.AlignVCenter
-                            font.pixelSize: md3.bodyS
-                            color: md3.cOnSurface
+                            font.pixelSize: Md3.bodyS
+                            color: Md3.cOnSurface
                             clip: true
                             selectByMouse: true
 
@@ -153,8 +151,8 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                                 visible: addUid.text === ""
                                 text: "老师账号/uid"
-                                font.pixelSize: md3.bodyS
-                                color: md3.cOutline
+                                font.pixelSize: Md3.bodyS
+                                color: Md3.cOutline
                             }
                         }
                     }
@@ -162,7 +160,7 @@ Item {
                         width: 96
                         height: 32
                         radius: 6
-                        color: md3.cSurfaceVar
+                        color: Md3.cSurfaceVar
 
                         TextInput {
                             id: addRoleHint
@@ -170,8 +168,8 @@ Item {
                             anchors.leftMargin: 8
                             anchors.rightMargin: 8
                             verticalAlignment: TextInput.AlignVCenter
-                            font.pixelSize: md3.bodyS
-                            color: md3.cOnSurface
+                            font.pixelSize: Md3.bodyS
+                            color: Md3.cOnSurface
                             readOnly: true
                             text: pane.selRole
                         }
@@ -181,7 +179,6 @@ Item {
                         }
                     }
                     Md3Btn {
-                        md3: pane.md3
                         text: "添加"
                         variant: "tonal"
                         enabled: addUid.text.trim() !== ""
@@ -199,7 +196,7 @@ Item {
                     height: 30
                     visible: false
                     radius: 6
-                    color: md3.cSurfaceVar
+                    color: Md3.cSurfaceVar
 
                     Row {
                         id: roleRow
@@ -210,7 +207,6 @@ Item {
                             model: ["owner", "teacher", "viewer"]
                             delegate: Md3Btn {
                                 required property string modelData
-                                md3: pane.md3
                                 text: modelData
                                 variant: pane.selRole === modelData ? "tonal" : "text"
                                 onClicked: {
@@ -239,7 +235,7 @@ Item {
                 width: ListView.view.width
                 height: 24
                 radius: 4
-                color: md3.cSurfaceVar
+                color: Md3.cSurfaceVar
 
                 Row {
                     anchors.fill: parent
@@ -249,24 +245,23 @@ Item {
 
                     Text {
                         text: (modelData && modelData.id) ? String(modelData.id) : "?"
-                        font.pixelSize: md3.bodyS
-                        color: md3.cOnSurface
+                        font.pixelSize: Md3.bodyS
+                        color: Md3.cOnSurface
                         elide: Text.ElideRight
                         width: parent.width - 96 - 12
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: (modelData && modelData.role) ? String(modelData.role) : ""
-                        font.pixelSize: md3.bodyS
+                        font.pixelSize: Md3.bodyS
                         font.weight: String(modelData && modelData.role) === "owner" ? Font.Bold : Font.Normal
                         color: String(modelData && modelData.role) === "owner"
-                               ? md3.cPrimary : (String(modelData && modelData.role) === "teacher"
-                               ? md3.cOnSurfaceVar : md3.cOutline)
+                               ? Md3.cPrimary : (String(modelData && modelData.role) === "teacher"
+                               ? Md3.cOnSurfaceVar : Md3.cOutline)
                         width: 68
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Md3Btn {
-                        md3: pane.md3
                         text: "移出"
                         variant: "text"
                         width: 28
@@ -282,16 +277,16 @@ Item {
             width: parent.width
             visible: pane.subscribed && pane.memberModel.length === 0 && !pane.membersLoading
             text: "还没有成员。填上面的账号后点「添加」—— 那人下次登录即可进入本班。"
-            font.pixelSize: md3.bodyS
-            color: md3.cOutline
+            font.pixelSize: Md3.bodyS
+            color: Md3.cOutline
             wrapMode: Text.WordWrap
         }
         Text {
             width: parent.width
             visible: pane.subscribed && pane.membersLoading
             text: "拉取成员清单中…"
-            font.pixelSize: md3.bodyS
-            color: md3.cOutline
+            font.pixelSize: Md3.bodyS
+            color: Md3.cOutline
         }
 
         // ══ 下半：设备成员 ══
@@ -299,8 +294,8 @@ Item {
             width: parent.width
             visible: pane.subscribed
             text: "设备：点行内的「换到…」选目标班，或「移出」让它暂时不属于任何班。"
-            font.pixelSize: md3.bodyS
-            color: md3.cOutline
+            font.pixelSize: Md3.bodyS
+            color: Md3.cOutline
             wrapMode: Text.WordWrap
         }
 
@@ -320,8 +315,8 @@ Item {
                 property bool rowExpanded: false
                 width: ListView.view.width
                 height: rowCol.implicitHeight + 16
-                radius: pane.md3.rS
-                color: pane.md3.cSurfaceVar
+                radius: Md3.rS
+                color: Md3.cSurfaceVar
 
                 Column {
                     id: rowCol
@@ -338,20 +333,20 @@ Item {
                             height: 8
                             radius: 4
                             anchors.verticalCenter: parent.verticalCenter
-                            color: (model.online === true) ? md3.cOk : md3.cOutline
+                            color: (model.online === true) ? Md3.cOk : Md3.cOutline
                         }
                         Text {
                             text: (model.name && model.name !== "") ? model.name : model.uid
-                            font.pixelSize: md3.body13
-                            color: md3.cOnSurface
+                            font.pixelSize: Md3.body13
+                            color: Md3.cOnSurface
                             elide: Text.ElideRight
                             width: parent.width - 16 - 150
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
                             text: model.version || ""
-                            font.pixelSize: md3.bodyS
-                            color: md3.cOutline
+                            font.pixelSize: Md3.bodyS
+                            color: Md3.cOutline
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
@@ -362,13 +357,11 @@ Item {
                         spacing: 6
 
                         Md3Btn {
-                            md3: pane.md3
                             text: "换到…"
                             variant: "text"
                             onClicked: rowExpanded = !rowExpanded
                         }
                         Md3Btn {
-                            md3: pane.md3
                             text: "移出本班"
                             variant: "text"
                             onClicked: {
@@ -388,7 +381,6 @@ Item {
                             model: pane.targetClasses()
                             delegate: Md3Btn {
                                 required property var modelData
-                                md3: pane.md3
                                 text: modelData.name || modelData.code
                                 variant: "outlined"
                                 onClicked: {
@@ -400,8 +392,8 @@ Item {
                         Text {
                             visible: pane.targetClasses().length === 0
                             text: "没有别的班可换（先去右栏「新建班级」）"
-                            font.pixelSize: md3.bodyS
-                            color: md3.cOutline
+                            font.pixelSize: Md3.bodyS
+                            color: Md3.cOutline
                         }
                     }
                 }

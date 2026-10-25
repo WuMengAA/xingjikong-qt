@@ -48,6 +48,7 @@ import "../shell"              // Sidebar / TopBar / ActionBar / DeviceCard / Si
 import "../pages/dashboard"     // DashPage（仪表盘三件）
 import "../pages/class"          // ClassDashboard（班级工作台 · #472）
 import "../island"             // SvgIcon
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: shell
@@ -233,7 +234,6 @@ Item {
             ClassNav {
                 id: nav
                 visible: !shell.portrait
-                md3: shell.th
                 ctx: shell.ctx
                 classes: backend ? backend.classes : []
                 devices: backend ? backend.devices : []
@@ -266,7 +266,6 @@ Item {
                     TopBar {
                         id: topBar
                         ctx: shell.ctx
-                        md3: shell.th          // 颜色令牌（TopBar 默认 md3=null，内部有兜底）
                         title: shell.sectionTitle
                         // ⚠️ 班级列表与当前班**不在这里传参** —— TopBar 内部直接读
                         //    backend.classes / backend.currentClass。曾经多传不存在的属性，
@@ -314,7 +313,6 @@ Item {
                         // ① 仪表盘（S1/S2/S3/S4/S5/S7 全在 pages/dashboard/）
                         // 抽件原因：本文件已到登记上限（710 行），内联 270 行不允许再长。
                         DashPage {
-                            md3: shell.th
                             host: shell.ctx ? shell.ctx.window : null
                             devices: shell.classDevices()
                             stats: shell.stats()
@@ -335,7 +333,6 @@ Item {
                         // 旧「班级看板」页（AdminDashboard.qml）文件保留，page 4 仍用它。
                         ClassDashboard {
                             id: classDash
-                            md3: shell.th
                             host: shell.ctx ? shell.ctx.window : null
                             cs: backend ? backend.classService : null
                             devices: backend ? backend.devices : []
@@ -396,7 +393,6 @@ Item {
             Layout.fillWidth: true
             Layout.preferredHeight: shell.navBarH
             visible: shell.portrait
-            md3: shell.th
             items: shell.navItems
             current: shell.section
             onActivated: function (key) { shell.navActivated(key) }
@@ -525,7 +521,6 @@ Item {
                     layoutDirection: Qt.RightToLeft
 
                     Md3Btn {
-                        md3: shell.th
                         text: "重新验证"
                         variant: "filled"
                         onClicked: {
@@ -534,7 +529,6 @@ Item {
                         }
                     }
                     Md3Btn {
-                        md3: shell.th
                         text: "稍后"
                         variant: "text"
                         onClicked: reauthLayer.visible = false

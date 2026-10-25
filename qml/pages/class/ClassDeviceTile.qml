@@ -12,11 +12,11 @@
 // 数据真源：ClassDeviceModel（typed）—— 本件只收标量属性，不碰 backend。
 import QtQuick
 import "../../island"          // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: root
 
-    property var md3: ({})
     property string uid: ""
     property string name: ""
     property bool online: false
@@ -38,10 +38,10 @@ Item {
     Rectangle {
         id: cardBg
         anchors.fill: parent
-        radius: md3.frRCard || 18
-        color: md3.frCard || "#FFFFFF"
+        radius: Md3.frRCard || 18
+        color: Md3.frCard || "#FFFFFF"
         border.width: root.selected ? 1.5 : 1
-        border.color: root.selected ? (md3.frGreen || "#22C55E") : (md3.frLine || "#EEF0F3")
+        border.color: root.selected ? (Md3.frGreen || "#22C55E") : (Md3.frLine || "#EEF0F3")
         z: 1
     }
 
@@ -49,14 +49,14 @@ Item {
     Rectangle {
         anchors.fill: cardBg
         anchors.topMargin: 6
-        radius: md3.rL
+        radius: Md3.rL
         color: Qt.rgba(0, 0, 0, 0.05)
         z: 0
     }
     Rectangle {
         anchors.fill: cardBg
         anchors.topMargin: 2
-        radius: md3.rL
+        radius: Md3.rL
         color: Qt.rgba(0, 0, 0, 0.04)
         z: 0
     }
@@ -64,10 +64,10 @@ Item {
     // 选中态主色薄雾（内容之下）
     Rectangle {
         anchors.fill: cardBg
-        radius: md3.rL
-        color: md3.frGreen || "#22C55E"
+        radius: Md3.rL
+        color: Md3.frGreen || "#22C55E"
         opacity: root.selected ? 0.06 : 0
-        Behavior on opacity { NumberAnimation { duration: md3.durShort } }
+        Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
         z: 2
     }
 
@@ -75,10 +75,10 @@ Item {
     Rectangle {
         id: stateLayer
         anchors.fill: cardBg
-        radius: md3.rL
-        color: md3.cOnSurface
+        radius: Md3.rL
+        color: Md3.cOnSurface
         opacity: root._stateOpacity
-        Behavior on opacity { NumberAnimation { duration: md3.durShort } }
+        Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
         z: 2
     }
 
@@ -93,7 +93,7 @@ Item {
         anchors.topMargin: 20
         anchors.bottomMargin: 20
         anchors.leftMargin: 5
-        color: md3.frGreen || "#22C55E"
+        color: Md3.frGreen || "#22C55E"
         z: 3
     }
 
@@ -111,8 +111,8 @@ Item {
             Rectangle {
                 width: parent.width
                 height: 80
-                radius: md3.rS
-                color: md3.cCont
+                radius: Md3.rS
+                color: Md3.cCont
                 clip: true
 
                 Image {
@@ -136,13 +136,13 @@ Item {
                     SvgIcon {
                         name: "monitor"
                         px: 22
-                        tint: md3.cOutline
+                        tint: Md3.cOutline
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
                     Text {
                         text: root.online ? "暂无画面" : "未开机"
-                        font.pixelSize: md3.bodyS
-                        color: md3.cOutline
+                        font.pixelSize: Md3.bodyS
+                        color: Md3.cOutline
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
@@ -152,7 +152,7 @@ Item {
                     width: 8
                     height: 8
                     radius: 4
-                    color: root.online ? md3.cOk : md3.cOutline
+                    color: root.online ? Md3.cOk : Md3.cOutline
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.margins: 6
@@ -162,9 +162,9 @@ Item {
             Text {
                 width: parent.width
                 text: root.name !== "" ? root.name : root.uid
-                font.pixelSize: md3.body13
+                font.pixelSize: Md3.body13
                 font.weight: Font.Medium
-                color: md3.cOnSurface
+                color: Md3.cOnSurface
                 elide: Text.ElideRight
             }
 
@@ -177,9 +177,9 @@ Item {
                     return root.lastSeenAgoSec < 60 ? "刚断线"
                            : Math.floor(root.lastSeenAgoSec / 60) + " 分前"
                 }
-                font.pixelSize: md3.bodyS
+                font.pixelSize: Md3.bodyS
                 font.family: (root.online && root.version !== "") ? "monospace" : ""
-                color: md3.cOnSurfaceVar
+                color: Md3.cOnSurfaceVar
                 elide: Text.ElideRight
             }
         }
@@ -190,10 +190,10 @@ Item {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
         hoverEnabled: true
-        onEntered: root._stateOpacity = md3.stHover
+        onEntered: root._stateOpacity = Md3.stHover
         onExited: root._stateOpacity = 0
-        onPressed: root._stateOpacity = md3.stPress
-        onReleased: root._stateOpacity = (tileMa.containsMouse ? md3.stHover : 0)
+        onPressed: root._stateOpacity = Md3.stPress
+        onReleased: root._stateOpacity = (tileMa.containsMouse ? Md3.stHover : 0)
         onClicked: root.clicked()
         z: 5
     }

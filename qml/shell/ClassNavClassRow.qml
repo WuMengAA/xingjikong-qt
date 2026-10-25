@@ -5,11 +5,11 @@
 // 计数由调用方算好传入（countOf 在 ClassNav，那里才有 devices）。
 import QtQuick
 import "../components/md3"
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Rectangle {
     id: row
 
-    property var md3: ({})
     property string code: ""
     property string name: ""
     property int onCount: 0
@@ -19,14 +19,14 @@ Rectangle {
     signal clicked()
 
     readonly property int rowH: 44
-    readonly property int padX: md3 ? md3.spM : 16
+    readonly property int padX: Md3.spM
 
     height: rowH
-    radius: md3 ? md3.rM : 12
+    radius: Md3.rM
     color: active
-           ? (md3 ? md3.cSecondaryCont : "#E8DEF8")
-           : (ma.containsMouse ? (md3 ? md3.cContHigh : "#ECE6F0") : "transparent")
-    Behavior on color { ColorAnimation { duration: md3 ? md3.durShort : 200 } }
+           ? (Md3.cSecondaryCont)
+           : (ma.containsMouse ? (Md3.cContHigh) : "transparent")
+    Behavior on color { ColorAnimation { duration: Md3.durShort} }
 
     // 选中态：终末地工业青左规（与 Sidebar 同一语言）
     Rectangle {
@@ -39,7 +39,7 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.topMargin: 12
         anchors.bottomMargin: 12
-        color: md3 ? md3.cAccent : "#2FB8C6"
+        color: Md3.cAccent
     }
 
     Text {
@@ -50,11 +50,11 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         text: row.name !== "" ? row.name : row.code
         elide: Text.ElideRight
-        font.pixelSize: md3 ? md3.body13 : 13
+        font.pixelSize: Md3.body13
         font.weight: row.active ? Font.Medium : Font.Normal
         color: row.active
-               ? (md3 ? md3.cOnSecondaryCont : "#1D192B")
-               : (md3 ? md3.cOnSurface : "#1C1B1F")
+               ? (Md3.cOnSecondaryCont)
+               : (Md3.cOnSurface)
     }
 
     // 人数读数：等宽字（技术读数），有在线才染色，否则灰
@@ -64,11 +64,11 @@ Rectangle {
         anchors.rightMargin: row.padX
         anchors.verticalCenter: parent.verticalCenter
         text: row.onCount + "/" + row.totalCount
-        font.pixelSize: md3 ? md3.labelS : 11
+        font.pixelSize: Md3.labelS
         font.family: "monospace"
         color: row.onCount > 0
-               ? (md3 ? md3.cOk : "#1B7A43")
-               : (md3 ? md3.cOutline : "#79747E")
+               ? (Md3.cOk)
+               : (Md3.cOutline)
     }
 
     MouseArea {

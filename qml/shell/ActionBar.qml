@@ -44,7 +44,6 @@ Item {
         spacing: 12
 
         Md3Btn {
-            md3: root.th
             text: "一键锁屏"
             variant: "outlined"
             radius: 12
@@ -52,7 +51,6 @@ Item {
             onClicked: root.lockRequested()
         }
         Md3Btn {
-            md3: root.th
             text: "批量重启"
             variant: "outlined"
             radius: 12
@@ -64,7 +62,6 @@ Item {
 
         // 竖屏出口（H7）：右端对齐的 text 变体，弱化处理不抢两个主操作
         Md3Btn {
-            md3: root.th
             visible: root.portrait
             text: "返回经典界面"
             variant: "text"

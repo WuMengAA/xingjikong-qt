@@ -25,6 +25,7 @@ import QtQuick.Layouts
 import QtCore
 import "../island"   // SvgIcon 唯一真源在共享岛目录（构建期拷到 qml/island/）
 import "md3"         // MD3 组件库（构建期由 Stelarith-shared-qml/ui/md3/ 拷入 components/md3/）
+import "./theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: cc
@@ -453,7 +454,6 @@ Item {
                     // 绑定选中的摄像头（主操作，filled，统一 12 圆角）
                     Md3Btn {
                         id: bindBtn
-                        md3: cc.theme
                         radius: cc.tRM
                         anchors.left: parent.left
                         anchors.right: parent.right
@@ -494,7 +494,6 @@ Item {
                         Md3SegmentedButton {
                             id: segRow
                             anchors.horizontalCenter: parent.horizontalCenter
-                            md3: cc.theme
                             model: [
                                 { value: 1, label: "仅屏幕",   icon: "monitor",     tip: "只看被控端屏幕" },
                                 { value: 0, label: "",         icon: "layout-grid", tip: "双画面：屏幕 + 摄像头" },
@@ -643,7 +642,6 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: cc.tSpS
                             Md3Btn {
-                                md3: cc.theme
                                 radius: cc.tRM
                                 variant: cc.recording ? "outlined" : "filled"
                                 text: cc.recording ? "停录" : "开录"
@@ -803,7 +801,6 @@ Item {
                         Md3Btn {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            md3: cc.theme
                             radius: cc.tRM
                             variant: cc.backend.studyActive ? "outlined" : "filled"
                             text: cc.backend.studyActive ? "关闭自习" : "开启自习"
@@ -1057,7 +1054,6 @@ Item {
                         }
                         Md3Btn {
                             visible: cc.canRetry
-                            md3: cc.theme
                             radius: cc.tRM
                             variant: "tonal"
                             text: "重试"
@@ -1131,7 +1127,6 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: cc.tSpS
                 Md3Btn {
-                    md3: cc.theme
                     radius: cc.tRM
                     variant: "tonal"
                     text: "截图"
@@ -1140,7 +1135,6 @@ Item {
                     onClicked: cc.screenShot()
                 }
                 Md3Btn {
-                    md3: cc.theme
                     radius: cc.tRM
                     variant: "filled"
                     text: "文件分发"
@@ -1154,7 +1148,6 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: cc.tSpS
                 Md3Btn {
-                    md3: cc.theme
                     radius: cc.tRM
                     variant: "outlined"
                     text: "停止"
@@ -1163,7 +1156,6 @@ Item {
                     onClicked: cc.stopAll()
                 }
                 Md3Btn {
-                    md3: cc.theme
                     radius: cc.tRM
                     variant: "text"
                     text: "返回"

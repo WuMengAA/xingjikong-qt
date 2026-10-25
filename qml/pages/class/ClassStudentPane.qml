@@ -11,11 +11,11 @@ import QtQuick.Layouts
 
 import "../../components"
 import "../../components/md3"
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: pane
 
-    property var md3: ({})
     property string classCode: ""
     property bool subscribed: false
     property var toastFn: null
@@ -84,7 +84,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "学生名单"
-                color: pane.md3 ? pane.md3.cOnSurface : "#1C1B1F"
+                color: Md3.cOnSurface
                 font.pixelSize: 14
                 font.weight: Font.Medium
             }
@@ -93,7 +93,7 @@ Item {
                 text: pane.subscribed
                       ? (pane.students.length + " 人" + (pane.loading ? " · 读取中…" : ""))
                       : "未选班"
-                color: pane.md3 ? pane.md3.cOnSurfaceVar : "#49454F"
+                color: Md3.cOnSurfaceVar
                 font.pixelSize: 12
             }
         }
@@ -106,7 +106,6 @@ Item {
 
             Md3TextField {
                 width: parent.width
-                md3: pane.md3
                 placeholder: "姓名（必填）"
                 text: pane.inName
                 onTextChanged: if (text !== pane.inName) pane.inName = text
@@ -116,14 +115,12 @@ Item {
                 spacing: 8
                 Md3TextField {
                     Layout.fillWidth: true
-                    md3: pane.md3
                     placeholder: "学号"
                     text: pane.inNo
                     onTextChanged: if (text !== pane.inNo) pane.inNo = text
                 }
                 Md3TextField {
                     Layout.preferredWidth: 72
-                    md3: pane.md3
                     placeholder: "座位"
                     text: pane.inSeat
                     onTextChanged: if (text !== pane.inSeat) pane.inSeat = text
@@ -131,7 +128,7 @@ Item {
                 Btn {
                     Layout.preferredWidth: 64
                     Layout.preferredHeight: 44
-                    theme: pane.md3
+                    theme: Md3
                     text: "加入"
                     strong: true
                     disabled: pane.inName.trim() === ""
@@ -142,7 +139,7 @@ Item {
                 width: parent.width
                 wrapMode: Text.Wrap
                 text: "同班同学号重复 = 更新那一条（不会长出两个一样的学生）。"
-                color: pane.md3 ? pane.md3.cOnSurfaceVar : "#49454F"
+                color: Md3.cOnSurfaceVar
                 font.pixelSize: 12
             }
         }
@@ -157,7 +154,6 @@ Item {
             spacing: 2
             delegate: ClassStudentRow {
                 width: ListView.view.width
-                md3: pane.md3
                 student: modelData
                 onRemoveRequested: function (id, name) {
                     const a = pane.admin()
@@ -174,7 +170,7 @@ Item {
             text: !pane.subscribed
                   ? "先在左上角选一个班级，再录入这个班的学生。"
                   : "这个班还没录入学生。上面填姓名点「加入」就能开始；连同考勤、座位表都按这份名单走。"
-            color: pane.md3 ? pane.md3.cOnSurfaceVar : "#49454F"
+            color: Md3.cOnSurfaceVar
             font.pixelSize: 13
         }
     }

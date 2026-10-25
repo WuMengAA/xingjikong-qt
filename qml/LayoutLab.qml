@@ -20,7 +20,6 @@ Item {
     // 宿主只传 dark 布尔；各屏内部自建 Md3 实例（见各屏注释——晚赋值换实例会出事故）。
     // 本文件左侧切换轨用自己的实例（同模式）。
     property bool dark: false
-    readonly property var md3: Md3
     property int screen: 0
     readonly property var screens: [
         { name: "桌面集控台", short: "桌面", icon: "🖥", w: 1280, h: 800, src: "DesktopConsole.qml" },
@@ -30,12 +29,12 @@ Item {
         { name: "通知全屏",   short: "通知", icon: "📢", w: 960,  h: 600, src: "NotifyFull.qml" }
     ]
 
-    Rectangle { anchors.fill: parent; color: md3.cContLowest }
+    Rectangle { anchors.fill: parent; color: Md3.cContLowest }
 
     // 左侧切换轨（56 宽，图标 + 短名）
     Rectangle {
         width: 56; height: parent.height
-        color: md3.cCont
+        color: Md3.cCont
         Column {
             anchors.top: parent.top; anchors.topMargin: 8
             anchors.horizontalCenter: parent.horizontalCenter
@@ -49,9 +48,9 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         anchors.margins: 4
-                        radius: md3.rM
-                        color: root.screen === index ? md3.cSecondaryCont : "transparent"
-                        Behavior on color { ColorAnimation { duration: md3.durShort } }
+                        radius: Md3.rM
+                        color: root.screen === index ? Md3.cSecondaryCont : "transparent"
+                        Behavior on color { ColorAnimation { duration: Md3.durShort } }
                     }
                     Column {
                         anchors.centerIn: parent
@@ -61,7 +60,7 @@ Item {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: modelData.short
                             font.pixelSize: 9
-                            color: root.screen === index ? md3.cOnSecondaryCont : md3.cOnSurfaceVar
+                            color: root.screen === index ? Md3.cOnSecondaryCont : Md3.cOnSurfaceVar
                         }
                     }
                     MouseArea { anchors.fill: parent; onClicked: root.screen = index }
@@ -72,9 +71,9 @@ Item {
         Text {
             anchors.bottom: parent.bottom; anchors.bottomMargin: 12
             anchors.horizontalCenter: parent.horizontalCenter
-            text: md3.dark ? "深" : "浅"
+            text: Md3.dark ? "深" : "浅"
             font.pixelSize: 10
-            color: md3.cOnSurfaceVar
+            color: Md3.cOnSurfaceVar
         }
     }
 

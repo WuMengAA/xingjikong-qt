@@ -9,11 +9,11 @@
 import QtQuick
 import "../../components/fresh"   // FreshCard / FreshBtn
 import "../../island"             // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: card
 
-    property var md3: ({})
     property int classCount: 0
 
     signal createRequested()
@@ -22,7 +22,6 @@ Item {
 
     FreshCard {
         anchors.fill: parent
-        md3: card.md3
 
         Column {
             id: col
@@ -36,14 +35,14 @@ Item {
                 SvgIcon {
                     name: "rocket"
                     px: 16
-                    tint: md3.frGreen || "#22C55E"
+                    tint: Md3.frGreen || "#22C55E"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "上手三步"
-                    font.pixelSize: md3.body13
+                    font.pixelSize: Md3.body13
                     font.weight: Font.Medium
-                    color: md3.frInk || "#111827"
+                    color: Md3.frInk || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -66,22 +65,22 @@ Item {
                         width: 20
                         height: 20
                         radius: 10
-                        color: md3.frGreenSoft || "#E9FBF0"
+                        color: Md3.frGreenSoft || "#E9FBF0"
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {
                             anchors.centerIn: parent
                             text: modelData.n
-                            font.pixelSize: md3.bodyS
+                            font.pixelSize: Md3.bodyS
                             font.weight: Font.Medium
-                            color: md3.frGreenD || "#16A34A"
+                            color: Md3.frGreenD || "#16A34A"
                         }
                     }
                     Text {
                         text: modelData.t
                         width: parent.width - 28
-                        font.pixelSize: md3.bodyS
-                        color: md3.frInk2 || "#6B7280"
+                        font.pixelSize: Md3.bodyS
+                        color: Md3.frInk2 || "#6B7280"
                         wrapMode: Text.WordWrap
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -89,7 +88,6 @@ Item {
             }
 
             FreshBtn {
-                md3: card.md3
                 text: "新建班级"
                 variant: "tonal"
                 width: parent.width

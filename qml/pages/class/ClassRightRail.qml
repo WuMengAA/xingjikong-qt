@@ -24,7 +24,6 @@ import QtQuick
 Item {
     id: rail
 
-    property var md3: ({})
     property var cs: null
     property var host: null
     property var devices: []
@@ -63,7 +62,6 @@ Item {
             ClassOnboardGuide {
                 visible: !rail.subbed
                 width: parent.width
-                md3: rail.md3
                 classCount: rail.classCount
                 onCreateRequested: rail.createRequested()
             }
@@ -72,14 +70,12 @@ Item {
             // 成员（人员与设备去留）走中栏「成员管理」tab。两处不混。
             ClassAdminPane {
                 width: parent.width
-                md3: rail.md3
                 cs: rail.cs
                 toastFn: rail.toastFn
             }
 
             ClassActionPane {
                 width: parent.width
-                md3: rail.md3
                 host: rail.host
                 cs: rail.cs
                 devices: rail.devices
@@ -95,7 +91,6 @@ Item {
             // 200 行红线，且语义不同（那边是电源类危险动作，这边是教学常用）。
             ClassToolPane {
                 width: parent.width
-                md3: rail.md3
                 host: rail.host
                 cs: rail.cs
                 devices: rail.devices
@@ -107,7 +102,6 @@ Item {
                 // 固定高（不再 parent.height - 220）：滚动容器里父高是视口高，
                 // 反推会把 contentHeight 算错，且小窗口下会算出负数被 clamp 成 120。
                 height: 240
-                md3: rail.md3
                 model: rail.evModel
             }
         }

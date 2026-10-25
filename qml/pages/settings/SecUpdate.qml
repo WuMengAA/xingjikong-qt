@@ -7,6 +7,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../../components"
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -24,8 +25,8 @@ SettingsCard {
         visible: updater.message !== ""
         text: updater.message
         color: updater.state === "failed"
-               ? (card.md3 ? card.md3.cOnSurface : "#1C1B1F")
-               : (card.md3 ? card.md3.cOnSurfaceVar : "#49454F")
+               ? (Md3.cOnSurface)
+               : (Md3.cOnSurfaceVar)
         font.pixelSize: 12
         font.bold: updater.state === "failed"
     }
@@ -40,7 +41,7 @@ SettingsCard {
               ? ("更新说明：" + updater.notes +
                  "（" + (updater.sizeBytes / 1048576).toFixed(1) + " MB）")
               : ("更新说明：" + updater.notes)
-        color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
+        color: Md3.cOnSurfaceVar
         font.pixelSize: 12
     }
 
@@ -51,7 +52,7 @@ SettingsCard {
         Btn {
             Layout.preferredWidth: 118
             Layout.preferredHeight: 26
-            theme: card.md3
+            theme: Md3
             text: updater.busy ? "处理中…" : "检查更新"
             tip: "检查云端是否有新版本"
             disabled: updater.busy
@@ -61,7 +62,7 @@ SettingsCard {
         Btn {
             Layout.preferredWidth: 118
             Layout.preferredHeight: 26
-            theme: card.md3
+            theme: Md3
             visible: updater.state === "available"
             strong: true
             text: updater.mandatory ? "必须更新" : "立即更新"
@@ -72,7 +73,7 @@ SettingsCard {
         Btn {
             Layout.preferredWidth: 118
             Layout.preferredHeight: 26
-            theme: card.md3
+            theme: Md3
             text: "去官网下载页"
             tip: "打开 www.245959623.xyz/download"
             onClicked: backend.openExternal("https://www.245959623.xyz/download")

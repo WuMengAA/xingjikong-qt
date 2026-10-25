@@ -12,11 +12,11 @@
 // 事件原样抛回——本页不写 backend、不改宿主状态（选择路径只有一条）。
 import QtQuick
 import QtQuick.Layouts
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: page
 
-    property var md3: ({})
     property var host: null           // ctx.window
     property var devices: []          // 本班设备（未按 chip 过滤）
     property var stats: ({ total: 0, on: 0, off: 0, pending: "—" })
@@ -39,11 +39,10 @@ Item {
         ColumnLayout {
             id: col
             width: flick.width
-            spacing: page.md3 ? page.md3.spM : 16
+            spacing: Md3.spM
 
             DashDeviceSection {
                 Layout.fillWidth: true
-                md3: page.md3
                 devices: page.devices
                 stats: page.stats
                 portrait: page.portrait
@@ -54,7 +53,6 @@ Item {
             }
 
             DashInsightCards {
-                md3: page.md3
                 host: page.host
                 portrait: page.portrait
                 toastFn: page.toastFn

@@ -13,6 +13,7 @@ import QtQuick.Layouts
 
 import "../../components"
 import "../../island"
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: page
@@ -127,7 +128,6 @@ Item {
                 source: page.srcOf(page.cat)
                 onLoaded: {
                     if (!item) return
-                    item.md3 = page.th
                     item.ctx = page.ctx
                 }
             }

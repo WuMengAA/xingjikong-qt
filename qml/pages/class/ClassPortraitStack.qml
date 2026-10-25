@@ -11,7 +11,6 @@ import QtQuick
 Column {
     id: stack
 
-    property var md3: ({})
     property var cs: null            // ClassService
     property var host: null          // ctx.window
     property var devices: []         // backend.devices
@@ -43,7 +42,6 @@ Column {
     ClassOnboardGuide {
         visible: !stack.boardExpanded && !stack.subbed
         width: parent.width
-        md3: stack.md3
         classCount: stack.classCount
         onCreateRequested: stack.createRequested()
     }
@@ -51,7 +49,6 @@ Column {
     ClassIdentityPane {
         visible: !stack.boardExpanded
         width: parent.width
-        md3: stack.md3
         cs: stack.cs
         pending: stack.pending
         onUnsubscribeRequested: stack.unsubscribeRequested()
@@ -73,7 +70,6 @@ Column {
                 width: parent.width
                 // 展板全屏时中栏吃掉整屏高度（竖屏没有左右栏可藏，只能给高度）
                 height: stack.boardExpanded ? Math.max(320, stack.height - 24) : 260
-                md3: stack.md3
                 deviceModel: stack.devModel
                 evModel: stack.evModel
                 subscribed: (stack.cs && stack.cs.subscribed === true)
@@ -86,19 +82,18 @@ Column {
                 onTabActivated: function (v) { stack.tabActivated(v) }
                 onDeviceClicked: function (uid) { stack.deviceClicked(uid) }
                 onBoardExpandToggled: stack.boardExpandToggled()
+                onPublishRequested: stack.publishRequested()
             }
 
             ClassAdminPane {
                 visible: !stack.boardExpanded
                 width: parent.width
-                md3: stack.md3
                 cs: stack.cs
                 toastFn: stack.toastFn
             }
             ClassActionPane {
                 visible: !stack.boardExpanded
                 width: parent.width
-                md3: stack.md3
                 host: stack.host
                 cs: stack.cs
                 devices: stack.devices
@@ -112,7 +107,6 @@ Column {
             ClassToolPane {
                 visible: !stack.boardExpanded
                 width: parent.width
-                md3: stack.md3
                 host: stack.host
                 cs: stack.cs
                 devices: stack.devices
@@ -122,7 +116,6 @@ Column {
                 visible: !stack.boardExpanded
                 width: parent.width
                 height: 180
-                md3: stack.md3
                 model: stack.evModel
             }
         }

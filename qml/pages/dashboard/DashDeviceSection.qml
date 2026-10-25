@@ -10,11 +10,11 @@ import QtQuick
 import QtQuick.Layouts
 import "../../components/md3"     // Md3Card / Md3Chip
 import "../../shell"              // DeviceCard
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 ColumnLayout {
     id: sec
 
-    property var md3: ({})
     property var devices: []           // 本班设备（未按 chip 过滤）
     property var stats: ({ total: 0, on: 0, off: 0, pending: "—" })
     property bool portrait: false
@@ -24,7 +24,7 @@ ColumnLayout {
     signal filterChanged(string mode)
     signal deviceActivated(string uid)
 
-    spacing: md3 ? md3.spM : 16
+    spacing: Md3.spM
 
     /** 在 devices 之上按 chip 再筛一层（与集控页同名同义，但那份含其它班）。 */
     function shownDevices() {
@@ -48,7 +48,7 @@ ColumnLayout {
     // ── S1 三张统计卡（禁手绘卡片，一律 Md3Card）──
     RowLayout {
         Layout.fillWidth: true
-        spacing: sec.md3 ? sec.md3.spM : 16
+        spacing: Md3.spM
 
         Repeater {
             model: [
@@ -61,28 +61,27 @@ ColumnLayout {
                 required property var modelData
                 Layout.fillWidth: true
                 Layout.preferredHeight: 96
-                md3: sec.md3
                 variant: "elevated"
 
                 ColumnLayout {
                     anchors.fill: parent
-                    spacing: sec.md3 ? sec.md3.spXS : 4
+                    spacing: Md3.spXS
 
                     Text {
                         text: modelData.k
-                        font.pixelSize: sec.md3 ? sec.md3.bodyS : 12
-                        color: sec.md3 ? sec.md3.cOnSurfaceVar : "#49454F"
+                        font.pixelSize: Md3.bodyS
+                        color: Md3.cOnSurfaceVar
                     }
                     Text {
                         text: modelData.v
-                        font.pixelSize: sec.md3 ? sec.md3.headlineM : 28
+                        font.pixelSize: Md3.headlineM
                         font.weight: Font.Medium
-                        color: sec.md3 ? sec.md3.cOnSurface : "#1D1B20"
+                        color: Md3.cOnSurface
                     }
                     Text {
                         text: modelData.sub
-                        font.pixelSize: sec.md3 ? sec.md3.bodyS : 12
-                        color: sec.md3 ? sec.md3.cOutline : "#79747E"
+                        font.pixelSize: Md3.bodyS
+                        color: Md3.cOutline
                     }
                 }
             }
@@ -92,7 +91,7 @@ ColumnLayout {
     // ── S5 筛选 chip ──
     RowLayout {
         Layout.fillWidth: true
-        spacing: sec.md3 ? sec.md3.spS : 8
+        spacing: Md3.spS
 
         Repeater {
             model: [
@@ -103,7 +102,6 @@ ColumnLayout {
 
             delegate: Md3Chip {
                 required property var modelData
-                md3: sec.md3
                 text: modelData.t
                 selected: sec.filterMode === modelData.k
                 onClicked: sec.filterChanged(modelData.k)
@@ -114,8 +112,8 @@ ColumnLayout {
 
         Text {
             text: sec.shownDevices().length + " 台"
-            font.pixelSize: sec.md3 ? sec.md3.bodyS : 12
-            color: sec.md3 ? sec.md3.cOutline : "#79747E"
+            font.pixelSize: Md3.bodyS
+            color: Md3.cOutline
         }
     }
 
@@ -123,8 +121,8 @@ ColumnLayout {
     GridLayout {
         Layout.fillWidth: true
         columns: sec.gridColumns(sec.width)
-        columnSpacing: sec.md3 ? sec.md3.spM : 16
-        rowSpacing: sec.md3 ? sec.md3.spM : 16
+        columnSpacing: Md3.spM
+        rowSpacing: Md3.spM
 
         Repeater {
             model: sec.shownDevices()
@@ -133,7 +131,6 @@ ColumnLayout {
                 required property var modelData
                 Layout.fillWidth: true
                 Layout.preferredHeight: 168
-                md3: sec.md3
                 uid: modelData.uid || ""
                 deviceName: modelData.name || ""
                 online: modelData.online !== false
@@ -151,7 +148,7 @@ ColumnLayout {
         text: sec.filterMode === "all"
               ? "这个班还没有设备"
               : ("当前筛选（" + (sec.filterMode === "online" ? "在线" : "离线") + "）下没有设备")
-        font.pixelSize: sec.md3 ? sec.md3.bodyS : 12
-        color: sec.md3 ? sec.md3.cOutline : "#79747E"
+        font.pixelSize: Md3.bodyS
+        color: Md3.cOutline
     }
 }

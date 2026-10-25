@@ -16,7 +16,6 @@ Item {
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
     //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
-    readonly property var md3: Md3
     property var switches: [
         { k: "语音对讲接收", s: "关闭后听不到管理端语音，课堂安静模式", on: true },
         { k: "摄像头允许",   s: "关闭后监控画面不可用（管理端显示离线）", on: true },
@@ -25,28 +24,27 @@ Item {
         { k: "桌面被监控提示", s: "关闭后不显示「正在被监控」角标", on: false }
     ]
 
-    Rectangle { anchors.fill: parent; color: md3.cContLowest }
+    Rectangle { anchors.fill: parent; color: Md3.cContLowest }
     Rectangle {
         anchors.fill: parent
         anchors.margins: 16
-        radius: md3.rXL
-        color: md3.cContLow
+        radius: Md3.rXL
+        color: Md3.cContLow
         Column {
             anchors.left: parent.left; anchors.right: parent.right
             anchors.top: parent.top; anchors.margins: 28
             spacing: 18
 
-            Text { text: "本机设置"; font.pixelSize: md3.headlineS; font.weight: Font.Medium; color: md3.cOnSurface }
+            Text { text: "本机设置"; font.pixelSize: Md3.headlineS; font.weight: Font.Medium; color: Md3.cOnSurface }
             Text {
                 width: parent.width
                 text: "这些开关只影响本机。关闭的项目云端不可见——是否需要「云端可强制打开」的策略，待学校确认。"
                 wrapMode: Text.Wrap
-                font.pixelSize: md3.bodyS; color: md3.cOnSurfaceVar
+                font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar
             }
 
             // 开关组（filled 卡 + Md3SwitchRow）
             Md3Card {
-                md3: root.md3
                 variant: "filled"
                 width: parent.width
                 Column {
@@ -58,7 +56,6 @@ Item {
                             required property var modelData
                             width: parent.width
                             Md3SwitchRow {
-                                md3: root.md3
                                 width: parent.width
                                 text: modelData.k
                                 supporting: modelData.s
@@ -67,7 +64,7 @@ Item {
                             }
                             Rectangle {
                                 width: parent.width; height: 1
-                                color: md3.cOutlineVar
+                                color: Md3.cOutlineVar
                                 visible: index < root.switches.length - 1
                             }
                         }
@@ -79,8 +76,8 @@ Item {
             Row {
                 anchors.right: parent.right
                 spacing: 12
-                Md3Btn { md3: root.md3; text: "恢复默认"; variant: "text" }
-                Md3Btn { md3: root.md3; text: "保存"; variant: "filled"; onClicked: {} }
+                Md3Btn { text: "恢复默认"; variant: "text" }
+                Md3Btn { text: "保存"; variant: "filled"; onClicked: {} }
             }
         }
     }

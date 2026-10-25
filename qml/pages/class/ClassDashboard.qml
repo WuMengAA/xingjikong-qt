@@ -8,17 +8,15 @@
 //     subscribeClass（新班级域），两套机制并存到集控页迁移完成；
 //   · 选中设备：host.pickDevice(uid,0,0)（宿主唯一选择路径，currentUid + picked
 //     双写；危险动作由宿主按 currentUid 快照下发，不会发错机器）。
-// ── pending（订阅中）── 本地过渡态：activateClass 置 true；subscribedChanged /
-//   classError / subscribeFailed 任一到达置 false（不探 m_pendingCode，用信号收口）。
-// ── 竖屏（宽<高）── 三栏竖排：身份 → 中栏 → 动作 → 时间线，中段以下进 Flickable。
-// ── 去集控页 ── openControlFn 由外壳注入（切 control section）；未注入回落旧壳 goPage(1)。
-// ── 展板全屏 ── boardMode ⇒ 隐藏左右栏、中栏独占（入口在展板顶栏按钮）。
+// ── pending ── activateClass 置 true；subscribedChanged/classError/subscribeFailed 收口置 false。
+// ── 竖屏：三栏竖排，中段以下进 Flickable；去集控页走 openControlFn（未注入回落 goPage(1)）。
+// ── 展板 ── 全屏=boardMode 隐藏左右栏；「发布到展板」与右栏共用同一个页级弹窗。
 import QtQuick
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: dash
 
-    property var md3: ({})
     property var host: null      // ctx.window
     property var cs: null        // ClassService
     property var devices: []     // backend.devices（动作面板算本班在线名单用）
@@ -96,7 +94,7 @@ Item {
     Row {
         anchors.fill: parent
         visible: !dash.portrait
-        spacing: dash.boardMode ? 0 : (dash.md3 ? dash.md3.spM : 16)
+        spacing: dash.boardMode ? 0 : (Md3.spM)
 
         // 左：身份与订阅态（260→240：给中栏让 20px，见 narrow 注释）
         ClassIdentityPane {
@@ -104,7 +102,6 @@ Item {
             visible: !dash.boardMode
             width: dash.boardMode ? 0 : 240
             height: parent.height
-            md3: dash.md3
             cs: dash.cs
             pending: dash.pending
             onUnsubscribeRequested: if (dash.cs) dash.cs.unsubscribeClass()
@@ -115,9 +112,8 @@ Item {
             id: midPane
             width: dash.boardMode
                    ? dash.width
-                   : Math.max(240, dash.width - 240 - 300 - (dash.md3 ? dash.md3.spM : 16) * 2)
+                   : Math.max(240, dash.width - 240 - 300 - (Md3.spM) * 2)
             height: parent.height
-            md3: dash.md3
             deviceModel: dash.devModel
             evModel: dash.evModel
             subscribed: (dash.cs && dash.cs.subscribed === true)
@@ -130,6 +126,7 @@ Item {
             onTabActivated: function (v) { dash.boardTab = v }
             onDeviceClicked: function (uid) { dash.onTileClicked(uid) }
             onBoardExpandToggled: dash.boardMode = !dash.boardMode
+            onPublishRequested: publishDlg.open()
         }
 
         // 右：管理 + 本班设备管控 + 课堂工具 + 时间线（2026-10-25 抽件 ClassRightRail，
@@ -139,7 +136,6 @@ Item {
             visible: !dash.boardMode
             width: dash.boardMode ? 0 : 300
             height: parent.height
-            md3: dash.md3
             cs: dash.cs
             host: dash.host
             devices: dash.devices
@@ -158,7 +154,6 @@ Item {
     ClassPortraitStack {
         anchors.fill: parent
         visible: dash.portrait
-        md3: dash.md3
         cs: dash.cs
         host: dash.host
         devices: dash.devices
@@ -186,7 +181,6 @@ Item {
     // 模态塞进去会被裁切/跟着滚。盖整页才是对的，入口仍在右栏「班级管理」。
     ClassPublishDialog {
         id: publishDlg
-        md3: dash.md3
         cs: dash.cs
         toastFn: dash.toastFn
     }
@@ -194,7 +188,6 @@ Item {
     // ══ 新建班级（2026-10-25）：页级模态，与发布中心同层 ══
     ClassCreateDialog {
         id: createDlg
-        md3: dash.md3
         toastFn: dash.toastFn
     }
 }

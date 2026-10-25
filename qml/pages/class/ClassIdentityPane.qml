@@ -9,11 +9,11 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshPill
 import "../../island"              // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: pane
 
-    property var md3: ({})
     property var cs: null        // ClassService（backend.classService）
     property bool pending: false  // 已发订阅请求、还没回执（宿主过渡态）
 
@@ -32,7 +32,6 @@ Item {
 
     FreshCard {
         anchors.fill: parent
-        md3: pane.md3
 
         Column {
             id: contentCol
@@ -46,16 +45,15 @@ Item {
 
                 Text {
                     text: pane.nameText !== "" ? pane.nameText : "未选择班级"
-                    font.pixelSize: md3.titleM
+                    font.pixelSize: Md3.titleM
                     font.weight: Font.Medium
-                    color: md3.frInk || "#111827"
+                    color: Md3.frInk || "#111827"
                     elide: Text.ElideRight
                     width: parent.width - 80
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 FreshPill {
                     anchors.verticalCenter: parent.verticalCenter
-                    md3: pane.md3
                     text: pane.subbed ? "已订阅" : (pane.pending ? "连接中" : "未订阅")
                     tone: pane.subbed ? "ok" : (pane.pending ? "wait" : "off")
                 }
@@ -66,9 +64,9 @@ Item {
                 width: parent.width
                 visible: pane.codeText !== ""
                 text: "班级代码  " + pane.codeText
-                font.pixelSize: md3.bodyS
+                font.pixelSize: Md3.bodyS
                 font.family: "monospace"
-                color: md3.frInk2 || "#6B7280"
+                color: Md3.frInk2 || "#6B7280"
                 elide: Text.ElideRight
             }
 
@@ -79,14 +77,14 @@ Item {
 
                 Text {
                     text: pane.onlineN
-                    font.pixelSize: md3.headlineS
+                    font.pixelSize: Md3.headlineS
                     font.weight: Font.Medium
-                    color: md3.frGreen || "#22C55E"
+                    color: Md3.frGreen || "#22C55E"
                 }
                 Text {
                     text: "台在线 · 共 " + pane.deviceN + " 台"
-                    font.pixelSize: md3.body13
-                    color: md3.frInk2 || "#6B7280"
+                    font.pixelSize: Md3.body13
+                    color: Md3.frInk2 || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -96,8 +94,8 @@ Item {
                 width: parent.width
                 visible: pane.errText !== ""
                 height: errRow.implicitHeight + 20
-                radius: md3.frRS || 12
-                color: md3.frDangerCont || "#FEE2E2"
+                radius: Md3.frRIn
+                color: Md3.frDangerSoft
 
                 Row {
                     id: errRow
@@ -108,13 +106,13 @@ Item {
                     SvgIcon {
                         name: "triangle-alert"
                         px: 16
-                        tint: md3.frDanger || "#EF4444"
+                        tint: Md3.frDanger || "#EF4444"
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: pane.errText
-                        font.pixelSize: md3.body13
-                        color: md3.frOnDangerCont || "#7F1D1D"
+                        font.pixelSize: Md3.body13
+                        color: Md3.cOnErrorCont
                         wrapMode: Text.WordWrap
                         width: parent.width - 24
                         anchors.verticalCenter: parent.verticalCenter
@@ -124,7 +122,6 @@ Item {
 
             // ── 退订（仅已订阅可点；未订阅不画）──
             FreshBtn {
-                md3: pane.md3
                 text: "取消订阅"
                 variant: "ghost"
                 enabled: pane.subbed

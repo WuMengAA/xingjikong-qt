@@ -8,6 +8,7 @@ import "../../components"     // Btn / ToggleRow 等本端自有通用组件
 // 以「构建 + 运行」验证为准，与岛同套路。
 import "../../components/md3"
 import "../../island"         // SvgIcon（唯一真源在共享岛目录，构建期拷到 qml/island/）
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 // 控制页（整屏页 · U5「两端同 shell」A-2 第二页）
 //
@@ -89,7 +90,6 @@ Item {
             // 高 32/圆角 8、选中 secondaryContainer + ✓、未选 outline 描边 + 状态层。
             // 三枚 chip 一排 + 计数，是把"分段筛选"说清楚的 MD3 标准形态。
             delegate: Md3Chip {
-                md3: th
                 text: modelData.l
                 selected: (ctx.window.deviceFilter === modelData.k)
                 onClicked: ctx.window.deviceFilter = modelData.k

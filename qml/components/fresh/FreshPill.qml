@@ -6,15 +6,15 @@
 //   off  灰软底 + 灰字 —— 未订阅 / 离线
 // 高 24、全圆、字 labelM(12)。左侧可选 8px 状态点（调用方传 dot 色）。
 import QtQuick
+import "../theme"   // Md3 令牌（pragma Singleton）
 
 Rectangle {
     id: root
 
-    property var md3: ({})
     property string text: ""
     /** ok / wait / off（默认 off；颜色解析集中在此，消费方不持色值）。 */
     property string tone: "off"
-    /** 状态点颜色（空 = 不画点；通常传 md3.frGreen / md3.cWarn / md3.frOffDot）。 */
+    /** 状态点颜色（空 = 不画点；通常传 Md3.frGreen / Md3.cWarn / Md3.frOffDot）。 */
     property color dotColor: "transparent"
     /** 是否可点（静态状态 pill 不挂 MouseArea —— 点了没反馈比不能点更糟）。 */
     property bool interactive: false
@@ -23,18 +23,18 @@ Rectangle {
 
     implicitWidth: pillRow.implicitWidth + 20
     implicitHeight: 24
-    radius: md3.frRPill || 999
+    radius: Md3.frRPill || 999
     color: root.bgColor()
 
     function bgColor() {
-        if (tone === "ok") return md3.frGreenSoft || "#E9FBF0"
+        if (tone === "ok") return Md3.frGreenSoft || "#E9FBF0"
         if (tone === "wait") return "#F5E6C8"   // 黄软底（MD3 无 warn 容器令牌，字值随 fr 组）
-        return md3.frLine || "#EEF0F3"
+        return Md3.frLine || "#EEF0F3"
     }
     function fgColor() {
-        if (tone === "ok") return md3.frGreenD || "#16A34A"
-        if (tone === "wait") return md3.cWarn || "#A87C0A"
-        return md3.frInk2 || "#6B7280"
+        if (tone === "ok") return Md3.frGreenD || "#16A34A"
+        if (tone === "wait") return Md3.cWarn || "#A87C0A"
+        return Md3.frInk2 || "#6B7280"
     }
 
     Row {
@@ -52,7 +52,7 @@ Rectangle {
         }
         Text {
             text: root.text
-            font.pixelSize: md3.labelM || 12
+            font.pixelSize: Md3.labelM || 12
             font.weight: Font.Medium
             color: root.fgColor()
             anchors.verticalCenter: parent.verticalCenter

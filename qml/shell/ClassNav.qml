@@ -14,11 +14,11 @@
 // 班级切换走 TopBar 的「全部班级」下拉。
 import QtQuick
 import QtQuick.Layouts
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: nav
 
-    property var md3: ({})
     property var ctx: null
     property var classes: []          // backend.classes [{code,name}]
     property var devices: []          // backend.devices（算每班在线数）
@@ -32,7 +32,7 @@ Item {
     signal classicRequested()
 
     readonly property int navWidth: 240
-    readonly property int padX: md3 ? md3.spM : 16
+    readonly property int padX: Md3.spM
 
     implicitWidth: navWidth
     Layout.fillHeight: true
@@ -58,7 +58,7 @@ Item {
         return { on: on, all: all }
     }
 
-    Rectangle { anchors.fill: parent; color: md3 ? md3.cSurfaceVar : "#E7E0EC" }
+    Rectangle { anchors.fill: parent; color: Md3.cSurfaceVar}
 
     // 右缘发丝线（与主内容区分界）
     Rectangle {
@@ -66,7 +66,7 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
-        color: md3 ? md3.cOutlineVar : "#CAC4D0"
+        color: Md3.cOutlineVar
         opacity: 0.5
     }
 
@@ -84,9 +84,9 @@ Item {
                 anchors.leftMargin: nav.padX
                 anchors.verticalCenter: parent.verticalCenter
                 text: "星集控"
-                font.pixelSize: md3 ? md3.titleM : 16
+                font.pixelSize: Md3.titleM
                 font.weight: Font.Medium
-                color: md3 ? md3.cOnSurfaceVar : "#49454F"
+                color: Md3.cOnSurfaceVar
             }
         }
 
@@ -95,8 +95,8 @@ Item {
             Layout.leftMargin: nav.padX
             Layout.topMargin: 8
             text: "班级"
-            font.pixelSize: md3 ? md3.labelS : 11
-            color: md3 ? md3.cOutline : "#79747E"
+            font.pixelSize: Md3.labelS
+            color: Md3.cOutline
         }
 
         // 班级空态放在 ListView **之前**：fillHeight 的列表会把后置文案推到页面
@@ -108,9 +108,9 @@ Item {
             Layout.leftMargin: nav.padX
             visible: classList.count === 0
             text: "还没有班级\n去「班级工作台」新建"
-            font.pixelSize: md3 ? md3.bodyS : 12
+            font.pixelSize: Md3.bodyS
             wrapMode: Text.WordWrap
-            color: md3 ? md3.cOutline : "#79747E"
+            color: Md3.cOutline
         }
 
         ListView {
@@ -125,7 +125,6 @@ Item {
             delegate: ClassNavClassRow {
                 required property var modelData
                 width: classList.width
-                md3: nav.md3
                 code: modelData.code || ""
                 name: modelData.name || ""
                 onCount: nav.countOf(modelData.code || "").on
@@ -141,7 +140,7 @@ Item {
             Layout.topMargin: 8
             Layout.bottomMargin: 4
             height: 1
-            color: md3 ? md3.cOutlineVar : "#CAC4D0"
+            color: Md3.cOutlineVar
             opacity: 0.6
         }
 
@@ -150,7 +149,6 @@ Item {
             delegate: ClassNavSysRow {
                 required property var modelData
                 Layout.fillWidth: true
-                md3: nav.md3
                 icon: modelData.icon
                 label: modelData.label
                 active: nav.section === modelData.key
@@ -168,8 +166,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 // lucide 无 arrow-left（原 Sidebar 那里一直画成空白），用「‹」汉字位形更稳
                 text: "‹  返回经典界面"
-                font.pixelSize: md3 ? md3.bodyM : 14
-                color: md3 ? md3.cOnSurfaceVar : "#49454F"
+                font.pixelSize: Md3.bodyM
+                color: Md3.cOnSurfaceVar
             }
             MouseArea {
                 anchors.fill: parent

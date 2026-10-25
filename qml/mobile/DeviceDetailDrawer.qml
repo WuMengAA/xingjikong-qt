@@ -5,6 +5,7 @@
 import QtQuick
 import QtQuick.Controls
 import "../components/md3"
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Drawer {
     id: drawer
@@ -15,8 +16,8 @@ Drawer {
     dragMargin: 0
     // 只圆顶角：整圆角 + 同色矩形盖住下半
     background: Rectangle {
-        color: drawer.md3.cContLow
-        radius: drawer.md3.rXL
+        color: Md3.cContLow
+        radius: Md3.rXL
         Rectangle {
             width: parent.width
             height: parent.height / 2
@@ -25,7 +26,6 @@ Drawer {
         }
     }
 
-    property var md3: ({})
     property var dev: ({})       // 当前设备（Main 打开时注入）
     signal shutdownRequested(string uid)
     signal toast(string msg)
@@ -49,7 +49,7 @@ Drawer {
             Rectangle {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: 32; height: 4; radius: 2
-                color: drawer.md3.cOutlineVar
+                color: Md3.cOutlineVar
             }
 
             // 设备名 + 在线态
@@ -60,26 +60,25 @@ Drawer {
                 Rectangle {
                     width: 12; height: 12; radius: 6
                     anchors.verticalCenter: parent.verticalCenter
-                    color: (drawer.dev.online !== false) ? drawer.md3.cOk : drawer.md3.cError
+                    color: (drawer.dev.online !== false) ? Md3.cOk : Md3.cError
                 }
                 Text {
                     text: (drawer.dev.name && drawer.dev.name !== "") ? drawer.dev.name : drawer.dev.uid
-                    color: drawer.md3.cOnSurface
-                    font.pixelSize: drawer.md3.headlineS
+                    color: Md3.cOnSurface
+                    font.pixelSize: Md3.headlineS
                     font.weight: Font.Medium
                 }
             }
             Text {
                 text: "UID " + drawer.dev.uid + (drawer.dev.version ? "  ·  v" + drawer.dev.version : "")
-                color: drawer.md3.cOnSurfaceVar
-                font.pixelSize: drawer.md3.bodyS
+                color: Md3.cOnSurfaceVar
+                font.pixelSize: Md3.bodyS
                 width: parent.width
                 wrapMode: Text.Wrap
             }
 
             // 操作列表（MD3 列表项：leading 容器 + trailing 箭头）
             Md3ListItem {
-                md3: drawer.md3
                 width: parent.width
                 icon: "🔒"
                 headline: "锁屏"
@@ -87,7 +86,6 @@ Drawer {
                 onClicked: { backend.sendAction("lock", {}); drawer.close(); drawer.toast("已下发锁屏 → " + drawer.dev.uid) }
             }
             Md3ListItem {
-                md3: drawer.md3
                 width: parent.width
                 icon: "🔄"
                 headline: "重启"
@@ -95,7 +93,6 @@ Drawer {
                 onClicked: { backend.sendAction("restart", {}); drawer.close(); drawer.toast("已下发重启 → " + drawer.dev.uid) }
             }
             Md3ListItem {
-                md3: drawer.md3
                 width: parent.width
                 icon: "📹"
                 headline: "停止画面（关闭摄像头推流）"
@@ -104,7 +101,6 @@ Drawer {
             }
             // ── 传文件（#5）──
             Md3ListItem {
-                md3: drawer.md3
                 width: parent.width
                 icon: "📄"
                 headline: "文件分发"
@@ -118,7 +114,6 @@ Drawer {
 
             // 关机（MD3 filled error 全宽按钮）
             Md3Btn {
-                md3: drawer.md3
                 width: parent.width
                 text: "关机"
                 variant: "error"

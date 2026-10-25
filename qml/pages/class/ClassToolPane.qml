@@ -13,10 +13,10 @@
 //    那是真实的本地状态，界面如实显示，不假装成功——所以这里不放"已开启"的常亮态。
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: pane
-    property var md3: ({})
     property var host: null
     property var cs: null
     property var devices: []
@@ -59,7 +59,6 @@ Item {
 
     FreshCard {
         anchors.fill: parent
-        md3: pane.md3
 
         Column {
             id: bodyCol
@@ -71,15 +70,15 @@ Item {
                 spacing: 6
                 Text {
                     text: "课堂工具"
-                    font.pixelSize: md3.body13
+                    font.pixelSize: Md3.body13
                     font.weight: Font.Medium
-                    color: md3.frInk2 || "#6B7280"
+                    color: Md3.frInk2 || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "对全班在线设备生效"
-                    font.pixelSize: md3.rXS || 11
-                    color: md3.frOffDot || "#9CA3AF"
+                    font.pixelSize: Md3.rXS || 11
+                    color: Md3.frOffDot || "#9CA3AF"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -89,7 +88,6 @@ Item {
                 width: parent.width
                 spacing: 8
                 FreshBtn {
-                    md3: pane.md3
                     text: "静音"
                     icon: "ban"
                     variant: "danger"
@@ -98,7 +96,6 @@ Item {
                     onClicked: pane.runBulk("pick-volume-mute")
                 }
                 FreshBtn {
-                    md3: pane.md3
                     text: "30%"
                     variant: "tonal"
                     enabled: pane.subbed
@@ -106,7 +103,6 @@ Item {
                     onClicked: pane.runBulk("pick-volume-low")
                 }
                 FreshBtn {
-                    md3: pane.md3
                     text: "80%"
                     variant: "tonal"
                     enabled: pane.subbed
@@ -120,7 +116,6 @@ Item {
                 width: parent.width
                 spacing: 8
                 FreshBtn {
-                    md3: pane.md3
                     text: "开启专注"
                     icon: "clock"
                     variant: "tonal"
@@ -129,7 +124,6 @@ Item {
                     onClicked: pane.runBulk("pick-study-on")
                 }
                 FreshBtn {
-                    md3: pane.md3
                     text: "结束专注"
                     variant: "outlined"
                     enabled: pane.subbed
@@ -143,7 +137,6 @@ Item {
                 width: parent.width
                 spacing: 8
                 FreshBtn {
-                    md3: pane.md3
                     text: "开启监测"
                     variant: "tonal"
                     enabled: pane.subbed
@@ -151,7 +144,6 @@ Item {
                     onClicked: pane.runBulk("pick-noise-on")
                 }
                 FreshBtn {
-                    md3: pane.md3
                     text: "结束监测"
                     variant: "outlined"
                     enabled: pane.subbed
@@ -163,8 +155,8 @@ Item {
             Text {
                 width: parent.width
                 text: "学生在设备本地关闭噪音监测后，相关指令会显示未执行"
-                font.pixelSize: md3.rXS || 11
-                color: md3.frOffDot || "#9CA3AF"
+                font.pixelSize: Md3.rXS || 11
+                color: Md3.frOffDot || "#9CA3AF"
                 wrapMode: Text.WordWrap
             }
         }

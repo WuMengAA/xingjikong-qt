@@ -9,6 +9,7 @@ import QtQuick.Layouts
 
 import "../../components"
 import "../../components/md3"
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -27,7 +28,6 @@ SettingsCard {
 
         Md3SwitchRow {
             width: parent.width
-            md3: card.md3
             text: "操作完成时提示"
             supporting: "设备上真的做完了才说一句（云端收下不算）"
             checked: backend.notifyOnDone
@@ -35,7 +35,6 @@ SettingsCard {
         }
         Md3SwitchRow {
             width: parent.width
-            md3: card.md3
             text: "设备离线时提醒"
             supporting: "与云端断开时弹一条（后台也能看见）"
             checked: backend.notifyOnOffline
@@ -50,7 +49,7 @@ SettingsCard {
 
         Text {
             text: "外观"
-            color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
+            color: Md3.cOnSurfaceVar
             font.pixelSize: 12
         }
 
@@ -67,21 +66,21 @@ SettingsCard {
                 delegate: Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 34
-                    radius: card.md3 ? card.md3.rCtrl : 10
+                    radius: Md3.rCtrl
                     color: (backend.themeMode === modelData.m)
-                           ? (card.md3 ? card.md3.cSecondaryCont : "#E8DEF8")
+                           ? (Md3.cSecondaryCont)
                            : "transparent"
                     border.color: (backend.themeMode === modelData.m)
-                                  ? (card.md3 ? card.md3.cPrimary : "#6750A4")
-                                  : (card.md3 ? card.md3.cOutlineVar : "#CAC4D0")
+                                  ? (Md3.cPrimary)
+                                  : (Md3.cOutlineVar)
                     border.width: 1
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.k
                         color: (backend.themeMode === modelData.m)
-                               ? (card.md3 ? card.md3.cOnSecondaryCont : "#1D192B")
-                               : (card.md3 ? card.md3.cOnSurfaceVar : "#49454F")
+                               ? (Md3.cOnSecondaryCont)
+                               : (Md3.cOnSurfaceVar)
                         font.pixelSize: 13
                         font.weight: (backend.themeMode === modelData.m) ? Font.Medium : Font.Normal
                     }
@@ -103,7 +102,6 @@ SettingsCard {
 
         Md3SwitchRow {
             width: parent.width
-            md3: card.md3
             text: "开机自动启动"
             supporting: "登录 Windows 后自动打开（免管理员）"
             checked: backend.autoStart
@@ -111,7 +109,6 @@ SettingsCard {
         }
         Md3SwitchRow {
             width: parent.width
-            md3: card.md3
             text: "桌面快捷方式"
             supporting: "在桌面放一枚「星集控管理端」图标"
             checked: backend.desktopShortcut

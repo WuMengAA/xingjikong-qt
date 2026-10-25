@@ -1556,7 +1556,6 @@ ApplicationWindow {
                 AccountLoginCard {
                     visible: welcomeLayer.step === 1
                     width: parent.width
-                    md3: Md3
                 }
 
                 // 步骤 2：启动方式（2026-10-09 · 用户清单第②条：引导里就能设自启/快捷）

@@ -15,24 +15,23 @@ Item {
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
     //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
-    readonly property var md3: Md3
     property string severity: "inform"    // urgent | inform | remind
     property int remainSec: 8
     property string title: "课间操音乐即将开始"
     property string body: "请各班同学停止当前操作，回到座位准备。广播站将于 09:55 播放第三套广播体操。"
     property string source: "广播站 · 教务处"
 
-    readonly property color sevColor: root.severity === "urgent" ? md3.cError
-                                     : (root.severity === "remind" ? md3.cOk : md3.cWarn)
+    readonly property color sevColor: root.severity === "urgent" ? Md3.cError
+                                     : (root.severity === "remind" ? Md3.cOk : Md3.cWarn)
 
-    Rectangle { anchors.fill: parent; color: md3.cContLowest }
+    Rectangle { anchors.fill: parent; color: Md3.cContLowest }
 
     // 全屏卡（severity 淡染 + 左侧色条）
     Rectangle {
         anchors.centerIn: parent
         width: 880; height: 480
-        radius: md3.rXL
-        color: md3.cContLow
+        radius: Md3.rXL
+        color: Md3.cContLow
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
@@ -65,8 +64,8 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.title
-                    font.pixelSize: md3.headlineM; font.weight: Font.Medium
-                    color: md3.cOnSurface
+                    font.pixelSize: Md3.headlineM; font.weight: Font.Medium
+                    color: Md3.cOnSurface
                 }
             }
 
@@ -75,18 +74,18 @@ Item {
                 width: parent.width
                 text: root.body
                 wrapMode: Text.Wrap
-                font.pixelSize: md3.bodyL
-                color: md3.cOnSurfaceVar
+                font.pixelSize: Md3.bodyL
+                color: Md3.cOnSurfaceVar
             }
 
             // 来源
             Row {
                 spacing: 8
-                Text { text: "来自："; font.pixelSize: md3.bodyS; color: md3.cOutline; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: "来自："; font.pixelSize: Md3.bodyS; color: Md3.cOutline; anchors.verticalCenter: parent.verticalCenter }
                 Rectangle {
                     width: srcTxt.implicitWidth + 24; height: 28; radius: 14
-                    color: md3.cSecondaryCont
-                    Text { id: srcTxt; anchors.centerIn: parent; text: root.source; font.pixelSize: md3.labelM; font.weight: Font.Medium; color: md3.cOnSecondaryCont }
+                    color: Md3.cSecondaryCont
+                    Text { id: srcTxt; anchors.centerIn: parent; text: root.source; font.pixelSize: Md3.labelM; font.weight: Font.Medium; color: Md3.cOnSecondaryCont }
                 }
             }
         }
@@ -99,7 +98,7 @@ Item {
             spacing: 8
             Rectangle {
                 width: parent.width; height: 6; radius: 3
-                color: md3.cContHighest
+                color: Md3.cContHighest
                 Rectangle {
                     width: parent.width * 0.62
                     height: parent.height; radius: 3
@@ -108,7 +107,7 @@ Item {
             }
             Text {
                 text: root.remainSec + " 秒后自动关闭"
-                font.pixelSize: md3.labelM; color: md3.cOnSurfaceVar
+                font.pixelSize: Md3.labelM; color: Md3.cOnSurfaceVar
             }
         }
 
@@ -119,7 +118,6 @@ Item {
             anchors.bottom: parent.bottom; anchors.bottomMargin: 32
             spacing: 12
             Md3Btn {
-                md3: root.md3
                 text: "知道了"
                 variant: "filled"
                 onClicked: {}

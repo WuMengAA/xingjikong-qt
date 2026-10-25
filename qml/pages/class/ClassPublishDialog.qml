@@ -13,11 +13,11 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
 import "../../island"               // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: dlg
 
-    property var md3: ({})
     property var cs: null            // ClassService（取当前班码/订阅态）
     property var toastFn: null       // (msg, isErr) 外壳页级 toast
     property bool opened: false
@@ -31,7 +31,7 @@ Item {
     readonly property bool canSend: dlg.subbed && !dlg.sending
                                    && (form.titleText.trim() !== "" || form.bodyText.trim() !== "")
     /** 动效时长：令牌优先，({}) 兜底 200（与 Md3Dialog 同口径）。 */
-    readonly property int animDur: (dlg.md3 && dlg.md3.durShort !== undefined) ? dlg.md3.durShort : 200
+    readonly property int animDur: (Md3 && Md3.durShort !== undefined) ? Md3.durShort : 200
 
     visible: opened
     anchors.fill: parent
@@ -93,7 +93,6 @@ Item {
         anchors.centerIn: parent
         width: Math.min(dlg.width - 48, 480)
         height: col.implicitHeight + 32
-        md3: dlg.md3
 
         Column {
             id: col
@@ -107,22 +106,22 @@ Item {
                 SvgIcon {
                     name: "monitor"
                     px: 16
-                    tint: md3.frInk2 || "#6B7280"
+                    tint: Md3.frInk2 || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "发布中心"
-                    font.pixelSize: md3.body13
+                    font.pixelSize: Md3.body13
                     font.weight: Font.Medium
-                    color: md3.frInk || "#111827"
+                    color: Md3.frInk || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Item { width: Math.max(8, parent.width - 180); height: 1 }
                 Text {
                     text: dlg.subbed ? ("当前班：" + ((dlg.cs && dlg.cs.className) ? dlg.cs.className : dlg.code))
                                      : "未订阅班级"
-                    font.pixelSize: md3.bodyS
-                    color: dlg.subbed ? (md3.frInk2 || "#6B7280") : (md3.frDanger || "#EF4444")
+                    font.pixelSize: Md3.bodyS
+                    color: dlg.subbed ? (Md3.frInk2 || "#6B7280") : (Md3.frDanger || "#EF4444")
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -130,7 +129,6 @@ Item {
             ClassPublishForm {
                 id: form
                 width: parent.width
-                md3: dlg.md3
             }
 
             // 按钮行
@@ -138,7 +136,6 @@ Item {
                 width: parent.width
                 spacing: 8
                 FreshBtn {
-                    md3: dlg.md3
                     text: dlg.sending ? "发布中…" : "发布到全班"
                     variant: "primary"
                     enabled: dlg.canSend
@@ -146,7 +143,6 @@ Item {
                     onClicked: dlg.doPublish()
                 }
                 FreshBtn {
-                    md3: dlg.md3
                     text: "取消"
                     variant: "outlined"
                     width: (parent.width - 8) / 2

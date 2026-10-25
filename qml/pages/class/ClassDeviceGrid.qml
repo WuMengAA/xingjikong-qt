@@ -13,11 +13,11 @@ import QtQuick
 import QtQuick.Controls          // ScrollBar
 import "../../components/md3"       // （Md3Card 不直接用，网格裸铺；预留令牌件）
 import "../../island"               // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: pane
 
-    property var md3: ({})
     property var model: null      // ClassDeviceModel
     property string selectedUid: ""
     property bool subscribed: false
@@ -38,7 +38,6 @@ Item {
         cacheBuffer: 200
 
         delegate: ClassDeviceTile {
-            md3: pane.md3
             width: pane.cellW
             height: 188
             uid: model.uid
@@ -64,13 +63,13 @@ Item {
         SvgIcon {
             name: "users"
             px: 40
-            tint: md3.cOutline
+            tint: Md3.cOutline
             anchors.horizontalCenter: parent.horizontalCenter
         }
         Text {
             text: "从左侧选择一个班级"
-            font.pixelSize: md3.body13
-            color: md3.cOnSurfaceVar
+            font.pixelSize: Md3.body13
+            color: Md3.cOnSurfaceVar
             anchors.horizontalCenter: parent.horizontalCenter
         }
     }
@@ -84,19 +83,19 @@ Item {
         SvgIcon {
             name: "monitor"
             px: 40
-            tint: md3.cOutline
+            tint: Md3.cOutline
             anchors.horizontalCenter: parent.horizontalCenter
         }
         Text {
             text: "这个班暂时没有设备"
-            font.pixelSize: md3.body13
-            color: md3.cOnSurfaceVar
+            font.pixelSize: Md3.body13
+            color: Md3.cOnSurfaceVar
             anchors.horizontalCenter: parent.horizontalCenter
         }
         Text {
             text: "设备加入班级后会自动出现在这里"
-            font.pixelSize: md3.bodyS
-            color: md3.cOutline
+            font.pixelSize: Md3.bodyS
+            color: Md3.cOutline
             anchors.horizontalCenter: parent.horizontalCenter
         }
     }

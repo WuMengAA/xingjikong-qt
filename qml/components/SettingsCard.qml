@@ -14,11 +14,11 @@
 //       Btn { ... }
 //   }
 import QtQuick
+import "./theme"   // Md3 令牌（pragma Singleton）
 
 Rectangle {
     id: card
 
-    property var md3: ({})
     property string title: ""
     property string subtitle: ""
     property int gap: 12
@@ -27,8 +27,8 @@ Rectangle {
     default property alias bodyData: col.data
 
     radius: 12
-    color: md3 ? md3.cContLow : "#F5F2F7"
-    border.color: md3 ? md3.cOutlineVar : "#CAC4D0"
+    color: Md3.cContLow
+    border.color: Md3.cOutlineVar
     border.width: 1
     implicitHeight: col.implicitHeight + 32
 
@@ -48,7 +48,7 @@ Rectangle {
             Text {
                 width: parent.width
                 text: card.title
-                color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
+                color: Md3.cOnSurfaceVar
                 font.pixelSize: 14
                 font.weight: Font.Medium
                 font.letterSpacing: 0.1
@@ -58,7 +58,7 @@ Rectangle {
                 visible: card.subtitle !== ""
                 wrapMode: Text.Wrap
                 text: card.subtitle
-                color: card.md3 ? card.md3.cOnSurfaceVar : "#49454F"
+                color: Md3.cOnSurfaceVar
                 font.pixelSize: 12
             }
         }

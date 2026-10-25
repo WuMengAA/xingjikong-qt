@@ -11,36 +11,36 @@
 // 投影才压得到卡身下。消费方只许传 width/height/md3/radius，不许覆写 color。
 // 内边距 16。投影两层偏移矩形近似，零依赖（不引 QtQuick.Effects，教室弱机可承受）。
 import QtQuick
+import "../theme"   // Md3 令牌（pragma Singleton）
 
 Rectangle {
     id: root
 
-    property var md3: ({})
     /** frRCard 令牌控制圆角（18）；如需覆写可在此扩展为显式属性。 */
     default property alias content: inner.data
 
     implicitWidth: 200
     implicitHeight: inner.implicitHeight + 32
 
-    radius: md3.frRCard || 18
-    color: md3.frCard || "#FFFFFF"
+    radius: Md3.frRCard || 18
+    color: Md3.frCard || "#FFFFFF"
     border.width: 0
 
     // ── 两层柔和投影（z:0 压在卡面下）──
     Rectangle {
         anchors.fill: parent
-        anchors.topMargin: (md3.frShadowY || 6)
+        anchors.topMargin: (Md3.frShadowY || 6)
         radius: root.radius
-        color: md3.frShadow || "#101828"
-        opacity: (md3.frShadowA === undefined ? 0.04 : md3.frShadowA)
+        color: Md3.frShadow || "#101828"
+        opacity: (Md3.frShadowA === undefined ? 0.04 : Md3.frShadowA)
         z: 0
     }
     Rectangle {
         anchors.fill: parent
         anchors.topMargin: 2
         radius: root.radius
-        color: md3.frShadow || "#101828"
-        opacity: (md3.frShadowA === undefined ? 0.04 : md3.frShadowA) * 0.8
+        color: Md3.frShadow || "#101828"
+        opacity: (Md3.frShadowA === undefined ? 0.04 : Md3.frShadowA) * 0.8
         z: 0
     }
 

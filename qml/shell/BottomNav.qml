@@ -14,11 +14,11 @@
 import QtQuick
 import QtQuick.Layouts
 import "../island"          // SvgIcon（lucide 图标名，禁 emoji）
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: root
 
-    property var md3: ({})
     /** 菜单项：[{ key, icon, label }]，与 Sidebar 同一份（宿主 shell.navItems）。 */
     property var items: []
     /** 当前选中的 key。 */
@@ -32,7 +32,7 @@ Item {
     // 底色与横屏侧栏同源（surfaceContainer 一档），保证两种模式"同一块板"
     Rectangle {
         anchors.fill: parent
-        color: root.md3 ? root.md3.cCont : "#F3EDF7"
+        color: Md3.cCont
     }
     // 顶部发丝线（与 TopBar 底部那条同口径，弱分隔不抢画）
     Rectangle {
@@ -40,7 +40,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         height: 1
-        color: root.md3 ? root.md3.cOutlineVar : "#CAC4D0"
+        color: Md3.cOutlineVar
         opacity: 0.5
     }
 
@@ -64,14 +64,14 @@ Item {
                     width: 64
                     height: 32
                     radius: 16
-                    color: on ? (root.md3 ? root.md3.cSecondaryCont : "#E8DEF8") : "transparent"
-                    Behavior on color { ColorAnimation { duration: root.md3 ? root.md3.durShort : 150 } }
+                    color: on ? (Md3.cSecondaryCont) : "transparent"
+                    Behavior on color { ColorAnimation { duration: Md3.durShort} }
                     SvgIcon {
                         anchors.centerIn: parent
                         name: modelData.icon
                         px: 20
-                        tint: on ? (root.md3 ? root.md3.cOnSecondaryCont : "#1D192B")
-                                : (root.md3 ? root.md3.cOnSurfaceVar : "#49454F")
+                        tint: on ? (Md3.cOnSecondaryCont)
+                                : (Md3.cOnSurfaceVar)
                     }
                 }
                 Text {
@@ -79,10 +79,10 @@ Item {
                     anchors.top: parent.top
                     anchors.topMargin: 48
                     text: modelData.label
-                    font.pixelSize: root.md3 ? root.md3.labelM : 12
+                    font.pixelSize: Md3.labelM
                     font.weight: Font.Medium
-                    color: on ? (root.md3 ? root.md3.cOnSurface : "#1D1B20")
-                            : (root.md3 ? root.md3.cOnSurfaceVar : "#49454F")
+                    color: on ? (Md3.cOnSurface)
+                            : (Md3.cOnSurfaceVar)
                 }
                 MouseArea {
                     anchors.fill: parent

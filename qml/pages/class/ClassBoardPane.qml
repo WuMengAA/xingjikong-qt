@@ -1,21 +1,22 @@
-// 班级工作台 · 中栏「班级展板」—— 真·常亮展示视图（2026-10-25 重做）
+// 班级工作台 · 中栏「班级展板」—— 真·常亮展示视图（2026-10-25 重做 + 功能补全）
 //
-// 之前这里是一张「规划中」说明卡：用户点中栏「展板」段什么都看不到，
-// 反映为「按钮按了没反应」。现在做成可用的**旁观视图**（只展示、不操作）：
-//   · 主区：本班设备实时画面（本件自带只读网格：无 MouseArea、不选中、不下发）
-//   · 右区：班级动态（复用 ClassTimelinePane；最新在上）
-//   · 顶栏：班名 + 实时时钟 + 「全屏展示 / 退出展示」（宿主控制页内展开）
+// 这里曾经是一张「规划中」说明卡：点中栏「展板」段什么都看不到，用户报「按钮按了
+// 没反应」。现在是有内容、能操作的旁观视图：
+//   · 主区：已发布内容（ClassBoardNoticePane：通知/作业卡，多条自动轮播、圆点可跳）
+//   · 右区：本班设备实时画面（只读网格：无 MouseArea、不选中、不下发）
+//   · 顶栏：班名 + 实时时钟 + 「发布到展板」+「全屏展示 / 退出展示」
 //
-// 为什么自带网格而不复用 ClassDeviceGrid：那件带"点了选中"的交互语义（手型光标
-// + hover + 选中描边），展板是给大屏看的、不该能点 —— 复用会再次制造"点了没反应"。
+// 为什么自带网格而不复用 ClassDeviceGrid：那件带"点了选中"的交互语义（手型 + hover
+// + 选中描边），展板是给大屏看的、不该能点 —— 复用会再次制造"点了没反应"。
+// 「发布到展板」不是装饰：它把页级发布弹窗打开（真发请求，落到本班设备 + 事件流）。
 import QtQuick
-import "../../island"           // SvgIcon
+import "../../island"           // SvgIcon（FreshBtn 由 ClassBoardNoticePane 之外的子件自带）
 import "../../components/fresh" // FreshBtn
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: pane
 
-    property var md3: ({})
     property var deviceModel: null    // ClassDeviceModel
     property var evModel: null        // ClassEventModel
     property bool subscribed: false
@@ -26,6 +27,16 @@ Item {
 
     /** 请求宿主切换页内全屏（展开 / 收起）。 */
     signal toggleExpanded()
+    /** 请求宿主打开发布中心（页级模态，宿主持有）。 */
+    signal publishRequested()
+
+    /** 已发布内容（最新在前）。显式依赖 revision：事件增删都要重算 —— 只绑 count 会
+     *  在"快照重置且条数不变"时漏更新。 */
+    readonly property var notices: {
+        if (!pane.evModel) return []
+        var dep = pane.evModel.revision   // eslint-disable-line no-unused-vars
+        return pane.evModel.recentOfKind("publish", 12)
+    }
 
     // ── 顶部时钟：只展示、不参与业务；15s 走一次，跨分钟即更新 ──
     property string clockText: "--:--"
@@ -37,14 +48,15 @@ Item {
     Component.onCompleted: pane.tickClock()
     Timer { interval: 15000; running: true; repeat: true; onTriggered: pane.tickClock() }
 
-    /** 右区事件栏只在够宽时出现（窄栏先保设备画面）。 */
-    readonly property bool showEvents: pane.width >= 560
+    /** 窄栏只保内容（设备画面是附加信息，不够宽就不挤）。 */
+    readonly property bool showDevices: pane.width >= 620
+    readonly property int devicePaneWidth: 232
 
     Column {
         anchors.fill: parent
         spacing: 12
 
-        // ── 顶栏：标题 + 班名 | 时钟 + 全屏 ──
+        // ── 顶栏：标题 + 班名 | 时钟 + 发布 + 全屏 ──
         Item {
             id: head
             width: parent.width
@@ -58,24 +70,24 @@ Item {
                 SvgIcon {
                     name: "tv"
                     px: 18
-                    tint: md3.frGreen || "#22C55E"
+                    tint: Md3.frGreen || "#22C55E"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "班级展板"
-                    font.pixelSize: md3.titleM
+                    font.pixelSize: Md3.titleM || 16
                     font.weight: Font.Medium
-                    color: md3.frInk || "#111827"
+                    color: Md3.frInk || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: pane.className !== ""
                           ? pane.className
                           : (pane.classCode !== "" ? pane.classCode : "未选择班级")
-                    font.pixelSize: md3.body13
-                    color: md3.frInk2 || "#6B7280"
+                    font.pixelSize: Md3.body13 || 13
+                    color: Md3.frInk2 || "#6B7280"
                     elide: Text.ElideRight
-                    width: Math.max(60, pane.width - 360)
+                    width: Math.max(48, pane.width - 400)
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -83,17 +95,24 @@ Item {
             Row {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 12
+                spacing: 10
 
                 Text {
                     text: pane.clockText
-                    font.pixelSize: md3.titleM
+                    font.pixelSize: Md3.titleM || 16
                     font.family: "monospace"
-                    color: md3.frInk2 || "#6B7280"
+                    color: Md3.frInk2 || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 FreshBtn {
-                    md3: pane.md3
+                    text: "发布到展板"
+                    icon: "plus"
+                    variant: "primary"
+                    enabled: pane.subscribed
+                    tip: pane.subscribed ? "向本班发布通知 / 作业（展板与设备同步）" : "先选择并订阅一个班级"
+                    onClicked: pane.publishRequested()
+                }
+                FreshBtn {
                     text: pane.expanded ? "退出展示" : "全屏展示"
                     variant: "tonal"
                     onClicked: pane.toggleExpanded()
@@ -101,62 +120,58 @@ Item {
             }
         }
 
-        // ── 主区：设备画面（只读）+ 班级动态 ──
+        // ── 主区：已发布内容（主）+ 设备画面（次，只读）──
         Row {
             width: parent.width
-            height: Math.max(80, parent.height - head.height - 12)
+            height: Math.max(120, parent.height - head.height - 12)
             spacing: 12
 
-            // 只读网格：无 MouseArea，格子点了没有任何反应是"设计如此"。
-            GridView {
-                id: board
-                width: pane.showEvents ? parent.width - 252 : parent.width
+            ClassBoardNoticePane {
+                width: pane.showDevices ? parent.width - pane.devicePaneWidth - 12 : parent.width
                 height: parent.height
-                clip: true
-                model: pane.deviceModel
-                cellHeight: 150
-                readonly property int cols: Math.max(2, Math.floor(width / 180))
-                cellWidth: Math.floor((width - (cols - 1) * 12) / cols)
+                notices: pane.notices
+            }
 
-                delegate: ClassBoardTile {
-                    width: board.cellWidth
-                    height: 150
-                    md3: pane.md3
-                    uid: model.uid
-                    name: model.name
-                    online: model.online
-                    hasThumb: model.hasThumb
-                    thumbRev: model.thumbRev
+            // 只读网格：无点击语义，格子点了没有任何反应是"设计如此"。
+            // 包一层 Item：空态文案不能写在 GridView 里（会挂到 contentItem，
+            // 没 delegate 时该容器高度为 0 ⇒ 文案跑到左上角而不是居中）。
+            Item {
+                id: devBox
+                visible: pane.showDevices
+                width: pane.showDevices ? pane.devicePaneWidth : 0
+                height: parent.height
+
+                GridView {
+                    id: board
+                    anchors.fill: parent
+                    clip: true
+                    model: pane.deviceModel
+                    cellHeight: 132
+                    readonly property int cols: 2
+                    cellWidth: Math.floor(width / cols)
+
+                    delegate: ClassBoardTile {
+                        width: board.cellWidth
+                        height: 132
+                        uid: model.uid
+                        name: model.name
+                        online: model.online
+                        hasThumb: model.hasThumb
+                        thumbRev: model.thumbRev
+                    }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    width: parent.width - 16
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    visible: board.count === 0
+                    text: pane.subscribed ? "本班暂无设备" : "未选择班级"
+                    font.pixelSize: Md3.bodyS || 12
+                    color: Md3.cOutline || "#79747E"
                 }
             }
-
-            ClassTimelinePane {
-                visible: pane.showEvents
-                width: 240
-                height: parent.height
-                md3: pane.md3
-                model: pane.evModel
-            }
-        }
-    }
-
-    // 空态（订了但没设备 / 还没选班）——说人话，不摆假画面
-    Column {
-        anchors.centerIn: parent
-        visible: board.count === 0
-        spacing: 8
-
-        SvgIcon {
-            name: "monitor"
-            px: 36
-            tint: md3.cOutline
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
-        Text {
-            text: pane.subscribed ? "这个班暂时没有设备" : "从左侧选择一个班级"
-            font.pixelSize: md3.body13
-            color: md3.cOnSurfaceVar
-            anchors.horizontalCenter: parent.horizontalCenter
         }
     }
 }

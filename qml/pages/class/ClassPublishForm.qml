@@ -11,11 +11,11 @@
 // 不新开共享件 —— shared-qml 不在「只改三工程」范围内，等第二处消费方再提升。
 import QtQuick
 import "../../components/md3"       // Md3SegmentedButton / Md3TextField
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: form
 
-    property var md3: ({})
 
     /** 类型段：icon 取已验证存在的 lucide 名（SvgIcon 由 C++ provider 供图）。 */
     readonly property var typeModel: [
@@ -65,7 +65,6 @@ Item {
                 // 显式给宽：Flickable 不像 Row/Column 会按 implicitWidth 布局子项，
                 // 不写这行 width 就是 0（段位全部叠在左上角）。
                 width: implicitWidth
-                md3: form.md3
                 fresh: true
                 model: form.typeModel
                 current: form.type
@@ -75,15 +74,14 @@ Item {
         Text {
             width: parent.width
             text: form.typeHint()
-            font.pixelSize: md3.bodyS
-            color: md3.frInk2 || "#6B7280"
+            font.pixelSize: Md3.bodyS
+            color: Md3.frInk2 || "#6B7280"
         }
 
         // 标题（单行）
         Md3TextField {
             id: titleField
             width: parent.width
-            md3: form.md3
             placeholder: "标题（可留空）"
             text: form.titleText
             onTextChanged: form.titleText = text
@@ -93,21 +91,21 @@ Item {
         Rectangle {
             width: parent.width
             height: 96
-            radius: md3.rXS
-            color: md3.cSurfaceVar
+            radius: Md3.rXS
+            color: Md3.cSurfaceVar
             Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 height: 2
-                color: bodyEdit.activeFocus ? md3.cPrimary : md3.cOnSurfaceVar
+                color: bodyEdit.activeFocus ? Md3.cPrimary : Md3.cOnSurfaceVar
             }
             TextEdit {
                 id: bodyEdit
                 anchors.fill: parent
                 anchors.margins: 12
-                font.pixelSize: md3.bodyL
-                color: md3.cOnSurface
+                font.pixelSize: Md3.bodyL
+                color: Md3.cOnSurface
                 wrapMode: TextEdit.Wrap
                 text: form.bodyText
                 onTextChanged: form.bodyText = text
@@ -119,8 +117,8 @@ Item {
                 anchors.leftMargin: 12
                 anchors.topMargin: 12
                 text: "正文（可留空，支持换行）"
-                font.pixelSize: md3.bodyL
-                color: md3.cOnSurfaceVar
+                font.pixelSize: Md3.bodyL
+                color: Md3.cOnSurfaceVar
             }
         }
     }

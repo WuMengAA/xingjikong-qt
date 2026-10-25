@@ -6,11 +6,11 @@
 // 云端默认策略也是 refuse（班内有设备即拒），这里是双保险。
 import QtQuick
 import "../../components/md3"     // Md3Btn
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: confirm
 
-    property var md3: ({})
     /** 班名（显示名；空则回落班码，由父级算好传入）。 */
     property string targetName: ""
 
@@ -22,8 +22,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: md3.rS
-        color: md3.cErrorCont
+        radius: Md3.rS
+        color: Md3.cErrorCont
 
         Column {
             id: body
@@ -34,8 +34,8 @@ Item {
             Text {
                 width: parent.width
                 text: "删除「" + confirm.targetName + "」？班内所有设备将被移出班级（设备本身不受影响），此操作不可撤销。"
-                font.pixelSize: md3.bodyS
-                color: md3.cOnErrorCont
+                font.pixelSize: Md3.bodyS
+                color: Md3.cOnErrorCont
                 wrapMode: Text.WordWrap
             }
             Row {
@@ -43,13 +43,11 @@ Item {
                 spacing: 8
 
                 Md3Btn {
-                    md3: confirm.md3
                     text: "确认删除"
                     variant: "error"
                     onClicked: confirm.confirmed()
                 }
                 Md3Btn {
-                    md3: confirm.md3
                     text: "再想想"
                     variant: "text"
                     onClicked: confirm.cancelled()

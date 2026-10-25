@@ -14,11 +14,11 @@ import QtQuick
 import QtQuick.Controls          // ScrollBar
 import "../../components/fresh"    // FreshCard
 import "../../island"               // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: pane
 
-    property var md3: ({})
     property var model: null      // ClassEventModel
 
     /** ISO 8601 → "HH:mm"；解析不了给 "——"（宁缺毋滥，不显示 Invalid Date）。 */
@@ -34,13 +34,21 @@ Item {
     function kindStyle(kind, isMember) {
         if (kind === "member.online")  return { icon: "circle-check",  tint: "ok",   label: "设备上线" }
         if (kind === "member.offline") return { icon: "circle-dashed", tint: "out",  label: "设备离线" }
+        if (kind === "publish")        return { icon: "tv",            tint: "info", label: "已发布" }
         if (isMember === true)         return { icon: "circle-dot",    tint: "info", label: "设备动态" }
         return { icon: "info", tint: "info", label: "班级事件" }
     }
 
+    /** 第二行：publish 只给标题（from 是内部标识，对老师无意义）；
+     *  其余保持 "uid · 原因" 口径（离线原因等要能看见）。 */
+    function subText(kind, uid, detail) {
+        if (kind === "publish") return detail || ""
+        if ((uid || "") === "") return detail || ""
+        return (detail || "") !== "" ? (uid + " · " + detail) : uid
+    }
+
     FreshCard {
         anchors.fill: parent
-        md3: pane.md3
 
         ListView {
             id: list
@@ -53,8 +61,8 @@ Item {
             delegate: Rectangle {
                 width: list.width
                 height: row.implicitHeight + 12
-                radius: md3.frRS || 12
-                color: evMa.containsMouse ? md3.frLine || "#EEF0F3" : "transparent"
+                radius: Md3.frRIn
+                color: evMa.containsMouse ? Md3.frLine || "#EEF0F3" : "transparent"
 
                 Row {
                     id: row
@@ -65,9 +73,9 @@ Item {
                     // 时间（等宽，事件流的"刻度"）
                     Text {
                         text: pane.hhmm(model.at)
-                        font.pixelSize: md3.bodyS
+                        font.pixelSize: Md3.bodyS
                         font.family: "monospace"
-                        color: md3.frInk2 || "#6B7280"
+                        color: Md3.frInk2 || "#6B7280"
                         anchors.verticalCenter: parent.verticalCenter
                     }
 
@@ -75,9 +83,9 @@ Item {
                         property var st: pane.kindStyle(model.kind, model.isMember)
                         name: st.icon
                         px: 14
-                        tint: st.tint === "ok" ? (md3.frGreen || "#22C55E")
-                              : st.tint === "out" ? (md3.frOffDot || "#9CA3AF")
-                              : (md3.cInfo || "#3B82F6")
+                        tint: st.tint === "ok" ? (Md3.frGreen || "#22C55E")
+                              : st.tint === "out" ? (Md3.frOffDot || "#9CA3AF")
+                              : (Md3.cInfo || "#3B82F6")
                         anchors.verticalCenter: parent.verticalCenter
                     }
 
@@ -89,21 +97,18 @@ Item {
                         Text {
                             width: parent.width
                             text: pane.kindStyle(model.kind, model.isMember).label
-                            font.pixelSize: md3.body13
-                            color: md3.frInk || "#111827"
+                            font.pixelSize: Md3.body13
+                            color: Md3.frInk || "#111827"
                             elide: Text.ElideRight
                         }
-                        // 第二行：设备名位（uid）+ detail 里的人话（离线原因等）
+                        // 第二行：设备名位（uid）+ detail 里的人话（离线原因 / 发布标题）
                         Text {
                             width: parent.width
-                            visible: (model.uid || "") !== "" || (model.detail || "") !== ""
-                            text: (model.uid || "") !== ""
-                                  ? ((model.detail || "") !== ""
-                                         ? (model.uid + " · " + model.detail)
-                                         : model.uid)
-                                  : (model.detail || "")
-                            font.pixelSize: md3.bodyS
-                            color: md3.frInk2 || "#6B7280"
+                            property string sub: pane.subText(model.kind, model.uid, model.detail)
+                            visible: sub !== ""
+                            text: sub
+                            font.pixelSize: Md3.bodyS
+                            color: Md3.frInk2 || "#6B7280"
                             elide: Text.ElideRight
                         }
                     }
@@ -128,19 +133,19 @@ Item {
             SvgIcon {
                 name: "clock"
                 px: 36
-                tint: md3.frOffDot || "#9CA3AF"
+                tint: Md3.frOffDot || "#9CA3AF"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
             Text {
                 text: "暂无班级动态"
-                font.pixelSize: md3.body13
-                color: md3.frInk2 || "#6B7280"
+                font.pixelSize: Md3.body13
+                color: Md3.frInk2 || "#6B7280"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
             Text {
                 text: "设备上下线等事件会实时出现在这里"
-                font.pixelSize: md3.bodyS
-                color: md3.frOffDot || "#9CA3AF"
+                font.pixelSize: Md3.bodyS
+                color: Md3.frOffDot || "#9CA3AF"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
         }

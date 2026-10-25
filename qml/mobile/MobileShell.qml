@@ -24,14 +24,13 @@ Item {
     Rectangle {
         anchors.fill: parent
         z: -1
-        color: md3Theme.cSurface
+        color: Md3.cSurface
     }
 
     // Md3 = pragma Singleton（真源 shared-qml/ui/theme/）；独立壳入口，负责写全局 dark。
-    readonly property var md3Theme: Md3
     Binding { target: Md3; property: "dark"; value: root.darkMode }
     // 迁移桥：保留 th 旧签名（桌面 Main.qml 的旧组件读 th.*，Md3 提供 legacy 别名）
-    readonly property var th: md3Theme
+    readonly property var th: Md3
     // E4 同步：darkMode 由 backend.themeMode 派生（0 浅色 / 1 深色 / 2 跟随系统取 backend.systemDark）。
     readonly property bool darkMode: (backend.themeMode === 1) ? true
                                       : (backend.themeMode === 2 ? backend.systemDark : false)
@@ -51,15 +50,15 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         height: 64
-        color: md3Theme.cSurface
+        color: Md3.cSurface
 
         Text {
             anchors.left: parent.left
             anchors.leftMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             text: "星集控"
-            font.pixelSize: md3Theme.titleL
-            color: md3Theme.cOnSurface
+            font.pixelSize: Md3.titleL
+            color: Md3.cOnSurface
         }
         Row {
             anchors.right: parent.right
@@ -69,12 +68,12 @@ Item {
             Rectangle {
                 width: 8; height: 8; radius: 4
                 anchors.verticalCenter: parent.verticalCenter
-                color: backend.connected ? md3Theme.cOk : md3Theme.cError
+                color: backend.connected ? Md3.cOk : Md3.cError
             }
             Text {
                 text: backend.loggedIn ? (backend.connected ? "已连接" : "重连中…") : "未登录"
-                color: md3Theme.cOnSurfaceVar
-                font.pixelSize: md3Theme.labelM
+                color: Md3.cOnSurfaceVar
+                font.pixelSize: Md3.labelM
             }
         }
     }
@@ -90,18 +89,16 @@ Item {
         currentIndex: bottomNav.currentIndex
 
         // 页 0：概览
-        OverviewPage { md3: md3Theme }
+        OverviewPage {}
 
         // 页 1：设备列表（点击 → 抽屉；关机 → 确认弹窗）
         DeviceListPage {
-            md3: md3Theme
             onOpenDetail: function (dev) { deviceDrawer.dev = dev; deviceDrawer.open() }
             onShutdownRequested: function (uid) { root.confirmTarget = uid; root.confirmAction = "shutdown"; confirmDialog.opened = true }
         }
 
         // 页 2：监控（实时屏 + 远控 VNC 双源，#370 重构）
         MonitorPage {
-            md3: md3Theme
             // 推文件：壳已持有 fileDlg，塞好目标机后开弹窗
             onFilePushRequested: function (uid) { backend.currentUid = uid; fileDlg.open() }
             // 轻提示透传（壳有 Md3Snackbar）
@@ -110,7 +107,6 @@ Item {
 
         // 页 3：我的（账户/身份/外观/告警/录制/版本）
         SettingsPage {
-            md3: md3Theme
             recSummary: root.recSummary
             recentEvents: root.recentEvents
             recBusy: root.recBusy
@@ -121,7 +117,6 @@ Item {
     Md3NavBar {
         id: bottomNav
         objectName: "bottomNav"
-        md3: md3Theme
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -136,7 +131,6 @@ Item {
     // ── 设备详情抽屉（底部）──
     DeviceDetailDrawer {
         id: deviceDrawer
-        md3: md3Theme
         onShutdownRequested: function (uid) { root.confirmTarget = uid; root.confirmAction = "shutdown"; confirmDialog.opened = true }
         onToast: function (msg) { root.toast(msg) }
         // #5：点「传文件」→ 先把目标设备设进 backend（FilePushDialog 推给 currentUid），
@@ -148,7 +142,7 @@ Item {
     // 原宽 560 在 390 宽的手机上会溢出，按屏宽收一下。
     FilePushDialog {
         id: fileDlg
-        theme: md3Theme
+        theme: Md3
         width: Math.min(560, root.width * 0.94)
     }
 
@@ -156,7 +150,6 @@ Item {
     Md3Dialog {
         id: confirmDialog
         objectName: "confirmDialog"
-        md3: md3Theme
         title: "确认操作"
         text: "对 " + root.confirmTarget + " 执行「" + (root.confirmAction === "shutdown" ? "关机" : "锁屏") + "」？"
         actions: [
@@ -177,7 +170,6 @@ Item {
     Md3Snackbar {
         id: snack
         objectName: "snack"
-        md3: md3Theme
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: bottomNav.top
         anchors.bottomMargin: 12

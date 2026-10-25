@@ -14,11 +14,11 @@ import QtQuick
 import QtQuick.Layouts
 import "../components/md3"
 import "../island"          // SvgIcon
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: root
 
-    property var md3: ({})
     /** 菜单项：[{ key, icon, label }]，icon = lucide 图标名（如 "users"）。 */
     property var items: []
     /** 当前选中的 key。 */
@@ -42,7 +42,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: md3.cSurfaceVar
+        color: Md3.cSurfaceVar
     }
 
     // 右缘发丝分隔线（与主内容区分界，避免侧栏"贴"在主区上）
@@ -51,7 +51,7 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
-        color: md3.cOutlineVar
+        color: Md3.cOutlineVar
         opacity: 0.5
     }
 
@@ -66,12 +66,12 @@ Item {
             Layout.preferredHeight: root.brandRowH
             Text {
                 anchors.left: parent.left
-                anchors.leftMargin: root.md3 ? root.md3.spM : 16
+                anchors.leftMargin: Md3.spM
                 anchors.verticalCenter: parent.verticalCenter
                 text: "星集控"
-                font.pixelSize: root.md3 ? root.md3.titleM : 16
+                font.pixelSize: Md3.titleM
                 font.weight: Font.Medium
-                color: md3.cOnSurfaceVar
+                color: Md3.cOnSurfaceVar
             }
         }
 
@@ -82,11 +82,11 @@ Item {
                 required property var modelData
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.navItemH
-                radius: md3.rFull
+                radius: Md3.rFull
                 color: (root.current === modelData.key)
-                       ? md3.cSecondaryCont
-                       : (navMa.containsMouse ? md3.cContHigh : "transparent")
-                Behavior on color { ColorAnimation { duration: md3.durShort } }
+                       ? Md3.cSecondaryCont
+                       : (navMa.containsMouse ? Md3.cContHigh : "transparent")
+                Behavior on color { ColorAnimation { duration: Md3.durShort } }
 
                 // 终末地工业青 · 选中项左侧细规（"当前终端"冷调点缀）
                 // 2026-10-22：硬编码 #2FB8C6 → 令牌 cAccent（零硬编码纪律）
@@ -100,26 +100,26 @@ Item {
                     anchors.bottom: parent.bottom
                     anchors.topMargin: 18
                     anchors.bottomMargin: 18
-                    color: md3.cAccent
+                    color: Md3.cAccent
                 }
 
                 Row {
                     anchors.left: parent.left
-                    anchors.leftMargin: root.md3 ? root.md3.spM : 16
+                    anchors.leftMargin: Md3.spM
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 12
 
                     SvgIcon {
                         name: modelData.icon
-                        tint: (root.current === modelData.key) ? md3.cOnSecondaryCont : md3.cOnSurfaceVar
+                        tint: (root.current === modelData.key) ? Md3.cOnSecondaryCont : Md3.cOnSurfaceVar
                         px: root.iconPx
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: modelData.label
-                        font.pixelSize: root.md3 ? root.md3.bodyM : 14
+                        font.pixelSize: Md3.bodyM
                         font.weight: (root.current === modelData.key) ? Font.Medium : Font.Normal
-                        color: (root.current === modelData.key) ? md3.cOnSecondaryCont : md3.cOnSurfaceVar
+                        color: (root.current === modelData.key) ? Md3.cOnSecondaryCont : Md3.cOnSurfaceVar
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
@@ -142,19 +142,19 @@ Item {
             Layout.preferredHeight: root.backRowH
             Row {
                 anchors.left: parent.left
-                anchors.leftMargin: root.md3 ? root.md3.spM : 16
+                anchors.leftMargin: Md3.spM
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 12
                 SvgIcon {
                     name: "arrow-left"
-                    tint: md3.cOnSurfaceVar
+                    tint: Md3.cOnSurfaceVar
                     px: root.iconPx
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "返回经典界面"
-                    font.pixelSize: root.md3 ? root.md3.bodyM : 14
-                    color: md3.cOnSurfaceVar
+                    font.pixelSize: Md3.bodyM
+                    color: Md3.cOnSurfaceVar
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }

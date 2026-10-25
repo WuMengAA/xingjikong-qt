@@ -13,11 +13,11 @@
 //     必然经过 open(t) 重置。
 import QtQuick
 import "../../components/md3"     // Md3TextField / Md3Btn
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: row
 
-    property var md3: ({})
     /** 输入框上方的小字说明（可空；改名行用来说「只改显示名，代码不变」）。 */
     property string hint: ""
     property string placeholder: ""
@@ -44,15 +44,14 @@ Item {
             width: parent.width
             visible: row.hint !== ""
             text: row.hint
-            font.pixelSize: md3.bodyS
-            color: md3.cOutline
+            font.pixelSize: Md3.bodyS
+            color: Md3.cOutline
             wrapMode: Text.WordWrap
         }
 
         Md3TextField {
             id: field
             width: parent.width
-            md3: row.md3
             placeholder: row.placeholder
             text: row.text
             onTextChanged: row.text = text
@@ -63,14 +62,12 @@ Item {
             spacing: 8
 
             Md3Btn {
-                md3: row.md3
                 text: row.confirmText
                 variant: "filled"
                 enabled: row.confirmEnabled
                 onClicked: row.confirmed(row.text.trim())
             }
             Md3Btn {
-                md3: row.md3
                 text: "取消"
                 variant: "text"
                 onClicked: row.cancelled()

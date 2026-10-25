@@ -6,11 +6,11 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../../components"
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: row
 
-    property var md3: ({})
     property var student: ({})     // {id,name,studentNo,seat,note}
     property bool hovered: false
 
@@ -21,7 +21,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: 8
-        color: row.hovered ? (row.md3 ? row.md3.cContHigh : "#ECE6F0") : "transparent"
+        color: row.hovered ? (Md3.cContHigh) : "transparent"
 
         RowLayout {
             anchors.fill: parent
@@ -32,14 +32,14 @@ Item {
             Text {
                 Layout.preferredWidth: 30
                 text: (row.student.seat === undefined || row.student.seat === "") ? "—" : row.student.seat
-                color: row.md3 ? row.md3.cOnSurfaceVar : "#49454F"
+                color: Md3.cOnSurfaceVar
                 font.pixelSize: 12
             }
             Text {
                 Layout.fillWidth: true
                 text: row.student.name === undefined ? "" : row.student.name
                 elide: Text.ElideRight
-                color: row.md3 ? row.md3.cOnSurface : "#1C1B1F"
+                color: Md3.cOnSurface
                 font.pixelSize: 13
             }
             Text {
@@ -47,13 +47,13 @@ Item {
                 text: (row.student.studentNo === undefined || row.student.studentNo === "")
                       ? "无学号" : row.student.studentNo
                 elide: Text.ElideRight
-                color: row.md3 ? row.md3.cOnSurfaceVar : "#49454F"
+                color: Md3.cOnSurfaceVar
                 font.pixelSize: 12
             }
             Btn {
                 Layout.preferredWidth: 52
                 Layout.preferredHeight: 26
-                theme: row.md3
+                theme: Md3
                 text: "移出"
                 tip: "从本班名单移除（学生本来就没有账号，不影响任何登录）"
                 onClicked: row.removeRequested(row.student.id, row.student.name)

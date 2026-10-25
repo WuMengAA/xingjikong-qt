@@ -124,7 +124,6 @@ Item {
                     elide: Text.ElideRight
                 }
                 Md3Btn {
-                    md3: root.th
                     text: "关闭"
                     variant: "text"
                     onClicked: root.closed()
@@ -176,7 +175,6 @@ Item {
                 Layout.fillWidth: true
                 spacing: 8
                 Md3Btn {
-                    md3: root.th
                     Layout.fillWidth: true
                     text: "屏幕截图"
                     variant: "tonal"
@@ -184,7 +182,6 @@ Item {
                     onClicked: if (root.ctx) root.ctx.window.runActionById("screenshot")
                 }
                 Md3Btn {
-                    md3: root.th
                     Layout.fillWidth: true
                     text: "锁定桌面"
                     variant: "error"
@@ -192,7 +189,6 @@ Item {
                     onClicked: if (root.ctx) root.ctx.window.runActionById("lock")
                 }
                 Md3Btn {
-                    md3: root.th
                     Layout.fillWidth: true
                     text: "远程重启"
                     variant: "error"
@@ -208,7 +204,6 @@ Item {
             // 出口点这里，比让老师自己找更符合"指哪打哪"的诉求。
             Md3Btn {
                 Layout.fillWidth: true
-                md3: root.th
                 text: "在集控页打开（鼠标键盘远控）"
                 variant: "outlined"
                 radius: 12
@@ -241,7 +236,6 @@ Item {
                     delegate: Md3Btn {
                         required property var modelData
                         Layout.fillWidth: true
-                        md3: root.th
                         text: modelData.title
                         variant: "tonal"
                         radius: 12

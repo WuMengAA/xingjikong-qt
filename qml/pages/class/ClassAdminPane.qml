@@ -4,10 +4,10 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
 import "../../island"              // SvgIcon
+import "../../components/theme"   // Md3 令牌（pragma Singleton）
 Item {
     id: pane
 
-    property var md3: ({})
     property var cs: null        // ClassService（订阅态 + 班码/班名）
     property var toastFn: null   // (msg, isErr) 外壳页级 toast
 
@@ -103,7 +103,6 @@ Item {
     }
     FreshCard {
         anchors.fill: parent
-        md3: pane.md3
 
         Column {
             id: bodyCol
@@ -118,22 +117,22 @@ Item {
                     // 失败 ⇒ 空白，离屏冒烟实证），改回实存的 "settings"。
                     name: "settings"
                     px: 16
-                    tint: md3.frInk2 || "#6B7280"
+                    tint: Md3.frInk2 || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "班级管理"
-                    font.pixelSize: md3.body13
+                    font.pixelSize: Md3.body13
                     font.weight: Font.Medium
-                    color: md3.frInk || "#111827"
+                    color: Md3.frInk || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Item { width: Math.max(8, parent.width - 140); height: 1 }
                 Text {
                     visible: !pane.subbed
                     text: "未订阅"
-                    font.pixelSize: md3.bodyS
-                    color: md3.frOffDot || "#9CA3AF"
+                    font.pixelSize: Md3.bodyS
+                    color: Md3.frOffDot || "#9CA3AF"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -143,22 +142,21 @@ Item {
                 width: parent.width
                 visible: pane.subbed
                 text: "当前班：" + (pane.name !== "" ? pane.name : pane.code)
-                font.pixelSize: md3.bodyS
-                color: md3.frInk2 || "#6B7280"
+                font.pixelSize: Md3.bodyS
+                color: Md3.frInk2 || "#6B7280"
                 elide: Text.ElideRight
             }
             Text {
                 width: parent.width
                 visible: !pane.subbed
                 text: "先选择左侧班级，才能执行管理操作"
-                font.pixelSize: md3.bodyS
-                color: md3.frOffDot || "#9CA3AF"
+                font.pixelSize: Md3.bodyS
+                color: Md3.frOffDot || "#9CA3AF"
                 wrapMode: Text.WordWrap
             }
 
             // ── 新建班级（不需要先订阅：建班本就不绑设备）──
             FreshBtn {
-                md3: pane.md3
                 text: pane.inputMode === "create" ? "收起" : "新建班级"
                 variant: "tonal"
                 width: parent.width
@@ -172,7 +170,6 @@ Item {
                 id: createRow
                 width: parent.width
                 visible: pane.inputMode === "create"
-                md3: pane.md3
                 placeholder: "班级名称，如：高二(3)班"
                 confirmText: "创建"
                 confirmEnabled: createRow.text.trim() !== ""
@@ -186,7 +183,6 @@ Item {
                 spacing: 8
 
                 FreshBtn {
-                    md3: pane.md3
                     text: pane.inputMode === "rename" ? "收起" : "修改班名"
                     variant: "outlined"
                     enabled: pane.subbed
@@ -198,7 +194,6 @@ Item {
                     }
                 }
                 FreshBtn {
-                    md3: pane.md3
                     text: pane.delArmed ? "取消删除" : "删除班级"
                     variant: pane.delArmed ? "danger" : "danger-ghost"
                     enabled: pane.subbed
@@ -210,7 +205,6 @@ Item {
                 id: renameRow
                 width: parent.width
                 visible: pane.inputMode === "rename"
-                md3: pane.md3
                 hint: "只改显示名，班级代码不变（已绑定设备的归属不受影响）。"
                 placeholder: "新的班级名称"
                 confirmText: "保存"
@@ -221,7 +215,6 @@ Item {
             ClassDeleteConfirm {
                 width: parent.width
                 visible: pane.delArmed
-                md3: pane.md3
                 targetName: pane.name !== "" ? pane.name : pane.code
                 onConfirmed: { const a = pane.admin(); if (a) a.deleteClass(pane.code, "release") }
                 onCancelled: pane.delArmed = false
@@ -235,11 +228,10 @@ Item {
                 width: parent.width
                 height: 1
                 visible: pane.subbed
-                color: md3.frOffDot || "#9CA3AF"
+                color: Md3.frOffDot || "#9CA3AF"
                 opacity: 0.3
             }
             FreshBtn {
-                md3: pane.md3
                 text: pane.issuing ? "生成中…" : "生成班级接入码"
                 variant: "tonal"
                 width: parent.width
@@ -259,15 +251,15 @@ Item {
                 Text {
                     width: parent.width
                     text: "把这串给这台设备（一次性，24 小时内有效）："
-                    font.pixelSize: md3.bodyS
-                    color: md3.frInk2 || "#6B7280"
+                    font.pixelSize: Md3.bodyS
+                    color: Md3.frInk2 || "#6B7280"
                     wrapMode: Text.WordWrap
                 }
                 Rectangle {
                     width: parent.width
                     height: 44
                     radius: 8
-                    color: md3.frOffDot || "#9CA3AF"
+                    color: Md3.frOffDot || "#9CA3AF"
                     opacity: 0.14
                 }
                 // 码叠在上面单独一层：父 Rectangle 用低透明度做底，字才不会被一起调淡。
@@ -279,17 +271,16 @@ Item {
                     readOnly: true
                     selectByMouse: true
                     text: pane.bindCode
-                    font.pixelSize: md3.bodyL || 16
+                    font.pixelSize: Md3.bodyL || 16
                     font.family: "Consolas"
                     font.letterSpacing: 4
-                    color: md3.frInk || "#111827"
+                    color: Md3.frInk || "#111827"
                     horizontalAlignment: TextEdit.AlignHCenter
                 }
                 Row {
                     width: parent.width
                     spacing: 8
                     FreshBtn {
-                        md3: pane.md3
                         text: "复制"
                         variant: "outlined"
                         width: (parent.width - 8) / 2
@@ -300,7 +291,6 @@ Item {
                         }
                     }
                     FreshBtn {
-                        md3: pane.md3
                         text: "作废"
                         variant: "danger-ghost"
                         width: (parent.width - 8) / 2

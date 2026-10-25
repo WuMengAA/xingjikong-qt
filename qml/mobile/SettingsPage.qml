@@ -4,10 +4,10 @@
 // MD3：分组卡片 + filter chip 选择 + filled/tonal 按钮 + 字阶。
 import QtQuick
 import "../components/md3"
+import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
     id: page
-    property var md3: ({})
     property var recSummary: []
     property var recentEvents: []
     property bool recBusy: false
@@ -25,9 +25,8 @@ Item {
             spacing: 12
 
             // ── 账户（OAuth 登录态）──
-            Text { text: "账户"; color: page.md3.cOnSurfaceVar; font.pixelSize: page.md3.labelM }
+            Text { text: "账户"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
             Md3Card {
-                md3: page.md3
                 variant: "filled"
                 width: parent.width
                 Row {
@@ -37,13 +36,13 @@ Item {
                     Rectangle {
                         width: 40; height: 40; radius: 20
                         anchors.verticalCenter: parent.verticalCenter
-                        color: page.md3.cPrimaryCont
+                        color: Md3.cPrimaryCont
                         Text {
                             anchors.centerIn: parent
                             text: backend.accountName ? backend.accountName.charAt(0) : "?"
-                            font.pixelSize: page.md3.titleM
+                            font.pixelSize: Md3.titleM
                             font.weight: Font.Medium
-                            color: page.md3.cOnPrimaryCont
+                            color: Md3.cOnPrimaryCont
                         }
                     }
                     Column {
@@ -51,20 +50,19 @@ Item {
                         spacing: 2
                         Text {
                             text: backend.accountName ? backend.accountName : "未登录"
-                            color: page.md3.cOnSurface
-                            font.pixelSize: page.md3.titleM
+                            color: Md3.cOnSurface
+                            font.pixelSize: Md3.titleM
                             font.weight: Font.Medium
                         }
                         Text {
                             text: backend.accountBusy ? "登录中…" : (backend.role === "admin" ? "管理员" : "教师")
-                            color: page.md3.cOnSurfaceVar
-                            font.pixelSize: page.md3.bodyS
+                            color: Md3.cOnSurfaceVar
+                            font.pixelSize: Md3.bodyS
                         }
                     }
                     Item { width: Math.max(4, parent.width - 220); height: 1 }
                     // 登录按钮带 busy 态（OAuth 浏览器回呼等待时禁用）
                     Md3Btn {
-                        md3: page.md3
                         anchors.verticalCenter: parent.verticalCenter
                         text: backend.accountBusy ? "等待登录…" : "网站账号登录"
                         variant: "filled"
@@ -75,17 +73,15 @@ Item {
             }
 
             // ── 身份（MD3 filter chip）──
-            Text { text: "身份"; color: page.md3.cOnSurfaceVar; font.pixelSize: page.md3.labelM }
+            Text { text: "身份"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
             Row {
                 spacing: 8
                 Md3Chip {
-                    md3: page.md3
                     text: "管理员"
                     selected: backend.role === "admin"
                     onClicked: backend.setRole("admin")
                 }
                 Md3Chip {
-                    md3: page.md3
                     text: "教师"
                     selected: backend.role !== "admin"
                     onClicked: backend.setRole("teacher")
@@ -93,7 +89,7 @@ Item {
             }
 
             // ── 外观（E4 三档 · MD3 filter chip）──
-            Text { text: "外观"; color: page.md3.cOnSurfaceVar; font.pixelSize: page.md3.labelM }
+            Text { text: "外观"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
             Row {
                 spacing: 8
                 Repeater {
@@ -103,7 +99,6 @@ Item {
                         { k: "跟随系统", m: 2 }
                     ]
                     delegate: Md3Chip {
-                        md3: page.md3
                         text: modelData.k
                         selected: backend.themeMode === modelData.m
                         onClicked: backend.themeMode = modelData.m
@@ -112,9 +107,8 @@ Item {
             }
 
             // ── 最近告警（/api/events 前 8 条）──
-            Text { text: "最近告警"; color: page.md3.cOnSurfaceVar; font.pixelSize: page.md3.labelM }
+            Text { text: "最近告警"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
             Md3Card {
-                md3: page.md3
                 variant: "filled"
                 width: parent.width
                 Column {
@@ -128,21 +122,21 @@ Item {
                             Rectangle {
                                 width: 8; height: 8; radius: 4
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: (modelData.level === "error") ? page.md3.cError : page.md3.cOk
+                                color: (modelData.level === "error") ? Md3.cError : Md3.cOk
                             }
                             Column {
                                 width: parent.width - 18
                                 Text {
                                     text: modelData.msg
-                                    color: page.md3.cOnSurface
-                                    font.pixelSize: page.md3.bodyM
+                                    color: Md3.cOnSurface
+                                    font.pixelSize: Md3.bodyM
                                     elide: Text.ElideRight
                                     width: parent.width
                                 }
                                 Text {
                                     text: (modelData.uid ? modelData.uid + " · " : "") + modelData.time
-                                    color: page.md3.cOutline
-                                    font.pixelSize: page.md3.labelS
+                                    color: Md3.cOutline
+                                    font.pixelSize: Md3.labelS
                                     elide: Text.ElideRight
                                     width: parent.width
                                 }
@@ -152,23 +146,21 @@ Item {
                     Text {
                         visible: page.recentEvents.length === 0
                         text: "暂无事件"
-                        color: page.md3.cOutline
-                        font.pixelSize: page.md3.bodyS
+                        color: Md3.cOutline
+                        font.pixelSize: Md3.bodyS
                     }
                 }
             }
 
             // ── 监控摘要 · 录制回放 ──
-            Text { text: "监控摘要 · 录制回放"; color: page.md3.cOnSurfaceVar; font.pixelSize: page.md3.labelM }
+            Text { text: "监控摘要 · 录制回放"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
             Md3Card {
-                md3: page.md3
                 variant: "filled"
                 width: parent.width
                 Column {
                     width: parent.width
                     spacing: 10
                     Md3Btn {
-                        md3: page.md3
                         text: page.recBusy ? "拉取中…" : "拉取录制列表"
                         variant: "tonal"
                         enabled: !page.recBusy
@@ -179,23 +171,23 @@ Item {
                         delegate: Row {
                             width: parent.width
                             spacing: 8
-                            Text { text: modelData.uid; color: page.md3.cOnSurface; font.pixelSize: page.md3.bodyM; width: parent.width * 0.4; elide: Text.ElideRight }
-                            Text { text: modelData.count + " 个录制"; color: page.md3.cOnSurfaceVar; font.pixelSize: page.md3.bodyS }
-                            Text { text: modelData.last; color: page.md3.cOutline; font.pixelSize: page.md3.labelS }
+                            Text { text: modelData.uid; color: Md3.cOnSurface; font.pixelSize: Md3.bodyM; width: parent.width * 0.4; elide: Text.ElideRight }
+                            Text { text: modelData.count + " 个录制"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.bodyS }
+                            Text { text: modelData.last; color: Md3.cOutline; font.pixelSize: Md3.labelS }
                         }
                     }
                     Text {
                         visible: page.recSummary.length === 0 && !page.recBusy
                         text: "暂无录制（或被控端未开录制）"
-                        color: page.md3.cOutline
-                        font.pixelSize: page.md3.bodyS
+                        color: Md3.cOutline
+                        font.pixelSize: Md3.bodyS
                     }
                 }
             }
 
             // ── 版本 ──
-            Text { text: "版本"; color: page.md3.cOnSurfaceVar; font.pixelSize: page.md3.labelM }
-            Text { text: "v" + backend.version; color: page.md3.cOnSurface; font.pixelSize: page.md3.bodyM }
+            Text { text: "版本"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
+            Text { text: "v" + backend.version; color: Md3.cOnSurface; font.pixelSize: Md3.bodyM }
         }
     }
 }

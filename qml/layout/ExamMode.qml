@@ -15,7 +15,6 @@ Item {
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
     //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
-    readonly property var md3: Md3
     property int remainSec: 2700        // 45:00
     property var seats: [
         { no: "01", name: "王同学", state: "答题中" },
@@ -33,28 +32,28 @@ Item {
         return (m < 10 ? "0" : "") + m + ":" + (sec < 10 ? "0" : "") + sec
     }
     function seatColor(st) {
-        if (st === "举手求助") return md3.cError
-        if (st === "已交卷") return md3.cOk
-        if (st === "离线") return md3.cOutline
-        return md3.cPrimary
+        if (st === "举手求助") return Md3.cError
+        if (st === "已交卷") return Md3.cOk
+        if (st === "离线") return Md3.cOutline
+        return Md3.cPrimary
     }
 
-    Rectangle { anchors.fill: parent; color: md3.cSurface }
+    Rectangle { anchors.fill: parent; color: Md3.cSurface }
 
     // 顶栏：考试名 + 倒计时
     Rectangle {
         anchors.top: parent.top
         width: parent.width; height: 96
-        color: md3.cCont
-        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: md3.cOutlineVar }
+        color: Md3.cCont
+        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Md3.cOutlineVar }
         Row {
             anchors.left: parent.left; anchors.leftMargin: 32
             anchors.verticalCenter: parent.verticalCenter
             spacing: 20
             Column {
                 spacing: 2
-                Text { text: "期中考试 · 数学"; font.pixelSize: md3.headlineS; font.weight: Font.Medium; color: md3.cOnSurface }
-                Text { text: "监考：张老师  ·  高一1班  ·  08:00 - 08:45"; font.pixelSize: md3.bodyS; color: md3.cOnSurfaceVar }
+                Text { text: "期中考试 · 数学"; font.pixelSize: Md3.headlineS; font.weight: Font.Medium; color: Md3.cOnSurface }
+                Text { text: "监考：张老师  ·  高一1班  ·  08:00 - 08:45"; font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar }
             }
         }
         // 倒计时大数字
@@ -65,8 +64,8 @@ Item {
             Text { text: "⏱"; font.pixelSize: 24; anchors.verticalCenter: parent.verticalCenter }
             Text {
                 text: root.fmt(root.remainSec)
-                font.pixelSize: md3.displayM; font.weight: Font.Medium
-                color: root.remainSec < 300 ? md3.cError : md3.cOnSurface
+                font.pixelSize: Md3.displayM; font.weight: Font.Medium
+                color: root.remainSec < 300 ? Md3.cError : Md3.cOnSurface
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
@@ -85,13 +84,13 @@ Item {
             delegate: Rectangle {
                 required property var modelData
                 width: 200; height: 76
-                radius: md3.rM
-                color: md3.cContHigh
+                radius: Md3.rM
+                color: Md3.cContHigh
                 Column {
                     anchors.centerIn: parent
                     spacing: 2
-                    Text { text: modelData.k; font.pixelSize: md3.labelM; color: md3.cOnSurfaceVar; anchors.horizontalCenter: parent.horizontalCenter }
-                    Text { text: modelData.v; font.pixelSize: md3.headlineS; font.weight: Font.Medium; color: md3.cOnSurface; anchors.horizontalCenter: parent.horizontalCenter }
+                    Text { text: modelData.k; font.pixelSize: Md3.labelM; color: Md3.cOnSurfaceVar; anchors.horizontalCenter: parent.horizontalCenter }
+                    Text { text: modelData.v; font.pixelSize: Md3.headlineS; font.weight: Font.Medium; color: Md3.cOnSurface; anchors.horizontalCenter: parent.horizontalCenter }
                 }
             }
         }
@@ -109,22 +108,22 @@ Item {
         delegate: Rectangle {
             required property var modelData
             width: 280; height: 104
-            radius: md3.rM
-            color: md3.cContHigh
+            radius: Md3.rM
+            color: Md3.cContHigh
             border.width: modelData.state === "举手求助" ? 2 : 0
-            border.color: md3.cError
+            border.color: Md3.cError
             Row {
                 anchors.left: parent.left; anchors.leftMargin: 16
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 14
                 Rectangle {
                     width: 44; height: 44; radius: 22
-                    color: md3.cSecondaryCont
-                    Text { anchors.centerIn: parent; text: modelData.no; font.pixelSize: md3.titleM; font.weight: Font.Medium; color: md3.cOnSecondaryCont }
+                    color: Md3.cSecondaryCont
+                    Text { anchors.centerIn: parent; text: modelData.no; font.pixelSize: Md3.titleM; font.weight: Font.Medium; color: Md3.cOnSecondaryCont }
                 }
                 Column {
                     spacing: 3
-                    Text { text: modelData.name; font.pixelSize: md3.bodyL; color: md3.cOnSurface }
+                    Text { text: modelData.name; font.pixelSize: Md3.bodyL; color: Md3.cOnSurface }
                     Row {
                         spacing: 6
                         Rectangle {
@@ -132,7 +131,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             color: root.seatColor(modelData.state)
                         }
-                        Text { text: modelData.state; font.pixelSize: md3.bodyS; color: md3.cOnSurfaceVar }
+                        Text { text: modelData.state; font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar }
                     }
                 }
             }
@@ -144,26 +143,24 @@ Item {
         id: bottomBar
         anchors.bottom: parent.bottom
         width: parent.width; height: 88
-        color: md3.cCont
-        Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: md3.cOutlineVar }
+        color: Md3.cCont
+        Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: Md3.cOutlineVar }
         Row {
             anchors.left: parent.left; anchors.leftMargin: 32
             anchors.verticalCenter: parent.verticalCenter
             spacing: 16
             Md3Btn {
-                md3: root.md3
                 text: "退出考试"
                 variant: "outlined"
                 onClicked: {}
             }
-            Text { text: "退出需监考密码；异常情况点「求助」通知监考老师"; font.pixelSize: md3.bodyS; color: md3.cOnSurfaceVar }
+            Text { text: "退出需监考密码；异常情况点「求助」通知监考老师"; font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar }
         }
         Row {
             anchors.right: parent.right; anchors.rightMargin: 32
             anchors.verticalCenter: parent.verticalCenter
             spacing: 12
             Md3Btn {
-                md3: root.md3
                 text: "🖐 求助"
                 variant: "tonal"
                 onClicked: {}
