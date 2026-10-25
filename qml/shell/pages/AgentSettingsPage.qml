@@ -74,7 +74,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {
@@ -117,7 +116,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {
@@ -154,26 +152,22 @@ Item {
                         topPadding: 10
                         spacing: 10
                         M.Md3Btn {
-                            md3: page.tok
                             text: "立即升级"
                             variant: "filled"
                             enabled: agentUi.canUpgrade
                             onClicked: agentUi.upgradeNow()
                         }
                         M.Md3Btn {
-                            md3: page.tok
                             text: agentUi.otaPausedNow ? "恢复自动升级" : "暂停自动升级"
                             variant: "tonal"
                             onClicked: agentUi.toggleOtaPause()
                         }
                         M.Md3Btn {
-                            md3: page.tok
                             text: "打开日志目录"
                             variant: "text"
                             onClicked: agentUi.openLogDir()
                         }
                         M.Md3Btn {
-                            md3: page.tok
                             text: "打开数据目录"
                             variant: "text"
                             onClicked: agentUi.openDataDir()
@@ -186,7 +180,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {
@@ -206,7 +199,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "开机自动启动（登录时拉起）"
                         supporting: "改动需管理员权限（弹 UAC）"
                         checked: agentUi.autostart
@@ -215,7 +207,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "在公共桌面放快捷方式"
                         supporting: "所有登录用户可见；改动需管理员权限"
                         checked: agentUi.desktopShortcut
@@ -225,7 +216,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "通知与弹窗"
                         checked: agentUi.notifyEnabled
                         onToggled: function (v) { agentUi.notifyEnabled = v }
@@ -233,7 +223,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "语音播报（通知朗读）"
                         checked: agentUi.voiceEnabled
                         onToggled: function (v) { agentUi.voiceEnabled = v }
@@ -241,7 +230,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "噪音监测"
                         checked: agentUi.noiseEnabled
                         onToggled: function (v) { agentUi.noiseEnabled = v }
@@ -249,7 +237,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "灵动岛空闲常驻"
                         supporting: "关掉后岛只在与老师交互时出现"
                         checked: agentUi.islandIdle
@@ -262,7 +249,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "允许第三方推送灵动岛"
                         supporting: "插件推的通知带 [插件名] 前缀；限 5 条/秒、标题 120 字"
                         checked: agentUi.pluginIslandPush
@@ -271,7 +257,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "浅色主题"
                         checked: agentUi.lightMode
                         onToggled: function (v) { agentUi.lightMode = v }
@@ -289,7 +274,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {
@@ -323,7 +307,6 @@ Item {
                     M.Md3TextField {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         placeholder: "服务地址（默认官方站）"
                         text: page.vh ? page.vh.baseUrl : ""
                         onEditingFinished: if (page.vh) page.vh.baseUrl = text
@@ -331,7 +314,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "开播提醒"
                         supporting: "有新广播时灵动岛弹一次（考试模式静默）"
                         checked: page.vh ? page.vh.autoNotify : false
@@ -340,7 +322,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "控制接口（点歌 / 歌词 / 广播）"
                         supporting: "留桩：接线后生效，当前只读展示不受影响"
                         checked: page.vh ? page.vh.controlEnabled : false

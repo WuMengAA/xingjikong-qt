@@ -32,7 +32,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {
@@ -80,7 +79,6 @@ Item {
                             M.Md3Btn {
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                md3: page.tok
                                 text: modelData.fix
                                 variant: "tonal"
                                 visible: !modelData.ok
@@ -95,7 +93,6 @@ Item {
             Row {
                 spacing: 10
                 M.Md3Btn {
-                    md3: page.tok
                     text: "重新检测"
                     variant: "filled"
                     onClicked: agentUi.runSelfCheckCheck()

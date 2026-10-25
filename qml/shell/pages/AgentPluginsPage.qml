@@ -31,8 +31,8 @@ Item {
 
             Row {
                 spacing: 10
-                M.Md3Btn { md3: page.tok; text: "刷新"; variant: "filled"; onClicked: agentUi.pluginsRefresh() }
-                M.Md3Btn { md3: page.tok; text: "安装本地示例(echo)"; variant: "tonal"; onClicked: agentUi.pluginInstallSample() }
+                M.Md3Btn { text: "刷新"; variant: "filled"; onClicked: agentUi.pluginsRefresh() }
+                M.Md3Btn { text: "安装本地示例(echo)"; variant: "tonal"; onClicked: agentUi.pluginInstallSample() }
             }
 
             // ── 内置模块（2026-10-16「模块化插件」）──
@@ -49,7 +49,6 @@ Item {
                     required property var modelData
                     anchors.left: parent ? parent.left : undefined
                     anchors.right: parent ? parent.right : undefined
-                    md3: page.tok
                     variant: "outlined"
 
                     Column {
@@ -91,7 +90,6 @@ Item {
                             topPadding: 6
                             spacing: 10
                             M.Md3Btn {
-                                md3: page.tok
                                 text: modelData.enabled ? "停用" : "启用"
                                 variant: "tonal"
                                 height: 30
@@ -120,7 +118,6 @@ Item {
                     required property var modelData
                     anchors.left: parent ? parent.left : undefined
                     anchors.right: parent ? parent.right : undefined
-                    md3: page.tok
                     variant: "filled"
 
                     Column {
@@ -169,7 +166,6 @@ Item {
                             topPadding: 6
                             spacing: 10
                             M.Md3Btn {
-                                md3: page.tok
                                 text: modelData.installed ? (modelData.enabled ? "停用" : "启用") : "安装"
                                 variant: "tonal"
                                 height: 30
@@ -178,7 +174,6 @@ Item {
                                            : agentUi.pluginInstall(modelData.id)
                             }
                             M.Md3Btn {
-                                md3: page.tok
                                 text: "卸载"
                                 variant: "text"
                                 height: 30

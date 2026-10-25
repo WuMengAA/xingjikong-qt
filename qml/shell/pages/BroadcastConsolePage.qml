@@ -48,7 +48,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {

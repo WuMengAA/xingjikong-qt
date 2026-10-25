@@ -18,7 +18,6 @@ Item {
 
     M.Md3Dialog {
         anchors.fill: parent
-        md3: root.tk
         opened: root.opened
         title: root.title
         text: root.text

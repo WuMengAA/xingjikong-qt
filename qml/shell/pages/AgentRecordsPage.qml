@@ -30,7 +30,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {
@@ -53,7 +52,6 @@ Item {
                         M.Md3Btn {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            md3: page.tok
                             text: "打开记录文件夹"
                             variant: "text"
                             height: 30
@@ -74,7 +72,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {
@@ -97,7 +94,6 @@ Item {
                         M.Md3Btn {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            md3: page.tok
                             text: "打开记录文件夹"
                             variant: "text"
                             height: 30

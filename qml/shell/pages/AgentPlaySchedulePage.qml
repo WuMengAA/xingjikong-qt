@@ -34,7 +34,6 @@ Item {
             M.Md3Card {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                md3: page.tok
                 variant: "filled"
 
                 Column {
@@ -46,7 +45,6 @@ Item {
                     M.Md3SwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        md3: page.tok
                         text: "启用播放时段限制"
                         supporting: "只在这些时段内允许广播/播放"
                         checked: agentUi.playScheduleEnabled
@@ -113,7 +111,6 @@ Item {
                         topPadding: 6
                         spacing: 10
                         M.Md3Btn {
-                            md3: page.tok
                             text: "保存"
                             variant: "filled"
                             onClicked: {
@@ -122,7 +119,6 @@ Item {
                             }
                         }
                         M.Md3Btn {
-                            md3: page.tok
                             text: "打开数据目录"
                             variant: "text"
                             onClicked: agentUi.openDataDir()

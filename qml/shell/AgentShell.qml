@@ -115,7 +115,6 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        md3: tok
         items: {
             var _dep = pageHost.count
             _dep = pageHost.currentIndex
