@@ -971,9 +971,23 @@ const server = http.createServer((req, res) => {
     return send(200, { ok: true, size: classDirSize(), classes: listClassDir() });
   }
   if (req.method === 'GET' && u.pathname === '/api/me/classes') {
-    // 管理端（登录账号）可见的班级列表 —— 第一版：云端不分账号，返回全部班级。
-    // 在线数现算（不落表，避免"不自刷新"老毛病），管理端按班下发时只发本班在线设备。
-    return send(200, { ok: true, classes: listClasses() });
+    // 管理端（登录账号）可见的班级列表。
+    // 2026-10-25：与 /api/classes 同口径 —— 票据身份只回**自己带的班**（并带 myRole），
+    //   静态令牌（系统身份 / 运维）或该账号还没有任何成员记录时回全量 + filtered:false。
+    //   两个端点各写一份过滤是下策，但它们的返回结构不同（这里要给 myRole 供界面显示身份），
+    //   合并成公共函数反而要维护两套形状 —— 所以显式重复，并在两处注释里互相指向。
+    const allMine = listClasses();
+    const whoMine = req.__auth || {};
+    if (whoMine.mode === 'ticket' && whoMine.uid) {
+      const mine = adminMyClasses({ uid: whoMine.uid });
+      if (mine.ok && mine.classes.length > 0) {
+        const roleMap = new Map(mine.classes.map((x) => [x.classCode, x.role]));
+        const own = allMine.filter((c) => roleMap.has(c.code))
+                           .map((c) => ({ ...c, myRole: roleMap.get(c.code) }));
+        return send(200, { ok: true, classes: own, filtered: true });
+      }
+    }
+    return send(200, { ok: true, classes: allMine, filtered: false });
   }
   if (u.pathname === '/api/env/test-whitelist') {
     // 环境白名单（2026-10-24）：谁是测试机由云端清单裁决，设备自报 env 一律忽略。
