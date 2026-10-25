@@ -1,7 +1,6 @@
 // 班级工作台 · 右栏「班级管理」（方案 B，清新极简）：新建 / 改名 / 删班。
 // 成员管理在中栏「成员」tab（ClassMemberPane）；右栏管班、中栏管设备，两处不混。
-// 铁律：操作对象=当前班（未订阅整组禁用）；写成功 requestClasses() 重拉；
-// 失败必 toast（fail-silent 红线）；删除行内两段确认；输入行抽件 ClassNameInputRow。
+// 铁律：操作对象=当前班（未订阅整组禁用）；写成功 requestClasses() 重拉；失败必 toast（fail-silent 红线）；删除行内两段确认；输入行抽件 ClassNameInputRow。
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
 import "../../island"              // SvgIcon
@@ -23,7 +22,6 @@ Item {
 
     implicitWidth: 320
     implicitHeight: bodyCol.implicitHeight + 32
-
     function toast(msg, isErr) { if (pane.toastFn) pane.toastFn(msg, isErr === true) }
 
     /** 班级管理调用层（backend.classAdmin，C++ ClassAdmin）。 */

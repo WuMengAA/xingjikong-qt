@@ -126,6 +126,7 @@ Item {
         if (shell.section === "control") return 2
         if (shell.section === "monitor") return 3
         if (shell.section === "settings") return 4
+        if (shell.section === "account") return 5
         return 0
     }
 
@@ -135,6 +136,7 @@ Item {
         if (shell.section === "control") return "设备集控"
         if (shell.section === "monitor") return "运行监控"
         if (shell.section === "settings") return "系统设置"
+        if (shell.section === "account") return "个人中心"
         return "设备监控"
     }
 
@@ -273,9 +275,11 @@ Item {
                         // 写旧筛选（setCurrentClass）与新班级域（subscribeClass）。
                         // 只写旧的话，班级工作台永远订不到班（网格空着不说话）。
                         onClassPicked: function (code) { classDash.activateClass(code) }
-                        // 头像 = 账户入口，落点就是系统设置。走 navActivated 而不是
-                        // goPage(2)：RBAC 门禁只有那一处，绕过去等于开第二个口子。
-                        onAvatarClicked: function () { shell.navActivated("settings") }
+                        // 头像 = 账户入口。2026-10-25：落点从「系统设置」改成「个人中心」——
+                        //   系统设置受 system:settings 门禁（teacher 无此权限），老师点自己头像
+                        //   会被一句"当前身份不能进系统设置"挡回来，等于个人中心根本进不去。
+                        //   个人中心不设门禁（任何人都该能看自己的账号与退出登录）。
+                        onAvatarClicked: function () { shell.navActivated("account") }
                         onLoginRequested: {
                             shell.toast("正在打开站点登录…")
                             if (backend) backend.loginWithSite()
@@ -368,9 +372,17 @@ Item {
                             }
                         }
 
-                        // ⑤ 系统设置：复用已交付的设置页（零重复）
+                        // ⑤ 系统设置：只给管理员（navActivated 里的 system:settings 门禁）
                         Loader {
                             source: "../pages/settings/SettingsPage.qml"
+                            onLoaded: if (item) item.ctx = shell.ctx
+                        }
+
+                        // ⑥ 个人中心（2026-10-25）：头像的落点。**不受** system:settings 门禁 ——
+                        //    老师必须能看自己的账号、在册班级、提醒/外观偏好与退出登录。
+                        //    原来头像直接跳 ⑤，而 ⑤ 对 teacher 是关的 ⇒ 老师点自己头像被挡。
+                        Loader {
+                            source: "../pages/account/AccountCenterPage.qml"
                             onLoaded: if (item) item.ctx = shell.ctx
                         }
                     }

@@ -172,6 +172,11 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QString accountName READ accountName NOTIFY accountChanged)
     /** 当前身份："admin"（管理员）／"teacher"（教师）。未登录时也是 teacher（按最低权限看）。 */
     Q_PROPERTY(QString role READ role NOTIFY roleChanged)
+    /** 身份是否由**服务端**下发锁定（2026-10-25）。锁定后本地切换一律被拒 ——
+     *  界面必须据此隐藏"换成管理员/教师"，否则就是一颗点了没反应的假按钮
+     *  （用户报的"按钮按不动"里，这类静默失败最招人烦）。 */
+    Q_PROPERTY(bool roleLocked READ roleLocked NOTIFY roleChanged)
+    bool roleLocked() const { return m_roleLocked; }
     // ── 提醒（设置页那两个开关，以前是画的假开关，2026-10-06 做成真的）──
     Q_PROPERTY(bool notifyOnDone READ notifyOnDone NOTIFY notifyPrefChanged
                WRITE setNotifyOnDone)

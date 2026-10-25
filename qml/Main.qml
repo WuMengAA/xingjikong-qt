@@ -586,6 +586,12 @@ ApplicationWindow {
     /** 设置页「课表编辑器」按钮用：`ScheduleEditor` 是窗口的子对象，外部访问不到。 */
     function openScheduleEditor() { schedEditor.show() }
 
+    /** 系统设置「诊断与反馈」用（2026-10-25）。
+     *  为什么必须有这层：`diagDlg` 是本文件的**组件内 id**，独立的 SettingsPage.qml
+     *  看不见它 —— 那边原来写裸 `diagDlg.refreshLog()`，点下去只会抛 ReferenceError，
+     *  而 GUI 子系统没有控制台，表现就是"按钮静默失灵"。与 openScheduleEditor 同款收口。 */
+    function openDiagnostics() { diagDlg.refreshLog(); diagDlg.open() }
+
     /** 整屏页「返回/退出」用：页号是主界面的事，不让子组件猜（见下方 _pageCtx 注释）。
      *  2026-10-24 旧界面迁移第三刀：旧壳 7 页栈退役，本函数变成**老页号 → 新栏目**的
      *  兼容层 —— 老调用点（弹窗、侧滑面板、业务页「返回」）一行不改也落到正确位置：
