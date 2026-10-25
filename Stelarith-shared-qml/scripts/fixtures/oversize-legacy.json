@@ -17,11 +17,11 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 7836,
+      "lines": 7837,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 217,
-      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交） | 2026-10-25 回写 7647→7681：#479 class-bound +27 与 #480 BlackboardCard 接线 +23（均 10-24/25 已提交），+11 属并行线存量 | 2026-10-25 回写 7681→7718：+29 渲染诊断埋点（651311b，Win7 黑底排查：sceneGraphBackend/env/OS/DWM 四行 qInfo），另 +8 属并行线存量未回写 | 2026-10-25 回写 7718→7836：**本批只提交 +66**（设备用途链路：g_deviceRole + 持久化 saveDeviceRole/loadDeviceRole + register 上报 role + 回执权威覆盖 + 缩略图门加用途判定 + 向导 setInitialRole/roleChosen 接线 + agentUiFill 快照）；**另 +52 属并行线 13:13 写入的 Win7 渲染兜底块（未提交、非本批，按纪律不替其提交）** —— 若该块被回退，请把本值回写为 7784"
+      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交） | 2026-10-25 回写 7647→7681：#479 class-bound +27 与 #480 BlackboardCard 接线 +23（均 10-24/25 已提交），+11 属并行线存量 | 2026-10-25 回写 7681→7718：+29 渲染诊断埋点（651311b，Win7 黑底排查：sceneGraphBackend/env/OS/DWM 四行 qInfo），另 +8 属并行线存量未回写 | 2026-10-25 回写 7718→7836：**本批只提交 +66**（设备用途链路：g_deviceRole + 持久化 saveDeviceRole/loadDeviceRole + register 上报 role + 回执权威覆盖 + 缩略图门加用途判定 + 向导 setInitialRole/roleChosen 接线 + agentUiFill 快照）；**另 +52 属并行线 13:13 写入的 Win7 渲染兜底块（未提交、非本批，按纪律不替其提交）** —— 若该块被回退，请把本值回写为 7784 | 2026-10-25 回写 7836→7837：+1 为本批删除 XJK 接入码路径（仅 6 位票走 /api/device/activate，旧 XJK 分支与站点代兑换注释移除）"
     },
     "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
       "lines": 870,
@@ -330,6 +330,13 @@
       "qInvokable": 0,
       "topLevel": 0,
       "plan": "[P2] 中栏「成员管理」tab，两段：上半班级人员（账号成员，/api/class/members，角色 owner/teacher/viewer）+ 下半设备去留（移出/换班）。拆分台账：抽 ClassMemberPeoplePane.qml（人员段：members 列表 + 添加/移除账号表单）与 ClassMemberDevicePane.qml（设备段：换班目标下拉 + 移出确认）；本件退化为段间编排器（约 60 行）。#461-#472 班级工作台收口时执行。"
+    },
+    "Stelarith-viewer-qt/qml/pages/class/ClassAdminPane.qml": {
+      "lines": 316,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[P2] 右栏「班级管理」面板：新建/改名/删班 + 班级接入码（生成/复制/作废）。拆分台账：抽 ClassBindCodeCard.qml（接入码生成+展示+复制+作废，约 90 行）与 ClassDeleteCard.qml（两段确认删班），本件退化为调度器。#505 接入码收归我方时新增，2026-10-25 登记。"
     }
   }
 }
