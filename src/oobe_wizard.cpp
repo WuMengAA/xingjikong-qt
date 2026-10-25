@@ -307,6 +307,34 @@ void OobeWizard::submitBindingCode(const QString &code)
     });
 }
 
+/** 用途归一：白名单外一律教室端（与云端 registry.normalizeDeviceRole 同口径）。
+ *  ⚠️ 两端各写一遍是有意的：端侧不能信任云端一定升级过，云端也不能信任端侧不乱报。 */
+static QString normalizeRole(const QString &role)
+{
+    return role.trimmed().toLower() == QStringLiteral("broadcast")
+        ? QStringLiteral("broadcast") : QStringLiteral("classroom");
+}
+
+void OobeWizard::setInitialRole(const QString &role)
+{
+    const QString n = normalizeRole(role);
+    if (m_role == n) return;
+    m_role = n;
+    emit roleChanged();
+}
+
+void OobeWizard::chooseRole(const QString &role)
+{
+    const QString n = normalizeRole(role);
+    if (m_role == n) return;
+    m_role = n;
+    emit roleChanged();
+    // 立即上报：不放进 finishWizard —— 「选了广播端但点稍后配置」是真实路径，
+    // 那条路上跳过绑定也不能跳过用途（否则机器身份空着，云端按教室端对待）。
+    emit roleChosen(m_role);
+    qInfo("[oobe] 用途已选：%s", m_role == QStringLiteral("broadcast") ? "广播端" : "教室端");
+}
+
 void OobeWizard::skipWizard()
 {
     if (m_done) return;

@@ -28,7 +28,9 @@ Rectangle {
         permissions: []
         // A-3 第一批的页都没声明 caps。
         capabilities: []
-        manifest: AgentPages.manifest()
+        // 2026-10-25：用途是第一维过滤 —— 广播机看到「广播台」首屏、看不到班级采集页；
+        // 教室机反之。manifestFor 内部按 order 重排，底导航顺序随之重算。
+        manifest: AgentPages.manifestFor(agentUi.deviceRole)
     }
 
     // ── 顶栏 ─────────────────────────────────────────────────
@@ -51,7 +53,8 @@ Rectangle {
             anchors.left: parent.left
             anchors.leftMargin: 20
             anchors.verticalCenter: parent.verticalCenter
-            text: "星集控 · 被控端"
+            // 标题即身份：现场一眼能看出这台是教室机还是广播机（用途来自 OOBE 第一步）
+            text: agentUi.deviceRole === "broadcast" ? "星集控 · 广播端" : "星集控 · 被控端"
             font.pixelSize: 16
             font.weight: Font.Medium
             color: tok.cOnSurface

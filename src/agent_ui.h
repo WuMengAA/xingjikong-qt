@@ -47,6 +47,11 @@ class AgentUi : public QObject
     Q_PROPERTY(QString uid          READ uid           NOTIFY infoChanged)
     Q_PROPERTY(QString cloudUrl     READ cloudUrl      NOTIFY infoChanged)
     Q_PROPERTY(QString connState    READ connState     NOTIFY infoChanged)
+    // 2026-10-25：设备用途（classroom / broadcast）。壳按它决定显示哪些页、标题叫什么。
+    // 为什么不放 OobeWizard：面板要在**没有向导**的常态下也知道自己是什么机器。
+    Q_PROPERTY(QString deviceRole   READ deviceRole    NOTIFY infoChanged)
+    // 归属码：教室机=班级码，广播机=站码（同一命名空间）。广播台要显示它。
+    Q_PROPERTY(QString classCode    READ classCode     NOTIFY infoChanged)
     Q_PROPERTY(QString dataDir      READ dataDir       NOTIFY infoChanged)
     Q_PROPERTY(QString logPath      READ logPath       NOTIFY infoChanged)
     Q_PROPERTY(QString latestText   READ latestText    NOTIFY infoChanged)
@@ -85,6 +90,8 @@ public:
     // ── getter（纯成员；moc 的属性系统会引用它们的地址）──
     QString appVersion() const { return m_appVersion; }
     QString uid() const { return m_uid; }
+    QString deviceRole() const { return m_deviceRole; }
+    QString classCode() const { return m_classCode; }
     QString cloudUrl() const { return m_cloudUrl; }
     QString connState() const { return m_connState; }
     QString dataDir() const { return m_dataDir; }
@@ -179,6 +186,8 @@ signals:
 
 private:
     QString m_appVersion, m_uid, m_cloudUrl, m_connState, m_dataDir, m_logPath;
+    QString m_deviceRole = QStringLiteral("classroom");   // 快照：用途（默认教室机）
+    QString m_classCode;                                   // 快照：归属码（班码/站码）
     QString m_latestText, m_updateNotes, m_otaModeText, m_otaAutoText, m_otaLastText, m_otaNextText;
     bool m_hasNewer = false, m_canUpgrade = false, m_otaPaused = false;
     bool m_notifyEnabled = true, m_voiceEnabled = true, m_noiseEnabled = true;

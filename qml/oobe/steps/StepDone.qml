@@ -43,7 +43,7 @@ Item {
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "绑定成功！"
+            text: page.wizard.isBroadcast ? "广播站绑定成功！" : "绑定成功！"
             font.pixelSize: 24
             font.weight: Font.Bold
             color: tk.cOnSurface
@@ -53,7 +53,9 @@ Item {
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: oobe.className.length > 0 ? oobe.className : "班级信息已记录"
+            text: oobe.className.length > 0
+                  ? oobe.className
+                  : (page.wizard.isBroadcast ? "广播站信息已记录" : "班级信息已记录")
             font.pixelSize: 32
             font.weight: Font.Bold
             color: tk.cPrimary
@@ -88,7 +90,7 @@ Item {
         OobeBigButton {
             width: parent.width
             tk: page.tk
-            text: "完成配置，进入系统"
+            text: page.wizard.isBroadcast ? "完成配置，进入广播台" : "完成配置，进入系统"
             onClicked: page.wizard.completeNow()
         }
     }

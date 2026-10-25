@@ -1,6 +1,8 @@
 // 星集控被控端 · 首次启动引导（OOBE Wizard）界面壳（2026-10-20）
 //
-// 结构：StackView 单向四步（欢迎 → 选方式 → 扫码/输码 → 确认班级）。
+// 结构：StackView 单向五步（欢迎 → **选用途** → 选方式 → 扫码/输码 → 确认）。
+//   2026-10-25：用途成为第一步 —— 用户裁决「独立界面要在 OOBE 阶段完成」。
+//   它决定后面绑的是班级还是广播站，也决定这台机器开哪套外壳。
 //   · 单向：只能往前走 + 从「选方式」退回欢迎；不能跳到后面的步骤。
 //   · 状态真源在 C++（`oobe` = OobeWizard）：bindingState 变了这里才动页面，
 //     QML 自己不猜绑定结果（扫码页/输码页共用同一处跳转判断）。
@@ -31,17 +33,21 @@ Rectangle {
     readonly property bool errorDialogOpen: errDlg.opened
 
     // ── 导航（供各步按钮与探针调用）─────────────────────────────
+    // 步序：0 欢迎 | 1 用途 | 2 选方式 | 3 扫码 | 4 输码 | 5 完成
     function gotoStep(n) {
         var comp = n === 0 ? welcomeComp
-                 : n === 1 ? chooseComp
-                 : n === 2 ? scanComp
-                 : n === 3 ? codeComp
+                 : n === 1 ? roleComp
+                 : n === 2 ? chooseComp
+                 : n === 3 ? scanComp
+                 : n === 4 ? codeComp
                  : doneComp;
         step = n;
         stack.replace(null, comp, { tk: tok, wizard: wizardRoot });
     }
-    function chooseQr()   { gotoStep(2); oobe.startScan(); }
-    function chooseCode() { gotoStep(3); }
+    function chooseQr()   { gotoStep(3); oobe.startScan(); }
+    function chooseCode() { gotoStep(4); }
+    /** 用途是否为广播机（各步文案据此切换：班级 / 广播站）。 */
+    readonly property bool isBroadcast: oobe.deviceRole === "broadcast"
     function skipNow()    { oobe.skipWizard(); }
     function completeNow(){ oobe.finishWizard(); }
 
@@ -71,9 +77,9 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 32
         spacing: 8
-        visible: wizardRoot.step < 4
+        visible: wizardRoot.step < 5
         Repeater {
-            model: 4
+            model: 5
             delegate: Rectangle {
                 required property int index
                 width: index === wizardRoot.step ? 20 : 8
@@ -89,8 +95,8 @@ Rectangle {
     Connections {
         target: oobe
         function onBindingStateChanged() {
-            if (oobe.bindingState === wizardRoot.stSuccess && wizardRoot.step !== 4) {
-                wizardRoot.gotoStep(4);
+            if (oobe.bindingState === wizardRoot.stSuccess && wizardRoot.step !== 5) {
+                wizardRoot.gotoStep(5);
             }
         }
         // 错误提示的开关**只以 errorText 为准**（C++ 是唯一真源）：
@@ -113,6 +119,7 @@ Rectangle {
     }
 
     Component { id: welcomeComp; StepWelcome  { } }
+    Component { id: roleComp;    StepRole     { } }
     Component { id: chooseComp;  StepChooseMethod { } }
     Component { id: scanComp;    StepScan     { } }
     Component { id: codeComp;    StepCode     { } }

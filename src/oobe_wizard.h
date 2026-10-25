@@ -53,6 +53,10 @@ public:
     Q_PROPERTY(QString machineCode READ machineCode NOTIFY infoChanged)
     Q_PROPERTY(QString className READ className NOTIFY infoChanged)
     Q_PROPERTY(QString classCode READ classCode NOTIFY infoChanged)
+    // 2026-10-25：设备用途（classroom / broadcast）。OOBE **第一步**就问它——
+    // 因为用途决定后面绑的是什么（班 or 广播站）、以及这台机器开哪套外壳。
+    // 它比绑定更早生效：选完立刻由 main.cpp 落盘并补发 register。
+    Q_PROPERTY(QString deviceRole READ deviceRole NOTIFY roleChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
     Q_PROPERTY(QVariantList qrMatrix READ qrMatrix NOTIFY qrChanged)
     Q_PROPERTY(QString qrCodeText READ qrCodeText NOTIFY qrChanged)
@@ -62,6 +66,7 @@ public:
     QString machineCode() const { return m_uid; }
     QString className() const { return m_className; }
     QString classCode() const { return m_classCode; }
+    QString deviceRole() const { return m_role; }
     QString errorText() const { return m_error; }
     QVariantList qrMatrix() const { return m_qrMatrix; }
     QString qrCodeText() const { return m_qrCode; }
@@ -70,6 +75,8 @@ public:
     /** 机器码（register 用的 uid）+ 站点基址：由 main.cpp 在显示向导前注入。 */
     void setMachineCode(const QString &uid);
     void setSiteBase(const QString &siteBase);
+    /** 注入本机已保存的用途（重开向导时默认选中上次的选择）。 */
+    void setInitialRole(const QString &role);
 
     // ── QML 可调 ─────────────────────────────────────────
     /** 进入扫码页：拉一次二维码并开始每 2 秒查一次绑定结果。 */
@@ -84,6 +91,8 @@ public:
     Q_INVOKABLE void finishWizard();
     /** 关掉错误提示（错误文案保留，供页面内提示行复用）。 */
     Q_INVOKABLE void dismissError();
+    /** 选用途（'classroom' / 'broadcast'）。选完立即发 roleChosen —— 用途不等绑定完成。 */
+    Q_INVOKABLE void chooseRole(const QString &role);
     /** 6 位绑定码是否合法（QML 用来控制「确认绑定」按钮亮灭）。 */
     Q_INVOKABLE bool isCodeFormatValid(const QString &code) const;
 
@@ -92,6 +101,10 @@ signals:
     void infoChanged();
     void errorTextChanged();
     void qrChanged();
+    void roleChanged();
+    /** 用途已选（main.cpp 落盘 + 补发 register）。与 wizardFinished 独立：
+     *  用户选了广播机却中途跳过绑定，用途也必须已经生效。 */
+    void roleChosen(const QString &role);
     /** 向导结束（bound=true 表示已绑定；false 表示用户跳过）。main.cpp 据此落盘标记。 */
     void wizardFinished(bool bound);
     /** 绑定成功：classCode 可能为空（老站点不回），className 可能为空（同上）。 */
@@ -110,6 +123,7 @@ private:
     QString m_siteBase;
     int m_state = Idle;
     QString m_className;
+    QString m_role = QStringLiteral("classroom");
     QString m_classCode;
     QString m_error;
     QVariantList m_qrMatrix;
