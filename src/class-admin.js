@@ -31,7 +31,8 @@ import {
 } from './class-data.js';
 // 2026-10-25：ClassIsland 档案 → 归一化课表信封（CIMS 退役后课表回落到我们自己的库，
 // 但格式保持与 ClassIsland 互通：老师手里的档案能直接导进来）。
-import { normalizeClassIslandProfile, listClassIslandGroups, TIMETABLE_SCHEMA } from './class-timetable.js';
+// classIslandGroupMeta：群顺序 + 「几班」标签（12 个群同名时靠首次出现序推断，不猜名字）
+import { normalizeClassIslandProfile, classIslandGroupMeta, TIMETABLE_SCHEMA } from './class-timetable.js';
 // 2026-10-25：班级接入码收归我方 —— 票据系统本就在 bind-qr.js（与设备自助码同一套码表、
 // 同一套 normalizeCode/过期清理），这里只做「按班签发」这一层，不另造码表。
 import { issueClassBind, getTicket, revokeTicket } from './bind-qr.js';
@@ -434,12 +435,14 @@ export function adminImportTimetable(code, rawProfile, groupKey = '', ident = nu
   }
   const r = saveTimetable(hit.code, norm.normalized, ident?.uid ?? 'system');
   if (r.ok) {
+    // 审计口径统一用「X班」标签（群名可能 12 个都叫「新课表群」，写进日志等于没写）
+    const g = norm.normalized.group;
     pushEvent('info', '管理端导入 ClassIsland 课表', {
-      classCode: hit.code, group: norm.normalized.group.name,
+      classCode: hit.code, group: g.label || g.name,
       days: norm.normalized.days.length, bytes: r.bytes, by: ident?.uid ?? 'system',
     });
     pushClassEvent(hit.code, 'timetable', {
-      group: norm.normalized.group.name, days: norm.normalized.days.length,
+      group: g.label || g.name, days: norm.normalized.days.length,
       schema: TIMETABLE_SCHEMA,
     }, ident?.uid ?? 'system');
   }
@@ -447,11 +450,14 @@ export function adminImportTimetable(code, rawProfile, groupKey = '', ident = nu
            lessons: norm.normalized.days.reduce((n, d) => n + d.lessons.length, 0) };
 }
 
-/** 列一份档案里的课表群（UI 在导入前预览用；不落库）。 */
+/**
+ * 列一份档案里的课表群（UI 在导入前预览用；不落库）。
+ * nameSource='order' 表示档案里 12 个群同名，班名是按出现顺序推的 ⇒ 界面必须提示核对。
+ */
 export function adminListTimetableGroups(rawProfile) {
-  const groups = listClassIslandGroups(rawProfile);
-  return groups.length
-    ? { ok: true, groups }
+  const meta = classIslandGroupMeta(rawProfile);
+  return meta.groups.length
+    ? { ok: true, groups: meta.groups, nameSource: meta.nameSource, conflict: meta.conflict }
     : { ok: false, error: '档案里没有任何日课表（ClassPlan 为空或格式不对）', groups: [] };
 }
 

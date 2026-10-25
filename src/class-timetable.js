@@ -11,10 +11,21 @@
  * 归一化只做三件事：挑一个课表群、把「第 N 节课」和作息里的「第 N 个上课时段」对齐、
  * 把科目/时间翻译成人话。**不做语义增删** —— 课表内容是老师的数据，服务端不解释。
  *
- * 数据事实（2026-10-25 用 D:\Classlsland\data\Profiles\Default.json 核对）：
- *   · 12 个 ClassPlan = 2 个课表群 × 6 天（周日 + 周一~周五），群名「1班课表群」「8班课表群」
- *   · 4 份 TimeLayout（周日 / 周1234 / 周5 / 周1 各一套「高二通用」）
- *   · 23 个科目
+ * 数据事实（2026-10-25 用三份真实档案核对）：
+ *   · **完整档案 = 72 个 ClassPlan = 12 个课表群 × 6 天**（周日 + 周一~周五）= 1~12 班全校课表；
+ *     交付到教室机的那份 `Default.json` 只剩被用到的 2 个群（「1班课表群」「8班课表群」）。
+ *   · 4 份 TimeLayout（周日 / 周1234 / 周5 / 周1 各一套「高二通用」）、23 个科目。
+ *
+ * 群 → 班的映射（**唯一的坑，别再猜**）：完整档案里 12 个群**全叫「新课表群」**，
+ *   靠名字分不出谁是谁。权威口径来自 CIMS `schedule_importer.py`：**保持 ClassPlanGroups
+ *   的声明顺序、只留有课表的群**，按序命名 1班…12班（`docs/phase4-班级课表导入验证报告.md`
+ *   给出了 12 个班周一的逐班课表）。但 2026-10-25 实测发现**声明顺序本身也会变**：
+ *   `pre-stelarith`（CIMS 真正导入的那份）声明序 = 12/12 对得上，
+ *   `pre-groupfix`（改名之后）声明序 **0/12**、只有「ClassPlans 首次出现序」才是 12/12 ——
+ *   因为改名把那个群在 ClassPlanGroups 里挪到了末尾。故：
+ *     · 排序一律用 **ClassPlans 里 AssociatedGroup 的首次出现顺序**（两份档案都 12/12，实测）；
+ *     · 群名只有在**全部**能解析成唯一的「N班课表群」时才采信（现役 2 群档案的 1班/8班）；
+ *     · 否则标签按序推 1班…N班，并标 `inferred:true` 让界面提示"按顺序编号，请核对"。
  *
  * TimeType 语义（**踩过坑，别再猜**）：`0 = 上课`、`1 = 课间`、`3 = 行动`。
  *   第一版按「1=上课」写，导入后数学只剩 20 分钟、语文 5 分钟 —— 因为 1 都是
@@ -52,14 +63,26 @@ export function isClassIslandProfile(obj) {
     && !!obj.TimeLayouts && typeof obj.TimeLayouts === 'object';
 }
 
+/** 「N班课表群」——档案里唯一可信的班名来源；其它写法（含全叫「新课表群」）一律按序编号。 */
+const GROUP_NAME_RE = /^(\d{1,2})\s*班\s*课表群$/;
+
 /**
- * 列出档案里「有课表」的课表群（供 UI 让老师选：一个档案常含多班）。
- * @returns {Array<{id:string,name:string,days:number,isGlobal:boolean}>}
+ * 列出档案里「有课表」的课表群，并推断「这是几班」。
+ *
+ * 顺序 = **ClassPlans 里 AssociatedGroup 的首次出现顺序**（不是 ClassPlanGroups 的
+ * 声明序 —— 见文件头：改名会把群挪到字典末尾，按声明序会整体错一位）。
+ *
+ * @returns {{groups:Array, nameSource:'declared'|'order', conflict:boolean}}
+ *   groups[i] = { id, name, label, inferred, index, days, isGlobal }
  */
-export function listClassIslandGroups(profile) {
-  if (!isClassIslandProfile(profile)) return [];
+export function classIslandGroupMeta(profile) {
+  if (!isClassIslandProfile(profile)) {
+    return { groups: [], nameSource: 'order', conflict: false };
+  }
   const meta = profile.ClassPlanGroups && typeof profile.ClassPlanGroups === 'object'
     ? profile.ClassPlanGroups : {};
+
+  // Map 插入序即首次出现序 —— 不要在这里 sort，排一次就把 12 个班的对应关系毁掉
   const tally = new Map();       // gid -> Set(dow)
   for (const plan of Object.values(profile.ClassPlans)) {
     if (!plan || typeof plan !== 'object') continue;
@@ -68,18 +91,42 @@ export function listClassIslandGroups(profile) {
     const dow = DOW[clip(plan.Name, 8)];
     if (dow !== undefined) tally.get(gid).add(dow);
   }
-  const out = [];
+
+  const groups = [];
   for (const [gid, days] of tally) {
-    if (days.size === 0) continue;                 // 全局群（无日计划）不算候选
+    if (days.size === 0) continue;                 // 全局群 / 空壳群（无日计划）不算候选
     const m = meta[gid] || {};
-    out.push({
+    groups.push({
       id: gid,
       name: clip(m.Name, 30) || (gid ? `课表群 ${gid.slice(0, 8)}` : '默认课表群'),
       days: days.size,
       isGlobal: m.IsGlobal === true,
+      index: groups.length + 1,
     });
   }
-  return out.sort((a, b) => b.days - a.days || a.name.localeCompare(b.name, 'zh'));
+
+  // 采信群名的条件：每一个群都解析得出、且编号互不重复（「1班+8班」这种稀疏命名也允许）
+  const nums = groups.map((r) => {
+    const m = GROUP_NAME_RE.exec(r.name);
+    return m ? Number(m[1]) : 0;
+  });
+  const named = nums.length > 0 && nums.every((n) => n > 0) && new Set(nums).size === nums.length;
+  // 部分可解析、且与顺序位对不上 ⇒ 档案命名混乱，必须让界面提示人工核对
+  const conflict = !named && nums.some((n, k) => n > 0 && n !== k + 1);
+
+  groups.forEach((r, k) => {
+    r.label = named ? `${nums[k]}班` : `${r.index}班`;
+    r.inferred = !named;         // true = 班名按出现顺序推的，界面要提示"请核对"
+  });
+  return { groups, nameSource: named ? 'declared' : 'order', conflict };
+}
+
+/**
+ * 列出档案里「有课表」的课表群（顺序即班级顺序，带推断班名）。
+ * @returns {Array<{id:string,name:string,label:string,inferred:boolean,index:number,days:number,isGlobal:boolean}>}
+ */
+export function listClassIslandGroups(profile) {
+  return classIslandGroupMeta(profile).groups;
 }
 
 /** 作息条目类型 → 人话（TimeType 见文件头：0=上课 1=课间 3=行动）。 */
@@ -100,15 +147,19 @@ export function normalizeClassIslandProfile(profile, groupKey = '') {
   if (!isClassIslandProfile(profile)) {
     return { ok: false, error: '不是 ClassIsland 档案（缺 ClassPlans / TimeLayouts）' };
   }
-  const groups = listClassIslandGroups(profile);
+  const meta = classIslandGroupMeta(profile);
+  const groups = meta.groups;
   if (groups.length === 0) return { ok: false, error: '档案里没有任何日课表（ClassPlan 为空）' };
 
   const key = clip(groupKey, 64).toLowerCase();
   let picked = null;
   if (key) {
+    const num = Number((/^(?:#|第)?(\d{1,2})(?:班)?$/.exec(key) || [])[1] || 0);
     picked = groups.find((g) => g.id.toLowerCase() === key)
       || groups.find((g) => g.id.toLowerCase().startsWith(key))
+      || groups.find((g) => g.label.toLowerCase() === key)
       || groups.find((g) => g.name.toLowerCase() === key)
+      || (num > 0 ? groups.find((g) => g.index === num) : null)
       || null;
     if (!picked) return { ok: false, error: `档案里没有这个课表群：${groupKey}`, groups };
   } else if (groups.length === 1) {
@@ -198,7 +249,14 @@ export function normalizeClassIslandProfile(profile, groupKey = '') {
       schema: TIMETABLE_SCHEMA,
       source: 'classisland',
       importedAt: new Date().toISOString(),
-      group: { id: picked.id, name: picked.name },
+      group: {
+        id: picked.id,
+        name: picked.name,
+        label: picked.label,
+        index: picked.index,
+        inferred: picked.inferred === true,   // true = 班名按序推的，界面需提示人工核对
+        nameSource: meta.nameSource,          // 'declared' = 采信了档案群名；'order' = 按序编号
+      },
       days,
       layouts,
       subjects,
