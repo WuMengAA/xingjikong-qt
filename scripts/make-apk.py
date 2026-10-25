@@ -18,6 +18,13 @@
        ⇒ 打包前按 `CMakeLists.txt` 的 `VIEWER_VERSION` **确定性改写** manifest。
        （Qt 6.12 在本工程配置下不消费 QT_ANDROID_VERSION_NAME/CODE，实测部署 json 里没有这两个键。）
 
+  坑 4（LLVM OOM，2026-10-26）——ninja 默认按核数并行，本机 14.8 GB 内存下
+       `viewerbackend.cpp`（2800 行 + 一堆 Qt 头）/ `viewerbackend_voice.cpp` /
+       `viewerbackend_account.cpp` / `mocs_compilation.cpp` 同时编 ⇒
+       `LLVM ERROR: out of memory` + `clang frontend command failed due to signal`。
+       ⇒ 显式传 `-j`，默认 **2**（可用内存 ÷ 单 TU 峰值 ~2-3GB 的安全值）。
+       想快可以 `--jobs 4`，但先确认任务管理器里可用内存 > 8GB。
+
 用法：
   python scripts/make-apk.py                # 全流程（增量：已编过就只做打包+签名）
   python scripts/make-apk.py --skip-build   # 只打包+签名（.so 已是最新时）
@@ -98,12 +105,20 @@ def version_from_cmake() -> tuple[str, int]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-build", action="store_true")
+    # 坑 4：默认并行度必须压住 —— ninja 按核数跑会把 clang++ 堆到 OOM。
+    ap.add_argument("--jobs", type=int, default=2,
+                    help="编译并行度（默认 2；LLVM OOM 时再降 1，内存充足可给 4）")
+    # 坑 5：本机「提交内存」（RAM+页面文件）常在 95%~99%，JVM 连几百 MB 都可能
+    #   commit 失败（DOS error 1455）。堆开小一点比开大更容易起得来。
+    ap.add_argument("--heap", default="900m",
+                    help="gradle JVM 堆上限（默认 900m；提交内存紧张时试 640m）")
     a = ap.parse_args()
     e = env()
 
     if not a.skip_build:
-        print("== 1) cmake --build build-android ==")
-        rc = run_to_file([str(CMAKE), "--build", str(BDIR)], ROOT, TMPLOG / "apk-build.log", e)
+        print("== 1) cmake --build build-android （-j %d）==" % a.jobs)
+        rc = run_to_file([str(CMAKE), "--build", str(BDIR), "--", "-j", str(a.jobs)],
+                         ROOT, TMPLOG / "apk-build.log", e)
         print("   rc =", rc)
         if rc != 0:
             txt = (TMPLOG / "apk-build.log").read_text(encoding="utf-8", errors="replace").splitlines()
@@ -143,7 +158,7 @@ def main() -> int:
     rc = run_to_file([str(JAVA_HOME / "bin" / "java.exe"),
                       "-classpath", str(AB / "gradle" / "wrapper" / "gradle-wrapper.jar"),
                       "org.gradle.wrapper.GradleWrapperMain", "assembleRelease", "--no-daemon",
-                      "-Dorg.gradle.jvmargs=-Xmx1400m -XX:MaxMetaspaceSize=384m",
+                      "-Dorg.gradle.jvmargs=-Xmx%s -XX:MaxMetaspaceSize=384m" % a.heap,
                       "-Dorg.gradle.parallel=false", "-Dorg.gradle.workers.max=1",
                       "-x", "lintVitalAnalyzeRelease", "-x", "lintVitalRelease"],
                      AB, TMPLOG / "apk-gradle.log", e)
