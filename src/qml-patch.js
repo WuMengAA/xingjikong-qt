@@ -34,16 +34,32 @@ const ISLAND_SRC = process.env.CLOUD_ISLAND_SRC
   || 'D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-shared-qml/island';
 const ISLAND_PREFIX = 'island/';
 
+// 附加源：共享 UI 基座（Md3 令牌 + UiRegistry / UiPageHost / md3/ 组件库）。
+// ⚠️ 2026-10-25（Md3 改 pragma Singleton）：真源已移到
+//    <repo-root>/Stelarith-shared-qml/ui/theme/Md3.qml（配 qmldir 声明 singleton）。
+//    与岛同源的问题：它不在 viewer 源 qml/ 树里 ⇒ 老逻辑的 collectFiles(QML_SRC)
+//    收不到它，于是：
+//      ① 改动前：热更包里没有 Md3.qml ⇒ 改令牌在手机端永远不生效（安装包里的旧件
+//         一直占着 qml-live/components/Md3.qml）；
+//      ② 改动后：页面是 `import "components/theme"`，热更树里没有 theme/ ⇒ 手机端
+//         启动即白屏（比①严重得多，故本次必须一并并入）。
+//    并入时前缀统一映射为 "components/"，与 Android qrc 的 PREFIX /components、
+//    桌面产物 qml/Stelarith/components/ 三处相对结构一致。
+//    ⚠️ 必须收 qmldir（collectFiles 不限扩展名，天然带上）——少了它 import 解析不到 singleton。
+const UI_SRC = process.env.CLOUD_UI_SRC
+  || 'D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-shared-qml/ui';
+const UI_PREFIX = 'components/';
+
 const PATCH_DIR = join(ASSETS_DIR, 'qml-patch');
 const MANIFEST = join(PATCH_DIR, 'latest.json');
 
-/** 共享岛目录的内容指纹（前 6 位 hex）。
- *  ⚠️ 必须参与 version：岛不在 viewer 源树里 ⇒ 只取 viewer HEAD 的话，
- *  「改了岛但 viewer 没提交」会让 version 不变，手机端判「已是最新」跳过下载
- *  （viewerbackend.cpp: localVer == ver），新岛永远下发不出去。 */
-function islandHash() {
+/** 目录内容指纹（前 6 位 hex）—— 供共享目录参与 version。
+ *  ⚠️ 必须参与 version：这些目录不在 viewer 源树里 ⇒ 只取 viewer HEAD 的话，
+ *  「改了共享文件但 viewer 没提交」会让 version 不变，手机端判「已是最新」跳过下载
+ *  （viewerbackend.cpp: localVer == ver），新内容永远下发不出去。 */
+function dirHash(dir) {
   try {
-    if (!existsSync(ISLAND_SRC)) return '';
+    if (!existsSync(dir)) return '';
     const h = createHash('md5');
     const walk = (d) => {
       for (const n of readdirSync(d).sort()) {
@@ -53,10 +69,13 @@ function islandHash() {
         else { h.update(n); h.update(readFileSync(p)); }
       }
     };
-    walk(ISLAND_SRC);
+    walk(dir);
     return h.digest('hex').slice(0, 6);
   } catch { return ''; }
 }
+
+function islandHash() { return dirHash(ISLAND_SRC); }
+function uiHash() { return dirHash(UI_SRC); }
 
 /** 版本 = viewer-qt git HEAD 前 7 位 + 共享岛内容指纹；
  *  拿不到 .git（无版本控制的工作区）就用 qml 树 mtime 和。
@@ -64,7 +83,8 @@ function islandHash() {
 function currentVersion() {
   const r = spawnSync('git', ['-C', 'D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-viewer-qt', 'rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8' });
   const ih = islandHash();
-  const suffix = ih ? '-' + ih : '';
+  const uh = uiHash();
+  const suffix = (ih ? '-' + ih : '') + (uh ? '-' + uh : '');
   if (r.status === 0 && r.stdout.trim()) return r.stdout.trim() + suffix;
   let sum = 0;
   const walk = (d) => {
@@ -117,6 +137,8 @@ export function ensureQmlPatch() {
     collectFiles(QML_SRC, files, QML_SRC);
     // 并入共享灵动岛（挂到 island/ 前缀下）—— 见 ISLAND_SRC 注释。
     if (existsSync(ISLAND_SRC)) collectFiles(ISLAND_SRC, files, ISLAND_SRC, ISLAND_PREFIX);
+    // 并入共享 UI 基座（挂到 components/ 前缀下，含 theme/qmldir）—— 见 UI_SRC 注释。
+    if (existsSync(UI_SRC)) collectFiles(UI_SRC, files, UI_SRC, UI_PREFIX);
     const chunks = [];
     const central = [];
     let offset = 0;
