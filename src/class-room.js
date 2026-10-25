@@ -100,6 +100,18 @@ function needDb() {
   return db;
 }
 
+/**
+ * 借出同一个 sqlite 连接给兄弟模块（2026-10-25 · class-data.js 用）。
+ *
+ * 为什么不让它自己开一个库：node:sqlite 默认回滚日志模式，同进程两个连接写同一个
+ * 文件会互相拿写锁 → SQLITE_BUSY。班级数据（学生/课表）与班级房间（成员/事件）
+ * 本来就是同一个班的同一份真相，共用一个连接既省锁也省一次打开。
+ * 调用顺序约束：initClassRoom 必须先跑（生产由 index.js 保证）。
+ */
+export function sharedDb() {
+  return needDb();
+}
+
 function rowToEvent(r) {
   let data = {};
   try { data = JSON.parse(r.data || '{}'); } catch { data = { raw: String(r.data || '') }; }

@@ -25,11 +25,19 @@ import {
   dropRoomEvents, dropRoomMembers, CLASS_ROLES,
 } from './class-room.js';
 import { canAccess } from './perms.js';
+import {
+  listStudents, addStudent, updateStudent, removeStudent, importStudents,
+  getTimetable, saveTimetable, dropClassData,
+} from './class-data.js';
 
 /** 读 JSON body（≤16KB，与 bind-class 同款上限）。坏 JSON → cb(null) 由调用方定夺。 */
 function readJsonBody(req, cb) {
   let raw = '';
-  req.on('data', (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+  // 2026-10-25：上限 10KB → 1MB。原值是按"成员/发布"这类小载荷定的，但同一条通道
+  // 现在还要收**班级课表**（整份 profile：科目 × 时段 × 多周 = 几十 KB 很常见），
+  // 10KB 会把正常保存直接 ECONNRESET 掐断。1MB 只对已鉴权的 /api/class/* 开放，
+  // 真正的业务上限在 saveTimetable 里（512KB，超了回可读的 400 而不是断连接）。
+  req.on('data', (c) => { raw += c; if (raw.length > 1e6) req.destroy(); });
   req.on('end', () => {
     let body;
     try { body = JSON.parse(raw || '{}'); } catch { return cb(null); }
@@ -89,13 +97,16 @@ export function adminDeleteClass(code, strategy = 'refuse') {
   // 反过来先清内容再删身份，一旦身份删失败就留下"空壳但有成员"的幽灵班。
   const ev = dropRoomEvents(r.code);
   const mb = dropRoomMembers(r.code);
+  // 班级数据（学生名单 + 课表）随班销毁：不留孤儿行（与身份删成功之后同序）。
+  const cd = dropClassData(r.code);
   pushEvent('warn', '管理端删除班级', {
     classCode: r.code, className: r.name, released: uidList.length, subsDropped: dropped,
-    eventsDropped: ev.deleted, membersDropped: mb.deleted,
+    eventsDropped: ev.deleted, membersDropped: mb.deleted, studentsDropped: cd.students,
   });
   return {
     ok: true, code: r.code, name: r.name, releasedDevices: uidList.length,
     subsDropped: dropped, eventsDropped: ev.deleted, membersDropped: mb.deleted,
+    studentsDropped: cd.students, timetableDropped: cd.timetables,
   };
 }
 
@@ -252,8 +263,94 @@ export function adminPublish(code, card = {}, ident = null) {
   return { ok: true, classCode: hit.code, type: t, delivered: r.delivered, online: r.online };
 }
 
+/* ───────────────── 学生名单 + 班级课表（2026-10-25） ─────────────────
+ * 用户裁决「云端数据库存储，不要本机了」：这两样都跟班走，不跟机器走。
+ *
+ * 权限（与成员管理同一套思路，但读写分档）：
+ *   · 读 —— 本班任一角色（owner/teacher/viewer）或票里 scopes 覆盖；
+ *   · 写 —— canManageMembers（owner/teacher 或管理员）：
+ *           名单和课表是「全班都要照着做」的东西，不能谁路过了都能改。
+ */
+
+/** 能否读这个班的班级数据（读权限比写宽一档：viewer 也该看得见名单）。 */
+function canReadClass(ident, code) {
+  if (!ident) return false;
+  if (canAccess(ident, code)) return true;
+  const role = ident.uid ? roleOf(code, ident.uid) : null;
+  return !!role;
+}
+
+/** 学生名单（按座位/学号排）。 */
+export function adminListStudents(code, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canReadClass(ident, hit.code)) return { ok: false, error: '无权限查看该班学生名单' };
+  const r = listStudents(hit.code);
+  return { ...r, name: hit.name };
+}
+
+export function adminAddStudent(code, student = {}, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班学生名单' };
+  const r = addStudent(hit.code, student, ident?.uid ?? 'system');
+  if (!r.ok) return r;
+  pushEvent('info', r.replaced ? '管理端更新学生信息' : '管理端新增学生', {
+    classCode: hit.code, studentId: r.student.id, name: r.student.name, by: ident?.uid ?? 'system',
+  });
+  return r;
+}
+
+export function adminUpdateStudent(code, studentId, patch = {}, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班学生名单' };
+  const r = updateStudent(hit.code, studentId, patch, ident?.uid ?? 'system');
+  if (r.ok) pushEvent('info', '管理端修改学生信息', { classCode: hit.code, studentId, by: ident?.uid ?? 'system' });
+  return r;
+}
+
+export function adminRemoveStudent(code, studentId, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班学生名单' };
+  const r = removeStudent(hit.code, studentId);
+  if (r.ok && r.removed) pushEvent('info', '管理端移除学生', { classCode: hit.code, studentId, by: ident?.uid ?? 'system' });
+  return r;
+}
+
+export function adminImportStudents(code, rows = [], ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班学生名单' };
+  const r = importStudents(hit.code, rows, ident?.uid ?? 'system');
+  if (r.ok) pushEvent('info', '管理端批量导入学生', {
+    classCode: hit.code, added: r.added, updated: r.updated, bad: r.bad, by: ident?.uid ?? 'system',
+  });
+  return r;
+}
+
+/** 班级课表（没存过 → profile:null，前端必须显示「还没排课」而不是空白表）。 */
+export function adminGetTimetable(code, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canReadClass(ident, hit.code)) return { ok: false, error: '无权限查看该班课表' };
+  const r = getTimetable(hit.code);
+  return { ...r, name: hit.name };
+}
+
+export function adminSaveTimetable(code, profile, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限修改该班课表' };
+  const r = saveTimetable(hit.code, profile, ident?.uid ?? 'system');
+  if (r.ok) pushEvent('info', '管理端保存班级课表', { classCode: hit.code, bytes: r.bytes, by: ident?.uid ?? 'system' });
+  return r;
+}
+
 /**
- * HTTP 路由：POST /api/class/{create,rename,delete,unbind,bind,member-add,member-remove,members,my-classes,publish}
+ * HTTP 路由：POST /api/class/{create,rename,delete,unbind,bind,member-add,member-remove,members,my-classes,publish,
+ *                        students,student-add,student-update,student-remove,students-import,timetable,timetable-save}
  * （鉴权在 index.js 的 isViewerApi 组，与 /api/device/bind-class 同一凭据口径；写操作过重认证门）。
  */
 export function handleClassAdminApi(req, res, u, send, ident = null) {
@@ -284,6 +381,21 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
         r = adminMyClasses(ident);
       } else if (action === 'publish') {
         r = adminPublish(String(body.classCode ?? ''), body.card ?? {}, ident);
+      } else if (action === 'students') {
+        r = adminListStudents(String(body.classCode ?? ''), ident);
+      } else if (action === 'student-add') {
+        r = adminAddStudent(String(body.classCode ?? ''), body.student ?? {}, ident);
+      } else if (action === 'student-update') {
+        r = adminUpdateStudent(String(body.classCode ?? ''), String(body.studentId ?? ''),
+                               body.patch ?? {}, ident);
+      } else if (action === 'student-remove') {
+        r = adminRemoveStudent(String(body.classCode ?? ''), String(body.studentId ?? ''), ident);
+      } else if (action === 'students-import') {
+        r = adminImportStudents(String(body.classCode ?? ''), body.rows ?? [], ident);
+      } else if (action === 'timetable') {
+        r = adminGetTimetable(String(body.classCode ?? ''), ident);
+      } else if (action === 'timetable-save') {
+        r = adminSaveTimetable(String(body.classCode ?? ''), body.profile ?? null, ident);
       } else {
         return send(404, { ok: false, error: `未知班级管理操作：${action}` });
       }
