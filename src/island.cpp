@@ -1762,7 +1762,14 @@ void IslandOverlay::setQmlObjectProperty(const QString &name, QObject *obj)
         QPointer<QObject> rootGuard(root);
         connect(obj, &QObject::destroyed, root, [rootGuard, key]() {
             if (!rootGuard) return;
-            rootGuard->setProperty(key.constData(), QVariant());
+            // 2026-10-25（Win7 现场排障）：必须写 **null QObject\***，不能写无效
+            //   QVariant()——var 语义探针实证（Qt 6.12）：无效 QVariant 在 QML 侧
+            //   读成 **undefined**，`vhRef !== null` 严格比较放行 undefined，
+            //   绑定重算读 .active/.nextTitle 连报 TypeError（Win7 rc.4 退出日志
+            //   三连报同款），正是 10-19 远控崩溃链想防的重算入口；而
+            //   QVariant::fromValue<QObject*>(nullptr) 读成 null，守卫按设计生效。
+            rootGuard->setProperty(key.constData(),
+                                   QVariant::fromValue<QObject *>(nullptr));
         });
     }
 }
