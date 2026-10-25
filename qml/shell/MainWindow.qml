@@ -75,10 +75,14 @@ Item {
     //   原来是 goPage(3) 把整页甩给旧壳——旧壳那页有自己的底部标签栏和背景，
     //   点进去像"出了这个软件"。现在 MonitorPage 直接内嵌在内容区（同一个 TopBar /
     //   同一个状态条），旧壳 page 3 保留但仍可用（同一份 QML，靠 backFn 区分出口）。
-    /** 设备集控面向管理员（用户裁决 2026-10-25：班级页可含本班设备管控、集控页面向管理员）。
-     *  服务端下发受限身份（applyServerRole 把非 admin 一律落成 teacher）时不摆这个入口；
-     *  未登录 / 全权令牌下 role 恒为 admin（见 ViewerBackend::loadPrefs），运维视角不受影响。 */
-    readonly property bool canControlPage: !backend || backend.role !== "teacher"
+    /** 设备集控面向管理员（用户裁决：班级页管本班设备、集控页是管理员视角）。
+     *  只在**服务端下发并锁定**的受限身份（teacher）下隐藏入口 —— 判定用 `roleLocked`：
+     *  它只在 applyServerRole() 里置真，全权连接（静态令牌/旧票）置假。
+     *  2026-10-26 裁决：本地手动选的身份**不挡**。它表达的是"我此刻用什么视角看这台机器"，
+     *    拿它砍页面入口会出现"切个身份功能就没了"的困惑；真正的权限事实是服务端下发的那个。
+     *  未登录 / 全权令牌 ⇒ roleLocked 恒假 ⇒ 运维视角不受影响。 */
+    readonly property bool canControlPage: !backend
+        || !(backend.roleLocked === true && backend.role === "teacher")
 
     /** 身份在停留期间变了（例如在集控页上登录了一个老师账号）⇒ 立刻退回仪表盘。
      *  只隐藏菜单不够：section 已经是 control 的话页面还挂在那儿。 */
