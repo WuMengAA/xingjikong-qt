@@ -55,7 +55,23 @@
 #include <QJsonDocument>   // 组件6：--report 把 CloudReporter 收到的 payload 序列化留证
 #include <QJsonObject>
 #include <cmath>   // §6.3 频谱探针：std::sin
+#include <cstdio>  // vhclear 模式：fprintf 交割
 #include <functional>  // P3 布局诊断：全子树几何转储
+
+// ── #Win7 排障（2026-10-25）：vhclear 模式专用 ─────────────────────────────
+// 复现并验收「VoiceHub 模块销毁 → setQmlObjectProperty 清空 voicehubObj」路径。
+// 现场（Win7 rc.4 退出时）连报三处 TypeError：IslandRoot.qml:275/228/190——
+// Cannot read property 'active'/'nextTitle' of undefined。根因：清空写的是无效
+// QVariant()，QML 的 var 属性读成 **undefined** 而非 null，`vhRef !== null`
+// 按严格比较放行 undefined ⇒ 守卫穿透、绑定重算读属性即抛。
+// （第 4 处 vhOn:182 因收起态 _expanded=false 短路不抛，故现场恰为 3 条。）
+// 本模式：注入假模块 → 删除 → 统计 TypeError（修复前应=3，修复后应=0），
+// 以退出码交割：0=修好，1=仍有 TypeError。
+static int g_typeErrors = 0;
+static void vhclearMsgHandler(QtMsgType, const QMessageLogContext &, const QString &msg)
+{
+    if (msg.contains(QLatin1String("TypeError"))) ++g_typeErrors;
+}
 
 // 从岛的子控件里找 QQuickWidget（island.h 没有公开 getter，这里按类型找）
 static QQuickWidget *findQuick(QWidget *w)
@@ -382,6 +398,7 @@ int main(int argc, char *argv[])
     // 用途：分辨历史 ts 取的是"通知出现时刻"还是"归档时刻"——
     //   停留 N 秒后归档，若 ts 仍是出现时刻，则 ts 比分文件写入时刻早约 N 秒。
     int holdSec = 0;
+    bool vhclear = false;   // #Win7 排障：vh 模块销毁清空路径验收（见文件头注释）
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
@@ -420,11 +437,33 @@ int main(int argc, char *argv[])
             outPath = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--hold") && i + 1 < argc)
             holdSec = QString::fromLocal8Bit(argv[++i]).toInt();
+        if (a == QLatin1String("--vhclear"))  vhclear = true;   // #Win7 排障
     }
+
+    qInstallMessageHandler(vhclearMsgHandler);   // 必须在岛（QML）创建前装
 
     IslandOverlay *isl = IslandOverlay::instance();
     isl->setIdleEnabled(true);
     if (light) isl->setLightMode(true);
+
+    if (vhclear) {
+        // #Win7 排障（2026-10-25）：岛已建（QML 已同步加载）⇒ 300ms 后注入假
+        // VoiceHub 模块 → 300ms 后删除（destroyed → 清属性 lambda 同步触发）→
+        // 400ms 后统计 TypeError 并以退出码交割（0=修好，1=仍有 TypeError）。
+        QTimer::singleShot(300, [isl] {
+            auto *dummy = new QObject(isl);   // 无需 active 属性：活对象读 .active 得 undefined 不抛
+            isl->setQmlObjectProperty(QStringLiteral("voicehubObj"), dummy);
+            QTimer::singleShot(300, [dummy] {
+                delete dummy;
+                QTimer::singleShot(400, [] {
+                    fprintf(stderr, "VHCLEAR-TYPEERRORS=%d\n", g_typeErrors);
+                    fflush(stderr);
+                    QCoreApplication::exit(g_typeErrors == 0 ? 0 : 1);
+                });
+            });
+        });
+        return app.exec();
+    }
 
     if (idle) {
         isl->ensureIdle();
