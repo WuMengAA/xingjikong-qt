@@ -199,19 +199,14 @@ ApplicationWindow {
         return arr
     })()
 
-    // ── 灵动岛的状态源（设计文档 3.8）────────────────────────────────
-    // 状态归主界面算：设备表、回执、文件读数都在 C++ 那边，组件不该猜。
-    // 每一项都对应一个真实存在的信号，缺数据源的一档（语音）不硬凑 —— 宁可不亮，
-    // 也不摆一个永远空的胶囊在那儿冒充"聚合器"。
-    property var islandStates: []      // [{ k, t, d, p }]，k ∈ offline/command/file/alert/monitor
+    // ── 批量指令 / 告警记账（2026-10-26 P0：灵动岛已移除，状态只记账、落点见各条）──
     // 批量指令：下发 +1、回执 -1（4.5「进度可见」）。老师盯着数往上走，
     // 不让他对着一屋子设备猜"这会儿发到哪台了"。
     // rows = 明细行 [{ uid, st, why, late }]，每台一格，一台只落一次账（4.5 按设备记账）。
     property var batch: ({ label: "", total: 0, done: 0, ok: 0, fail: 0, active: false, rows: [] })
-    // 没处理的告警（4.3 场景四）：回执失败、文件没推成都算，攒起来给灵动岛。
+    // 未处理告警（4.3 场景四）：回执失败、文件没推成都算；pushAlert 时立即 toast（岛已移除）。
     property var alerts: []
-    // 2026-10-21（审查 #8）：告警可清除 —— 批量收口时自动清掉本批攒的告警，
-    // 不让灵动岛永远挂着"N 条没处理"。手动"全部已处理"入口等岛交互扩展，本次不做。
+    // 2026-10-21（审查 #8）：告警可清除 —— 批量收口时自动清掉本批攒的告警。
     function clearAlerts() { root.alerts = [] }
     // 多选的设备 uid（4.4）。和 currentUid 是两套东西：那个管"看哪台"，
     // 这个管"给哪些台发" —— 混在一处会互相踢（台数变了不知道该信哪个）。
@@ -374,7 +369,6 @@ ApplicationWindow {
                         root.toast(_title + " 成功 → " + uid)
                 }
             }
-            root.refreshIsland()
         }
     }
 
@@ -656,53 +650,16 @@ ApplicationWindow {
         ctx: ({ window: root })
     }
 
-    Item {
-        anchors.top: parent.top
-        anchors.topMargin: 52
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: island.width
-        height: island.height
-        // 2026-10-20 P1：骨架页有自己的 64px TopBar，旧灵动岛浮层会**压住标题与网格**
-        // （用户实测反馈第一屏就被挡住）⇒ 骨架页不显示它。
-        visible: root.page !== 6
-
-        // 不许让状态只走"记得手动刷一次"这条路：
-        //  · 自动停（到点 / 断线）必须让老师看见 —— 按钮会自己变回"开始讲话"，
-        //    但不弹一句，老师只觉得"怎么自己断了，也没提示"。所以 autoNote 非空就弹一次。
-        //  · 语音 / 广播状态变了（含被自动停掉），灵动岛要跟着重算一次。
-        Connections {
-            target: backend
-            // ⚠️ 2026-10-10：统一改成 `function onX(...)` 函数式声明 —— 老写法（直接写属性名）
-            //   Qt 6 已弃用，会刷 "Implicitly defined onFoo properties in Connections are deprecated"；
-            //   而 `onIslandNote: island.showNote(title, desc, icon, …)` 更严重：隐式参数注入同样
-            //   弃用，且上面还刷 "Parameter \"title\" is not declared"。改函数式后参数显式、告警消失。
-            function onAutoNoteChanged() { if (backend.autoNote !== "") root.toast(backend.autoNote); root.refreshIsland() }
-            function onSpeakingChanged() { root.refreshIsland() }
-            function onBroadcastingChanged() { root.refreshIsland() }
-            // 设备表一变（有人掉线 / 新机上线 / 掉线重连）就重算：
-            // 掉线是教室里最高频的异常，之前灵动岛对它是瞎的。
-            function onDevicesChanged() { root.refreshIsland() }
-            // 云端状态通知（断线重连 / 指令执行完成）统一走灵动岛，不再弹系统托盘气泡
-            function onIslandNote(title, desc, icon) { bridge.showNote(title, desc, icon, 3000) }
-        }
-        // 启动时没有任何输入进来，灵动岛从来没被刷过一次（一直是空的）。
-        // 这里补一次：空的也得是"真的空"。
-        Component.onCompleted: {
-            // 主界面接入：岛从此**可交互**（点击展开/收起）；审批面板预览态才设 false。
-            bridge.setInteractive(true)
-            bridge.setDark(root.darkMode)
-            root.refreshIsland()
-        }
-        // 深浅跟随：岛的色彩族来自共享 IslandTheme，light 由桥转达（岛读的是 bridge.light）。
-        Connections {
-            target: root
-            function onDarkModeChanged() { bridge.setDark(root.darkMode) }
-        }
-
-        // 2026-10-16（island 系统性升级）：管理端主界面**直接跑被控端同一份岛**。
-        // 原 DynamicIsland（管理端自有实现，287 行）及其 4 个自有部件已退役 ——
-        // 两颗岛的开合 / 配色 / 几何从此一处定义（用户裁决：「直接用被控端那一颗」）。
-        IslandHost { id: island }
+    // 2026-10-26（产品笔记 P0）：管理端移除灵动岛浮层（「无用/不好的信息通知来得方便」）。
+    // 被移除项的落点：
+    //  · autoNote（语音/广播自动停提示）→ 直接 toast，不依赖岛；
+    //  · 云端状态通知（onIslandNote：断线重连/指令完成）→ toast 通道（bridge.showNote，3s）；
+    //  · 批量进度 / 回执失败告警 → 完成/超时 toast + pushAlert 实时 toast；
+    //  · 互动审批面板 InteractDialog 内的岛预览（用户 2026-10-15 点单）→ 保留。
+    Connections {
+        target: backend
+        function onAutoNoteChanged() { if (backend.autoNote !== "") root.toast(backend.autoNote) }
+        function onIslandNote(title, desc, icon) { bridge.showNote(title, desc, icon, 3000) }
     }
 
     // 批量的超时兜底（见 batchTimeoutClose）。放窗口层：跟老师在哪个标签页无关。
@@ -958,26 +915,26 @@ ApplicationWindow {
             if (backend.speaking) { backend.stopSpeaking(); root.toast("语音已停止") }
             else if (backend.startSpeaking()) { root.toast("正在讲话") }
             else { root.toast("开麦失败：" + backend.speakError) }
-            root.refreshIsland(); return true
+            return true
         case "voice-start":
-            if (backend.startSpeaking()) { root.refreshIsland(); root.toast("正在讲话") }
+            if (backend.startSpeaking()) { root.toast("正在讲话") }
             else { root.toast("开麦失败：" + backend.speakError) }
             return true
         case "voice-stop":
-            backend.stopSpeaking(); root.refreshIsland(); root.toast("语音已停止"); return true
+            backend.stopSpeaking(); root.toast("语音已停止"); return true
 
         // ── 屏幕广播 ──
         case "screen-toggle":
             if (backend.broadcasting) { backend.stopBroadcast(); root.toast("屏幕广播已停止") }
             else if (backend.startBroadcast()) { root.toast("正在屏幕广播") }
             else { root.toast("广播启动失败") }
-            root.refreshIsland(); return true
+            return true
         case "screen-start":
-            if (backend.startBroadcast()) { root.refreshIsland(); root.toast("正在屏幕广播") }
+            if (backend.startBroadcast()) { root.toast("正在屏幕广播") }
             else { root.toast("广播启动失败") }
             return true
         case "screen-stop":
-            backend.stopBroadcast(); root.refreshIsland(); root.toast("屏幕广播已停止"); return true
+            backend.stopBroadcast(); root.toast("屏幕广播已停止"); return true
 
         // ── 考试模式 ──
         // ⚠️ 原来这段在每个分支里各抄一遍（快捷行 exam / 命令面板 exam-start / exam-stop
@@ -1097,53 +1054,6 @@ ApplicationWindow {
         bridge.showNote(s, "", "bell", 3000)
     }
 
-    // 灵动岛：把"正在进行 / 需要处理"的事聚成一条（3.8）。
-    // 数组顺序就是优先级（3.8.3：离线 > 批量指令 > 文件 > 告警 > 监控），
-    // 组件取 states[0] 当主状态，其余在展开态列出来。
-    // 语音那一档本项目还没有数据源（被控端没这个能力），宁可不亮，不摆一个永远空的胶囊。
-    function refreshIsland() {
-        const s = []
-        if (!backend.loggedIn)
-            s.push({ k: "offline", t: "还没登录", d: "点右上角账户，用网站账号登录" })
-        else if (!backend.connected)
-            s.push({ k: "offline", t: "连接断开，重连中…", d: "设备表还是上次拉到的" })
-        if (batch.active)
-            s.push({ k: "command", t: batch.label + " " + batch.done + "/" + batch.total,
-                     d: (batch.fail > 0 ? "已失败 " + batch.fail + " 台" : "逐台下发中"),
-                     p: batch.total > 0 ? batch.done / batch.total : 0 })
-        if (backend.fileState === "sending" || backend.fileState === "pushing")
-            s.push({ k: "file", t: "分发文件 " + backend.filePercent + "%",
-                     d: backend.fileTarget || backend.fileName || "",
-                     p: Math.max(0, Math.min(100, backend.filePercent)) / 100 })
-        if (alerts.length > 0)
-            s.push({ k: "alert", t: alerts.length + " 条没处理", d: alerts[0].uid + " · " + alerts[0].action })
-        if (backend.vncState === "已连接")
-            s.push({ k: "monitor", t: "正在看 " + backend.currentUid, d: "实时画面" })
-        // 语音对讲 / 屏幕广播：有真实状态源（backend.speaking / broadcasting）
-        // 才亮；没在讲/没在播就不出现（宁可不亮，不冒充聚合器）
-        if (backend.speaking)
-            s.push({ k: "voice", t: "正在语音对讲 " + backend.speakLeftSec + " 秒",
-                     d: "老师讲话，全班在听；到点自动停" })
-
-        if (backend.broadcasting)
-            s.push({ k: "broadcast", t: "正在屏幕广播 " + backend.bcastLeftSec + " 秒",
-                     d: "老师屏幕推给全部在线设备；到点自动停" })
-        // 设备离线（3.8 的"告警"档）：这是教室里最高频的异常 —— 有人拔了网线、
-        // 机器睡了、被控端被杀。之前这一档只有"批量下发失败"会亮，
-        // 于是设备表那边掉线一片，灵动岛却纹丝不动 = 看着像没接上。
-        // 认云端给的 online 字段，老版本云端不带这个键时按在线处理（和设备表同口径）。
-        const off = root.offlineDevices()
-        if (off.length > 0)
-            s.push({ k: "alert", t: off.length + " 台设备离线",
-                     d: deviceLabel(off[0].uid) + (off.length > 1 ? " 等 " + off.length + " 台" : ""),
-                     p: -1 })
-
-        islandStates = s
-        // 喂给桥 —— 管理端的岛是共享 IslandRoot，它读的是 bridge.states，不是 QML 属性。
-        // 这里是状态聚合的**唯一出口**：算完立刻同步给岛。
-        bridge.setIslandStates(s)
-    }
-
     // 设备表里"没在线"的那几台（online === false 才算离线；字段缺失按在线）。
     function offlineDevices() {
         const arr = root.devices || []
@@ -1160,6 +1070,8 @@ ApplicationWindow {
         const arr = alerts.slice()
         arr.unshift({ t: Qt.formatTime(new Date(), "hh:mm:ss"), uid: uid, action: action, why: why || "" })
         alerts = arr.slice(0, 20)
+        // 2026-10-26（P0 灵动岛移除）：告警不再攒给岛浮层，改**实时 toast**，失败不静默。
+        root.toast("未完成：" + action + (why ? " —— " + why : ""))
     }
 
     // ── 批量三段式：发之前说清几台、发之中看得见走到哪、发完了报结果（4.5）──
