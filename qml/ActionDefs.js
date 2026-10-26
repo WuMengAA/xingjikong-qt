@@ -203,6 +203,14 @@ function manifest() {
         // 班级场景缺"对全班一键"。这里补批量入口，被控端零改动、零新协议。
         // ⚠️ 音量三档用固定值而不是滑块：批量场景下"拖到一半点下发"没法对 40 台
         //    逐台确认，档位是老师真正会用的形状（静音 / 标准 / 大声）。
+
+        // 2026-10-27（I 批）：PPT 放映。**单机动作**，不进批量条（bulk=false）——
+        // 两台设备的放映页永远不同步，批量翻页只会把别的班的 PPT 也翻走。
+        { id: "ppt-panel", palOrder: 39, title: "PPT 放映", palName: "PPT 放映（翻页 / 跳页）",
+          kind: "panel", panel: "ppt",
+          group: "课堂", order: 69, surfaces: ["action", "command"],
+          keys: ["ppt", "fangying", "fy", "huandeng", "xiayiye"],
+          tip: "上一页 / 下一页 / 跳到第 N 页，并显示放映状态" },
         // ⚠️ study_mode / noise_monitor 在被控端有「本地开关」门：学生机自己关了
         //    噪音监测，这两条会回 skipped（不是失败）⇒ 回执里看得见，不会假装成功。
         { id: "pick-volume-mute", title: "全班静音", palName: "将全班设备设为静音",

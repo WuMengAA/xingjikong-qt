@@ -32,6 +32,13 @@ function manifest() {
         { id: "alarm",     title: "闹钟",       icon: "clock",      order: 41,
           surfaces: ["panel"], entry: "AlarmDialog.qml",
           keys: ["alarm", "naozhong", "nz"], tip: "定时响铃 / 播报 / 锁屏（2026-10-26 P1）" },
+        // 2026-10-27（I 批）：PPT 放映面板（翻页 / 跳页 / 放映状态）。
+        // 为什么单独一个面板而不只做两个按钮：老师要"我在第几页、一共几页"
+        // 才敢往上翻；只有按钮等于闭着眼睛翻。
+        { id: "ppt",       title: "PPT 放映",   icon: "play",       order: 42,
+          surfaces: ["panel"], entry: "panels/PptDialog.qml",
+          keys: ["ppt", "fangying", "fy", "huandeng", "kejian"],
+          tip: "翻页与放映状态（上一页 / 下一页 / 跳页）" },
         { id: "camera",    title: "监控",       icon: "camera",     order: 50,
           surfaces: ["panel"], entry: "panels/CameraCenterDialog.qml",
           keys: ["camera", "shexiangtou", "sxt"], tip: "摄像头监控 + 绑定" },
