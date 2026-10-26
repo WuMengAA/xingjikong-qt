@@ -262,11 +262,11 @@
       "plan": "[P3] 拆输出/输入区"
     },
     "Stelarith-shared-qml/island/IslandRoot.qml": {
-      "lines": 3205,
+      "lines": 3210,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 灵动岛单一真源：拆状态层/动画层/内容层（两端同源，改前先同步） | 2026-10-25 回写 3095→3104：+9 为 33d22e2 vhRef 四处守卫改真值判断 + undefined 陷阱注释（Win7 三连 TypeError 修复，meta 已提交） | 2026-10-27 回写（+37）：收起/展开动画曲线与回弹系数优化（展开 OutBack overshoot 1.15、收起 OutCubic 240ms、圆角补缓动）。已 3141 行，下一刀拆分候选：历史列表抽 IslandHistoryList.qml | 2026-10-27 回写（+36）：F 收尾第 2 项 —— _channel 点访问绑定 + 收起态 IslandChannelChip（描述行首，描述让位 6px）+ 展开态标签与 exTitle 条件让位（2↔24）。新组件独立文件 island/IslandChannelChip.qml（54 行） | 2026-10-27 回写 3177→3205（+28）：G4/G5/G6 —— _panelFace/_panelInfo/_panelOn 三个绑定 + IslandPanelFace 实例（anchors.fill，仅展开态）+ 活动态让位（!root._panelOn）+ 面板态不画鲸鱼（避免标题气泡压住课表末行）"
+      "plan": "[P1] 灵动岛单一真源：拆状态层/动画层/内容层（两端同源，改前先同步） | 2026-10-25 回写 3095→3104：+9 为 33d22e2 vhRef 四处守卫改真值判断 + undefined 陷阱注释（Win7 三连 TypeError 修复，meta 已提交） | 2026-10-27 回写（+37）：收起/展开动画曲线与回弹系数优化（展开 OutBack overshoot 1.15、收起 OutCubic 240ms、圆角补缓动）。已 3141 行，下一刀拆分候选：历史列表抽 IslandHistoryList.qml | 2026-10-27 回写（+36）：F 收尾第 2 项 —— _channel 点访问绑定 + 收起态 IslandChannelChip（描述行首，描述让位 6px）+ 展开态标签与 exTitle 条件让位（2↔24）。新组件独立文件 island/IslandChannelChip.qml（54 行） | 2026-10-27 回写 3177→3205（+28）：G4/G5/G6 —— _panelFace/_panelInfo/_panelOn 三个绑定 + IslandPanelFace 实例（anchors.fill，仅展开态）+ 活动态让位（!root._panelOn）+ 面板态不画鲸鱼（避免标题气泡压住课表末行） | 2026-10-27 回写 3205→3210（+5）：生产截图实证后的让位修复 —— 历史面板是**根级** Item，expandedCol 里的「活动态让位」管不到它，面板态历史列表叠在面板上；histH 同步归零（不占高）"
     },
     "Stelarith-shared-qml/island/StateList.qml": {
       "lines": 214,

@@ -456,7 +456,8 @@ Item {
     // 同屏会挤，且对讲本身就是临时的。收起频谱后历史照常出来。
     readonly property int histH: (root._expanded && root._history.length > 0 && !root._showActionsNow
                                   && !root._spectrumActive && !root.mediaIsContent
-                                  && !root.facePanelOn)   // #330：面面板打开时不占位
+                                  && !root.facePanelOn   // #330：面面板打开时不占位
+                                  && !root._panelOn)     // 2026-10-27：组件面板打开时不占位
         // 2026-10-17：筛选行展开时多占 30px（用户主动开的，接受高度变化；
         // 收起时预算与旧版完全一致，不回归「历史显示不全」）。
         ? Math.min(root.histVisibleMax, root._history.length) * 48 + 32
@@ -2807,6 +2808,10 @@ Item {
                  // 本面板是根级、面面板在 expandedCol 里 ⇒ 不隐藏就会盖在面面板上
                  // （2026-10-17 截图实证：面 2 的历史行与旧历史面板交错重叠）。
                  && !root.facePanelOn
+                 // 2026-10-27（G4/G5/G6）：组件面板打开时同样让位 —— 生产实测
+                 //   （prod-panel-date 截图）面板内容与历史列表叠在一起：历史面板是
+                 //   **根级** Item，藏在 expandedCol 里的"活动态让位"管不到它。
+                 && !root._panelOn
         anchors.left: parent.left
         anchors.leftMargin: root.padH
         anchors.right: parent.right
