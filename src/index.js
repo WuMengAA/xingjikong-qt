@@ -221,7 +221,7 @@ import { initEnvWhitelist, setTestUid, listTestUids } from './env-gate.js';
 import { noteVerified, isFresh } from './reauth.js';
 import { REAUTH_INTERVAL_MS } from './config.js';
 // 设备报修（2026-10-07，《设备报修-第一版设计》落地）：内存表 + repairs.json 落盘
-import { loadRepairs, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
+import { loadRepairs, useRepairFile, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
 // 权限消费层（2026-10-15 · 契约《多校多身份-scope契约草案》§4.3：云端是唯一权限入口）
 import { identityFromAuth, canAccess, filterDevices, maskDevices } from './perms.js';
 // 班级域事件通道（2026-10-23 · #458 班级工作台地基）：按班订阅/推送/历史，
@@ -273,6 +273,10 @@ if (!storeReady()) pushEvent('error', '指令队列不可持久化：本次运�
     pushEvent('info', `已作废 ${n} 条历史「未回执的关机/重启/升级」指令（执行即终止进程，补发等于又关一次机）`, { purged: n });
   }
 }
+// 2026-10-26（审计面三 · 测试隔离）：repairs 落盘路径支持 CLOUD_REPAIRS_FILE 覆盖。
+// 此前 repairs.js 固定写工程根 repairs.json —— 隔离实例测试会直接把假报修单写进
+// 生产同一文件（真实污染事故，见当日归档）。默认值保持与原行为字节一致。
+useRepairFile(process.env.CLOUD_REPAIRS_FILE || join(__dirname, '..', 'repairs.json'));
 loadRepairs();               // 打开设备报修表（repairs.json），重启后从这里恢复
 // 班级目录（2026-10-20 班级真源统一）：班级码/名/别名落盘，重启后班级身份与显示名不丢；
 // 同时把落盘的班灌进 registry 的运行时索引，避免"重启后管理台班级列表空掉"。
@@ -403,12 +407,53 @@ const server = http.createServer((req, res) => {
     if (!existsSync(file)) return send(404, { ok: false, error: '录制不存在' });
     const st = statSync(file);
     const fname = asciiHeaderName(file.split(/[\\/]/).pop());
-    res.writeHead(200, {
+    const recHead = {
       'content-type': 'video/mp4',
-      'content-length': st.size,
       'cache-control': 'private, max-age=3600',
       'content-disposition': `inline; filename="${fname}"`,
-    });
+    };
+    // ── HTTP Range / 206（2026-10-26 · P4 回放小窗）────────────────────────
+    // 为什么必须有：此前这里恒返回 200 全量、且**不带 Accept-Ranges**。
+    //   代价不是"慢一点"，而是播放器根本没法用：
+    //   ① 进度条拖不动 —— seek 在网络层无处落脚，MediaPlayer 只能从头再下一次；
+    //   ② 首帧要等整个文件下完（几十 MB 的录制 = 几十秒白屏）；
+    //   ③ 只想看最后 30 秒，也得把前面几分钟全拉下来。
+    // 加 206 后：播放器按需取字节段，seek 退化成一次带 Range 的小请求。
+    // ⚠️ 安全：Range 是**外部可控输入**，必须严格正则解析 + 双向钳制；
+    //    畸形/越界一律降级为 200 全量（宁可多传，不可崩或读越界）。
+    const rangeHdr = (req.headers.range || '').trim();
+    let start = 0;
+    let end = st.size - 1;
+    let partial = false;
+    const rm = /^bytes=(\d*)-(\d*)$/.exec(rangeHdr);
+    if (rm) {
+      if (rm[1] === '' && rm[2] !== '') {
+        // bytes=-N：最后 N 字节（播放器探尾部 moov 时常用）
+        const n = Number(rm[2]);
+        if (Number.isFinite(n) && n > 0) { start = Math.max(0, st.size - n); end = st.size - 1; partial = true; }
+      } else {
+        const s = Number(rm[1]);
+        const e = rm[2] !== '' ? Number(rm[2]) : st.size - 1;
+        if (Number.isFinite(s) && Number.isFinite(e) && s >= 0 && s <= e) {
+          start = s; end = Math.min(e, st.size - 1); partial = true;
+        }
+      }
+    }
+    // 起点越过文件尾 ⇒ 416（RFC 7233），必须带 Content-Range: bytes */size
+    if (partial && start >= st.size) {
+      res.writeHead(416, { ...recHead, 'content-range': `bytes */${st.size}`, 'accept-ranges': 'bytes' });
+      return res.end();
+    }
+    if (partial) {
+      res.writeHead(206, {
+        ...recHead,
+        'content-length': end - start + 1,
+        'content-range': `bytes ${start}-${end}/${st.size}`,
+        'accept-ranges': 'bytes',
+      });
+      return createReadStream(file, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { ...recHead, 'content-length': st.size, 'accept-ranges': 'bytes' });
     return createReadStream(file).pipe(res);
   }
 
@@ -1501,8 +1546,13 @@ const server = http.createServer((req, res) => {
   //   DELETE /api/repairs/{id}                    关闭 / 删除
   // 报修是资源类操作，不触碰设备控制权限；创建与状态变更都进 events.log（审计）。
   if (req.method === 'GET' && u.pathname === '/api/repairs') {
+    // 2026-10-26（大范围找活 · 审计面三副产物）：报修列表按班过滤 ——
+    // 此前任何已登录者可见全校报修单（uid/症状/备注），与 interact* 的按班口径不一致。
+    // 无班级归属的设备（classCode=null）：受限身份一律不可见（与 recordings 同口径）。
     const st = u.searchParams.get('status') || '';
-    return send(200, { ok: true, repairs: listRepairs(st) });
+    const ident = identityFromAuth(req.__auth);
+    const repairs = listRepairs(st).filter((t) => canAccess(ident, getDeviceClassCode(t.uid)));
+    return send(200, { ok: true, repairs });
   }
   if (req.method === 'POST' && u.pathname === '/api/repairs') {
     let body = '';
@@ -1524,9 +1574,20 @@ const server = http.createServer((req, res) => {
       const rid = decodeURIComponent(m[1]);
       if (req.method === 'GET') {
         const t = listRepairs().find((x) => x.id === rid);
-        return t ? send(200, { ok: true, ticket: t }) : send(404, { ok: false, error: `报修单不存在：${rid}` });
+        if (!t) return send(404, { ok: false, error: `报修单不存在：${rid}` });
+        // 2026-10-26（副产物同批）：单条读取按目标设备班级过滤
+        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid))) {
+          return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限查看该报修单' });
+        }
+        return send(200, { ok: true, ticket: t });
       }
       if (req.method === 'PATCH') {
+        const t = listRepairs().find((x) => x.id === rid);
+        if (!t) return send(404, { ok: false, error: `报修单不存在：${rid}` });
+        // 2026-10-26（副产物同批）：状态变更按目标设备班级过滤
+        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid))) {
+          return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限处理该报修单' });
+        }
         let body = '';
         req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
         req.on('end', () => {
@@ -1541,6 +1602,12 @@ const server = http.createServer((req, res) => {
         return undefined;
       }
       if (req.method === 'DELETE') {
+        const t = listRepairs().find((x) => x.id === rid);
+        if (!t) return send(404, { ok: false, error: `报修单不存在：${rid}` });
+        // 2026-10-26（副产物同批）：删除按目标设备班级过滤
+        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid))) {
+          return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限删除该报修单' });
+        }
         const r = deleteRepair(rid);
         if (r.error) return send(r.http || 404, { ok: false, error: r.error });
         pushEvent('info', '报修已删除', { id: rid });
