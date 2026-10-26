@@ -137,6 +137,14 @@ class IslandBridge : public QObject
     // 骑全量 changed()（与 mediaElapsedMs 同口径，不单独开信号）。
     Q_PROPERTY(int blessingCooldownSec READ blessingCooldownSec NOTIFY changed)
 
+    // ── 批注 / 白板（2026-10-27 · H 批）────────────────────────────
+    // 用户 07:36：「这些功能大多是加入到被控端，而且大部分和灵动岛有关」。
+    // 岛上的「笔」面读这四个属性，按钮走 annotateAction()（本机直调，不经云端）。
+    Q_PROPERTY(bool    annotateActive READ annotateActive NOTIFY changed)
+    Q_PROPERTY(QString annotateTool   READ annotateTool   NOTIFY changed)
+    Q_PROPERTY(QString annotatePage   READ annotatePage   NOTIFY changed)
+    Q_PROPERTY(QString annotateHint   READ annotateHint   NOTIFY changed)
+
 public:
     explicit IslandBridge(IslandOverlay *host, QObject *parent = nullptr);
 
@@ -234,6 +242,17 @@ public:
     // QML → C++：手势请求展开/收起。
     Q_INVOKABLE void requestExpand(bool on);
 
+    // ── 批注 / 白板（2026-10-27 · H 批 · **被控端本机入口**）──────────────
+    // 用户 07:36 裁决：「这些功能大多是加入到被控端，而且大部分和灵动岛有关」。
+    // ⇒ 批注不能只躺在管理端面板里：老师在上课时点不到管理端，岛才是他的手。
+    // 这里直接调 AnnotateDomain（本机、不经云端），指令串与 annotate_* 同义，
+    // 但只保留岛上能按到的几个（开始/结束、工具、颜色、撤销、清空、翻页）。
+    bool    annotateActive() const;
+    QString annotateTool() const;
+    QString annotatePage() const;    // "3/8"（未分页时 "1/1"）
+    QString annotateHint() const;    // 一句话状态（成功/失败原因）
+    Q_INVOKABLE void annotateAction(const QString &cmd);
+
 private:
     // 2026-10-13（用户「历史通知第一位优先显示管理端通知」）：历史**显示序** ——
     // 管理端在前、本地事件在后，组内保持原有先后（**稳定**，不重排时间序）。
@@ -245,6 +264,7 @@ private:
     IslandOverlay *m_host = nullptr;   // 不持有（IslandOverlay 是单例，活得比本对象久）
     QString m_histCategory;            // 空 / "全部" = 不限
     QString m_histKeyword;             // 空 = 不搜（标题+描述包含即命中）
+    QString m_annotHint;               // 批注面的一句话状态（成功/失败原因）
 
 signals:
     void changed();

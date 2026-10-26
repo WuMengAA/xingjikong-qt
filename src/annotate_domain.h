@@ -179,6 +179,11 @@ public:
     // 置顶层级断言（任务管理器之下 / 其余 topmost）
     void assertZOrder();
 
+    // 让某个窗口**始终压在本层之上**（传 HWND；传 nullptr 取消）。
+    // 用途：批注层是全屏的，而灵动岛是老师唯一的本机交互面 —— 岛必须留在上面可点，
+    // 否则一开始批注，老师就只能靠键盘热键，岛上的工具全被盖住。
+    void setWindowAboveMe(void *hwnd);
+
     // ── I3：批注跟 PPT 翻页 ───────────────────────────────────────
     // 开/关跟随（白板模式自动不跟：白板盖住了课件，页码无意义）
     void setFollowPpt(bool on);
@@ -205,6 +210,7 @@ private:
     QString     m_boardBg;
 
     void  *m_hwnd = nullptr;          // HWND 缓存（void* 以免头文件拖进 <windows.h>）
+    void  *m_above = nullptr;         // 必须压在批注层之上的窗口（灵动岛）
     void  *m_kbHook = nullptr;        // HHOOK 同上
     QTimer *m_zTimer = nullptr;       // 3s 一次的置顶层级纠偏
 

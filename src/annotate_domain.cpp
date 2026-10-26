@@ -324,6 +324,12 @@ bool Overlay::nativeEventFilter(const QByteArray &eventType, void *message, qint
 }
 
 /* ── 置顶层级纠偏：topmost，但排在置顶的任务管理器之下 ──────────── */
+void Overlay::setWindowAboveMe(void *hwnd)
+{
+    m_above = hwnd;
+    if (isActive()) assertZOrder();
+}
+
 void Overlay::assertZOrder()
 {
     if (!m_hwnd) return;
@@ -333,6 +339,14 @@ void Overlay::assertZOrder()
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
 
+    // ① 灵动岛压在批注层之上（岛是老师唯一的本机交互面，被盖住就等于没有）
+    const HWND above = static_cast<HWND>(m_above);
+    if (above && IsWindow(above) && IsWindowVisible(above)) {
+        SetWindowPos(hwnd, above, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+
+    // ② 但两者都排不到置顶的任务管理器之上（「仅次于任务管理器」的纪律）
     const HWND tm = findTaskManagerWindow();
     if (tm && (GetWindowLongPtrW(tm, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
         // hwndInsertAfter = tm ⇒ 我们紧跟其后 = 「仅次于任务管理器置顶」
