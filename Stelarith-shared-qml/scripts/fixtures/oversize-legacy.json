@@ -3,11 +3,11 @@
   "note": "历史超限台账：白名单内未变胖=允许；再长 1 行=判红；拆完一项就删一项。plan 前缀 P1/P2/P3 是拆分优先级。增量归属写进 plan（哪一批 +多少行、是否已提交），回写不等于批准变胖——P 级计划仍然有效。 | 2026-10-24 注册 ClassMemberPane（班级工作台方案B 成员管理 tab，两段结构，待拆为人员/设备两子件）",
   "files": {
     "Stelarith-control-qt/src/island.cpp": {
-      "lines": 2472,
+      "lines": 2481,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 67,
-      "plan": "[P2] 灵动岛逻辑按状态机/动画/数据三段拆 | 2026-10-25 回写 2446→2453：+7 为 a13b507 vhRef 清空写 null QObject* + 守卫注释（Win7 三连 TypeError 修复，已提交） | 2026-10-27 回写（+8）：通知渠道（m_channel/m_skipHistory 一次性注入 + 归档处 skipHistory 拦截） | 2026-10-27 回写（+11）：F 收尾第 2 项 —— geometryForContent 把渠道标签算进胶囊宽度（12px DemiBold 度量 + 14 padding + 6 间距 + 描述宽），否则描述被标签挤成省略号"
+      "plan": "[P2] 灵动岛逻辑按状态机/动画/数据三段拆 | 2026-10-25 回写 2446→2453：+7 为 a13b507 vhRef 清空写 null QObject* + 守卫注释（Win7 三连 TypeError 修复，已提交） | 2026-10-27 回写（+8）：通知渠道（m_channel/m_skipHistory 一次性注入 + 归档处 skipHistory 拦截） | 2026-10-27 回写（+11）：F 收尾第 2 项 —— geometryForContent 把渠道标签算进胶囊宽度（12px DemiBold 度量 + 14 padding + 6 间距 + 描述宽），否则描述被标签挤成省略号 | 2026-10-27 回写（+9）：生产截图实证后的宽度修正 —— 标签行改按「48 左内缩 + 标签 + 6 + 描述 + 42 右内缩」算，描述改用 12px 字体度量（与原 48+iconW 估算式并存取大）。旧式在 209px 宽下把「数学 · 08:00」截成「数学 · 0…」"
     },
     "Stelarith-control-qt/src/island.h": {
       "lines": 579,
