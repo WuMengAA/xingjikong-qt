@@ -249,8 +249,10 @@ Popup {
                         }
                         Text {
                             text: modelData.name
-                            color: sel ? (dlg.theme ? dlg.theme.fg : "#FAFAFA")
-                                       : (dlg.theme ? dlg.theme.op : "#C8C8C8")
+                            // 2026-10-26（P3）：黑名单一律标红（老师一眼看见"不许开的"）
+                            color: (modelData.blacklisted === true) ? "#E24B4A"
+                                   : (sel ? (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                                          : (dlg.theme ? dlg.theme.op : "#C8C8C8"))
                             font.pixelSize: 13
                             font.weight: sel ? Font.Medium : Font.Normal
                         }
@@ -288,9 +290,14 @@ Popup {
                     }
                 }
 
-                MouseArea {
+MouseArea {
                     anchors.fill: parent
-                    onClicked: listView.picked = index
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    // 2026-10-26（P3）：左键选中、右键弹菜单（停止/加白/加黑/冻结·解冻/去网·恢复）
+                    onClicked: function (mouse) {
+                        listView.picked = index
+                        if (mouse.button === Qt.RightButton) dlg.openMenu(modelData)
+                    }
                 }
             }
         }
@@ -505,9 +512,151 @@ Popup {
                     color: dlg.theme ? dlg.theme.op : "#C8C8C8"
                     font.pixelSize: 13
                 }
-                MouseArea {
+MouseArea {
                     anchors.fill: parent
                     onClicked: dlg.close()
+                }
+            }
+        }
+    }
+
+    // ══ 右键菜单（2026-10-26 · 产品笔记 P3）══════════════════════════════
+    // 点图标/行右键弹出：停止运行 · 加入白名单 · 加入黑名单 · 冻结/解冻 · 去网/恢复。
+    // 菜单顶部那行是"此应用的信息"：名称 / pid / 内存 / 受保护类别 / 名单状态 ——
+    // 老师要的就是"这到底是什么、我能不能动它"。
+    property var menuItem: null
+    property var policy: ({ blacklist: [], whitelist: [], denyRun: false })
+
+    function openMenu(it) {
+        dlg.menuItem = it
+        backend.sendAction("soft_policy_get")   // 先拿最新策略（加白/加黑是"先读后写"）
+        itemMenu.open()
+    }
+
+    function act(kind) {
+        const it = dlg.menuItem
+        if (!it) return
+        if (kind === "stop")          backend.sendAction("process_stop", { "pid": it.pid })
+        else if (kind === "freeze")   backend.sendAction("soft_freeze", { "pid": it.pid })
+        else if (kind === "unfreeze") backend.sendAction("soft_unfreeze", { "pid": it.pid })
+        else if (kind === "deny")     backend.sendAction("soft_deny_net", { "pid": it.pid })
+        else if (kind === "allow")    backend.sendAction("soft_restore_net", { "pid": it.pid })
+        else if (kind === "black") { dlg.addToList("blacklist", it.name); itemMenu.close(); return }
+        else if (kind === "white") { dlg.addToList("whitelist", it.name); itemMenu.close(); return }
+        itemMenu.close()
+        dlg.hint("已下发，稍后刷新列表")
+        backend.sendAction("process_list", {})
+    }
+
+    function addToList(which, name) {
+        const bl = (dlg.policy.blacklist || []).slice()
+        const wl = (dlg.policy.whitelist || []).slice()
+        if (which === "blacklist") { if (bl.indexOf(name) < 0) bl.push(name) }
+        else { if (wl.indexOf(name) < 0) wl.push(name) }
+        backend.sendAction("soft_policy_set", {
+            "blacklist": bl, "whitelist": wl, "denyRun": dlg.policy.denyRun === true
+        })
+        dlg.hint("已加入" + (which === "blacklist" ? "黑名单" : "白名单") + "：" + name)
+        itemMenu.close()
+        backend.sendAction("process_list", {})
+    }
+
+    Connections {
+        target: backend
+        function onResultReceived(action, data) {
+            if (action !== "soft_policy_get" || !data) return
+            dlg.policy = {
+                blacklist: data.blacklist || [],
+                whitelist: data.whitelist || [],
+                denyRun: data.denyRun === true
+            }
+        }
+    }
+
+    Popup {
+        id: itemMenu
+        anchors.centerIn: Overlay.overlay
+        width: 300
+        height: 268
+        modal: true
+        padding: 0
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            color: dlg.theme ? dlg.theme.cream : "#141414"
+            radius: dlg.theme ? dlg.theme.rCard : 12
+            border.color: dlg.theme ? dlg.theme.stroke : "#242424"
+            border.width: 1
+        }
+
+        contentItem: Column {
+            spacing: 0
+
+            // ── 信息头（"此应用的信息与渊源"）──
+            Item {
+                width: parent.width
+                height: 62
+                Text {
+                    x: 14; y: 10
+                    width: parent.width - 28
+                    elide: Text.ElideMiddle
+                    text: dlg.menuItem ? (dlg.menuItem.name || "?") : ""
+                    color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
+                    font.pixelSize: 13
+                    font.weight: Font.Medium
+                }
+                Text {
+                    x: 14; y: 32
+                    width: parent.width - 28
+                    wrapMode: Text.WordWrap
+                    text: {
+                        if (!dlg.menuItem) return ""
+                        const p = []
+                        if (dlg.menuItem.pid) p.push("PID " + dlg.menuItem.pid)
+                        if (dlg.menuItem.mem_mb !== undefined) p.push(dlg.menuItem.mem_mb + " MB")
+                        if (dlg.menuItem.protected) p.push("受保护：" + dlg.menuItem.protected)
+                        if (dlg.menuItem.blacklisted === true) p.push("黑名单（标红）")
+                        if (dlg.menuItem.frozen === true) p.push("已冻结")
+                        return p.join(" · ")
+                    }
+                    color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                    font.pixelSize: 11
+                }
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 1
+                    color: dlg.theme ? dlg.theme.line : "#161616"
+                }
+            }
+
+            Repeater {
+                model: [
+                    { k: "stop",     t: "停止运行" },
+                    { k: "black",    t: "加入黑名单（禁止运行）" },
+                    { k: "white",    t: "加入白名单（永不禁用·不显示）" },
+                    { k: "freeze",   t: "冻结" },
+                    { k: "unfreeze", t: "解冻" },
+                    { k: "deny",     t: "去网（禁出站）" },
+                    { k: "allow",    t: "恢复网络" }
+                ]
+                delegate: Rectangle {
+                    width: parent.width
+                    height: 29
+                    color: rowMa.containsMouse ? (dlg.theme ? dlg.theme.hover : "#1E1E1E") : "transparent"
+                    Text {
+                        x: 14
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.t
+                        color: modelData.k === "black" ? "#E24B4A" : (dlg.theme ? dlg.theme.op : "#C8C8C8")
+                        font.pixelSize: 12
+                    }
+                    MouseArea {
+                        id: rowMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: dlg.act(modelData.k)
+                    }
                 }
             }
         }
