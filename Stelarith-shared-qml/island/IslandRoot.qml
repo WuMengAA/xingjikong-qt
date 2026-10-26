@@ -110,6 +110,15 @@ Item {
     // 和老师发的通知长得一模一样，分不清该不该当回事。
     // viewer 侧桥没有这个属性 ⇒ undefined ⇒ "" ⇒ 标签不出现，退化成旧样子。
     readonly property string _channel: (bridgeRef && bridgeRef.channel) ? bridgeRef.channel : ""
+    // ── 组件面板（2026-10-27 · G4/G5/G6：日期 / 课表 / 倒计时）──────────
+    // 非空 = 展开区画的是**看板**（面板），不是通知详情。
+    // 与通知的分工见 island.h showPanel 的注释：通知是事件、面板是看板。
+    // ⚠️ 点访问（bridgeRef.panelFace）：下标访问不建立绑定依赖，changed() 刷不新。
+    // ⚠️ 只在**展开态**显示：收起态仍是面板自带的 title/desc 摘要 ——
+    //    学生把面板推回去，看到的是一条正常的胶囊，不是一块空白。
+    readonly property string _panelFace: (bridgeRef && bridgeRef.panelFace) ? bridgeRef.panelFace : ""
+    readonly property var    _panelInfo: (bridgeRef && bridgeRef.panelData) ? bridgeRef.panelData : ({})
+    readonly property bool   _panelOn: root._panelFace !== "" && root._expanded
     // ⚠️ 2026-10-18 · 新通知到来时复位多面切换（face 自动逻辑缺陷修复）
     // 原行为：face / faceUserPick 是**永久 property**，收起、展开、换内容都不复位。
     //   ⇒ 用户上次展开看了媒体面，岛收起后来了条新通知，再展开**仍停在媒体面**，
@@ -674,7 +683,10 @@ Item {
         // 右下角挂一只鲸鱼会在 520×200 里显得"贴了张贴纸"。全屏保留（大屏右下角合适）。
         // 大卡片档（Centered/Fullscreen）也不画：全屏会冒一颗标题气泡（鲸鱼对新通知
         // 自动 speak），与正文重复；520×200 的卡片右下角挂吉祥物也像贴纸。
-        visible: !root._compactForm && !root._bigForm
+        // 2026-10-27（G4/G5/G6）：**面板态也不画** —— 面板是看板（课表/倒计时），
+        // 右下角一只鲸鱼 + 一句标题气泡（"今天"/"今日课表"）纯属重复信息，
+        // 还会压住课表最后一行（640×320 里第 7~8 节正好在右下）。
+        visible: !root._compactForm && !root._bigForm && !root._panelOn
         // 空闲态鲸鱼正常大小（28px），底层扩大了能放下
         px: root._idle ? 28 : (root._expanded ? 36 : 28)
         bridgeRef: root.bridgeRef
@@ -839,12 +851,28 @@ Item {
     }
 
     // ══════════════════════════════════════════════════════════
+    // 组件面板（2026-10-27 · G4/G5/G6）—— 日期 / 课表 / 倒计时
+    // ══════════════════════════════════════════════════════════
+    // 只在展开态显示：收起态用面板自带的 title/desc 摘要（不是空板子）。
+    // 与下面"活动态"互斥：面板在时，通知那一套内容整体让位 —— 两套版式同时画
+    // 会互相压（同 banner/mini 与胶囊的互斥理由）。
+    // ⚠️ 宿主只是 Loader 壳子，三枚面各自独立文件、按需加载（项目铁律丙）。
+    IslandPanelFace {
+        id: panelFaceItem
+        anchors.fill: parent
+        th: root.th
+        face: root._panelFace
+        info: root._panelInfo
+        visible: root._panelOn
+    }
+
+    // ══════════════════════════════════════════════════════════
     // 活动态 收起 / 展开
     // ══════════════════════════════════════════════════════════
     Item {
         anchors.fill: parent
         // #330：紧凑外框（Banner/Mini）有自己的面，胶囊那套内容整体让位
-        visible: !root._idle && !root._compactForm && !root._bigForm
+        visible: !root._idle && !root._compactForm && !root._bigForm && !root._panelOn
         opacity: root._idle ? 0 : 1
         // 2026-10-18：走 durShort 令牌（原硬编码 160）
         Behavior on opacity { NumberAnimation { duration: root.th ? root.th.durShort : 160 } }
