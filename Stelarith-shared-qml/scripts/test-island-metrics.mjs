@@ -5,16 +5,21 @@
  * 为什么有它：岛的尺寸有**两个主人**，而且都在用：
  *   · 被控端 —— C++ `IslandOverlay` 按 `island.h::Shape` + `island.cpp::geometryForContent`
  *     给 QQuickWidget 定窗（SizeRootObjectToView ⇒ **C++ 是尺寸的真源**）。
- *   · 管理端 —— QML `IslandHost` 是嵌在布局里的普通 Item，**复刻**同一套预算（没有 C++ 宿主）。
+ *   · 共享层 —— QML `IslandTheme` / `IslandRoot`（shared-qml/island/，被控端与
+ *     管理端审批面板共用同一份）复刻同一套预算。
  * 两边是"两处手写、必须同值"。历史已经漂过：
  *   `IslandTheme.shapeIdle` 长期是 36（旧 DynamicIsland 的值），而 C++ 是 44（132×44 的 4:3 比例）；
  *   `shapeExpanded` 是 168（旧值），而 C++ 是 320。
  * 这类漂移**编得过、跑得动**，只在跨端观感分叉时才暴露 —— 所以必须机器盯。
  *
+ * ⚠️ 2026-10-26（产品笔记 P0）：管理端主界面灵动岛已移除，原 `IslandHost.qml`
+ *    （管理端宿主）随之删除 —— 本脚本第六/七节的 IslandHost 检查同步退役；
+ *    管理端仅剩互动审批面板（InteractDialog）内的岛预览（仍是共享 IslandRoot）。
+ *
  * 用法：node scripts/test-island-metrics.mjs
  * 退出码：0 全过 / 1 有失败
  *
- * ⚠️ 两条断言是**跨仓读真源**（island.h / island.cpp）—— 红了说明 QML 侧没跟上 C++ 真源，
+ * ⚠️ 断言是**跨仓读真源**（island.h / island.cpp）—— 红了说明 QML 侧没跟上 C++ 真源，
  *    别把它们当噪声关掉（与 test-ui-contract.mjs 的权限词表门禁同一个道理）。
  */
 import fs from "node:fs";
@@ -27,7 +32,6 @@ const ISLAND_H = path.join(REPO, "Stelarith-control-qt", "src", "island.h");
 const ISLAND_CPP = path.join(REPO, "Stelarith-control-qt", "src", "island.cpp");
 const THEME = path.join(ROOT, "island", "IslandTheme.qml");
 const ROOT_QML = path.join(ROOT, "island", "IslandRoot.qml");
-const HOST = path.join(REPO, "Stelarith-viewer-qt", "qml", "components", "IslandHost.qml");
 
 let pass = 0;
 const fails = [];
@@ -77,7 +81,6 @@ const MEDIA = { expanded: Number(mediaMatch[1]), collapsed: Number(mediaMatch[2]
 // ── 二、消费方：QML 侧 ──────────────────────────────────────────
 const thSrc = read(THEME);
 const rootSrc = read(ROOT_QML);
-const hostSrc = read(HOST);
 
 const TH = {
 	shapeIdle: num(thSrc, /shapeIdle\s*:\s*(\d+)/, "IslandTheme.shapeIdle"),
@@ -91,20 +94,11 @@ const rootWide = rootSrc.match(/_expanded\s*\?\s*(\d+)\s*:\s*(\d+)/);
 if (!rootWide) throw new Error("IslandRoot 的 implicitWidth 三元式没抓到");
 const ROOTW = { expanded: Number(rootWide[1]), collapsed: Number(rootWide[2]) };
 
-// IslandHost: implicitWidth/Height 各一条三元式
-const hostW = hostSrc.match(/_expanded\s*\?\s*(\d+)\s*:\s*(\d+)/);
-if (!hostW) throw new Error("IslandHost 的 implicitWidth 三元式没抓到");
-const HOSTW = { expanded: Number(hostW[1]), collapsed: Number(hostW[2]) };
-const hostHits = [...hostSrc.matchAll(/_expanded\s*\?\s*(\d+)\s*:\s*(\d+)/g)];
-if (hostHits.length !== 2) throw new Error(`IslandHost 应恰好 2 条尺寸三元式，实测 ${hostHits.length}`);
-const HOSTH = { expanded: Number(hostHits[1][1]), collapsed: Number(hostHits[1][2]) };
-
 console.log("── 一、C++ 真源（island.h / island.cpp）──");
 console.log(`  Shape = ${JSON.stringify(SHAPE)}  kIdleW = ${CPP.kIdleW}  kMinContentW = ${CPP.kMinContentW}  媒体宽 = ${JSON.stringify(MEDIA)}`);
 console.log("── 二、QML 消费方 ──");
 console.log(`  IslandTheme = ${JSON.stringify(TH)}`);
 console.log(`  IslandRoot  = idle×${rootIdleMul} / ${JSON.stringify(ROOTW)}`);
-console.log(`  IslandHost  = W ${JSON.stringify(HOSTW)} / H ${JSON.stringify(HOSTH)}`);
 console.log("");
 
 console.log("── 三、形状令牌必须等于 C++ enum Shape ──");
@@ -121,22 +115,8 @@ t("IslandRoot 的 idle 倍数恰为 3（4:3）", () => eq(rootIdleMul, 3));
 console.log("── 五、媒体呈现宽：IslandRoot 与 C++ 同值 ──");
 t("IslandRoot 媒体宽 === C++ 媒体宽", () => eq(ROOTW, MEDIA, "IslandRoot 与 island.cpp 的媒体宽分叉"));
 
-console.log("── 六、管理端宿主 IslandHost 复刻值（宽度/高度）──");
-t("IslandHost 宽 === C++ 媒体宽（收起/展开）", () => eq(HOSTW, MEDIA, "IslandHost 宽度与 C++ 媒体宽分叉"));
-t("IslandHost 收起高 === Shape::Collapsed", () => eq(HOSTH.collapsed, SHAPE.Collapsed, "宿主收起高漂移"));
-t("IslandHost 展开高 === Shape::Expanded", () => eq(HOSTH.expanded, SHAPE.Expanded, "宿主展开高漂移"));
-
-console.log("── 七、已知缺口看板（防静默变更）──");
-t("★ 已知缺口仍在：IslandHost 未复刻非媒体「内容定宽」路径", () => {
-	// C++ geometryForContent 的非媒体分支按 QFontMetrics 算内容宽度（qBound(kMinContentW, iconW+textW+48, maxW)）。
-	// 管理端 IslandHost 是固定 320 —— 这是**有意保留**（岛嵌在布局里，宽度随文案跳会顶动周围布局），
-	// 不是遗漏。一旦有人补上复刻，这条会红 ⇒ 提醒同步更新归档与两处注释，别默默改观感。
-	// ⚠️ 判据必须**剥掉注释**再看 —— 注释里提到 kMinContentW 是在说明这个缺口，不是复刻了它。
-	const codeOnly = hostSrc.replace(/^\s*\/\/.*$/gm, "");
-	const hasTextBudget = /TextMetrics|horizontalAdvance|fontMetrics/.test(codeOnly);
-	ok(!hasTextBudget, "IslandHost 出现了内容定宽预算 —— 缺口已补，请同步更新归档与本断言");
-});
-t("kMinContentW 落在 C++ 真源（提醒：管理端未复刻，见上条）", () => {
+console.log("── 六、C++ 真源完整性（2026-10-26：管理端宿主已退役，仅留真源检查）──");
+t("kMinContentW 落在 C++ 真源", () => {
 	ok(CPP.kMinContentW > 0, "kMinContentW 缺失");
 });
 

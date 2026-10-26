@@ -17,11 +17,11 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 7838,
+      "lines": 7873,
       "limit": 600,
       "qInvokable": 0,
-      "topLevel": 204,
-      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交） | 2026-10-25 回写 7647→7681：#479 class-bound +27 与 #480 BlackboardCard 接线 +23（均 10-24/25 已提交），+11 属并行线存量 | 2026-10-25 回写 7681→7718：+29 渲染诊断埋点（651311b，Win7 黑底排查：sceneGraphBackend/env/OS/DWM 四行 qInfo），另 +8 属并行线存量未回写 | 2026-10-25 回写 7718→7836：**本批只提交 +66**（设备用途链路：g_deviceRole + 持久化 saveDeviceRole/loadDeviceRole + register 上报 role + 回执权威覆盖 + 缩略图门加用途判定 + 向导 setInitialRole/roleChosen 接线 + agentUiFill 快照）；**另 +52 属并行线 13:13 写入的 Win7 渲染兜底块（未提交、非本批，按纪律不替其提交）** —— 若该块被回退，请把本值回写为 7784 | 2026-10-25 回写 7836→7837：+1 为本批删除 XJK 接入码路径（仅 6 位票走 /api/device/activate，旧 XJK 分支与站点代兑换注释移除） | 2026-10-25 回写 7837→7838（+1，顶层定义仍 204）：+1 属**并行线在途**改动（非本批），此处只据实回写台账使门禁可读，不代其提交代码"
+      "topLevel": 206,
+      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交） | 2026-10-25 回写 7647→7681：#479 class-bound +27 与 #480 BlackboardCard 接线 +23（均 10-24/25 已提交），+11 属并行线存量 | 2026-10-25 回写 7681→7718：+29 渲染诊断埋点（651311b，Win7 黑底排查：sceneGraphBackend/env/OS/DWM 四行 qInfo），另 +8 属并行线存量未回写 | 2026-10-25 回写 7718→7836：**本批只提交 +66**（设备用途链路：g_deviceRole + 持久化 saveDeviceRole/loadDeviceRole + register 上报 role + 回执权威覆盖 + 缩略图门加用途判定 + 向导 setInitialRole/roleChosen 接线 + agentUiFill 快照）；**另 +52 属并行线 13:13 写入的 Win7 渲染兜底块（未提交、非本批，按纪律不替其提交）** —— 若该块被回退，请把本值回写为 7784 | 2026-10-25 回写 7836→7837：+1 为本批删除 XJK 接入码路径（仅 6 位票走 /api/device/activate，旧 XJK 分支与站点代兑换注释移除） | 2026-10-25 回写 7837→7838（+1，顶层定义仍 204）：+1 属**并行线在途**改动（非本批），此处只据实回写台账使门禁可读，不代其提交代码 | 2026-10-26 回写 7838→7873（+35，顶层定义 204→206）：+35 为上轮密码批次（6cbc800，vnc_access 本地持久化 +36/−1）未回写存量；本轮 P0 kind=island 归一净 0 行。据实回写使门禁可读"
     },
     "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
       "lines": 870,
@@ -73,18 +73,18 @@
       "plan": "[P3] 拆下载/校验/安装三段"
     },
     "Stelarith-viewer-qt/src/viewerbackend.cpp": {
-      "lines": 2822,
+      "lines": 2898,
       "limit": 600,
       "qInvokable": 0,
-      "topLevel": 90,
-      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交） | 2026-10-25 回写 2772→2787：登记值滞后（#460/#477 增量未回写），本批未改此文件 | 2026-10-25 回写 2787→2795（+8，顶层定义 89→90）：registerUrl 属性与注册页说明（提交 61e4495，未认证链路批次） | 2026-10-25 回写 2795→2813（+18，顶层定义仍 90）：设备表按 scope 裁剪 —— m_devices 改 scopedDevices→maskDevices 两级、默认选中改从裁剪后的表取（不拿云端原始 arr）、设备表日志改口径（可见/原始 双数） | 2026-10-26 回写 2813→2822：+9 为 ef44f86 班级名单改走登录票据（10-25 23:50 已提交，非本批批准变胖）"
+      "topLevel": 94,
+      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交） | 2026-10-25 回写 2772→2787：登记值滞后（#460/#477 增量未回写），本批未改此文件 | 2026-10-25 回写 2787→2795（+8，顶层定义 89→90）：registerUrl 属性与注册页说明（提交 61e4495，未认证链路批次） | 2026-10-25 回写 2795→2813（+18，顶层定义仍 90）：设备表按 scope 裁剪 —— m_devices 改 scopedDevices→maskDevices 两级、默认选中改从裁剪后的表取（不拿云端原始 arr）、设备表日志改口径（可见/原始 双数） | 2026-10-26 回写 2813→2822：+9 为 ef44f86 班级名单改走登录票据（10-25 23:50 已提交，非本批批准变胖） | 2026-10-26 回写 2822→2898（+76，顶层定义 90→94）：为上轮密码批次 1b704a9（beginTakeover/requestVncAccessAuth/sendVncAuth/submitVncPassword + vnc-auth 分发 + VNC_AUTH_REQUIRED 门控）未回写。据实回写"
     },
     "Stelarith-viewer-qt/src/viewerbackend.h": {
-      "lines": 1027,
+      "lines": 1047,
       "limit": 300,
-      "qInvokable": 61,
+      "qInvokable": 62,
       "topLevel": 16,
-      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明。台账：984 → 1001（+17）：#477 ClassAdmin +8（前向声明/Q_PROPERTY/访问器/成员）；另 +9 属并行线 VNC 批次（m_pendingVncUid/m_vncUid） | 2026-10-25 回写 1001→1005：登记值滞后，本批未改此文件 | 2026-10-25 回写 1005→1010：+5 为本批 roleLocked Q_PROPERTY + 注释（个人中心：服务端锁身份时隐藏『换身份』假按钮，原行为是点了静默失败） | 2026-10-25 回写 1010→1020（+10，顶层定义 15→16）：verified + registerUrl 两个 Q_PROPERTY 与访问器（提交 61e4495） | 2026-10-25 回写 1020→1027（+7，顶层定义仍 16）：classesFiltered Q_PROPERTY + 成员 m_classesFiltered + 访问器 + 说明注释（提交 ef44f86，班级名单走登录票据）"
+      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明。台账：984 → 1001（+17）：#477 ClassAdmin +8（前向声明/Q_PROPERTY/访问器/成员）；另 +9 属并行线 VNC 批次（m_pendingVncUid/m_vncUid） | 2026-10-25 回写 1001→1005：登记值滞后，本批未改此文件 | 2026-10-25 回写 1005→1010：+5 为本批 roleLocked Q_PROPERTY + 注释（个人中心：服务端锁身份时隐藏『换身份』假按钮，原行为是点了静默失败） | 2026-10-25 回写 1010→1020（+10，顶层定义 15→16）：verified + registerUrl 两个 Q_PROPERTY 与访问器（提交 61e4495） | 2026-10-25 回写 1020→1027（+7，顶层定义仍 16）：classesFiltered Q_PROPERTY + 成员 m_classesFiltered + 访问器 + 说明注释（提交 ef44f86，班级名单走登录票据） | 2026-10-26 回写 1027→1047（+20，Q_INVOKABLE 61→62）：为上轮密码批次 1b704a9（3 信号 + submitVncPassword + 3 私有方法 + 4 成员）未回写。据实回写"
     },
     "Stelarith-control-qt/qml/shell/BroadcastScheduleSheet.qml": {
       "lines": 795,
@@ -283,18 +283,18 @@
       "plan": "[P3] 拆动画帧与路径数据"
     },
     "Stelarith-cloud/src/index.js": {
-      "lines": 2989,
+      "lines": 3014,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）→ 2873（2026-10-24 #475 班级管理 API 分发 +13：import handleClassAdminApi + isViewerApi 加 /api/class/ 前缀 + POST 分发点） | 2026-10-25 回写 2873→2976：登记值滞后（班级域/发布中心增量），本批未改此文件 | 2026-10-25 回写 2976→2983：+7 为班级数据（学生/课表）接线 —— 一行 import + 建表与启动日志；业务全在新 TU src/class-data.js（307 行，红线 600 内），index.js 只留启动钩子 | 2026-10-25 回写 2983→2989：+6 为设备用途接线（register 解析 role 入 regMeta 3 行 + 回执下发 getDeviceRole 3 行）；业务在 registry.js"
+      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）→ 2873（2026-10-24 #475 班级管理 API 分发 +13：import handleClassAdminApi + isViewerApi 加 /api/class/ 前缀 + POST 分发点） | 2026-10-25 回写 2873→2976：登记值滞后（班级域/发布中心增量），本批未改此文件 | 2026-10-25 回写 2976→2983：+7 为班级数据（学生/课表）接线 —— 一行 import + 建表与启动日志；业务全在新 TU src/class-data.js（307 行，红线 600 内），index.js 只留启动钩子 | 2026-10-25 回写 2983→2989：+6 为设备用途接线（register 解析 role 入 regMeta 3 行 + 回执下发 getDeviceRole 3 行）；业务在 registry.js | 2026-10-26 回写 2989→3014（+25）：上轮密码批次 7dc67ed（vnc 中继门控/vnc-auth/改密 API）未回写，据实回写使门禁可读"
     },
     "Stelarith-cloud/src/registry.js": {
-      "lines": 1312,
+      "lines": 1401,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 拆注册/心跳/清理三段。台账：1190 → 1236（#475 班级管理 +47/-1）：G3 换班残留修复 +5（addToClassIndex 清旧班索引）/ notifyClassBoundIfOnline（G4 在线下发 class-bound）+21 / dropClassIndex（删班后清运行时 Map 条目，防 listClasses 吐幽灵班）+9 / bind-class 成功后调用点 +4 / import +1 | 2026-10-25 回写 1236→1278：其中 +17 为本批 sendToClassDevices（发布中心 P0 地基）；其余为 #459 缩略图等历史增量未回写 | 2026-10-25 回写 1278→1312：+34 为设备用途模型（DEVICE_ROLES/normalizeDeviceRole 12、markConnected 首次采纳+已有则权威优先 6、listDevices 输出 2、setDeviceMeta 支持改用途 8、getDeviceRole 4、注释 2）；归一规则与端侧 AgentPages.manifestFor 逐字对齐（trim+lower，探针实测过 ' broadcast ' 的空格分裂坑）"
+      "plan": "[P2] 拆注册/心跳/清理三段。台账：1190 → 1236（#475 班级管理 +47/-1）：G3 换班残留修复 +5（addToClassIndex 清旧班索引）/ notifyClassBoundIfOnline（G4 在线下发 class-bound）+21 / dropClassIndex（删班后清运行时 Map 条目，防 listClasses 吐幽灵班）+9 / bind-class 成功后调用点 +4 / import +1 | 2026-10-25 回写 1236→1278：其中 +17 为本批 sendToClassDevices（发布中心 P0 地基）；其余为 #459 缩略图等历史增量未回写 | 2026-10-25 回写 1278→1312：+34 为设备用途模型（DEVICE_ROLES/normalizeDeviceRole 12、markConnected 首次采纳+已有则权威优先 6、listDevices 输出 2、setDeviceMeta 支持改用途 8、getDeviceRole 4、注释 2）；归一规则与端侧 AgentPages.manifestFor 逐字对齐（trim+lower，探针实测过 ' broadcast ' 的空格分裂坑） | 2026-10-26 回写 1312→1401（+89）：上轮密码批次 7dc67ed（vnc-access.json 持久化 scrypt verifier）未回写，据实回写使门禁可读"
     },
     "Stelarith-viewer-qt/qml/pages/control/ControlPage.qml": {
       "lines": 915,
