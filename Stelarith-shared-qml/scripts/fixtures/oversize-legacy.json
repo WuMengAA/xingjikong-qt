@@ -1,13 +1,13 @@
 {
-  "updated": "2026-10-26",
+  "updated": "2026-10-27",
   "note": "历史超限台账：白名单内未变胖=允许；再长 1 行=判红；拆完一项就删一项。plan 前缀 P1/P2/P3 是拆分优先级。增量归属写进 plan（哪一批 +多少行、是否已提交），回写不等于批准变胖——P 级计划仍然有效。 | 2026-10-24 注册 ClassMemberPane（班级工作台方案B 成员管理 tab，两段结构，待拆为人员/设备两子件）",
   "files": {
     "Stelarith-control-qt/src/island.cpp": {
-      "lines": 2461,
+      "lines": 2472,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 67,
-      "plan": "[P2] 灵动岛逻辑按状态机/动画/数据三段拆 | 2026-10-25 回写 2446→2453：+7 为 a13b507 vhRef 清空写 null QObject* + 守卫注释（Win7 三连 TypeError 修复，已提交） | 2026-10-27 回写（+8）：通知渠道（m_channel/m_skipHistory 一次性注入 + 归档处 skipHistory 拦截）"
+      "plan": "[P2] 灵动岛逻辑按状态机/动画/数据三段拆 | 2026-10-25 回写 2446→2453：+7 为 a13b507 vhRef 清空写 null QObject* + 守卫注释（Win7 三连 TypeError 修复，已提交） | 2026-10-27 回写（+8）：通知渠道（m_channel/m_skipHistory 一次性注入 + 归档处 skipHistory 拦截） | 2026-10-27 回写（+11）：F 收尾第 2 项 —— geometryForContent 把渠道标签算进胶囊宽度（12px DemiBold 度量 + 14 padding + 6 间距 + 描述宽），否则描述被标签挤成省略号"
     },
     "Stelarith-control-qt/src/island.h": {
       "lines": 579,
@@ -17,11 +17,11 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件 | 2026-10-27 回写（+16）：渠道能力声明与 4 个成员（channelHint/skipHistoryHint/channel/skipHistory）"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 8324,
+      "lines": 8399,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 206,
-      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交） | 2026-10-25 回写 7647→7681：#479 class-bound +27 与 #480 BlackboardCard 接线 +23（均 10-24/25 已提交），+11 属并行线存量 | 2026-10-25 回写 7681→7718：+29 渲染诊断埋点（651311b，Win7 黑底排查：sceneGraphBackend/env/OS/DWM 四行 qInfo），另 +8 属并行线存量未回写 | 2026-10-25 回写 7718→7836：**本批只提交 +66**（设备用途链路：g_deviceRole + 持久化 saveDeviceRole/loadDeviceRole + register 上报 role + 回执权威覆盖 + 缩略图门加用途判定 + 向导 setInitialRole/roleChosen 接线 + agentUiFill 快照）；**另 +52 属并行线 13:13 写入的 Win7 渲染兜底块（未提交、非本批，按纪律不替其提交）** —— 若该块被回退，请把本值回写为 7784 | 2026-10-25 回写 7836→7837：+1 为本批删除 XJK 接入码路径（仅 6 位票走 /api/device/activate，旧 XJK 分支与站点代兑换注释移除） | 2026-10-25 回写 7837→7838（+1，顶层定义仍 204）：+1 属**并行线在途**改动（非本批），此处只据实回写台账使门禁可读，不代其提交代码 | 2026-10-26 回写 7838→7873（+35，顶层定义 204→206）：+35 为上轮密码批次（6cbc800，vnc_access 本地持久化 +36/−1）未回写存量；本轮 P0 kind=island 归一净 0 行。据实回写使门禁可读 | 2026-10-26 回写 7873→8158（+285）：产品笔记 P1 闹钟域（struct AlarmTask + load/save/arm/fire/reschedule + schedule_alarm/list_alarms/cancel_alarm 三指令 + 启动接线）。独立函数块，候选第 5 刀整体拆出。 | 2026-10-26 回写 8158→8419（+261）：产品笔记 P3 软件管理域（SoftPolicy + soft-manage.json 持久化 + 冻结/解冻 NtSuspend/Resume + 去网 netsh 防火墙规则 + 黑名单守护 softGuardTick + 6 条指令 + process_list 白名单过滤/黑名单标记）。独立函数块，候选第 5 刀拆出。 | 2026-10-27 回写（第五刀：闹钟域 187 行拆出到 alarm_domain 模块，TTS 用 init 回调注入） | 2026-10-27 回写（+89）：F 收尾 —— 定时通知三条指令（schedule_notify / list_notifies / cancel_notify）+ 启动注入 NotifyDomain::init 回调。域实现已外置到 src/notify_domain.{h,cpp}（268 行），未占主文件；后续可继续把指令分支整段搬进域内。"
+      "plan": "[P1] 四刀已完成 8142→7525：①ffmpeg纯函数层 ②录制/播放控制 ③相机六件套分支 ④媒体会话分支+AgentSettings+时段判定，且 6 个媒体状态已收归 MediaSession（extern 从 11 行降到 3 行存储域的）；第 5 刀候选：媒体库四件套(media_list/media_delete) / 存储域 g_shotDir+g_mediaDir / OTA 域。台账：7525（四刀完成）→ 7559（+10 为 10-22 前存量未回写，+24 为 #459 缩略图上报接线）→ 7620（e48288e 带宽帽/Tight 落地 +61，10-24 凌晨已提交未回写）→ 7647（#479 class-bound 接收分支 +27，2026-10-24 在途未提交） | 2026-10-25 回写 7647→7681：#479 class-bound +27 与 #480 BlackboardCard 接线 +23（均 10-24/25 已提交），+11 属并行线存量 | 2026-10-25 回写 7681→7718：+29 渲染诊断埋点（651311b，Win7 黑底排查：sceneGraphBackend/env/OS/DWM 四行 qInfo），另 +8 属并行线存量未回写 | 2026-10-25 回写 7718→7836：**本批只提交 +66**（设备用途链路：g_deviceRole + 持久化 saveDeviceRole/loadDeviceRole + register 上报 role + 回执权威覆盖 + 缩略图门加用途判定 + 向导 setInitialRole/roleChosen 接线 + agentUiFill 快照）；**另 +52 属并行线 13:13 写入的 Win7 渲染兜底块（未提交、非本批，按纪律不替其提交）** —— 若该块被回退，请把本值回写为 7784 | 2026-10-25 回写 7836→7837：+1 为本批删除 XJK 接入码路径（仅 6 位票走 /api/device/activate，旧 XJK 分支与站点代兑换注释移除） | 2026-10-25 回写 7837→7838（+1，顶层定义仍 204）：+1 属**并行线在途**改动（非本批），此处只据实回写台账使门禁可读，不代其提交代码 | 2026-10-26 回写 7838→7873（+35，顶层定义 204→206）：+35 为上轮密码批次（6cbc800，vnc_access 本地持久化 +36/−1）未回写存量；本轮 P0 kind=island 归一净 0 行。据实回写使门禁可读 | 2026-10-26 回写 7873→8158（+285）：产品笔记 P1 闹钟域（struct AlarmTask + load/save/arm/fire/reschedule + schedule_alarm/list_alarms/cancel_alarm 三指令 + 启动接线）。独立函数块，候选第 5 刀整体拆出。 | 2026-10-26 回写 8158→8419（+261）：产品笔记 P3 软件管理域（SoftPolicy + soft-manage.json 持久化 + 冻结/解冻 NtSuspend/Resume + 去网 netsh 防火墙规则 + 黑名单守护 softGuardTick + 6 条指令 + process_list 白名单过滤/黑名单标记）。独立函数块，候选第 5 刀拆出。 | 2026-10-27 回写（第五刀：闹钟域 187 行拆出到 alarm_domain 模块，TTS 用 init 回调注入） | 2026-10-27 回写（+89）：F 收尾 —— 定时通知三条指令（schedule_notify / list_notifies / cancel_notify）+ 启动注入 NotifyDomain::init 回调。域实现已外置到 src/notify_domain.{h,cpp}（268 行），未占主文件；后续可继续把指令分支整段搬进域内。 | 2026-10-27 回写（+75）：G3 时间同步 —— include + TimesyncDomain init/setOnChanged/start 接线 + s_schedClock 静态指针（偏移变更时重设课表校正量）+ time_sync/time_offset/time_status 三条指令。域实现外置到 src/timesync_domain.{h,cpp}（70/293 行），未占主文件"
     },
     "Stelarith-control-qt/src/modules/voicehubmodule.cpp": {
       "lines": 870,
@@ -262,11 +262,11 @@
       "plan": "[P3] 拆输出/输入区"
     },
     "Stelarith-shared-qml/island/IslandRoot.qml": {
-      "lines": 3141,
+      "lines": 3177,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 灵动岛单一真源：拆状态层/动画层/内容层（两端同源，改前先同步） | 2026-10-25 回写 3095→3104：+9 为 33d22e2 vhRef 四处守卫改真值判断 + undefined 陷阱注释（Win7 三连 TypeError 修复，meta 已提交） | 2026-10-27 回写（+37）：收起/展开动画曲线与回弹系数优化（展开 OutBack overshoot 1.15、收起 OutCubic 240ms、圆角补缓动）。已 3141 行，下一刀拆分候选：历史列表抽 IslandHistoryList.qml"
+      "plan": "[P1] 灵动岛单一真源：拆状态层/动画层/内容层（两端同源，改前先同步） | 2026-10-25 回写 3095→3104：+9 为 33d22e2 vhRef 四处守卫改真值判断 + undefined 陷阱注释（Win7 三连 TypeError 修复，meta 已提交） | 2026-10-27 回写（+37）：收起/展开动画曲线与回弹系数优化（展开 OutBack overshoot 1.15、收起 OutCubic 240ms、圆角补缓动）。已 3141 行，下一刀拆分候选：历史列表抽 IslandHistoryList.qml | 2026-10-27 回写（+36）：F 收尾第 2 项 —— _channel 点访问绑定 + 收起态 IslandChannelChip（描述行首，描述让位 6px）+ 展开态标签与 exTitle 条件让位（2↔24）。新组件独立文件 island/IslandChannelChip.qml（54 行）"
     },
     "Stelarith-shared-qml/island/StateList.qml": {
       "lines": 214,

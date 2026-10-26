@@ -104,6 +104,12 @@ Item {
     //    bridgeRef["noticeTime"] 会在组件创建那一刻锁死（上面 _idle 长注释同款坑）。
     //   viewer 侧桥没有这个属性 ⇒ undefined ⇒ "" ⇒ 整块时间不显示，退化成旧样子。
     readonly property string _noticeTime: (bridgeRef && bridgeRef.noticeTime) ? bridgeRef.noticeTime : ""
+    // ── 通知渠道（2026-10-27 · F 收尾第 2 项）────────────────────────
+    // 「课程提醒」这类渠道名由 C++ 一次性注入（island.h setChannelForNext），桥已就绪
+    // （IslandBridge::channel），这里只负责**画出来**：不画的话，学生眼里"上课啦"
+    // 和老师发的通知长得一模一样，分不清该不该当回事。
+    // viewer 侧桥没有这个属性 ⇒ undefined ⇒ "" ⇒ 标签不出现，退化成旧样子。
+    readonly property string _channel: (bridgeRef && bridgeRef.channel) ? bridgeRef.channel : ""
     // ⚠️ 2026-10-18 · 新通知到来时复位多面切换（face 自动逻辑缺陷修复）
     // 原行为：face / faceUserPick 是**永久 property**，收起、展开、换内容都不复位。
     //   ⇒ 用户上次展开看了媒体面，岛收起后来了条新通知，再展开**仍停在媒体面**，
@@ -896,9 +902,25 @@ Item {
                 font.pixelSize: 11
             }
 
+            // 渠道标签（2026-10-27 · F 收尾第 2 项）：落在**描述行首**，与描述同一行。
+            // 为什么不放标题行：标题是主角，抢占宽度会把它压成省略号（岛宽由 C++ 按内容定）；
+            // 描述行本来就有一条空位，"渠道 + 内容"读起来正是「课程提醒：数学 · 08:00」。
+            // ⚠️ 媒体态不标（媒体不是通知，标了反而误读）；媒体态本来就占满这行。
+            IslandChannelChip {
+                id: csChannel
+                visible: !root.mediaIsContent && root._channel !== ""
+                th: root.th
+                text: root._channel
+                anchors.left: csTitle.left
+                anchors.top: csTitle.bottom
+                anchors.topMargin: 1
+            }
+
             Text {
                 visible: text !== ""
-                anchors.left: csTitle.left
+                // 有渠道标签时描述让位到标签右侧（6px）；无标签时逐字回到旧版式
+                anchors.left: csChannel.visible ? csChannel.right : csTitle.left
+                anchors.leftMargin: csChannel.visible ? 6 : 0
                 anchors.right: parent.right
                 anchors.rightMargin: 42
                 anchors.top: csTitle.bottom
@@ -993,6 +1015,19 @@ Item {
             anchors.fill: parent
             anchors.margins: root.padH
 
+            // 展开态渠道标签（2026-10-27 · F 收尾第 2 项）：标题**正上方**一行。
+            // ⚠️ 必须有条件地让位：exTitle 的 topMargin 跟着它切（2 ↔ 26）。
+            //    不用 visible:false 的"幽灵占位"——锚链对不可见 item 依然起效
+            //    （stList 那条注释记的坑同源），否则无渠道的通知会被顶下去 22px。
+            IslandChannelChip {
+                id: exChannel
+                visible: root._channel !== ""
+                th: root.th
+                text: root._channel
+                anchors.left: parent.left
+                anchors.top: parent.top
+            }
+
             Text {
                 id: exTitle
                 // 组件2：搜索页打开时隐藏大标题并**清零高度**——visible:false 不减
@@ -1007,7 +1042,8 @@ Item {
                 anchors.right: root._showNoticeTime ? exTime.left : parent.right
                 anchors.rightMargin: root._showNoticeTime ? 8 : 48
                 anchors.top: parent.top
-                anchors.topMargin: 2
+                // 2026-10-27：有渠道标签时下移 24（标签 16 + 8 间距）；无标签回到 2
+                anchors.topMargin: exChannel.visible ? 24 : 2
                 text: bridgeRef ? bridgeRef.title : ""
                 color: root.th.fg
                 // #330：多界面开面时标题**压到 20px 单行** —— 面面板要吃内容区，
