@@ -433,9 +433,20 @@ const server = http.createServer((req, res) => {
         if (Number.isFinite(n) && n > 0) { start = Math.max(0, st.size - n); end = st.size - 1; partial = true; }
       } else {
         const s = Number(rm[1]);
-        const e = rm[2] !== '' ? Number(rm[2]) : st.size - 1;
-        if (Number.isFinite(s) && Number.isFinite(e) && s >= 0 && s <= e) {
-          start = s; end = Math.min(e, st.size - 1); partial = true;
+        const hasEnd = rm[2] !== '';
+        const e = hasEnd ? Number(rm[2]) : st.size - 1;
+        // ⚠️ 这里刻意**不**要求 s <= e：
+        //   越界起点（s >= size）必须先置 partial，才能走到下面的 416 分支。
+        //   若在此挡掉，越界 Range 会降级成 200 全量 —— 播放器一旦算错偏移，
+        //   本该报错却被塞回整个文件（几十 MB 白传），与"省流量"正好相反。
+        //   只有**显式**反向区间（bytes=900-100，end 真的比 start 小）才是语义无效，
+        //   按 RFC 7233 忽略 Range 降级 200 —— 那时 start 一定 < size，不会误伤 416。
+        if (Number.isFinite(s) && Number.isFinite(e) && s >= 0) {
+          if (hasEnd && e < s) {
+            partial = false;                       // 显式反向区间 → 无效，降级 200
+          } else {
+            start = s; end = Math.min(e, st.size - 1); partial = true;
+          }
         }
       }
     }
