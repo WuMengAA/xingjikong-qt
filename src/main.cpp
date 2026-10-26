@@ -3996,11 +3996,15 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
     //   popup / 未知 → Centered（屏幕正中卡片，安全默认）
     //   fullscreen → Fullscreen（铺满整屏）
     //   banner → 顶部通栏（长文案单行横幅）｜ mini → 右下角角标（常驻轻状态，不挡课件）
-    //   2026-10-26（产品笔记 P0）：通知形态收敛为 弹窗/角标/跑马灯/全屏 四类 ——
-    //   kind=island（旧顶部胶囊）已归一为弹窗 Centered，老发送方不受损。
+    //   2026-10-27（用户裁决）：**被控端的岛保留并扩充** —— 产品笔记里
+    //   「通知只保留 弹窗 / 岛上 / 跑马灯 / 全屏」这条为准，kind=island 是四形态之一，
+    //   恢复为顶部胶囊（Capsule）。此前 2026-10-26 P0 曾把它归一为弹窗，那是按
+    //   笔记另一处「灵动岛无用不如通知方便」做的 —— 那一处指的是**管理端**的岛
+    //   （已删，见 viewer 侧），被控端的岛是学生的信息出口，不跟着删。
     // ⚠️ 未知 kind 必须继续落 Centered —— 管理端老版本发的 kind 不能被新枚举带偏。
     IslandOverlay::Form f = IslandOverlay::Form::Centered;
-    if (kind == QLatin1String("fullscreen"))      f = IslandOverlay::Form::Fullscreen;
+    if (kind == QLatin1String("island"))          f = IslandOverlay::Form::Capsule;
+    else if (kind == QLatin1String("fullscreen")) f = IslandOverlay::Form::Fullscreen;
     else if (kind == QLatin1String("banner"))     f = IslandOverlay::Form::Banner;
     else if (kind == QLatin1String("mini"))       f = IslandOverlay::Form::Mini;
 
@@ -8229,17 +8233,26 @@ int main(int argc, char *argv[])
         QObject::connect(clock, &ScheduleClock::periodStarted, &app,
             [](const QString& name, const QTime& at) {
                 const QString txt = QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm"));
-                // P1 · 2026-10-14：统一走灵动岛（原 NotifyWindow 已删），本地铃记 fromAdmin=false
+                // 2026-10-27（F · 产品笔记）：课程提醒走**独立渠道「课程提醒」**，
+                //   形态回到**岛上胶囊**（此前是 Centered 弹窗 —— 课表自己响的提示
+                //   不该用"管理端通知"那种抢屏幕的样式），且**不计入历史**
+                //   （一天十几次，会把老师真发的通知淹掉）。
+                //   ⚠️ 两个 hint 都是一次性：必须在 islandShow 之前设。
+                IslandOverlay::instance()->setChannelForNext(QStringLiteral("课程提醒"));
+                IslandOverlay::instance()->setSkipHistoryForNext(true);
                 islandShow(QStringLiteral("上课啦"), txt, QStringLiteral("bell"),
-                           6000, false, QString(), IslandOverlay::Form::Centered, false);
+                           6000, false, QString(), IslandOverlay::Form::Capsule, false);
                 speakText(QStringLiteral("上课啦") + QStringLiteral("：") + txt);
                 qInfo().noquote() << "[agent-qt] 上课提醒已弹: " << name;
             });
         QObject::connect(clock, &ScheduleClock::periodEnded, &app,
             [](const QString& name, const QTime& at) {
                 const QString txt = QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm"));
+                // 同上课提醒：渠道「课程提醒」+ 岛上胶囊 + 不进历史（见上方注释）
+                IslandOverlay::instance()->setChannelForNext(QStringLiteral("课程提醒"));
+                IslandOverlay::instance()->setSkipHistoryForNext(true);
                 islandShow(QStringLiteral("下课啦"), txt, QStringLiteral("bell"),
-                           6000, false, QString(), IslandOverlay::Form::Centered, false);
+                           6000, false, QString(), IslandOverlay::Form::Capsule, false);
                 speakText(QStringLiteral("下课啦") + QStringLiteral("：") + txt);
                 qInfo().noquote() << "[agent-qt] 下课提醒已弹: " << name;
             });

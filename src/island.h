@@ -213,6 +213,18 @@ public:
     // ⚠️ 只设正数；<=0 视为"清除"，不会让下一条通知变成 1970 年。
     void setNoticeTimeForNext(qint64 atMs) { m_noticeHintMs = atMs > 0 ? atMs : 0; }
 
+    // ── 通知「渠道」与「不进历史」（2026-10-27 · 产品笔记 F）────────────────
+    // 渠道（channel）：笔记要求上下课提醒走一个叫「课程提醒」的独立渠道，
+    //   与"管理端通知/告警/消息"区分开；岛本体上也要标出渠道名，学生一眼知道
+    //   这条是哪一类（不是老师发的通知，是课表自己响的）。
+    // skipHistory：课程提醒**不计入历史通知** —— 它一天响十几次，全塞进历史
+    //   会把真正的管理端通知淹掉（历史的用法是"回头查老师发过什么"）。
+    // 两者都照 m_noticeHintMs 的模式：**一次性注入、用完即清**，
+    //   否则下一条通知会莫名继承上一条的渠道。
+    void setChannelForNext(const QString &ch) { m_channelHint = ch; }
+    void setSkipHistoryForNext(bool on) { m_skipHistoryHint = on; }
+    QString channel() const { return m_channel; }
+
     // 时间文本格式化（唯一口径；归档与 bridge 组装共用这三个函数，别各写一套）
     //   timeStr  = HH:mm —— 概览面历史面板有日期分组，行内再带日期是冗余；
     //   timeFull = 今天 HH:mm / 昨天 HH:mm / M/d HH:mm —— 历史面(face 2)是平铺
@@ -427,6 +439,10 @@ private:
     // P0-0（2026-10-17）：「下一条通知的发生时刻」一次性注入位（毫秒，0=无）。
     // 插件边界用它把"插件调用那一刻"带进来；showIsland 消费后立刻清零。
     qint64 m_noticeHintMs = 0;
+    QString m_channelHint;              // 下一条通知的渠道（一次性，见 setChannelForNext）
+    bool    m_skipHistoryHint = false;  // 下一条通知是否不进历史（一次性）
+    QString m_channel;                  // 当前这条的渠道（空 = 不标）
+    bool    m_skipHistory = false;      // 当前这条是否不进历史
     static constexpr int kSpectrumBands = 16;   // §6.3 语音频谱带数（QML 按 bands 长度渲染）
     // 2026-10-13（用户「每条消息保存时间为一周，一周后清除历史」）：超过 7 天的历史
     // 在加载/归档时剔除（loadHistory 与 archiveToHistory 都过一遍 pruneHistory）。

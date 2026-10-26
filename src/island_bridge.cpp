@@ -259,6 +259,12 @@ QString IslandBridge::noticeTime() const
     return IslandOverlay::noticeTimeOf(m_host->noticeTs());
 }
 
+// 2026-10-27（F）：渠道透传给 QML（"课程提醒"这类自动提示要在岛本体上标出来）。
+QString IslandBridge::channel() const
+{
+    return m_host ? m_host->channel() : QString();
+}
+
 int IslandBridge::historyUnreadCount() const
 {
     return m_host ? m_host->historyUnreadCount() : 0;

@@ -44,6 +44,8 @@ class IslandBridge : public QObject
     // 2026-10-17「通知写上时间」：以前只有历史列表有时间，看当前这条还得去翻历史。
     // 空串 = 没有内容 / 媒体等不该带时间的态，QML 侧 visible 绑 noticeTime !== ""。
     Q_PROPERTY(QString noticeTime READ noticeTime NOTIFY changed)
+    // 2026-10-27（F）：通知渠道（"课程提醒" 之类）。空串 = 不标渠道，QML 侧隐藏。
+    Q_PROPERTY(QString channel READ channel NOTIFY changed)
     // ── 形态 ────────────────────────────────────────────────
     // "capsule" | "centered" | "fullscreen" | "banner" | "mini"（对齐 IslandOverlay::Form）
     Q_PROPERTY(QString form     READ form     NOTIFY changed)
@@ -157,6 +159,7 @@ public:
     QVariantList history() const;
     // 当前这条通知的时间文本（HH:mm）；见 Q_PROPERTY noticeTime 上的说明。
     QString noticeTime() const;
+    QString channel() const;    // 2026-10-27（F）：通知渠道（"课程提醒"）
     int    historyUnreadCount() const;
     QString historyCategoryFilter() const { return m_histCategory; }
     void    setHistoryCategoryFilter(const QString &c);

@@ -939,6 +939,9 @@ void IslandOverlay::archiveToHistory()
 {
     // 有标题才归档（空内容/空闲态不该进历史）
     if (m_title.isEmpty()) return;
+    // 2026-10-27（F）：课程提醒这类高频自动提示**不进历史** —— 一天十几次会把
+    //   真正的管理端通知淹掉（历史是"回头查老师发过什么"，不是流水账）。
+    if (m_skipHistory) return;
     // 同标题不重复归档（5 秒内的重复跳过）
     if (!m_history.isEmpty()) {
         const auto &last = m_history.last();
@@ -1004,6 +1007,11 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
                                      : QDateTime::currentSecsSinceEpoch();
     m_noticeHintMs = 0;
     m_fromAdmin = fromAdmin;   // 2026-10-13：跟着这条内容走，归档时写进 HistoryItem
+    // 2026-10-27（F）：渠道 / 是否入历史 —— 同 m_noticeHintMs 的一次性语义，用完即清。
+    m_channel = m_channelHint;
+    m_channelHint.clear();
+    m_skipHistory = m_skipHistoryHint;
+    m_skipHistoryHint = false;
     // ── T 档：把这条内容登记成任务（本步**只记录**，不影响上面的任何显示逻辑）──
     //    tag 用 "notice"：兼容层的核心 —— 下一条通知按同 tag 合并（顶掉），
     //    行为与"原来直接顶掉"完全一致，所以 14 处调用点的外部表现不变。
