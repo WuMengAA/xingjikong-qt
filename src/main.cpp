@@ -24,6 +24,7 @@
 #include "notify_domain.h"  // 2026-10-27 第六刀：定时通知域（F 收尾）
 #include "timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
 #include "panel_domain.h"     // 2026-10-27 G4/G5/G6：岛组件面板（日期/课表/倒计时）
+#include "ppt_domain.h"       // 2026-10-27 I：PPT 放映控制（COM/IDispatch，PowerPoint/WPS）
 #include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
 #include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 #include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
@@ -5615,6 +5616,109 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
+    // ── PPT 放映控制（2026-10-27 · I 批，用户称"尤为重要"）：ppt_status / ppt_next / ppt_prev / ppt_goto / ppt_app ──
+    // 口径（照用户原话）：**没开 PPT 或没在放映 → 如实 failed，绝不假成功**。
+    // 但 data 里**仍然回完整状态**（app/presenting/slide/total/available）——
+    // 管理端要靠它显示"未放映"中性徽标，而不是把一条状态查询当红色错误。
+    if (action == QStringLiteral("ppt_status") || action == QStringLiteral("ppt_next")
+        || action == QStringLiteral("ppt_prev") || action == QStringLiteral("ppt_goto")
+        || action == QStringLiteral("ppt_app")) {
+
+        // 三个字段是"本次实际控的是哪个"，每一次回执都带 —— 绝不让老师以为在控 Office 实际控的是 WPS
+        const auto fillState = [&out](const PptDomain::Status &st) {
+            const QString label = (st.app == QLatin1String("wps"))       ? QStringLiteral("WPS 演示")
+                                : (st.app == QLatin1String("powerpoint")) ? QStringLiteral("PowerPoint")
+                                                                          : QString();
+            out.data.insert(QStringLiteral("app"), st.app);
+            out.data.insert(QStringLiteral("appLabel"), label);
+            out.data.insert(QStringLiteral("running"), st.running);
+            out.data.insert(QStringLiteral("presenting"), st.presenting);
+            out.data.insert(QStringLiteral("slide"), st.slide);
+            out.data.insert(QStringLiteral("total"), st.total);
+            out.data.insert(QStringLiteral("presentation"), st.presentation);
+            QJsonArray avail;
+            for (const QString &a : st.available) avail.append(a);
+            out.data.insert(QStringLiteral("available"), avail);
+        };
+
+        if (action == QStringLiteral("ppt_app")) {
+            const QString want = params.value(QStringLiteral("app")).toString().trimmed().toLower();
+            QString err;
+            bool saved = false;
+            if (!PptDomain::setPreferredApp(want, &err, &saved)) {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("ppt_app: ") + err;
+                return out;
+            }
+            out.result = QStringLiteral("done");
+            out.data.insert(QStringLiteral("preferred"), PptDomain::preferredApp());
+            out.data.insert(QStringLiteral("saved"), saved);
+            // 切完立刻探一次：告诉调用方"现在实际能控的是哪个"（互斥时这条最关键）
+            fillState(PptDomain::query());
+            if (!saved)
+                out.data.insert(QStringLiteral("note"), err);
+            return out;
+        }
+
+        if (action == QStringLiteral("ppt_status")) {
+            const PptDomain::Status st = PptDomain::query();
+            fillState(st);
+            out.data.insert(QStringLiteral("preferred"), PptDomain::preferredApp());
+            if (!st.ok || !st.presenting) {
+                out.result = QStringLiteral("failed");
+                out.error = st.error.isEmpty() ? QStringLiteral("没有在放映") : st.error;
+                out.data.insert(QStringLiteral("note"),
+                                QStringLiteral("状态已采集，但当前没有可翻页的放映"));
+                return out;
+            }
+            out.result = QStringLiteral("done");
+            out.data.insert(QStringLiteral("note"),
+                            QStringLiteral("正在放映：第 %1 / %2 页").arg(st.slide).arg(st.total));
+            return out;
+        }
+
+        int gotoIndex = 0;
+        if (action == QStringLiteral("ppt_goto")) {
+            const QJsonValue jv = params.value(QStringLiteral("index"));
+            gotoIndex = jv.isDouble() ? jv.toInt() : jv.toString().trimmed().toInt();
+            if (gotoIndex < 1) {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("ppt_goto: 需要 index（页码从 1 开始）");
+                return out;
+            }
+        }
+
+        PptDomain::Status st;
+        QString err;
+        const bool done = (action == QStringLiteral("ppt_goto"))
+            ? PptDomain::gotoSlide(gotoIndex, &st, &err)
+            : PptDomain::step(action == QStringLiteral("ppt_next") ? 1 : -1, &st, &err);
+        if (!done) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("%1: %2").arg(action, err);
+            // 失败也把**能拿到的状态**带上（例如"没在放映"时 slide/total 为 0，
+            // 管理端据此把按钮置灰而不是反复点）
+            fillState(PptDomain::query());
+            return out;
+        }
+        fillState(st);
+        out.result = QStringLiteral("done");
+        if (!st.presenting) {
+            // 翻到最后一页 PowerPoint 会结束放映 —— 动作成功了，但要如实说清
+            out.data.insert(QStringLiteral("note"),
+                            QStringLiteral("已翻到末尾，放映已结束（现在没有可翻页的放映）"));
+        } else if (action == QStringLiteral("ppt_goto") && st.slide != gotoIndex) {
+            // 请求值与实际停的页不一致（PPT 会夹到有效范围）⇒ 说清，不回显请求值
+            out.data.insert(QStringLiteral("note"),
+                            QStringLiteral("请求第 %1 页，实际停在第 %2 / %3 页")
+                                .arg(gotoIndex).arg(st.slide).arg(st.total));
+        } else {
+            out.data.insert(QStringLiteral("note"),
+                            QStringLiteral("第 %1 / %2 页").arg(st.slide).arg(st.total));
+        }
+        return out;
+    }
+
     // ── 闹钟（2026-10-26 · P1 产品笔记）：schedule_alarm / list_alarms / cancel_alarm ──
     if (action == QStringLiteral("schedule_alarm")) {
         const QString time = params.value(QStringLiteral("time")).toString().trimmed();
@@ -7653,6 +7757,10 @@ int main(int argc, char *argv[])
         if (s_schedClock) s_schedClock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
     });
     TimesyncDomain::start();
+
+    // ── PPT 放映控制（2026-10-27 · I 批）：只连已运行的 PowerPoint / WPS ────────
+    // 偏好（auto/powerpoint/wps）落 ppt.json；**不做启动**，启动走 launch_app。
+    PptDomain::init(dataDir + QStringLiteral("/ppt.json"));
 
     // ── 软件管理策略（2026-10-26 P3）：黑白名单 + 黑名单守护 ──
     g_softPolicyFile = dataDir + QStringLiteral("/soft-manage.json");

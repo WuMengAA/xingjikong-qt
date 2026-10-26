@@ -115,6 +115,10 @@ add_executable(stelarith-agent-qt
   src/timesync_domain.h
   src/panel_domain.cpp
   src/panel_domain.h
+  # 2026-10-27 I（第七刀）：PPT 放映控制域（Win32 COM + IDispatch，PowerPoint / WPS 演示）。
+  # 只用 GetActiveObject 连已在运行的实例，绝不 CoCreateInstance 拉起程序。
+  src/ppt_domain.cpp
+  src/ppt_domain.h
   src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
   src/singleinstance.cpp
   src/singleinstance.h
@@ -247,6 +251,9 @@ target_link_libraries(stelarith-agent-qt PRIVATE gdi32 user32)
 # 2026-10-19：DXGI Desktop Duplication 抓屏（screen_capture_dxgi.cpp 用 D3D11/DXGI/COM）
 if(WIN32)
   target_link_libraries(stelarith-agent-qt PRIVATE d3d11 dxgi ole32)
+  # 2026-10-27（I 批）：PPT 域用 GetActiveObject（oleaut32）+ CLSIDFromProgID（ole32 已在上面）。
+  # 不链 oleaut32 会 LNK2019：unresolved external symbol __imp_GetActiveObject。
+  target_link_libraries(stelarith-agent-qt PRIVATE oleaut32)
 endif()
 # 2026-10-22：系统媒体识别 SMTC（winrt/Windows.Media.Control.h，C++/WinRT 消费端）
 #   windowsapp.lib = WinRT 的 umbrella import lib（RequestAsync / RoInitialize 等）。
