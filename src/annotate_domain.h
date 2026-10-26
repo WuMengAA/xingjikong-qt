@@ -151,6 +151,8 @@ public:
 
     // 白板模式：bg 为空 → 透明批注层；"white"/"black"/"green"/"#RRGGBB" → 不透明白板
     void setBoard(const QString &bg);
+    // 当前白板背景原样（空 = 透明批注层）—— 给管理端回执用
+    QString boardBg() const { return m_boardBg; }
 
     QString statusLine() const;
 
