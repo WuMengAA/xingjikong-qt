@@ -21,6 +21,7 @@
 
 #include "singleinstance.h"
 #include "alarm_domain.h"   // 2026-10-27 第五刀：闹钟域
+#include "notify_domain.h"  // 2026-10-27 第六刀：定时通知域（F 收尾）
 #include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
 #include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 #include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
@@ -5438,6 +5439,84 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
+    // ── 定时通知（2026-10-27 · F 收尾 · 第六刀）：schedule_notify / list_notifies / cancel_notify ──
+    // 与闹钟（AlarmDomain）分工：闹钟 = 响铃/锁屏/TTS「叫醒」；这里 = 走通知体系（岛/弹窗/跑马灯/全屏）「告诉」。
+    // 产品原话「定时任务里应包括关机、定时闹钟（附有锁屏与相间选时，类似手机闹钟）」——关机与闹钟已有，这条是补的定时通知。
+    if (action == QStringLiteral("schedule_notify")) {
+        NotifyDomain::NotifyTask t;
+        t.id = params.value(QStringLiteral("id")).toString().trimmed();
+        if (t.id.isEmpty())
+            t.id = QStringLiteral("ntf-") + QString::number(QDateTime::currentMSecsSinceEpoch());
+        t.time = params.value(QStringLiteral("time")).toString().trimmed();
+        t.times = params.value(QStringLiteral("times")).toInt(1);
+        t.intervalMin = params.value(QStringLiteral("intervalMin")).toInt(0);
+        t.title = params.value(QStringLiteral("title")).toString();
+        t.content = params.value(QStringLiteral("content")).toString();
+        t.channel = params.value(QStringLiteral("channel")).toString().trimmed();
+        t.createdMs = QDateTime::currentMSecsSinceEpoch();
+        const QJsonArray daysArr = params.value(QStringLiteral("days")).toArray();
+        for (const auto &dv : daysArr) {
+            const int day = dv.toInt(0);
+            if (day >= 1 && day <= 7 && !t.days.contains(day)) t.days.append(day);
+        }
+        QString err;
+        if (!NotifyDomain::upsert(t, &err)) {      // 校验失败如实报，不静默
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("schedule_notify: ") + err;
+            return out;
+        }
+        const qint64 next = NotifyDomain::nextFireMs(t, QDateTime::currentMSecsSinceEpoch(), 0);
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("id"), t.id);
+        out.data.insert(QStringLiteral("times"), qMax(1, t.times));
+        out.data.insert(QStringLiteral("nextAt"),
+                        next > 0 ? QDateTime::fromMSecsSinceEpoch(next).toString(Qt::ISODateWithMs)
+                                 : QString());
+        if (!t.days.isEmpty() && t.times > 1)
+            out.data.insert(QStringLiteral("note"),
+                            QStringLiteral("days 非空时按每天一次处理，times 被忽略"));
+        return out;
+    }
+
+    if (action == QStringLiteral("list_notifies")) {
+        const QVector<NotifyDomain::NotifyTask> tasks = NotifyDomain::loadTasks();
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        QJsonArray items;
+        for (const auto &t : tasks) {
+            QJsonObject o;
+            o.insert(QStringLiteral("id"), t.id);
+            o.insert(QStringLiteral("time"), t.time);
+            o.insert(QStringLiteral("times"), t.times);
+            o.insert(QStringLiteral("intervalMin"), t.intervalMin);
+            o.insert(QStringLiteral("title"), t.title);
+            o.insert(QStringLiteral("content"), t.content);
+            o.insert(QStringLiteral("channel"), t.channel);
+            QJsonArray d;
+            for (int day : t.days) d.append(day);
+            o.insert(QStringLiteral("days"), d);
+            const qint64 nx = NotifyDomain::nextFireMs(t, now, 0);
+            o.insert(QStringLiteral("nextAt"),
+                     nx > 0 ? QDateTime::fromMSecsSinceEpoch(nx).toString(Qt::ISODateWithMs)
+                            : QString());
+            items.append(o);
+        }
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("items"), items);
+        out.data.insert(QStringLiteral("count"), items.size());
+        return out;
+    }
+
+    if (action == QStringLiteral("cancel_notify")) {
+        const QString id = params.value(QStringLiteral("id")).toString().trimmed();
+        if (!NotifyDomain::cancel(id)) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("cancel_notify: 找不到 id=%1 的定时通知").arg(id);
+            return out;
+        }
+        out.result = QStringLiteral("done");
+        return out;
+    }
+
     // ── 闹钟（2026-10-26 · P1 产品笔记）：schedule_alarm / list_alarms / cancel_alarm ──
     if (action == QStringLiteral("schedule_alarm")) {
         const QString time = params.value(QStringLiteral("time")).toString().trimmed();
@@ -7454,6 +7533,16 @@ int main(int argc, char *argv[])
     g_schedFile = g_schedDir + QStringLiteral("/schedules.json");
     AlarmDomain::init(g_schedDir + QStringLiteral("/alarms.json"), speakText);   // 闹钟与开关机同目录（2026-10-26 P1）
     AlarmDomain::rescheduleAlarms();                                          // 崩溃/重启后重挂闹钟
+    // 2026-10-27 第六刀：定时通知域 —— 注入触发回调（转 islandShow，带渠道标签）。
+    // 不做成域内直接调通知渲染：底层域不反向依赖主文件（与 speakText 注入同款）。
+    NotifyDomain::init(g_schedDir + QStringLiteral("/notifies.json"),
+                       [](const NotifyDomain::NotifyTask &t) {
+        if (!t.channel.isEmpty())
+            IslandOverlay::instance()->setChannelForNext(t.channel);
+        islandShow(t.title, t.content, QStringLiteral("bell"), 6000, false,
+                   QString(), IslandOverlay::Form::Capsule, false);
+    });
+    NotifyDomain::reschedule();
 
     // ── 软件管理策略（2026-10-26 P3）：黑白名单 + 黑名单守护 ──
     g_softPolicyFile = dataDir + QStringLiteral("/soft-manage.json");

@@ -108,6 +108,8 @@ add_executable(stelarith-agent-qt
   # TTS 由 init() 注入回调）。main.cpp 8432 → 8247 行。
   src/alarm_domain.cpp
   src/alarm_domain.h
+  src/notify_domain.cpp
+  src/notify_domain.h
   src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
   src/singleinstance.cpp
   src/singleinstance.h
