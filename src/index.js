@@ -26,6 +26,7 @@ import { currentAgentPackage, currentViewerPackage, buildProvisionBat, recordPro
 import { ensureQmlPatch, qmlPatchManifest, qmlPatchZipPath } from './qml-patch.js';
 // 设备绑定（2026-10-20）：二维码矩阵生成 + 一次性绑定票据（零依赖，自带单测）
 import { makeQrMatrix, issueDeviceBind, issueClassBind, getTicket, markBound, pollDeviceBind } from './bind-qr.js';
+import { hitRate, clientIp } from './ratelimit.js';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
@@ -1237,6 +1238,12 @@ const server = http.createServer((req, res) => {
   // 现在一律走 resolveClassCode()：同码/同名/别名都归一到同一个 canonical 班。
 
   if (req.method === 'GET' && u.pathname === '/api/device/bind-qr') {
+    // 2026-10-27（OOBE 洪水加固）：匿名可连续签发绑定码 → 按源 IP 60s/6 次限流。
+    // OOBE 正常换码重试 1-3 次/分钟，留足裕量；超限 429 + 人话，不静默。
+    if (!hitRate(`bindqr:${clientIp(req)}`, 6, 60_000)) {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' });
+      return res.end(JSON.stringify({ ok: false, error: '生成太频繁，请 1 分钟后再试' }));
+    }
     const uid = String(u.searchParams.get('uid') || '').trim();
     const issued = issueDeviceBind(uid);
     if (!issued.ok) return send(400, { ok: false, error: issued.error });
@@ -1321,6 +1328,13 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && u.pathname === '/api/bind/info') {
+    // 2026-10-27（OOBE 洪水加固）：凭码查班级清单 + 在线数，匿名可重复调用
+    // （码就挂在教室大屏上）→ 按源 IP 60s/60 次限流，防把低敏清单当无限数据泵。
+    // 手机选班页正常打开 <5 次/分钟，60 次/分钟满足任何正常操作。
+    if (!hitRate(`bindinfo:${clientIp(req)}`, 60, 60_000)) {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '60' });
+      return res.end(JSON.stringify({ ok: false, error: '查询太频繁，请稍后再试' }));
+    }
     const code = String(u.searchParams.get('c') || '').trim();
     const t = getTicket(code);
     if (!t) {
