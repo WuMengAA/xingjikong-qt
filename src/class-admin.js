@@ -70,7 +70,9 @@ export function adminCreateClass({ code = '', name = '' } = {}) {
  * 变更混进去会让前端多一种要处理的 kind。新鲜度由管理端「写操作成功后
  * 立即重拉 /api/classes」保证（不等 15s 轮询），运维审计走 pushEvent。
  */
-export function adminRenameClass(code, name) {
+export function adminRenameClass(code, name, ident = null) {
+  const c = String(code ?? '').trim();
+  if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
   const r = renameClass(code, name);
   if (!r.ok) return r;
   pushEvent('info', '管理端修改班级名', { classCode: r.class.code, className: r.class.name });
@@ -83,8 +85,9 @@ export function adminRenameClass(code, name) {
  *   · 'release'       —— 先把设备全部移出班级（knownDevices.classCode 清空），再删。
  * 两种情况都会清掉该班全部订阅并通知（dropClassSubs）。
  */
-export function adminDeleteClass(code, strategy = 'refuse') {
+export function adminDeleteClass(code, strategy = 'refuse', ident = null) {
   const c = String(code ?? '').trim();
+  if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
   const hit = getClass(c);
   if (!hit) return { ok: false, error: '班级不存在' };
   const devs = listClasses().find((x) => x.code === hit.code);
@@ -118,10 +121,11 @@ export function adminDeleteClass(code, strategy = 'refuse') {
 }
 
 /** 移出一台设备（退班）。在线设备同步收到 class-bound{code:''} 清端侧状态。 */
-export function adminUnbindDevice(code, uid) {
+export function adminUnbindDevice(code, uid, ident = null) {
   const c = String(code ?? '').trim();
   const u = String(uid ?? '').trim();
   if (!c || !u) return { ok: false, error: '缺班级码或 uid' };
+  if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
   const devs = listClasses().find((x) => x.code === c);
   if (!devs || !devs.devices.includes(u)) return { ok: false, error: '该设备不在此班' };
   unbindDeviceFromClass(c, u);
@@ -135,10 +139,11 @@ export function adminUnbindDevice(code, uid) {
  * 与 index.js 的 /api/device/bind-class 同一实现；给 /api/class/bind 是为了
  * 让管理端四个班级写操作同走 /api/class/ 前缀（QML 侧一个 ClassAdmin 打全部）。
  */
-export function adminBindDevice(code, uid, name = '') {
+export function adminBindDevice(code, uid, name = '', ident = null) {
   const c = String(code ?? '').trim();
   const u = String(uid ?? '').trim();
   if (!c || !u) return { ok: false, error: '缺班级码或 uid' };
+  if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
   const r = bindDeviceToClass(c, u, name);
   if (!r.ok) return r;
   notifyClassBoundIfOnline(u, r.classCode, r.class.name);
@@ -484,14 +489,14 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
       if (action === 'create') {
         r = adminCreateClass({ code: String(body.classCode ?? ''), name: String(body.className ?? '') });
       } else if (action === 'rename') {
-        r = adminRenameClass(String(body.classCode ?? ''), String(body.className ?? ''));
+        r = adminRenameClass(String(body.classCode ?? ''), String(body.className ?? ''), ident);
       } else if (action === 'delete') {
-        r = adminDeleteClass(String(body.classCode ?? ''), String(body.strategy ?? 'refuse'));
+        r = adminDeleteClass(String(body.classCode ?? ''), String(body.strategy ?? 'refuse'), ident);
       } else if (action === 'unbind') {
-        r = adminUnbindDevice(String(body.classCode ?? ''), String(body.uid ?? ''));
+        r = adminUnbindDevice(String(body.classCode ?? ''), String(body.uid ?? ''), ident);
       } else if (action === 'bind') {
         r = adminBindDevice(String(body.classCode ?? ''), String(body.uid ?? ''),
-                            String(body.className ?? ''));
+                            String(body.className ?? ''), ident);
       } else if (action === 'member-add') {
         r = adminAddMember(String(body.classCode ?? ''), String(body.uid ?? ''),
                            String(body.role ?? 'teacher'), ident);
