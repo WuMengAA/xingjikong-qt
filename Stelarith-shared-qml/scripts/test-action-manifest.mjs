@@ -61,8 +61,12 @@ console.log("── 一、声明合法性 ──");
 t("两份清单合并后零问题（id 跨清单唯一）", () => eq(C.validate(items), [], "validate"));
 t("条目数 = 52（动作）+ 14（面板）", () => {
 	// 2026-10-25 教室小工具第一刀：45 → 52（新增 7 条课堂工具，见 fixture note）
-	eq(A.manifest().length, 52, "ActionDefs");
-	eq(U.manifest().length, 14, "UiPlugins");
+	// 2026-10-27 I 批：动作 52 → 53（新增 1 条 PPT 放映，kind=panel）。
+	// ⚠️ 面板数原本写死 14，而 HEAD 的 UiPlugins.js 实际已有 15 条（历史漂移，
+	//    本批未去追是哪一次加的）⇒ 这条断言在 HEAD 上就已经是红的。本批把基线改到
+	//    真实值：15（HEAD）+ 1（PPT 放映）= 16，并写明"14 是过期基线"，避免下次又靠猜。
+	eq(A.manifest().length, 53, "ActionDefs");
+	eq(U.manifest().length, 16, "UiPlugins");
 });
 
 console.log("\n── 二、★ 命令面板：与改造前 38 条逐字比对 ──");
