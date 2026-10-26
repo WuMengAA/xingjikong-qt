@@ -23,6 +23,7 @@
 #include "alarm_domain.h"   // 2026-10-27 第五刀：闹钟域
 #include "notify_domain.h"  // 2026-10-27 第六刀：定时通知域（F 收尾）
 #include "timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
+#include "panel_domain.h"     // 2026-10-27 G4/G5/G6：岛组件面板（日期/课表/倒计时）
 #include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
 #include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 #include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
@@ -5576,6 +5577,44 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
+    // ── 岛组件面板（2026-10-27 · G4/G5/G6）：island_panel / island_panel_close ──
+    // 对标 ClassIsland 的「组件」：日期 / 课表 / 倒计时。
+    // 与通知的区别（产品口径）：通知是"事件"（来一条看完就走），面板是"看板"
+    //   （今天第几节、还有多久下课 —— 要停下来看清、反复看）。
+    // 所以面板走岛**展开区**并且可以常驻，不像通知那样 6 秒收走。
+    if (action == QStringLiteral("island_panel")) {
+        const QString face = params.value(QStringLiteral("face")).toString().trimmed().toLower();
+        // durationSec：0 = 常驻（等 close 或下一条通知顶掉）；缺省 60 秒。
+        // ⚠️ 不用 showIsland 的 5 秒默认值 —— 课表看 5 秒根本读不完。
+        const int durSec = params.contains(QStringLiteral("durationSec"))
+            ? params.value(QStringLiteral("durationSec")).toInt(60) : 60;
+        if (durSec < 0) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("island_panel: durationSec 不能为负（0 = 常驻）");
+            return out;
+        }
+        QString err;
+        QJsonObject data;
+        if (!PanelDomain::show(face, params, durSec * 1000, &err, &data)) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("island_panel: ") + err;
+            return out;
+        }
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("face"), face);
+        out.data.insert(QStringLiteral("durationSec"), durSec);
+        // 把**真正显示出去的数据**也回执一份：管理端/端到端脚本能直接断言
+        // "课表拿到几节、倒计时目标对不对"，不用去截图猜。
+        out.data.insert(QStringLiteral("panel"), data);
+        return out;
+    }
+
+    if (action == QStringLiteral("island_panel_close")) {
+        PanelDomain::close();
+        out.result = QStringLiteral("done");
+        return out;
+    }
+
     // ── 闹钟（2026-10-26 · P1 产品笔记）：schedule_alarm / list_alarms / cancel_alarm ──
     if (action == QStringLiteral("schedule_alarm")) {
         const QString time = params.value(QStringLiteral("time")).toString().trimmed();
@@ -8197,6 +8236,10 @@ int main(int argc, char *argv[])
         // 都会经 TimesyncDomain 的回调重设（见上方 init 块）。
         s_schedClock = clock;
         clock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
+        // 2026-10-27（G5）：把课表源交给面板域 —— 日期/课表/倒计时三面里，
+        // 课表与"默认倒计时"都要读"今天上什么"。注入而不是让面板域自己 new 一个：
+        // 课表必须与上下课提醒**同一份判定数据**，两份会分叉（档案换了只刷新一边）。
+        PanelDomain::init(clock);
         QObject::connect(clock, &ScheduleClock::periodStarted, &app,
             [](const QString& name, const QTime& at) {
                 const QString txt = QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm"));

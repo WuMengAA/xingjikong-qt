@@ -46,6 +46,13 @@ class IslandBridge : public QObject
     Q_PROPERTY(QString noticeTime READ noticeTime NOTIFY changed)
     // 2026-10-27（F）：通知渠道（"课程提醒" 之类）。空串 = 不标渠道，QML 侧隐藏。
     Q_PROPERTY(QString channel READ channel NOTIFY changed)
+    // ── 岛组件面板（2026-10-27 · G4/G5/G6：日期 / 课表 / 倒计时）──────────
+    // panelFace 非空 = 展开区画的是**面板**（不是通知详情），值即面名。
+    // panelData 是该面专属数据（PanelDomain 组装的 QJsonObject → QVariantMap）。
+    // ⚠️ QML 侧必须**点访问**（`bridgeRef.panelFace`），别用 `bridgeRef["panelFace"]` ——
+    //    下标访问不建立绑定依赖，changed() 全量 NOTIFY 也刷不新（同 channel 的教训）。
+    Q_PROPERTY(QString panelFace READ panelFace NOTIFY changed)
+    Q_PROPERTY(QVariantMap panelData READ panelData NOTIFY changed)
     // ── 形态 ────────────────────────────────────────────────
     // "capsule" | "centered" | "fullscreen" | "banner" | "mini"（对齐 IslandOverlay::Form）
     Q_PROPERTY(QString form     READ form     NOTIFY changed)
@@ -160,6 +167,8 @@ public:
     // 当前这条通知的时间文本（HH:mm）；见 Q_PROPERTY noticeTime 上的说明。
     QString noticeTime() const;
     QString channel() const;    // 2026-10-27（F）：通知渠道（"课程提醒"）
+    QString panelFace() const;  // 2026-10-27（G）：面板面名（空 = 无面板）
+    QVariantMap panelData() const;
     int    historyUnreadCount() const;
     QString historyCategoryFilter() const { return m_histCategory; }
     void    setHistoryCategoryFilter(const QString &c);

@@ -349,6 +349,15 @@ QRect IslandOverlay::geometryForContent(int shapeHeight) const
     if (!screen) return QRect(0, 0, 200, shapeHeight);
     const QRect sg = screen->geometry();
 
+    // ── 面板（2026-10-27 · G4/G5/G6 组件）：定宽 640 ──────────────────────
+    // 与媒体同一口径：面板内容是**多行表格/大数字**，宽度由内容定会算成"标题那行"
+    // 的宽度（200 出头），课表一行都排不下。
+    // ⚠️ 放在媒体分支**之前**：面板与媒体互斥，面板优先（showPanel 会顶掉媒体内容）。
+    if (!m_panelFace.isEmpty()) {
+        const int pw = qMin(640, qMax(kMinContentW, sg.width() - 48));
+        return QRect(sg.x() + (sg.width() - pw) / 2, sg.y() + 24, pw, shapeHeight);
+    }
+
     // 2026-10-15 组件1（点歌互动）：媒体呈现时按 QML 预算宽度走 ——
     // 收起 320 / 展开 640（与 IslandRoot.implicitWidth 逐字一致）。
     // 内容定宽对短曲名只给 ~200：互动区 + 弹幕输入行在 200 宽下放不下
@@ -1015,6 +1024,11 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     if (m_contentActive && !m_title.isEmpty() && !m_ftActive && !m_mediaPresenting)
         archiveToHistory();
 
+    // 2026-10-27（G4/G5/G6）：新内容一律**顶掉面板** —— 面板是"当下要看的一块板"，
+    // 来了通知就该让位（否则岛会同时是课表和通知，两套内容抢同一块展开区）。
+    m_panelFace.clear();
+    m_panelData = QJsonObject();
+
     m_title = title;
     m_desc = desc;
     m_icon = icon;
@@ -1571,6 +1585,8 @@ void IslandOverlay::enterIdle()
         m_idle = false;
         m_expanded = false;
         m_contentActive = false;
+        m_panelFace.clear();          // 2026-10-27：面板随内容一起收
+        m_panelData = QJsonObject();
         m_autoClose->stop();
         clearOpenPath();
         setInteractive(false);
@@ -1637,6 +1653,8 @@ void IslandOverlay::enterIdle()
     m_idle = true;
     m_expanded = false;
     m_contentActive = false;   // 内容这就算过去了，之后展开的是"最近一条"
+    m_panelFace.clear();       // 2026-10-27：面板是内容的一部分，收回即一起收
+    m_panelData = QJsonObject();
     m_autoClose->stop();
     // A4：收回空闲即停滚并归零
     m_marqueeX = 0;
@@ -1662,6 +1680,52 @@ void IslandOverlay::enterIdle()
     // 最后一次信号还是 true"的自相矛盾。
     if (wasExpanded) emit expandedChanged(false);
     if (m_bridge) m_bridge->sync();
+}
+
+// ── 岛组件面板（2026-10-27 · G4/G5/G6：日期 / 课表 / 倒计时）────────────────
+// 为什么复用 showIsland 而不是另写一套：几何/淡入/归档/顶掉/远控冻结全在那条链上，
+// 平行实现必然漏掉其中一条（历史上"媒体"那条就漏过归档守卫）。这里只做两件事：
+//   ① 把 panelFace/panelData 盖上（QML 据此切到面板面）；
+//   ② 展开（看板要摊开看）。
+// ⚠️ 顺序不能反：showIsland 开头会**清面板**（新内容一律顶掉面板），
+//    所以必须先 showIsland 再盖标志。
+void IslandOverlay::showPanel(const QString &face, const QJsonObject &data, int durationMs)
+{
+    if (s_islandSuppressed) return;          // 远控期冻结：与 showIsland 同口径
+    if (face.isEmpty()) { closePanel(); return; }
+
+    const QString title = data.value(QStringLiteral("title")).toString();
+    const QString desc  = data.value(QStringLiteral("desc")).toString();
+    const QString icon  = data.value(QStringLiteral("icon")).toString();
+
+    // 面板不是"老师发过的通知"：不进历史（同课程提醒的 skipHistory 口径）。
+    setSkipHistoryForNext(true);
+    showIsland(title, desc, icon, durationMs, Form::Capsule, false);
+    m_panelFace = face;
+    m_panelData = data;
+
+    setExpanded(true);   // 摊开：否则学生只看到一个比平时长一点的胶囊
+
+    // 两条兜底定时器对面板的语义：
+    //   · m_autoClose：setExpanded 里会按 m_durationMs 排期，但 durationMs<=0（常驻）
+    //     时它排的是 qMax(5000,0)=5 秒 —— 常驻面板会在 5 秒后自己消失，必须停掉；
+    //   · m_expandGuard：固定 20 秒硬回收（给通知用的），会把 60 秒的面板提前压回去。
+    //     面板有明确时长就交给 m_autoClose；常驻则两条都不留（等 closePanel/顶掉）。
+    if (durationMs <= 0) m_autoClose->stop();
+    if (durationMs <= 0 || durationMs > kExpandMaxMs) m_expandGuard->stop();
+
+    if (m_bridge) m_bridge->sync();
+    update();
+}
+
+void IslandOverlay::closePanel()
+{
+    if (m_panelFace.isEmpty()) return;
+    m_panelFace.clear();
+    m_panelData = QJsonObject();
+    // 先 sync 让 QML 卸掉面板面，再走既有 dismiss（收起/回空闲/归档/信号一条路）
+    if (m_bridge) m_bridge->sync();
+    dismiss();
 }
 
 void IslandOverlay::setExpanded(bool on)

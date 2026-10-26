@@ -28,11 +28,29 @@ void ScheduleClock::stop()
     m_timer.stop();
 }
 
+// 2026-10-27（G5）：教学周算法**唯一实现**。
+// 原来这段写在 tick() 里（9/1 起算），面板要用同一口径 ⇒ 抽成 static，两边共用。
+// 规则：取「最近一个已到的开学日」——上学期 2/17、下学期 9/1；当天即第 1 周。
+// ⚠️ 这是**近似**（真实校历可能提前/延后一周，且不完全对齐周一）。它只影响
+//     "今天第几周"这类展示与 WeekCountDiv>1 的双周轮换判断，不影响上下课时刻。
+//     要精确就等云端下发校历起始日（挂账：class-timetable 里的学期开始日期）。
+int ScheduleClock::semesterWeek(const QDate &d)
+{
+    const QDate spring(d.year(), 2, 17);
+    const QDate autumn(d.year(), 9, 1);
+    QDate start;
+    if (d >= autumn)      start = autumn;
+    else if (d >= spring) start = spring;
+    else                  start = QDate(d.year() - 1, 9, 1);   // 1 月 → 算上一学年秋季学期
+    const int days = start.daysTo(d);
+    return days < 0 ? 1 : (days / 7) + 1;
+}
+
 // 从档案构建今天的课程
-QList<ScheduleClock::TodayLesson> ScheduleClock::buildTodayLessons(
+QList<ScheduleClock::LessonInfo> ScheduleClock::buildTodayLessons(
     const Profile& profile, const QDate& today, int currentWeek)
 {
-    QList<TodayLesson> result;
+    QList<LessonInfo> result;
     const int weekday = today.dayOfWeek();  // 1=周一 ... 7=周日
 
     // 从档案提取"节次时间表"：
@@ -80,7 +98,7 @@ QList<ScheduleClock::TodayLesson> ScheduleClock::buildTodayLessons(
             if (slot < 0 || slot >= slotTimeTable.size()) continue;
             const TimeSlot& ts = slotTimeTable[slot];
 
-            TodayLesson l;
+            LessonInfo l;
             l.periodName = ts.name;
             const auto subIt = profile.subjects.find(lesson.subjectId);
             l.subjectName = (subIt != profile.subjects.end())
@@ -94,7 +112,7 @@ QList<ScheduleClock::TodayLesson> ScheduleClock::buildTodayLessons(
 
     // 按开始时间排序
     std::sort(result.begin(), result.end(),
-              [](const TodayLesson& a, const TodayLesson& b) { return a.startTime < b.startTime; });
+              [](const LessonInfo& a, const LessonInfo& b) { return a.startTime < b.startTime; });
     return result;
 }
 
@@ -110,9 +128,8 @@ void ScheduleClock::tick()
     if (m_builtFor != today) {
         ProfileRepository repo;
         Profile profile = repo.load(m_profilePath);
-        // 周次：以 9/1 为第 1 周的简化算法（与 ScheduleModel::weekFromDate 一致）
-        QDate start(today.year(), 9, 1);
-        int currentWeek = (start.daysTo(today) >= 0) ? (start.daysTo(today) / 7) + 1 : 1;
+        // 周次：走 semesterWeek()（9/1 或 2/17 起算，面板与判定同口径）
+        const int currentWeek = semesterWeek(today);
         m_today = buildTodayLessons(profile, today, currentWeek);
         m_builtFor = today;
         qInfo().noquote() << "[schedule-clock] 今日课程 " << m_today.size() << " 节"
@@ -125,7 +142,7 @@ void ScheduleClock::tick()
     // 找当前时间落在哪一节
     int activeIdx = -1;
     for (int i = 0; i < m_today.size(); ++i) {
-        const TodayLesson& l = m_today.at(i);
+        const LessonInfo& l = m_today.at(i);
         if (curTime >= l.startTime && curTime < l.endTime) { activeIdx = i; break; }
     }
 
@@ -133,7 +150,7 @@ void ScheduleClock::tick()
     if (activeIdx != m_currentSlotIndex) {
         if (activeIdx >= 0) {
             // 刚上课
-            const TodayLesson& l = m_today.at(activeIdx);
+            const LessonInfo& l = m_today.at(activeIdx);
             m_currentPeriod = l.subjectName;
             m_currentSlotIndex = activeIdx;
             if (m_lastEmitSlot != activeIdx) {  // 同一节上课只提醒一次
@@ -146,7 +163,7 @@ void ScheduleClock::tick()
         } else {
             // 刚下课（从某一节出来）
             if (m_currentSlotIndex >= 0 && m_currentSlotIndex < m_today.size()) {
-                const TodayLesson& l = m_today.at(m_currentSlotIndex);
+                const LessonInfo& l = m_today.at(m_currentSlotIndex);
                 emit periodEnded(l.subjectName, l.endTime);
                 qInfo().noquote() << "[schedule-clock] 下课提醒: " << l.subjectName;
             }

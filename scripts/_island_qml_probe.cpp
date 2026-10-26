@@ -38,7 +38,13 @@
 //                         等真实拒绝路径（2026-10-15）
 #include "island.h"
 #include "danmaku.h"           // 组件5：弹幕层单例诊断（peek 不建窗口）
+// 2026-10-27（G4/G5/G6）：面板三面 —— 探针走**真实数据域**（PanelDomain::build），
+// 而不是在 QML 里塞假 JSON：课表数据/倒计时边界/周次都来自 C++，塞假数据等于没测。
+#include "panel_domain.h"
+#include "schedule_clock.h"
 
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QApplication>
 #include <QDir>
 #include <QFile>
@@ -394,6 +400,15 @@ int main(int argc, char *argv[])
     //    走 showIsland(..., Form::X) 才验证得到"窗口几何 + QML 版式"整条链。
     //    取值：banner（长文案通栏）/ mini（有描述 方牌）/ mini-nodesc（无描述 正圆）。
     QString formArg;
+    // 2026-10-27（F 收尾第 2 项）：渠道标签 —— 复刻上课提醒真链路（setChannelForNext）。
+    QString channelArg;
+    // 2026-10-27（G4/G5/G6）：面板三面 —— face 名 + 额外 JSON 参数 + 课表档案路径。
+    //   --panel date|timetable|countdown   开面板（真实 PanelDomain::build）
+    //   --panel-json '{"to":"12:30"}'      追加参数（countdown 用）
+    //   --profile <path>                   课表档案（timetable / 默认 countdown 用）
+    QString panelArg;
+    QString panelJsonArg;
+    QString profileArg;
     // 2026-10-17：--hold <sec> 让通知**多停留**若干秒再截图/退出。
     // 用途：分辨历史 ts 取的是"通知出现时刻"还是"归档时刻"——
     //   停留 N 秒后归档，若 ts 仍是出现时刻，则 ts 比分文件写入时刻早约 N 秒。
@@ -433,6 +448,14 @@ int main(int argc, char *argv[])
         // #330 形态多样化 + 2026-10-17 补 centered/fullscreen（大卡片两档此前无 QML 版式）
         if (a == QLatin1String("--form") && i + 1 < argc)
             formArg = QString::fromLocal8Bit(argv[++i]);
+        if (a == QLatin1String("--channel") && i + 1 < argc)
+            channelArg = QString::fromLocal8Bit(argv[++i]);
+        if (a == QLatin1String("--panel") && i + 1 < argc)
+            panelArg = QString::fromLocal8Bit(argv[++i]);
+        if (a == QLatin1String("--panel-json") && i + 1 < argc)
+            panelJsonArg = QString::fromLocal8Bit(argv[++i]);
+        if (a == QLatin1String("--profile") && i + 1 < argc)
+            profileArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--out") && i + 1 < argc)
             outPath = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--hold") && i + 1 < argc)
@@ -578,6 +601,31 @@ int main(int argc, char *argv[])
         isl->advanceMediaElapsed(mediaPhaseArg == QLatin1String("ending") ? 250000 : 83000);
         if (mediaPhaseArg == QLatin1String("ended")) isl->mediaFinished();
         if (expand || search || submit || likefly) isl->setExpanded(true);
+    } else if (!panelArg.isEmpty()) {
+        // 2026-10-27（G4/G5/G6）：面板三面 —— 走**真实数据域**（PanelDomain::build），
+        // 连课表源也照生产那条路建（同 ScheduleClock、同档案路径口径）。
+        // 输出 PANEL-DATA 供断言：课表几节、倒计时目标、周次都在里面。
+        const QString prof = profileArg.isEmpty()
+            ? QStringLiteral("%1/ClassIsland/data/Profiles/Default.json")
+                  .arg(qEnvironmentVariable("LOCALAPPDATA"))
+            : profileArg;
+        auto *clk = new ScheduleClock(prof, &app);
+        clk->start();                 // tick() 同步建"今日课表"，面板随即能取到
+        PanelDomain::init(clk);
+        const QJsonObject params = QJsonDocument::fromJson(panelJsonArg.toUtf8()).object();
+        QString perr;
+        QJsonObject pdata;
+        const bool pok = PanelDomain::show(panelArg, params, 0, &perr, &pdata);
+        fprintf(stderr, "PANEL face=%s ok=%d err=%s\nPANEL-DATA=%s\n",
+                qPrintable(panelArg), int(pok), qPrintable(perr),
+                QJsonDocument(pdata).toJson(QJsonDocument::Compact).constData());
+        fflush(stderr);
+    } else if (!channelArg.isEmpty()) {
+        // 渠道标签：与 main.cpp 的上课提醒同一条路（一次性 hint → 胶囊通知）
+        isl->setChannelForNext(channelArg);
+        isl->showIsland(QStringLiteral("上课啦"), QStringLiteral("数学 · 08:00"),
+                        QStringLiteral("bell"), 30000);
+        if (expand) isl->setExpanded(true);
     } else {
         isl->showIsland(QStringLiteral("老师正在讲话"),
                         QStringLiteral("请保持安静，认真听讲，有问题举手"),

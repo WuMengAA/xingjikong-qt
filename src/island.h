@@ -225,6 +225,21 @@ public:
     void setSkipHistoryForNext(bool on) { m_skipHistoryHint = on; }
     QString channel() const { return m_channel; }
 
+    // ── 岛组件面板（2026-10-27 · G4/G5/G6：日期 / 课表 / 倒计时）─────────────
+    // 与通知的分工：通知是**事件**（来一条，看完就走）；面板是**看板**
+    //   （今天第几节、还有多久下课 —— 要停下来看清、反复看）。
+    // 实现：面板打开 ⇒ 岛自动展开，展开区不再画通知详情，改由 QML 的
+    //   IslandPanelFace 按 face 名 Loader 加载具体面；数据是 face 专属的 QJsonObject
+    //   （由 PanelDomain 组装，本类只负责显示，不碰课表/时间计算）。
+    // ⚠️ 面板只占**展开区**：收起态仍用面板自带的 title/desc 摘要 ——
+    //    学生把它推回去不会看到一块空白，也不会丢失"这块是什么"的信息。
+    // durationMs<=0 ⇒ 常驻（直到 closePanel() 或下一条通知顶掉）。
+    // ⚠️ 面板**不进历史**：它不是"老师发过的通知"，是看板（同课程提醒的 skipHistory 口径）。
+    void showPanel(const QString &face, const QJsonObject &data, int durationMs = 60000);
+    void closePanel();
+    QString panelFace() const { return m_panelFace; }
+    QJsonObject panelData() const { return m_panelData; }
+
     // 时间文本格式化（唯一口径；归档与 bridge 组装共用这三个函数，别各写一套）
     //   timeStr  = HH:mm —— 概览面历史面板有日期分组，行内再带日期是冗余；
     //   timeFull = 今天 HH:mm / 昨天 HH:mm / M/d HH:mm —— 历史面(face 2)是平铺
@@ -443,6 +458,10 @@ private:
     bool    m_skipHistoryHint = false;  // 下一条通知是否不进历史（一次性）
     QString m_channel;                  // 当前这条的渠道（空 = 不标）
     bool    m_skipHistory = false;      // 当前这条是否不进历史
+    // 2026-10-27（G4/G5/G6）：岛面板（空 = 当前没有面板，展开区照旧画通知详情）。
+    // face 是面名（date/timetable/countdown），data 是该面专属数据（PanelDomain 组装）。
+    QString     m_panelFace;
+    QJsonObject m_panelData;
     static constexpr int kSpectrumBands = 16;   // §6.3 语音频谱带数（QML 按 bands 长度渲染）
     // 2026-10-13（用户「每条消息保存时间为一周，一周后清除历史」）：超过 7 天的历史
     // 在加载/归档时剔除（loadHistory 与 archiveToHistory 都过一遍 pruneHistory）。
