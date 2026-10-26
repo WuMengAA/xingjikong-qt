@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-25",
+  "updated": "2026-10-26",
   "note": "历史超限台账：白名单内未变胖=允许；再长 1 行=判红；拆完一项就删一项。plan 前缀 P1/P2/P3 是拆分优先级。增量归属写进 plan（哪一批 +多少行、是否已提交），回写不等于批准变胖——P 级计划仍然有效。 | 2026-10-24 注册 ClassMemberPane（班级工作台方案B 成员管理 tab，两段结构，待拆为人员/设备两子件）",
   "files": {
     "Stelarith-control-qt/src/island.cpp": {
@@ -73,11 +73,11 @@
       "plan": "[P3] 拆下载/校验/安装三段"
     },
     "Stelarith-viewer-qt/src/viewerbackend.cpp": {
-      "lines": 2813,
+      "lines": 2822,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 90,
-      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交） | 2026-10-25 回写 2772→2787：登记值滞后（#460/#477 增量未回写），本批未改此文件 | 2026-10-25 回写 2787→2795（+8，顶层定义 89→90）：registerUrl 属性与注册页说明（提交 61e4495，未认证链路批次） | 2026-10-25 回写 2795→2813（+18，顶层定义仍 90）：设备表按 scope 裁剪 —— m_devices 改 scopedDevices→maskDevices 两级、默认选中改从裁剪后的表取（不拿云端原始 arr）、设备表日志改口径（可见/原始 双数）"
+      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交） | 2026-10-25 回写 2772→2787：登记值滞后（#460/#477 增量未回写），本批未改此文件 | 2026-10-25 回写 2787→2795（+8，顶层定义 89→90）：registerUrl 属性与注册页说明（提交 61e4495，未认证链路批次） | 2026-10-25 回写 2795→2813（+18，顶层定义仍 90）：设备表按 scope 裁剪 —— m_devices 改 scopedDevices→maskDevices 两级、默认选中改从裁剪后的表取（不拿云端原始 arr）、设备表日志改口径（可见/原始 双数） | 2026-10-26 回写 2813→2822：+9 为 ef44f86 班级名单改走登录票据（10-25 23:50 已提交，非本批批准变胖）"
     },
     "Stelarith-viewer-qt/src/viewerbackend.h": {
       "lines": 1027,
@@ -234,11 +234,11 @@
       "plan": "[P3] 拆参数区"
     },
     "Stelarith-viewer-qt/qml/shell/MainWindow.qml": {
-      "lines": 613,
+      "lines": 617,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 骨架壳：已抽仪表盘三件（718→458，#473）；旧界面迁移把监控/集控内嵌成 section（458→480→495，2026-10-24）；第三刀加 sectionHook 与栏目驱动拉流；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav | 2026-10-25 回写 496→582：其中 +4 为本批 runBulk label 修复（原二元组会把「全班静音」显示成「远程重启」）；其余 +82 属 #461 班级工作台接线等历史增量未回写，非本批批准变胖 | 2026-10-25 回写 582→596：+14 为个人中心接入（sectionIndex/sectionTitle 各 +2、账户页 Loader +9、头像落点改指个人中心 +2 —— 原来头像跳系统设置，teacher 被门禁挡住＝个人中心进不去） | 2026-10-25 回写 596→613（+17）：集控页管理员门禁 —— navItemsAll 全集 + 按身份过滤的 navItems、canControlPage 判据、navActivated 拦 control、身份变化时从集控页退回仪表盘、班级看板的「去集控页」改走 openSection（不改会绕过门禁）"
+      "plan": "[P2] 骨架壳：已抽仪表盘三件（718→458，#473）；旧界面迁移把监控/集控内嵌成 section（458→480→495，2026-10-24）；第三刀加 sectionHook 与栏目驱动拉流；余 [P2] 拆 Sidebar/TopBar/StatusBar + 左栏班级导航 ClassNav | 2026-10-25 回写 496→582：其中 +4 为本批 runBulk label 修复（原二元组会把「全班静音」显示成「远程重启」）；其余 +82 属 #461 班级工作台接线等历史增量未回写，非本批批准变胖 | 2026-10-25 回写 582→596：+14 为个人中心接入（sectionIndex/sectionTitle 各 +2、账户页 Loader +9、头像落点改指个人中心 +2 —— 原来头像跳系统设置，teacher 被门禁挡住＝个人中心进不去） | 2026-10-25 回写 596→613（+17）：集控页管理员门禁 —— navItemsAll 全集 + 按身份过滤的 navItems、canControlPage 判据、navActivated 拦 control、身份变化时从集控页退回仪表盘、班级看板的「去集控页」改走 openSection（不改会绕过门禁） | 2026-10-26 回写 613→617：+4 为 46f5a98 集控页门禁只认服务端下发身份（10-26 00:28 已提交，非本批批准变胖）"
     },
     "Stelarith-viewer-qt/qml/shell/SideSheet.qml": {
       "lines": 289,
