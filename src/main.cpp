@@ -3668,13 +3668,13 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
     // 形态分流（P1 · 2026-10-14）：kind 直接映射灵动岛形态，**不再经 NotifyWindow**
     // （岛已覆盖全屏/居中/胶囊/确认/紧急，是被控端唯一展示入口）。
     //   popup / 未知 → Centered（屏幕正中卡片，安全默认）
-    //   fullscreen → Fullscreen（铺满整屏） ｜ island → Capsule（顶部胶囊）
-    //   2026-10-17（#330 形态多样化）：banner → 顶部通栏（长文案单行横幅）
-    //                                   mini   → 右下角角标（常驻轻状态，不挡课件）
+    //   fullscreen → Fullscreen（铺满整屏）
+    //   banner → 顶部通栏（长文案单行横幅）｜ mini → 右下角角标（常驻轻状态，不挡课件）
+    //   2026-10-26（产品笔记 P0）：通知形态收敛为 弹窗/角标/跑马灯/全屏 四类 ——
+    //   kind=island（旧顶部胶囊）已归一为弹窗 Centered，老发送方不受损。
     // ⚠️ 未知 kind 必须继续落 Centered —— 管理端老版本发的 kind 不能被新枚举带偏。
     IslandOverlay::Form f = IslandOverlay::Form::Centered;
-    if (kind == QLatin1String("island"))          f = IslandOverlay::Form::Capsule;
-    else if (kind == QLatin1String("fullscreen")) f = IslandOverlay::Form::Fullscreen;
+    if (kind == QLatin1String("fullscreen"))      f = IslandOverlay::Form::Fullscreen;
     else if (kind == QLatin1String("banner"))     f = IslandOverlay::Form::Banner;
     else if (kind == QLatin1String("mini"))       f = IslandOverlay::Form::Mini;
 
