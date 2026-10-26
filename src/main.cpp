@@ -22,6 +22,7 @@
 #include "singleinstance.h"
 #include "alarm_domain.h"   // 2026-10-27 第五刀：闹钟域
 #include "notify_domain.h"  // 2026-10-27 第六刀：定时通知域（F 收尾）
+#include "timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
 #include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
 #include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 #include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
@@ -5517,6 +5518,64 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
+    // ── 时间同步（2026-10-27 · G3 灵动岛拓展第二项）：time_sync / time_offset / time_status ──
+    // 三条指令共用 TimesyncDomain（NTP + 人工偏移）。产品口径：提醒要准点，且学校铃声
+    // 与标准时间常有偏差 —— 偏移只改**判定**，不改系统钟（理由见 timesync_domain.h）。
+    if (action == QStringLiteral("time_sync")) {
+        // 异步：NTP 一轮最长 3s×2 台，阻塞等会让整条指令超时（云端 10s 兜底）。
+        // ⇒ 只报"是否真的发起了"，结果让 time_status 查 —— 不谎称已成功。
+        const bool started = TimesyncDomain::syncNow();
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("started"), started);
+        out.data.insert(QStringLiteral("note"),
+                        started ? QStringLiteral("已发起 NTP 同步，约 1–6 秒后用 time_status 查看结果")
+                                : QStringLiteral("已有一轮同步在进行，本次未重复发起"));
+        return out;
+    }
+
+    if (action == QStringLiteral("time_offset")) {
+        const QJsonValue jm = params.value(QStringLiteral("minutes"));
+        const int m = jm.isDouble() ? jm.toInt() : jm.toString().trimmed().toInt();
+        if (!jm.isDouble() && jm.toString().trimmed().isEmpty()) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("time_offset: 需要 minutes（整数，正=判定时间往前拨；0=取消偏移）");
+            return out;
+        }
+        if (!TimesyncDomain::setOffsetMinutes(m)) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("time_offset: minutes=%1 越界（允许 ±720）").arg(m);
+            return out;
+        }
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("offsetMin"), m);
+        out.data.insert(QStringLiteral("skewMs"), (double)TimesyncDomain::skewMs());
+        out.data.insert(QStringLiteral("note"),
+                        QStringLiteral("只影响课表/提醒判定，系统时钟未修改"));
+        return out;
+    }
+
+    if (action == QStringLiteral("time_status")) {
+        const TimesyncDomain::Status st = TimesyncDomain::status();
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("ntpOk"), st.ntpOk);
+        out.data.insert(QStringLiteral("deltaMs"), (double)st.deltaMs);
+        out.data.insert(QStringLiteral("offsetMin"), st.offsetMin);
+        out.data.insert(QStringLiteral("skewMs"), (double)TimesyncDomain::skewMs());
+        out.data.insert(QStringLiteral("server"), st.server);
+        out.data.insert(QStringLiteral("lastAttempt"), st.lastAttempt);
+        out.data.insert(QStringLiteral("lastSyncAt"),
+                        st.lastSyncMs > 0
+                            ? QDateTime::fromMSecsSinceEpoch(st.lastSyncMs).toString(Qt::ISODateWithMs)
+                            : QString());
+        out.data.insert(QStringLiteral("error"), st.error);
+        // 判定用时间 + 系统时间的对照：一眼看出偏移生效了没有（诊断必备）
+        out.data.insert(QStringLiteral("judgeTime"),
+                        TimesyncDomain::now().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+        out.data.insert(QStringLiteral("systemTime"),
+                        QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+        return out;
+    }
+
     // ── 闹钟（2026-10-26 · P1 产品笔记）：schedule_alarm / list_alarms / cancel_alarm ──
     if (action == QStringLiteral("schedule_alarm")) {
         const QString time = params.value(QStringLiteral("time")).toString().trimmed();
@@ -7544,6 +7603,18 @@ int main(int argc, char *argv[])
     });
     NotifyDomain::reschedule();
 
+    // ── 时间同步（2026-10-27 · G3 灵动岛拓展第二项）：NTP 校时 + 人工偏移 ──────
+    // 为什么放在这里：日历/课表/提醒三条链都读"现在几点"，校时必须在它们之前就位。
+    // ⚠️ 课表时钟（本函数后半段）才创建 —— 用 static 指针把"偏移变了"转给它：
+    //    未建时回调是空操作（不崩），建时立刻补一次当前校正量。
+    // ⚠️ **不改系统钟**：skew 只作用于判定（schedule_clock 的 tick）。
+    static ScheduleClock *s_schedClock = nullptr;
+    TimesyncDomain::init(dataDir + QStringLiteral("/timesync.json"));
+    TimesyncDomain::setOnChanged([] {
+        if (s_schedClock) s_schedClock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
+    });
+    TimesyncDomain::start();
+
     // ── 软件管理策略（2026-10-26 P3）：黑白名单 + 黑名单守护 ──
     g_softPolicyFile = dataDir + QStringLiteral("/soft-manage.json");
     loadSoftPolicy();
@@ -8122,6 +8193,10 @@ int main(int argc, char *argv[])
             QStringLiteral("%1/ClassIsland/data/Profiles/Default.json")
                 .arg(qEnvironmentVariable("LOCALAPPDATA")));
         auto *clock = new ScheduleClock(profilePath, &app);
+        // 2026-10-27（G3）：接上时间同步的校正量 —— 之后 NTP 成功/人工偏移变更
+        // 都会经 TimesyncDomain 的回调重设（见上方 init 块）。
+        s_schedClock = clock;
+        clock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
         QObject::connect(clock, &ScheduleClock::periodStarted, &app,
             [](const QString& name, const QTime& at) {
                 const QString txt = QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm"));

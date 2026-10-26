@@ -110,6 +110,9 @@ add_executable(stelarith-agent-qt
   src/alarm_domain.h
   src/notify_domain.cpp
   src/notify_domain.h
+  # 2026-10-27 G3：时间同步域（SNTP + 人工偏移），独立文件，不进 main.cpp。
+  src/timesync_domain.cpp
+  src/timesync_domain.h
   src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
   src/singleinstance.cpp
   src/singleinstance.h

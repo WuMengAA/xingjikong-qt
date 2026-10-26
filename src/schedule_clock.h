@@ -29,6 +29,13 @@ public:
     QString currentPeriod() const { return m_currentPeriod; }   // 正在上的课名，空=课间/无课
     int currentSlotIndex() const { return m_currentSlotIndex; } // -1 = 不在任何课内
 
+    // 2026-10-27（G3 · 时间同步）：判定用时间的校正量（秒）。
+    // 来源 = TimesyncDomain::skewMs()/1000（NTP 差 + 人工偏移），main.cpp 注入。
+    // ⚠️ **不改系统钟**：只让"什么时候算上课"跟 NTP/铃声对齐。
+    //    0 = 不校正（未注入时的行为与以前逐字一致）。
+    void setClockSkewSec(qint64 sec) { m_skewSec = sec; }
+    qint64 clockSkewSec() const { return m_skewSec; }
+
 signals:
     // 上课提醒：periodName（如「第一节 · 语文」），startTime
     void periodStarted(const QString& periodName, const QTime& startTime);
@@ -52,4 +59,5 @@ private:
     int m_lastEmitSlot = -1;         // 上一次触发的节次
     QString m_currentPeriod;         // 当前正在上的课名
     int m_currentSlotIndex = -1;     // 当前节次
+    qint64 m_skewSec = 0;            // 2026-10-27（G3）：判定时间校正量（秒），见 setClockSkewSec
 };

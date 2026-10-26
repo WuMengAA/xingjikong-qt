@@ -364,8 +364,19 @@ QRect IslandOverlay::geometryForContent(int shapeHeight) const
     const int maxW = qMin(sg.width() * 6 / 10, 640);
     QFontMetrics fm(font());
     const int iconW = m_icon.isEmpty() ? 0 : 28;
-    const int textW = qMax(fm.horizontalAdvance((m_title.isEmpty() ? "" : m_title) + "  "),
-                           fm.horizontalAdvance(m_desc));
+    const int textW0 = qMax(fm.horizontalAdvance((m_title.isEmpty() ? "" : m_title) + "  "),
+                            fm.horizontalAdvance(m_desc));
+    // 2026-10-27（F 收尾第 2 项）：有渠道标签时，收起态是「标签 + 6px + 描述」同排
+    // （见 IslandRoot 的 csChannel）—— 宽度必须一起算进窗口，否则描述会被标签挤成
+    // "数学 · 08…"，标签在而内容没了。标签度量与 QML 对齐：12px DemiBold + 左右各 7px。
+    int textW = textW0;
+    if (!m_channel.isEmpty()) {
+        QFont cf = font();
+        cf.setPixelSize(12);
+        cf.setWeight(QFont::DemiBold);
+        textW = qMax(textW, QFontMetrics(cf).horizontalAdvance(m_channel) + 14 + 6
+                                + fm.horizontalAdvance(m_desc));
+    }
     const int w = qBound(kMinContentW, iconW + textW + 48, maxW);
     return QRect(sg.x() + (sg.width() - w) / 2, sg.y() + 24, w, shapeHeight);
 }

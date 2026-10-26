@@ -100,7 +100,9 @@ QList<ScheduleClock::TodayLesson> ScheduleClock::buildTodayLessons(
 
 void ScheduleClock::tick()
 {
-    const QDateTime now = QDateTime::currentDateTime();
+    // 2026-10-27（G3）：判定时间 = 系统时间 + 校正量（NTP 差 + 人工偏移，见 TimesyncDomain）。
+    // ⚠️ 系统钟一个字都不改 —— 只让"什么时候算上课"跟真实时间/学校铃声对齐。
+    const QDateTime now = QDateTime::currentDateTime().addSecs(m_skewSec);
     const QDate today = now.date();
     const QTime curTime = now.time();
 
