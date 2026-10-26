@@ -5451,6 +5451,8 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     //   annotate_status        只读状态
     //   annotate_pen|highlighter|eraser / annotate_tool{tool} / annotate_color{color} / annotate_width{width}
     //   annotate_undo / annotate_redo / annotate_clear / annotate_page{key} / annotate_board{board}
+    // 本地热键（窗口无焦点，走低层键盘钩子）：ESC 收层 / Ctrl+Z 撤销 / Ctrl+Y 重做 /
+    // Ctrl+Shift+Z 重做 / Ctrl+E 清空。所以老师不需要管理端也能自救。
     if (action.startsWith(QStringLiteral("annotate_"))) {
         auto *ov = AnnotateDomain::Overlay::instance();
         const QString sub = action.mid(9);      // "annotate_" = 9 字符

@@ -15,11 +15,26 @@
 //    墨迹一多 Canvas 会掉帧（项目已有 QML 性能痛点）。
 // 3. **穿透用 show/hide，不切 window flags** —— Qt 改 flags 会重建原生窗口
 //    （闪烁 + 丢状态），批注层每按一次键就闪一下是不可接受的。
+// 4. **无焦点触控**（用户 2026-10-27 07:09 点单）—— 落笔不许激活窗口：
+//    一旦激活，前台从 PPT 放映切到我们，老师的翻页笔 / 空格翻页 / F5 立刻失效。
+//    三层落实：`Qt::WindowDoesNotAcceptFocus`（Qt 会给 WS_EX_NOACTIVATE）
+//    + `WS_EX_NOACTIVATE` 显式补一遍 + 原生事件过滤把 `WM_MOUSEACTIVATE` 回成
+//    `MA_NOACTIVATE`（Qt 的 windows 插件仍可能自己请求激活）。
+//    代价：窗口不接受焦点 ⇒ QML 收不到按键 ⇒ 逃生口改用**低层键盘钩子**
+//    （只在批注层可见期间装，只吃 ESC/Ctrl+Z/Ctrl+Y/Ctrl+Shift+Z/Ctrl+E 五个组合，
+//      其余键原样放行）。钩子回调只做队列投递，绝不阻塞。
+// 5. **置顶上限：UAC 之上不谈，任务管理器之下**（用户同一条点单）。
+//    Windows 没有"设置绝对层级"的 API，实际只有三档：
+//      普通窗口 < 本层（WS_EX_TOPMOST） < 任务管理器（topmost + 系统特权） < UAC 安全桌面
+//    ⇒ 本域只做 `HWND_TOPMOST`；若任务管理器正置顶可见，则把自己 `hwndInsertAfter`
+//      插到它下面（「仅次于任务管理器」）。UAC 提示跑在独立安全桌面，本层**天生**压不过，
+//      且绝不尝试（禁用 SetThreadDesktop / 抢 Winlogon 桌面那一套）。
 //
 // ── 与 PPT 的交界（I3 接口已留）────────────────────────────────
 // 翻页后调用方用 `PptDomain::query()` 取页码，再 `setPageKey()` 让本域按页存取墨迹
 // （对应 ICC CE 的 PPTInkManager）。本域不认识 PPT，只认"页键"。
 #include <QColor>
+#include <QAbstractNativeEventFilter>
 #include <QObject>
 #include <QPainterPath>
 #include <QPointF>
@@ -29,6 +44,7 @@
 
 class QQuickView;
 class QScreen;
+class QTimer;
 
 namespace AnnotateDomain {
 
@@ -107,7 +123,7 @@ private:
 };
 
 /* ── 域：窗口生命周期 + 指令入口 ───────────────────────────────── */
-class Overlay : public QObject {
+class Overlay : public QObject, public QAbstractNativeEventFilter {
     Q_OBJECT
 public:
     static Overlay *instance();
@@ -124,14 +140,38 @@ public:
 
     QString statusLine() const;
 
+    // 只建窗口不显示（探针用：验 QML 能否加载 / canvas 能否 findChild、
+    // WS_EX_NOACTIVATE 是否真落上，不弹全屏、不碰桌面）。
+    // 成功后 m_view 已存在但未 show。
+    bool createHidden(QString *err);
+
+    // 原生窗口句柄（void* = HWND；探针/诊断用，未建窗前为 nullptr）
+    void *nativeHandle() const { return m_hwnd; }
+
+    // 低层键盘钩子投递进来的热键（1=ESC 收层 / 2=撤销 / 3=重做 / 4=清空）
+    void handleHotkey(int action);
+
+    // 原生事件过滤：拦 WM_MOUSEACTIVATE（无焦点触控最后一层保险）
+    bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *result) override;
+
+    // 置顶层级断言（任务管理器之下 / 其余 topmost）
+    void assertZOrder();
+
 private:
     Overlay() = default;
     bool ensureView(QString *err);    // 懒建 QQuickView（首次 start 时）
+    void applyWindowStyles();         // WS_EX_TOPMOST|NOACTIVATE|TOOLWINDOW
+    void installKeyboardHook();
+    void uninstallKeyboardHook();
 
     QQuickView *m_view = nullptr;
     Canvas     *m_canvas = nullptr;   // QML 创建后 findChild 回填
     bool        m_boardMode = false;
     QString     m_boardBg;
+
+    void  *m_hwnd = nullptr;          // HWND 缓存（void* 以免头文件拖进 <windows.h>）
+    void  *m_kbHook = nullptr;        // HHOOK 同上
+    QTimer *m_zTimer = nullptr;       // 3s 一次的置顶层级纠偏
 };
 
 // 注册 QML 类型（在创建 view 之前调用一次；重复调用安全）
