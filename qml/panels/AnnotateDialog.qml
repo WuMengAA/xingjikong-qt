@@ -4,8 +4,10 @@
 // 所以排布顺序是 状态 → 开关 → 笔 → 白板 → 页，和手伸过去的距离一致。
 //
 // 三条设计口径（都是踩过的）：
-// 1. **界面不自己猜状态**：全部来自被控端回执（active/tool/board/pageIndex…），
-//    回执里没有的一律保持原值，不"乐观更新"（乐观更新会让人以为改动生效了）。
+// 1. **界面不自己猜状态**：全部来自被控端回执（active/tool/color/width/board/pageIndex…），
+//    回执里没有的字段一律保持原值。
+//    唯一的例外是颜色/粗细的"本地回显"——点色块必须立刻有反馈，
+//    但设备回执一到就以回执为准（回执是权威，本地只是先画一下）。
 // 2. **不解析 status 字符串**：那是给人看的。结构化字段由被控端单独下发，
 //    面板只读字段（见 main.cpp 的 annotate_ 分支）。
 // 3. **批注层无焦点**：落笔不激活窗口，PPT 的键盘翻页笔照常可用 —— 面板文案要把
@@ -73,6 +75,8 @@ Popup {
             if (info) {
                 if (info.active !== undefined)    dlg.ovActive  = info.active === true
                 if (info.tool !== undefined)      dlg.toolName  = String(info.tool)
+                if (info.color !== undefined)     dlg.penColor  = String(info.color)
+                if (info.width !== undefined)     dlg.penWidth  = Math.round(Number(info.width))
                 if (info.board !== undefined)     dlg.boardBg   = String(info.board)
                 if (info.pageIndex !== undefined) dlg.pageIdx   = info.pageIndex
                 if (info.pageCount !== undefined) dlg.pageCnt   = info.pageCount
