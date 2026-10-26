@@ -68,6 +68,13 @@ function reindex(rec) {
 
 function persist(rec) {
   const now = Date.now();
+  // 2026-10-26：db 未初始化时原来是 `db.prepare(...)` 直接 TypeError
+  //   （「Cannot read properties of null」），崩得毫无指向性，排障只能靠猜。
+  //   班级目录是**身份真源**，这里**不能**静默降级成内存态 —— 那样班级码会在重启后
+  //   重新派生，已绑设备的归属当场跳变（比崩更糟）。所以给一条能直接照做的报错。
+  if (!db) {
+    throw new Error('班级目录未初始化：请先调用 initClassDir()（身份真源不可降级为内存态）');
+  }
   db.prepare(
     `INSERT INTO classes (code, name, aliases, source, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)

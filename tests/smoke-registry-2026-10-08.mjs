@@ -1,11 +1,24 @@
 // 2026-10-08 冒烟测试：已知设备表（离线保留）+ name + 分班制 + storage
 // 不依赖外部服务，直接 import registry.js 的函数驱动。
+//
+// ⚠️ 2026-10-26 修：本脚本曾在全量复跑里崩 `TypeError: Cannot read properties of null
+//    (reading 'prepare')`（class-dir.js:71）。根因不是产品回归 —— 班级目录（class-dir）
+//    是 2026-10-20 才引入的 sqlite 真源，registry 绑班路径会写它，而本脚本是 10-08 写的，
+//    只 import registry 就开跑，**从来没调 initClassDir()**。
+//    现在补上初始化，并把库指到临时文件（不碰云端根目录的 class-dir.db）。
 import assert from 'node:assert';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { initClassDir, closeClassDir } from '../src/class-dir.js';
 import {
   markConnected, markDisconnected, listDevices, getDevice,
   setDeviceMeta, bindDeviceToClass, unbindDeviceFromClass, listClasses,
   getStorageInfo, isClassCodeValid,
 } from '../src/registry.js';
+
+// 身份真源必须先初始化，否则绑班写库时按空库崩（见上方说明）
+initClassDir(path.join(os.tmpdir(), `ste-smoke-registry-${process.pid}.db`));
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; } else { fail++; console.error('  ✗ ' + m); } };
@@ -63,4 +76,12 @@ ok(typeof st.pendingInstructions === 'number', 'storage 应含 pendingInstructio
 ok(typeof st.eventsBytes === 'number', 'storage 应含 eventsBytes');
 
 console.log(`\n云端数据面冒烟测试：通过 ${pass} / 失败 ${fail}`);
+
+// 自清理：关掉本脚本打开的临时班级目录库，并删掉临时文件（不留在 Temp 里堆积）
+try {
+  closeClassDir();
+  const tmpDb = path.join(os.tmpdir(), `ste-smoke-registry-${process.pid}.db`);
+  if (fs.existsSync(tmpDb)) fs.unlinkSync(tmpDb);
+} catch { /* 清不掉不影响结论 */ }
+
 process.exit(fail ? 1 : 0);

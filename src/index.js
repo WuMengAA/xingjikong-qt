@@ -378,9 +378,22 @@ const server = http.createServer((req, res) => {
       pushEvent('warn', '录制回放下载被拒（未授权）', { path: u.pathname });
       return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN> 或网站账号签发的票据' });
     }
+    // 2026-10-26 补「按班」这一层（此前只有"有没有令牌"这一层）：
+    //   录像 = 教室画面 + 声音，是本项目最敏感的一类数据。此前**任何**持令牌者
+    //   （含受限老师票）都能下载全校任意班的录像 —— 与 /api/frame（实时画面）、
+    //   /api/instructions（下发指令）早就有的 canAccess 口径不一致。
+    //   这里与设备表同口径：受限身份只拿自己班的；设备无班级归属 ⇒ 谁都不该拿。
+    req.__auth = rStatic ? { ok: true, mode: 'token', uid: null } : verifyViewerTicket(rtoken);
+    applyStoredClaims(req.__auth);
     const rel = u.pathname.replace(/^\/recordings\//, '');
     if (!/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.mp4$/.test(rel)) {
       return send(404, { ok: false, error: '路径不合法' });
+    }
+    const recUid = rel.split('/')[0];
+    if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(recUid))) {
+      pushEvent('warn', '录制回放下载被拒（越权：目标不在其 scopes 内）',
+        { path: u.pathname, uid: recUid });
+      return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权查看该设备的录制' });
     }
     // ⚠️ 2026-10-16 修复：原为硬编码 join(__dirname, '..', 'recordings', rel)，
     //    与 RECORDINGS_ROOT（env CLOUD_RECORDINGS_DIR 可覆盖）不是同一目录 ⇒
@@ -1396,11 +1409,16 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && u.pathname === '/api/recordings') {
     // 管理端列表：按 uid 分组返回 recordings/ 下的文件
+    // 2026-10-26：与上面的静态下载同口径 —— 受限身份只列自己班设备的录像。
+    //   此前列表不过 can()，受限老师在 viewer「监控中心 → 录制回放」里能直接看到
+    //   全校各班的录像清单（画面/声音，最敏感的一类数据）。
+    const listIdent = identityFromAuth(req.__auth);
     const out = {};
     if (existsSync(RECORDINGS_ROOT)) {
       for (const uid of readdirSync(RECORDINGS_ROOT)) {
         const dir = join(RECORDINGS_ROOT, uid);
         if (!statSync(dir).isDirectory()) continue;
+        if (!canAccess(listIdent, getDeviceClassCode(uid))) continue;
         const files = readdirSync(dir)
           .filter((n) => n.endsWith('.mp4'))
           .map((n) => {
