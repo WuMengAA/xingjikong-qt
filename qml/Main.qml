@@ -503,6 +503,26 @@ ApplicationWindow {
         function onDiagFeedbackRequested() { diagDlg.refreshLog(); diagDlg.open() }
     }
 
+    // 被控端访问密码弹窗（2026-10-26）：接管启用了访问密码的设备前，云端要求先鉴权。
+    VncAuthDialog { id: vncAuthDlg; theme: root.th }
+    Connections {
+        target: backend
+        function onVncAuthRequired(uid) {
+            // 用 devices 解析设备显示名（拿不到就退回 uid 本身）
+            var name = uid
+            var arr = backend.devices
+            for (var i = 0; i < arr.length; i++) {
+                if (arr[i].uid === uid) {
+                    name = arr[i].name || arr[i].label || arr[i].hostname || uid
+                    break
+                }
+            }
+            vncAuthDlg.showFor(uid, name)
+        }
+        function onVncAuthFailed(uid, reason) { vncAuthDlg.showError(reason) }
+        function onVncAuthOk(uid) { vncAuthDlg.close() }
+    }
+
     // 通知弹窗（2026-10-06 加）：被控端的大屏通知早就实现了，只有管理端这个发送方漏了。
     // 2026-10-15 组件6 配套：互动审批面板（点歌/祝福待审 + 右侧「学生在教室机上会看到」
     // 的岛预览 —— 那颗岛与被控端**是同一份** IslandRoot.qml，真源在

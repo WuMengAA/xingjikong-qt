@@ -435,6 +435,8 @@ public:
     Q_INVOKABLE void startVnc(const QString &uid);
     /** 收掉 VNC 会话，画面回退到常规 JPEG 轮询通道。 */
     Q_INVOKABLE void stopVnc();
+    /** 用户在密码框提交被控端访问密码（对应 uid）。发 vnc-auth 给云端校验。 */
+    Q_INVOKABLE void submitVncPassword(const QString &uid, const QString &password);
     /** 注册 QML 图像提供器（main.cpp 建 engine 时传入 image://vnc 那个实例）。 */
     void setVncImageProvider(VncImageProvider *p);
 
@@ -689,6 +691,12 @@ signals:
     void filePicked(const QString &url);
     /** 远控链路状态变化（连接中/已连接/断开/错误）。Q_PROPERTY vncActive/vncState 共用它。 */
     void vncStateChanged();
+    /** 被控端访问密码鉴权：云端要求先输入访问密码才能接管该设备。QML 弹密码框。 */
+    void vncAuthRequired(const QString &uid);
+    /** 访问密码错误（云端回 vnc-auth-fail）。QML 在密码框上提示并允许重试。 */
+    void vncAuthFailed(const QString &uid, const QString &reason);
+    /** 访问密码校验通过（云端回 vnc-auth-ok）。QML 关掉密码框。 */
+    void vncAuthOk(const QString &uid);
     /** 远控解出一帧（libvncclient → QImage）。主画面走 frameChanged，这里给 QML 直连。 */
     void vncFrameReady(const QImage &frame);
     /** 2026-10-12 · 四·双画面：摄像头第二轨帧就绪（→ QML 刷 image://frames/cam）。
@@ -788,6 +796,14 @@ private:
     /** 断线 / 退出时把语音和广播一起收掉，why 直接显示成状态行那句话。 */
     void stopAllLive(const QString &why);
 
+    // ── 被控端访问密码（2026-10-26 新增）──
+    /** 选中即接管：发 remote_control_start + 置 pending + 2s 兜底拉 VNC。 */
+    void beginTakeover(const QString &uid);
+    /** 云端要求访问密码：有会话缓存就自动重试，否则发 vncAuthRequired 让 QML 弹框。 */
+    void requestVncAccessAuth(const QString &uid);
+    /** 发 vnc-auth 消息（autoSubmitted=true 表示本会话已缓存密码，自动重试）。 */
+    void sendVncAuth(const QString &uid, const QString &password, bool autoSubmitted);
+
     // ── 远程终端 ──
     /** 改状态并通知界面（状态四件套共用一个信号，省得四个 NOTIFY 各写一遍）。 */
     void setTermState(TermState s, const QString &sid, const QString &note);
@@ -877,6 +893,11 @@ private:
     QString m_vncState = QStringLiteral("idle");   // 连接中/已连接/已断开/连接失败
     quint8 m_vncBtnMask = 0;          // 当前鼠标按键位（RFB PointerEvent 用）
     QString m_vncPassword;            // 被控端 VNC 密码（STE_VNC_PASSWORD）
+    // ── 被控端访问密码（2026-10-26 新增）：云端改密，接管前须 vnc-auth 鉴权 ──
+    QHash<QString, QString> m_vncAccessPassword;   // uid -> 本会话记住的访问密码（仅内存）
+    bool m_vncAuthAuto = false;       // 当前 vnc-auth 是否自动重试（区分"错误提示/静默重试"）
+    QString m_vncAuthUid;             // 当前在鉴权的 uid
+    QString m_vncAuthPasswordSubmitted; // 本次提交的密码（vnc-auth-ok 时缓存）
     bool m_screenActive = true;   // 2026-10-08：带画面页是否可见（不可见则暂停单台拉流）
     QStringList m_capActions;              // 当前设备的指令能力全集（空=没上报过）
     QStringList m_procBlacklist;           // 2026-10-11：进程黑名单（QSettings proc/blacklist）

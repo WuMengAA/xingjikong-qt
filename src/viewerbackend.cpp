@@ -1089,35 +1089,8 @@ void ViewerBackend::setCurrentUid(const QString &uid)
     //    · 教师角色不发（权限不足，发了也是被拒，还会在回执流水里留一条失败）
     //    · 设备没上报 remote_control_start 能力就不发（老版本被控端，别让回执流水里全是失败）
     //    被控端收到 remote_control_start 会自己弹"已被老师接管"的提示（学生知情）。
-    if (role() == QStringLiteral("admin")
-        && m_capActions.contains(QStringLiteral("remote_control_start"))) {
-        QJsonObject rc;
-        // 帧率随单下发（2026-10-18 晚修复）：原先 rc 是空对象，被控端取默认 20
-        // 且 VncServer 抓屏节奏写死 100ms=10fps —— 客户端要多少都只有 10fps。
-        // 现在一路带到 VncServer::start(0, fps)，抓屏间隔按 1000/fps 算（clamp 33ms）。
-        rc.insert(QStringLiteral("fps"), 24);
-        sendAction(QStringLiteral("remote_control_start"), rc);
-        m_remoteControlling = true;
-        m_remoteControlUid = uid;
-        m_pendingVncUid = uid;   // 等回执/兜底再拉 VNC（见下）
-        logf("[viewer] 选中即远控：已对 %s 下发 remote_control_start", uid.toUtf8().constData());
-        // ⚠️ 2026-10-24 修复（VNC 从未通过的根因）：
-        //   原来这里是「发指令」和「startVnc」在同一毫秒执行 —— 而被控端要等指令
-        //   到达后才起抓屏线程、绑 127.0.0.1:5900、接桥。管理端立刻连过去，等不到
-        //   "RFB 003.008"，rfbInitClient 直接失败（日志"连接或握手未完成"），
-        //   于是整场远控都退回 JPEG 轮询照片（1fps，无交互）。
-        //   现在改为**等被控端回执确认 VNC 已起**再拉（见 instruction-result 分支），
-        //   并留一个 2s 兜底定时器（回执丢失时不至于永远不拉）。
-        QTimer::singleShot(2000, this, [this, uid]() {
-            if (m_pendingVncUid != uid || m_vncActive) return;
-            logf("[viewer] 2s 兜底：仍未见回执，直接拉起 VNC（uid=%s）", uid.toUtf8().constData());
-            startVnc(uid);
-        });
-    } else {
-        logf("[viewer] 选中 %s 但未自动进远控（role=%s，远控能力=%d）——权限或设备能力不满足",
-             uid.toUtf8().constData(), role().toUtf8().constData(),
-             (int)m_capActions.contains(QStringLiteral("remote_control_start")));
-    }
+    // 选中即接管（需求#7）+ 被控端访问密码鉴权（2026-10-26）：接管前云端可能要求先过访问密码。
+    beginTakeover(uid);
 }
 
 void ViewerBackend::setScreenActive(bool on)
@@ -1321,6 +1294,17 @@ void ViewerBackend::onTextMessage(const QString &text)
         // #460 班级域旁路：订阅 pending 窗口内到来的 error 就是订阅被拒
         // （无权限 / 班级不存在…）。ClassService 内部只在该窗口内认领。
         if (m_classService) m_classService->onError(pay);
+        // 2026-10-26 被控端访问密码门：接管启用了访问密码的设备，云端在 remote_control_start
+        // / vnc-data 上行两处回 VNC_AUTH_REQUIRED 拒绝。此时接管尚未真正发生，清掉未生效的
+        // 远控态，转去鉴权（有本会话缓存就自动重试，否则发信号让 QML 弹密码框）。
+        if (code == QLatin1String("VNC_AUTH_REQUIRED") || ecode == QLatin1String("VNC_AUTH_REQUIRED")) {
+            const QString uid = m_pendingVncUid.isEmpty() ? m_currentUid : m_pendingVncUid;
+            logf("[viewer] 云端要求被控端访问密码（uid=%s）", uid.toUtf8().constData());
+            if (!m_pendingVncUid.isEmpty()) m_pendingVncUid.clear();
+            if (m_remoteControlling) { m_remoteControlling = false; m_remoteControlUid.clear(); }
+            requestVncAccessAuth(uid);
+            return;
+        }
         // 2026-10-24 重认证门：敏感操作超期被云端 REAUTH_REQUIRED。
         // 与 AU1002/AU1003 的区别：**票没废，连接不断**（云端 ERR.REAUTH_REQUIRED
         // close=0）——只提示"该重新验证密码了"，界面弹窗走一次重新登录即可恢复，
@@ -1466,6 +1450,29 @@ void ViewerBackend::onTextMessage(const QString &text)
                            : QStringLiteral("%1 在 %2 上失败：%3").arg(action, uid, err));
         }
         emit resultReceived(uid, action, state, result, err, detail, data);
+    } else if (type == QStringLiteral("vnc-auth-ok")) {
+        const QString uid = pay.value(QStringLiteral("uid")).toString();
+        logf("[viewer] 访问密码核验通过（uid=%s）", uid.toUtf8().constData());
+        emit vncAuthOk(uid);
+        // 记住密码，便于本会话后续自动重试（同一连接已放行；重连后免再问）。
+        if (uid == m_vncAuthUid && !m_vncAuthPasswordSubmitted.isEmpty())
+            m_vncAccessPassword.insert(uid, m_vncAuthPasswordSubmitted);
+        // 重新发起接管（此时云端已放行 vnc-data 双向中继与 remote_control_start）。
+        if (uid == m_currentUid) beginTakeover(uid);
+        else logf("[viewer] vnc-auth-ok 但设备已不是当前选中（%s），不自动接管",
+                  uid.toUtf8().constData());
+    } else if (type == QStringLiteral("vnc-auth-fail")) {
+        const QString uid = pay.value(QStringLiteral("uid")).toString();
+        const QString reason = pay.value(QStringLiteral("reason")).toString();
+        logf("[viewer] 访问密码核验失败（uid=%s，%s）", uid.toUtf8().constData(), reason.toUtf8().constData());
+        if (m_vncAuthAuto) {
+            // 自动重试失败：缓存的密码已失效（多半是云端改了密码 / 设备关了密码）。
+            // 清掉缓存并改走人工输入，别死循环重试。
+            m_vncAccessPassword.remove(uid);
+            emit vncAuthRequired(uid);
+        } else {
+            emit vncAuthFailed(uid, reason.isEmpty() ? QStringLiteral("密码错误") : reason);
+        }
     } else if (type == QStringLiteral("unsubscribed")) {
         // 2026-10-10：云端对我们主动退订的确认。它**不是错误**，原来落到下面那句
         // "收到未处理的云端消息"里 —— 每次切设备/离开带画面页都刷一条，纯噪音。
@@ -2448,6 +2455,75 @@ void ViewerBackend::setVncState(const QString &s)
     if (m_vncState == s) return;
     m_vncState = s;
     emit vncStateChanged();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 被控端访问密码鉴权（2026-10-26 新增）
+//   接管一台启用了访问密码的设备前，必须先向云端 vnc-auth 鉴权；云端在本连接记
+//   ws.__vncAuthed[uid]，之后 remote_control_start / vnc-data 双向中继才放行。
+//   未设密码的设备行为与以往完全一致（不走鉴权，直接接管）。
+// ─────────────────────────────────────────────────────────────────────────────
+void ViewerBackend::beginTakeover(const QString &uid)
+{
+    if (uid.isEmpty()) return;
+    // 选中即接管（需求#7，2026-10-11）：进了远控界面、选好机器，就不需要再点开关。
+    // 教师角色不发（权限不足，发了也是被拒）；设备没上报 remote_control_start 能力就不发
+    // （老版本被控端，别让回执流水里全是失败）。
+    if (role() != QStringLiteral("admin")
+        || !m_capActions.contains(QStringLiteral("remote_control_start")))
+        return;
+    QJsonObject rc;
+    // 帧率随单下发（2026-10-18 晚修复）：原先 rc 是空对象，被控端取默认 20
+    // 且 VncServer 抓屏节奏写死 100ms=10fps——客户端要多少都只有 10fps。
+    // 现在一路带到 VncServer::start(0, fps)，抓屏间隔按 1000/fps 算（clamp 33ms）。
+    rc.insert(QStringLiteral("fps"), 24);
+    sendAction(QStringLiteral("remote_control_start"), rc);
+    m_remoteControlling = true;
+    m_remoteControlUid = uid;
+    m_pendingVncUid = uid;   // 等回执/兜底再拉 VNC
+    logf("[viewer] 选中即远控：已对 %s 下发 remote_control_start", uid.toUtf8().constData());
+    // ⚠️ 2026-10-24 修复（VNC 从未通过的根因）：原来「发指令」和「startVnc」在同一毫秒执行——
+    // 被控端要等指令到达后才起抓屏线程、绑 127.0.0.1:5900、接桥。管理端立刻连过去等不到
+    // "RFB 003.008"，rfbInitClient 直接失败（日志"连接或握手未完成"），整场远控退回 JPEG 轮询。
+    // 现在改为等被控端回执确认 VNC 已起再拉（见 instruction-result 分支），并留 2s 兜底定时器。
+    QTimer::singleShot(2000, this, [this, uid]() {
+        if (m_pendingVncUid != uid || m_vncActive) return;
+        logf("[viewer] 2s 兜底：仍未见回执，直接拉起 VNC（uid=%s）", uid.toUtf8().constData());
+        startVnc(uid);
+    });
+}
+
+void ViewerBackend::requestVncAccessAuth(const QString &uid)
+{
+    if (uid.isEmpty()) return;
+    // 本会话已记过这台设备的访问密码 → 直接重试，不弹窗（避免每次重连都问一次）。
+    const QString cached = m_vncAccessPassword.value(uid);
+    if (!cached.isEmpty()) {
+        sendVncAuth(uid, cached, /*autoSubmitted=*/true);
+    } else {
+        emit vncAuthRequired(uid);   // QML 弹密码框
+    }
+}
+
+void ViewerBackend::sendVncAuth(const QString &uid, const QString &password, bool autoSubmitted)
+{
+    if (uid.isEmpty()) return;
+    QJsonObject p;
+    p.insert(QStringLiteral("uid"), uid);
+    p.insert(QStringLiteral("password"), password);
+    sendEnvelope(QStringLiteral("vnc-auth"), p);
+    m_vncAuthAuto = autoSubmitted;
+    m_vncAuthUid = uid;
+    m_vncAuthPasswordSubmitted = password;
+    logf("[viewer] 已发 vnc-auth（uid=%s，%s）", uid.toUtf8().constData(),
+         autoSubmitted ? "自动重试" : "用户提交");
+}
+
+void ViewerBackend::submitVncPassword(const QString &uid, const QString &password)
+{
+    // 由 QML 密码框调用：用户手动提交，失败要弹错误提示（m_vncAuthAuto=false）。
+    m_vncAuthAuto = false;
+    sendVncAuth(uid, password, /*autoSubmitted=*/false);
 }
 
 void ViewerBackend::startVnc(const QString &uid)
