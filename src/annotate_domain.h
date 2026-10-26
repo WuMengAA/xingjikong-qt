@@ -43,6 +43,8 @@
 #include <QStringList>
 #include <QVector>
 
+#include <functional>
+
 class QQuickView;
 class QScreen;
 class QTimer;
@@ -174,12 +176,25 @@ public:
     // 置顶层级断言（任务管理器之下 / 其余 topmost）
     void assertZOrder();
 
+    // ── I3：批注跟 PPT 翻页 ───────────────────────────────────────
+    // 开/关跟随（白板模式自动不跟：白板盖住了课件，页码无意义）
+    void setFollowPpt(bool on);
+    bool followPpt() const { return m_follow; }
+    // 注入页码取数函数（0 = 没在放映）；传空函数即彻底关掉跟随
+    void setSlideProvider(std::function<int()> fn);
+    // I3 的核心一行：页码 → 墨迹页键。返回"这次是否真的换了页"。
+    // slide<=0 表示没在放映 → 不动页（否则会把老师刚写的墨迹切走）。
+    // 独立成公开方法是为了能被探针直接验（定时器 + 可见性不好在离屏环境验）。
+    bool applyPptSlide(int slide);
+
 private:
     Overlay() = default;
     bool ensureView(QString *err);    // 懒建 QQuickView（首次 start 时）
     void applyWindowStyles();         // WS_EX_TOPMOST|NOACTIVATE|TOOLWINDOW
     void installKeyboardHook();
     void uninstallKeyboardHook();
+    void tickPpt();                   // 拉一次放映页码，变了就换墨迹页
+    void armPptTimer();               // 按「可见 + 跟随 + 透明批注」决定开不开定时器
 
     QQuickView *m_view = nullptr;
     Canvas     *m_canvas = nullptr;   // QML 创建后 findChild 回填
@@ -189,7 +204,17 @@ private:
     void  *m_hwnd = nullptr;          // HWND 缓存（void* 以免头文件拖进 <windows.h>）
     void  *m_kbHook = nullptr;        // HHOOK 同上
     QTimer *m_zTimer = nullptr;       // 3s 一次的置顶层级纠偏
+
+    bool                 m_follow = true;   // 默认跟（批注 over PPT 是最常见用法）
+    QTimer              *m_pptTimer = nullptr;
+    std::function<int()> m_slideFn;         // 注入：返回当前放映页码，0 = 没在放映
 };
+
+// I3：注入"当前放映页码"取数函数（0 = 没在放映）。
+// 为什么用 std::function 注入而不是直接 include ppt_domain：
+// 域之间不互相依赖（与 AlarmDomain 注入 TTS 同一套办法），
+// 将来 PPT 换成别的放映器也不用改批注域。
+void init(std::function<int()> slideFn);
 
 // 注册 QML 类型（在创建 view 之前调用一次；重复调用安全）
 void registerQmlTypes();

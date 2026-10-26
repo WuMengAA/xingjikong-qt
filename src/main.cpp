@@ -5503,11 +5503,14 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                 c->prevPage();
             } else if (sub == QStringLiteral("board")) {
                 ov->setBoard(params.value(QStringLiteral("board")).toString());
+            } else if (sub == QStringLiteral("follow")) {
+                // I3：批注跟 PPT 翻页开关（默认开；白板模式下内部自动不跟）
+                ov->setFollowPpt(params.value(QStringLiteral("on")).toBool(true));
             } else {
                 out.result = QStringLiteral("failed");
                 out.error = QStringLiteral("未知批注子指令：%1（支持 start/stop/status/pen/highlighter/"
                                            "eraser/tool/color/width/undo/redo/clear/page/page_add/"
-                                           "page_next/page_prev/board）").arg(sub);
+                                           "page_next/page_prev/board/follow）").arg(sub);
                 return out;
             }
         }
@@ -7845,6 +7848,15 @@ int main(int argc, char *argv[])
     // ── PPT 放映控制（2026-10-27 · I 批）：只连已运行的 PowerPoint / WPS ────────
     // 偏好（auto/powerpoint/wps）落 ppt.json；**不做启动**，启动走 launch_app。
     PptDomain::init(dataDir + QStringLiteral("/ppt.json"));
+
+    // ── I3：批注跟 PPT 翻页（2026-10-27）────────────────────────────────
+    // 注入"当前放映页码"取数函数（0 = 没在放映）。批注域不认识 PPT，只认页键；
+    // 这样 PPT 换成别的放映器时只需改这一行。取数用 query()（只 attach 不启动，
+    // 见 ppt_domain.h 的红线），由批注层在自己的定时器里按需调用（1.5s，仅可见时）。
+    AnnotateDomain::init([]() -> int {
+        const PptDomain::Status st = PptDomain::query();
+        return (st.ok && st.presenting) ? st.slide : 0;
+    });
 
     // ── 软件管理策略（2026-10-26 P3）：黑白名单 + 黑名单守护 ──
     g_softPolicyFile = dataDir + QStringLiteral("/soft-manage.json");

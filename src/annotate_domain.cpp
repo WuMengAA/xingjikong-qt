@@ -17,6 +17,8 @@
 
 #include <windows.h>   // SetWindowLongPtr / GWL_EXSTYLE / WS_EX_* / 低层键盘钩子
 
+#include <utility>     // std::move（注入取数函数）
+
 namespace AnnotateDomain {
 
 /* ══════════════════════════════════════════════════════════════
@@ -96,6 +98,11 @@ static LRESULT CALLBACK annotateKeyboardProc(int code, WPARAM wParam, LPARAM lPa
 /* ══════════════════════════════════════════════════════════════
  *  Overlay —— QQuickView 窗口（QWindow，不是 QWidget）
  * ══════════════════════════════════════════════════════════════ */
+
+void init(std::function<int()> slideFn)
+{
+    Overlay::instance()->setSlideProvider(std::move(slideFn));
+}
 
 Overlay *Overlay::instance()
 {
@@ -188,6 +195,7 @@ bool Overlay::start(QString *err)
     m_zTimer->start();
 
     installKeyboardHook();
+    armPptTimer();
 
     qInfo("[agent-qt] 批注层已显示：%dx%d %s", m_view->width(), m_view->height(),
           qPrintable(m_canvas->statusLine()));
@@ -198,10 +206,71 @@ void Overlay::stop()
 {
     uninstallKeyboardHook();
     if (m_zTimer) m_zTimer->stop();
+    if (m_pptTimer) m_pptTimer->stop();
     if (!m_view) return;
     // 穿透 = hide（不切 window flags：改 flags 会重建原生窗口，闪烁且丢状态）
     m_view->hide();
     qInfo("[agent-qt] 批注层已隐藏（穿透态）");
+}
+
+/* ── I3：批注跟随 PPT 翻页 ────────────────────────────────────────
+ * 为什么是**拉取**而不是推送：老师自己的翻页笔、键盘空格、触摸屏都能翻页，
+ * 这些动作不经过我们，PPT 域永远收不到"页变了"。所以只能定时拉一次页码。
+ * 代价：一次 COM 查询（只在批注层可见 + 透明批注模式下跑）。
+ * 为什么不跟白板模式：白板把课件整个盖住了，页码对白板没有意义，
+ * 而且会把白板多页的页序搅乱。
+ */
+void Overlay::setSlideProvider(std::function<int()> fn)
+{
+    m_slideFn = std::move(fn);
+    armPptTimer();
+}
+
+void Overlay::setFollowPpt(bool on)
+{
+    if (m_follow == on) return;
+    m_follow = on;
+    armPptTimer();
+}
+
+void Overlay::armPptTimer()
+{
+    const bool want = isActive() && m_follow && !m_boardMode && bool(m_slideFn);
+    if (!want) {
+        if (m_pptTimer) m_pptTimer->stop();
+        return;
+    }
+    if (!m_pptTimer) {
+        m_pptTimer = new QTimer(this);
+        m_pptTimer->setInterval(1500);   // 1.5s：翻页落后半拍以内，又不至于把 COM 打满
+        QObject::connect(m_pptTimer, &QTimer::timeout, this, [this] { tickPpt(); });
+    }
+    if (!m_pptTimer->isActive()) {
+        m_pptTimer->start();
+        tickPpt();                       // 立刻对一次，别等第一个 1.5s tick
+    }
+}
+
+bool Overlay::applyPptSlide(int slide)
+{
+    if (!m_canvas || slide <= 0) return false;
+    const QString key = QString::number(slide);
+    if (m_canvas->pageKey() == key) return false;
+    m_canvas->setPageKey(key);
+    qInfo("[agent-qt] 批注跟随 PPT：第 %d 页", slide);
+    return true;
+}
+
+void Overlay::tickPpt()
+{
+    if (!m_canvas || !m_slideFn || m_boardMode || !isActive()) return;
+    int slide = 0;
+    try {
+        slide = m_slideFn();
+    } catch (...) {
+        return;                          // 取数方内部异常不该带崩批注层
+    }
+    applyPptSlide(slide);                // slide<=0 = 没在放映 → 保持当前页
 }
 
 bool Overlay::isActive() const
@@ -329,6 +398,7 @@ void Overlay::setBoard(const QString &bg)
         m_boardMode = false;
         m_boardBg.clear();
         m_canvas->setBoardColor(QColor());      // 无效色 = 透明
+        armPptTimer();                          // 回透明批注 = 恢复跟随 PPT
         return;
     }
     QColor c;
@@ -343,16 +413,19 @@ void Overlay::setBoard(const QString &bg)
     m_boardMode = c.isValid();
     m_boardBg = bg.trimmed();
     m_canvas->setBoardColor(c);
+    armPptTimer();      // 切白板 = 停止跟随 PPT（页码对白板无意义）
 }
 
 QString Overlay::statusLine() const
 {
     if (!m_canvas) return QStringLiteral("active=0 (未创建)");
-    // focus=0 恒为 0（无焦点触控）；hook 是逃生口是否可用的唯一判据
-    return QStringLiteral("active=%1 board=%2 hook=%3 focus=0 topmost=1 %4")
+    // focus=0 恒为 0（无焦点触控）；hook 是逃生口是否可用的唯一判据；
+    // follow=1 且 timer 在跑 = 正跟随 PPT 页码
+    return QStringLiteral("active=%1 board=%2 hook=%3 follow=%4 focus=0 topmost=1 %5")
         .arg(isActive() ? 1 : 0)
         .arg(m_boardMode ? m_boardBg : QStringLiteral("transparent"))
         .arg(m_kbHook ? 1 : 0)
+        .arg(m_pptTimer && m_pptTimer->isActive() ? 1 : 0)
         .arg(m_canvas->statusLine());
 }
 
