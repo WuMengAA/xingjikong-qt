@@ -603,8 +603,30 @@ Item {
     // ⚠️ 不给 width/height 赋值：宿主 QQuickWidget 用 SizeRootObjectToView 时根随视图，
     //    显式写 width: implicitWidth 会被 view 覆盖，且与 Behavior 打架。
 
-    Behavior on width  { NumberAnimation { duration: root.th.durShape; easing.type: Easing.OutBack } }
-    Behavior on height { NumberAnimation { duration: root.th.durShape; easing.type: Easing.OutBack } }
+    // 2026-10-27（手感优化）：收起与展开**分开用曲线**，不再共用一个 OutBack。
+    //   原来两者都是 `Easing.OutBack` —— 该曲线默认 overshoot = 1.70158，
+    //   在 width/height 上意味着**过冲 70%**：胶囊先涨过头再弹回来，观感"笨"；
+    //   而且展开/收起同为 380ms，收拢时还在慢慢回弹，显得拖沓。
+    //   更麻烦的是它卡：width 与 height 各挂一条 Behavior，动画期间每帧都要
+    //   重算整条布局链（尺寸 → 圆角 → 内部 face 的隐式尺寸），低端机直接掉帧。
+    //   现在：
+    //     · 展开 → OutBack，但 overshoot 压到 1.15（留物理感，去掉"弹过头"）；
+    //     · 收起 → OutCubic 且更短（240ms）：收拢要干脆，不该"弹一下才回去"；
+    //     · overshoot 对 OutCubic 无效，给 1.0 只为写法统一，不会被读到。
+    Behavior on width {
+        NumberAnimation {
+            duration: root._expanded ? root.th.durLong : 240
+            easing.type: root._expanded ? Easing.OutBack : Easing.OutCubic
+            easing.overshoot: root._expanded ? 1.15 : 1.0
+        }
+    }
+    Behavior on height {
+        NumberAnimation {
+            duration: root._expanded ? root.th.durLong : 240
+            easing.type: root._expanded ? Easing.OutBack : Easing.OutCubic
+            easing.overshoot: root._expanded ? 1.15 : 1.0
+        }
+    }
 
     // ══════════════════════════════════════════════════════════
     // 手势 MouseArea（⚠️ 必须在最底层，否则吃掉按钮点击）
@@ -660,7 +682,14 @@ Item {
 
         // 2026-10-18：透明度过渡走 durMid 令牌（原硬编码 200，值相同、改为可调）
         Behavior on opacity { NumberAnimation { duration: root.th ? root.th.durMid : 200 } }
-        Behavior on px       { NumberAnimation { duration: root.th.durShape; easing.type: Easing.OutBack } }
+        // 图标尺寸同尺寸动画口径（OutBack 过冲压到 1.15），避免图标"跳一下"
+        Behavior on px {
+            NumberAnimation {
+                duration: root._expanded ? root.th.durLong : 240
+                easing.type: root._expanded ? Easing.OutBack : Easing.OutCubic
+                easing.overshoot: root._expanded ? 1.15 : 1.0
+            }
+        }
     }
 
     // ── 底 ──────────────────────────────────────────────────
@@ -703,7 +732,15 @@ Item {
         strokeWidth: root._idle ? 0 : 1
         strokeColor: root.th.light ? "#E2E2E2" : "#333333"
 
-        Behavior on radius { NumberAnimation { duration: root.th.durShape } }
+        // 圆角此前**没有缓动**（线性 380ms）—— 与带曲线的尺寸动画叠在一起时，
+        // 圆角和尺寸各走各的，收起的最后一截会看到"角是直的、边还在动"的生硬感。
+        Behavior on radius {
+            NumberAnimation {
+                duration: root._expanded ? root.th.durLong : 240
+                easing.type: root._expanded ? Easing.OutBack : Easing.OutCubic
+                easing.overshoot: root._expanded ? 1.15 : 1.0
+            }
+        }
 
         // 严重度：只做顶部细条。
         // ⚠️ 左右必须内缩到 radius 之外：细条是**直角**，铺满宽度时会在圆角段
