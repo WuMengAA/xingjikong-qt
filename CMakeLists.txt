@@ -104,6 +104,10 @@ configure_file(src/version.nsh.in "${CMAKE_CURRENT_BINARY_DIR}/version.nsh" @ONL
 
 add_executable(stelarith-agent-qt
   src/main.cpp
+  # 2026-10-27 第五刀：闹钟域从 main.cpp 拆出（自带 3 个 g_alarm* 变量、零隐式依赖，
+  # TTS 由 init() 注入回调）。main.cpp 8432 → 8247 行。
+  src/alarm_domain.cpp
+  src/alarm_domain.h
   src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
   src/singleinstance.cpp
   src/singleinstance.h
