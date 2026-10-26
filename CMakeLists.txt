@@ -110,6 +110,8 @@ add_executable(stelarith-agent-qt
   src/alarm_domain.h
   src/notify_domain.cpp
   src/notify_domain.h
+  src/annotate_domain.cpp
+  src/annotate_domain.h
   # 2026-10-27 G3：时间同步域（SNTP + 人工偏移），独立文件，不进 main.cpp。
   src/timesync_domain.cpp
   src/timesync_domain.h

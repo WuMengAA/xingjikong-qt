@@ -1,0 +1,140 @@
+#pragma once
+// 2026-10-27：**批注 / 白板内核**（H 批，替代 ICC CE 的画图地位）。
+//
+// 为什么自研而不是调起 ICC CE（用户 00:42 裁决）：
+//   "集成 ICC CE 相关元素，代替 ICC CE 的画图地位…成为我们软件的一部分，重构版的软件参考"
+//   ⇒ 能力吸收进本进程，老师不需要再装第三方。
+//
+// ── 三条硬约束（都是用户/项目踩过的）──────────────────────────────
+// 1. **禁用 QWidget**（用户 00:46："QWidget 尽量不要使用，会淘汰的"）
+//    ⇒ 窗口用 `QQuickView`（QWindow 派生，不是 Widget），不用 QQuickWidget。
+//    ⚠️ island.cpp:1887 提醒过 QQuickView 有"窗口跑到后面、点不到"的问题 ——
+//       本域用 `Qt::WindowStaysOnTopHint` + `WS_EX_TOPMOST` 双保险（exam_mode.cpp:197 的经验），
+//       并且必须盖住 PPT 全屏放映。
+// 2. **渲染用 `QQuickPaintedItem`**（QPainter 画进 scenegraph），不用 QML Canvas ——
+//    墨迹一多 Canvas 会掉帧（项目已有 QML 性能痛点）。
+// 3. **穿透用 show/hide，不切 window flags** —— Qt 改 flags 会重建原生窗口
+//    （闪烁 + 丢状态），批注层每按一次键就闪一下是不可接受的。
+//
+// ── 与 PPT 的交界（I3 接口已留）────────────────────────────────
+// 翻页后调用方用 `PptDomain::query()` 取页码，再 `setPageKey()` 让本域按页存取墨迹
+// （对应 ICC CE 的 PPTInkManager）。本域不认识 PPT，只认"页键"。
+#include <QColor>
+#include <QObject>
+#include <QPainterPath>
+#include <QPointF>
+#include <QQuickPaintedItem>
+#include <QString>
+#include <QVector>
+
+class QQuickView;
+class QScreen;
+
+namespace AnnotateDomain {
+
+// 一笔（一次按下到抬起）。橡皮也是"一笔"，只是合成模式不同。
+struct Stroke {
+    QVector<QPointF> pts;
+    QColor  color;
+    qreal   width = 4.0;
+    bool    highlighter = false;   // 荧光笔：半透明 + 加宽 + 圆头
+    bool    eraser = false;        // 橡皮：清掉命中区域的既有墨迹
+};
+
+/* ── 渲染器：QML 里声明为 `AnnotateCanvas` ──────────────────────── */
+class Canvas : public QQuickPaintedItem {
+    Q_OBJECT
+    Q_PROPERTY(int strokeCount READ strokeCount NOTIFY changed)
+    Q_PROPERTY(QString tool READ tool NOTIFY changed)
+public:
+    explicit Canvas(QQuickItem *parent = nullptr);
+
+    void paint(QPainter *p) override;
+
+    // 输入（QML 的 MultiPointTouchArea / MouseArea 转发逻辑坐标）
+    Q_INVOKABLE void beginStroke(qreal x, qreal y);
+    Q_INVOKABLE void addPoint(qreal x, qreal y);
+    Q_INVOKABLE void endStroke();
+
+    // 编辑
+    Q_INVOKABLE void undo();
+    Q_INVOKABLE void redo();
+    Q_INVOKABLE void clearAll();
+
+    // 工具与样式
+    Q_INVOKABLE void setTool(const QString &tool);      // pen / highlighter / eraser
+    Q_INVOKABLE void setColor(const QString &hex);      // "#RRGGBB"
+    Q_INVOKABLE void setWidth(qreal w);                 // 1..40
+
+    int strokeCount() const { return m_strokes.size(); }
+    QString tool() const { return m_tool; }
+
+    // 白板背景（空 = 透明批注层；非空 = 不透明白板）
+    void setBoardColor(const QColor &c);
+
+    // 按页存取（I3：PPT 每页批注）。key 为空表示不分页。
+    void setPageKey(const QString &key);
+    QString pageKey() const { return m_pageKey; }
+
+    // 状态快照（给指令回执用）
+    QString statusLine() const;
+
+    // QML 按 ESC 时调它 → 域 hide（批注层全屏吃输入，必须有本地逃生口，
+    // 否则老师被自己的批注层困住，只能等管理端发 stop）
+    Q_INVOKABLE void requestStop() { emit stopRequested(); }
+
+signals:
+    void changed();
+    void stopRequested();
+
+private:
+    void pushHistory();          // 把当前 m_strokes 压栈（改动前调用）
+    QPainterPath pathOf(const Stroke &s) const;
+
+    QVector<Stroke> m_strokes;
+    QVector<QVector<Stroke>> m_undo;   // 撤销栈（快照式，简单可靠；墨迹量级不大）
+    QVector<QVector<Stroke>> m_redo;
+    QHash<QString, QVector<Stroke>> m_pages;   // 页键 → 墨迹（切页时换出/换入）
+
+    QString m_tool = QStringLiteral("pen");
+    QColor  m_color = QColor(0xE5, 0x39, 0x35);   // 默认红笔（教室场景最常用、最显眼）
+    qreal   m_width = 4.0;
+    QColor  m_boardColor;                         // 无效 = 透明（批注模式）
+    QString m_pageKey;
+
+    bool m_drawing = false;
+    Stroke m_cur;
+};
+
+/* ── 域：窗口生命周期 + 指令入口 ───────────────────────────────── */
+class Overlay : public QObject {
+    Q_OBJECT
+public:
+    static Overlay *instance();
+
+    // 显示/隐藏（穿透 = hide，不切 flags）
+    bool start(QString *err);
+    void stop();
+    bool isActive() const;
+
+    Canvas *canvas() const { return m_canvas; }
+
+    // 白板模式：bg 为空 → 透明批注层；"white"/"black"/"green"/"#RRGGBB" → 不透明白板
+    void setBoard(const QString &bg);
+
+    QString statusLine() const;
+
+private:
+    Overlay() = default;
+    bool ensureView(QString *err);    // 懒建 QQuickView（首次 start 时）
+
+    QQuickView *m_view = nullptr;
+    Canvas     *m_canvas = nullptr;   // QML 创建后 findChild 回填
+    bool        m_boardMode = false;
+    QString     m_boardBg;
+};
+
+// 注册 QML 类型（在创建 view 之前调用一次；重复调用安全）
+void registerQmlTypes();
+
+} // namespace AnnotateDomain

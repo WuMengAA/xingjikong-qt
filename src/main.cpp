@@ -22,6 +22,7 @@
 #include "singleinstance.h"
 #include "alarm_domain.h"   // 2026-10-27 第五刀：闹钟域
 #include "notify_domain.h"  // 2026-10-27 第六刀：定时通知域（F 收尾）
+#include "annotate_domain.h" // 2026-10-27 H 批：批注/白板内核（替代 ICC CE）
 #include "timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
 #include "panel_domain.h"     // 2026-10-27 G4/G5/G6：岛组件面板（日期/课表/倒计时）
 #include "ppt_domain.h"       // 2026-10-27 I：PPT 放映控制（COM/IDispatch，PowerPoint/WPS）
@@ -5439,6 +5440,68 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             out.error = QStringLiteral("%1 失败：netsh 非零退出（多半是**没有管理员权限**）").arg(block ? QStringLiteral("去网") : QStringLiteral("恢复网络"));
         else
             out.data.insert(QStringLiteral("path"), path);
+        return out;
+    }
+
+    // ── 批注 / 白板（2026-10-27 · H 批 · 替代 ICC CE）────────────────────
+    // 用户 00:42 裁决："集成 ICC CE 相关元素，代替 ICC CE 的画图地位…成为我们软件的一部分"。
+    // 一条前缀分支收全部子指令，避免再往主文件塞 N 段 if（main.cpp 已 8550 行）。
+    //   annotate_start{board}  显示批注层（board 空/transparent=透明批注；white/black/green/#RRGGBB=白板）
+    //   annotate_stop          隐藏（穿透态 = hide，不切 window flags）
+    //   annotate_status        只读状态
+    //   annotate_pen|highlighter|eraser / annotate_tool{tool} / annotate_color{color} / annotate_width{width}
+    //   annotate_undo / annotate_redo / annotate_clear / annotate_page{key} / annotate_board{board}
+    if (action.startsWith(QStringLiteral("annotate_"))) {
+        auto *ov = AnnotateDomain::Overlay::instance();
+        const QString sub = action.mid(9);      // "annotate_" = 9 字符
+        QString err;
+
+        if (sub == QStringLiteral("start")) {
+            if (!ov->start(&err)) {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("annotate_start: ") + err;
+                return out;
+            }
+            ov->setBoard(params.value(QStringLiteral("board")).toString());
+        } else if (sub == QStringLiteral("stop")) {
+            ov->stop();
+        } else if (sub == QStringLiteral("status")) {
+            // 只读，落到下面统一回执
+        } else {
+            AnnotateDomain::Canvas *c = ov->canvas();
+            if (!c) {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("批注层还没启动（先发 annotate_start）");
+                return out;
+            }
+            if (sub == QStringLiteral("pen") || sub == QStringLiteral("highlighter")
+                || sub == QStringLiteral("eraser")) {
+                c->setTool(sub);
+            } else if (sub == QStringLiteral("tool")) {
+                c->setTool(params.value(QStringLiteral("tool")).toString());
+            } else if (sub == QStringLiteral("color")) {
+                c->setColor(params.value(QStringLiteral("color")).toString());
+            } else if (sub == QStringLiteral("width")) {
+                c->setWidth(params.value(QStringLiteral("width")).toDouble(4.0));
+            } else if (sub == QStringLiteral("undo")) {
+                c->undo();
+            } else if (sub == QStringLiteral("redo")) {
+                c->redo();
+            } else if (sub == QStringLiteral("clear")) {
+                c->clearAll();
+            } else if (sub == QStringLiteral("page")) {
+                c->setPageKey(params.value(QStringLiteral("key")).toString());
+            } else if (sub == QStringLiteral("board")) {
+                ov->setBoard(params.value(QStringLiteral("board")).toString());
+            } else {
+                out.result = QStringLiteral("failed");
+                out.error = QStringLiteral("未知批注子指令：%1（支持 start/stop/status/pen/highlighter/"
+                                           "eraser/tool/color/width/undo/redo/clear/page/board）").arg(sub);
+                return out;
+            }
+        }
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("status"), ov->statusLine());
         return out;
     }
 

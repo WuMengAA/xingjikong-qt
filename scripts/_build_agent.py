@@ -49,7 +49,18 @@ def main():
     if "--clean" in sys.argv:
         cmd = [NINJA, "-C", BUILD, "-t", "clean"] + cmd[2:]
     p = subprocess.run(cmd, env=build_env())
-    return p.returncode
+    if p.returncode != 0:
+        return p.returncode
+
+    # ── 2026-10-27（H 批实测踩到）：显式指定 exe target 时，ALL 里的
+    #    `agent_qml_sync` **不会被执行**。于是新增一个 qml/ 子目录（本轮 qml/annotate/）
+    #    后，build/qml/ 里只多出一个**空目录** —— 运行期表现是"批注 QML 不存在"，
+    #    而且不报错、只在功能上哑掉，极难查（POST_BUILD 那条同样靠不住：
+    #    ninja 认为 exe 已最新时整条 POST_BUILD 都不跑）。
+    #    所以构建成功后显式补一次 qml 同步（copy_directory 是 copy-if-different，
+    #    无改动时只做几十次 stat，耗时可忽略）。
+    q = subprocess.run([NINJA, "-C", BUILD, "agent_qml_sync"], env=build_env())
+    return q.returncode
 
 
 if __name__ == "__main__":
