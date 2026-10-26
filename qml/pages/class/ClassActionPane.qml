@@ -1,6 +1,6 @@
 // 班级工作台 · 右栏上「动作面板」（#461-#472，2026-10-24 清新极简改版）
 // 全班（本班在线塞 picked 走批量 id）/ 单台（宿主已 pickDevice 走 runActionById）。
-// 语音对讲走 host.startSpeaking（全局广播，班级语音待建设，按钮预留）。
+// 语音对讲 = ClassTalkButton（真开麦，按住说话 / 松开结束；2026-10-26 修掉假按钮）。
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
 import "../../island"              // SvgIcon
@@ -54,15 +54,12 @@ Item {
             width: parent.width
             spacing: 14
 
-            FreshBtn {
-                text: "按住说话"
-                icon: "mic"
-                variant: "primary"
+            // 语音对讲：真·按住说话（2026-10-26 换掉假按钮）
+            // 旧写法 `pane.host.startSpeaking` 在外壳上不存在 ⇒ 点了只弹"请到集控页"。
+            // 现在直连 backend.startSpeaking/stopSpeaking，按下开麦、松开停。
+            ClassTalkButton {
                 width: parent.width
-                onClicked: {
-                    if (pane.host && pane.host.startSpeaking) pane.host.startSpeaking()
-                    else pane.toast("语音对讲请到集控页", false)
-                }
+                toastFn: pane.toastFn
             }
 
             Column {
