@@ -120,6 +120,9 @@ Section "Main" SEC_MAIN
   File "..\build\libcrypto-3-x64.dll"
 
   File /r "..\build\platforms"
+  ; 2026-10-26 P4：媒体后端插件（ffmpeg / windowsmediaplugin）。没有它，
+  ;   Qt6Multimedia.dll 和 qml/QtMultimedia 都在，MediaPlayer 仍放不出画面。
+  File /r "..\build\multimedia"
   File /r "..\build\imageformats"
   File /r "..\build\iconengines"
   File /r "..\build\generic"

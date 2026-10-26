@@ -30,6 +30,7 @@ static constexpr const char *kDefaultSiteUrl = "https://www.245959623.xyz";
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
+#include "playback_proxy.h"   // 2026-10-26 P4：回放本机回环代理
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -437,6 +438,12 @@ public:
     Q_INVOKABLE void stopVnc();
     /** 用户在密码框提交被控端访问密码（对应 uid）。发 vnc-auth 给云端校验。 */
     Q_INVOKABLE void submitVncPassword(const QString &uid, const QString &password);
+
+    // 2026-10-26 P4：监控回放。云端 /recordings/* 要 Bearer 头，而 MediaPlayer 的
+    // source 带不了头 ⇒ 走本机回环代理（令牌不出进程，Range 原样转发可拖进度条）。
+    // 返回给 QML 的播放地址；失败返回空串（QML 需据此提示，别点了没反应）。
+    Q_INVOKABLE QString playbackUrl(const QString &uid, const QString &name);
+    Q_INVOKABLE bool mediaAvailable() const;
     /** 注册 QML 图像提供器（main.cpp 建 engine 时传入 image://vnc 那个实例）。 */
     void setVncImageProvider(VncImageProvider *p);
 
@@ -895,6 +902,8 @@ private:
     QString m_vncPassword;            // 被控端 VNC 密码（STE_VNC_PASSWORD）
     // ── 被控端访问密码（2026-10-26 新增）：云端改密，接管前须 vnc-auth 鉴权 ──
     QHash<QString, QString> m_vncAccessPassword;   // uid -> 本会话记住的访问密码（仅内存）
+
+    PlaybackProxy m_playProxy;      // P4 回放：本机回环代理（见 playback_proxy.h）
     bool m_vncAuthAuto = false;       // 当前 vnc-auth 是否自动重试（区分"错误提示/静默重试"）
     QString m_vncAuthUid;             // 当前在鉴权的 uid
     QString m_vncAuthPasswordSubmitted; // 本次提交的密码（vnc-auth-ok 时缓存）

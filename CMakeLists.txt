@@ -140,7 +140,11 @@ endif()
 # ⚠️ 2026-10-13 审计 #25：Qt 最低版本 6.5 → 6.12 —— FluentWinUI3 风格是 6.12 才支持的
 # （此前声明 6.5 而代码用 FluentWinUI3，落在 [6.5,6.12) 的构建环境会静默回落默认风格）。
 # 项目实际固定 D:\QTqwq\6.12.0，声明对齐到实际，杜绝"配置能过、运行时风格不对"。
-find_package(Qt6 6.12 REQUIRED COMPONENTS Core CorePrivate Gui Quick QuickControls2 Network WebSockets Widgets Svg)
+# 2026-10-26 P4：监控回放小窗需要真视频解码 ⇒ 引入 Multimedia。
+# 历史注释（10-11）说"两 kit 都没装" —— 现已用 MaintenanceTool 装上
+# qt.qt6.6120.addons.qtmultimedia（含 WMF 与 **ffmpeg** 两个后端插件，
+# mp4/H.264 兼容性取 ffmpeg 更稳）。桌面 kit 与 Android kit 同步具备。
+find_package(Qt6 6.12 REQUIRED COMPONENTS Core CorePrivate Gui Quick QuickControls2 Network WebSockets Widgets Svg Multimedia)
 qt_standard_project_setup(REQUIRES 6.12)
 
 # ── libopus（P1 语音对讲，静态链接）2026-10-21 ────────────────────────────
@@ -178,6 +182,9 @@ qt_add_executable(viewer-qt
   # vnc_client.cpp 退化为安全桩（不引 rfb 头），整个工程仍可干净构建。
   src/vnc_client.cpp
   src/vnc_client.h
+  # 2026-10-26 P4：回放本机回环代理（补 Bearer 头 + 转发 Range，见文件头注释）
+  src/playback_proxy.cpp
+  src/playback_proxy.h
   src/vnc_image_provider.cpp
   src/vnc_image_provider.h
   # 2026-10-15 组件6 配套：互动审批桥（审批数据面 + 共享灵动岛的桥面）。
@@ -376,7 +383,7 @@ add_dependencies(viewer-qt viewer_qml_sync)
 target_sources(viewer-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio/opus_codec.cpp")
 target_include_directories(viewer-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio")
 
-target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg opus)
+target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg Qt6::Multimedia opus)
 
 # ── OpenSSL 运行时 DLL 拷进 build/（2026-10-20 恢复 720bd8d 的规则）──────────
 # 历史：0.6.33 的 `720bd8d` 加过这条规则（作者当时的实证：干净重建后 makensis 报
@@ -496,9 +503,15 @@ endif()
 # ... Android 不用 windeployqt（androiddeployqt 管）；且它读 Android .so 会报 DOS header
 # 2026-10-11：加桌面条件
 if(NOT STE_IS_ANDROID AND STE_WINDEPLOYQT_EXECUTABLE)
+  # 2026-10-26 P4：加 --qmldir —— windeployqt 默认只扫 exe 的 PE 导入表，
+  #   而 QML 的 `import QtMultimedia` 不产生任何 C++ 符号（MSVC 会把未引用的
+  #   Qt6Multimedia.dll 导入整个丢掉），结果是"链接成功了、装完却放不出来"：
+  #   Qt6Multimedia.dll 与 plugins/multimedia/*.dll 都不会被部署。
+  #   给 --qmldir 让它扫 QML import，才能把 Multimedia 运行时 + 媒体后端插件带上。
   add_custom_command(TARGET viewer-qt POST_BUILD
     COMMAND "${STE_WINDEPLOYQT_EXECUTABLE}" "$<TARGET_FILE:viewer-qt>"
             --no-translations
+            --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/qml"
     VERBATIM)
 endif()
 

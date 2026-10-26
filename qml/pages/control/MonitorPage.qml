@@ -28,6 +28,15 @@ Item {
     property var backFn: null
 
     readonly property var th: (ctx && ctx.window && ctx.window.th) ? ctx.window.th : null
+    // 2026-10-26 P4：当前设备的录像列表。
+    // backend.recordings = { uid: [ { name, bytes, mtimeMs } ] }（QJsonObject → JS 对象）
+    readonly property var recs: {
+        const u = backend.currentUid
+        if (!u) return []
+        const o = backend.recordings
+        if (!o || !o[u]) return []
+        return o[u] || []
+    }
 
     Rectangle { anchors.fill: parent; color: th ? th.body : "#141414" }
 
@@ -161,7 +170,41 @@ Item {
             }
         }
 
-        // ── ③ 操作栏（全部复用现有后端动作，给监控场景的快捷操作）──────
+        // ── ③ 录像回放（2026-10-26 · P4）──────────────────────────────
+        //  点一条就在右下角弹小窗播（不是跳页）。小窗是根上的浮层，
+        //  所以切去别的面板它还在 —— 老师能一边看回放一边干别的。
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 6
+            visible: page.recs.length > 0
+
+            Text {
+                text: "录像回放"
+                font.pixelSize: 13
+                color: th ? th.fg : "#FAFAFA"
+            }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+                Repeater {
+                    model: page.recs
+                    Md3Btn {
+                        text: (modelData && modelData.name)
+                              ? modelData.name.replace("rec-", "").replace(".mp4", "")
+                              : "录像"
+                        variant: "tonal"
+                        onClicked: {
+                            if (!modelData) return
+                            if (ctx.window && ctx.window.openPlayback)
+                                ctx.window.openPlayback(backend.currentUid, modelData.name,
+                                                        backend.currentUid)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── ④ 操作栏（全部复用现有后端动作，给监控场景的快捷操作）──────
         //  #370：补「推文件」入口（走 file_push 面板）与「返回」（跳回集控页）。
         //  用 Flow 包，窗口窄时自动换行，不挤成一团。
         Flow {

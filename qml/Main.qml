@@ -499,6 +499,11 @@ ApplicationWindow {
 
     // 被控端访问密码弹窗（2026-10-26）：接管启用了访问密码的设备前，云端要求先鉴权。
     VncAuthDialog { id: vncAuthDlg; theme: root.th }
+
+    // 2026-10-26 P4：监控回放小窗。声明在根上 ⇒ 跨页常驻（切到别的面板也不掉），
+    // 这才是"电脑管家贴角小窗"该有的样子；页面里只负责调用 openPlayback。
+    PlaybackMiniWindow { id: playbackWin; theme: root.th }
+    function openPlayback(uid, name, label) { playbackWin.openFor(uid, name, label) }
     Connections {
         target: backend
         function onVncAuthRequired(uid) {

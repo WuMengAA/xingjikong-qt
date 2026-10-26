@@ -2130,6 +2130,34 @@ bool ViewerBackend::unzipStore(const QString &outDir, const QByteArray &zip)
     return false;
 }
 
+// 2026-10-26 P4：给 QML 一个能直接喂给 MediaPlayer 的地址。
+// 云端 /recordings/* 要 Bearer 令牌，而 QML MediaPlayer 的 source 带不了请求头 ——
+// 所以这里起本机回环代理，由它在转发时补 Authorization（令牌不出进程），
+// 并把 Range 原样带给云端、把 206 原样带回来（拖动进度条 = 一次小范围请求）。
+QString ViewerBackend::playbackUrl(const QString &uid, const QString &name)
+{
+    if (uid.isEmpty() || name.isEmpty())
+        return {};
+    // 云端 http 基址：与 fetchRecordings 同口径（m_url 是 ws://host:port/ws/viewer）
+    QString base = m_url;
+    base.replace(QLatin1String("wss://"), QLatin1String("https://"))
+        .replace(QLatin1String("ws://"), QLatin1String("http://"));
+    const int wsIdx = base.indexOf(QLatin1String("/ws/"));
+    if (wsIdx > 0)
+        base.truncate(wsIdx);
+    const QByteArray token = !m_cloudTicket.isEmpty() ? m_cloudTicket.toUtf8() : m_token.toUtf8();
+    if (m_playProxy.start(m_nam, base, QString::fromUtf8(token)).isEmpty()) {
+        logf("[rec] 回放代理起不来（回环监听失败），播放将不可用");
+        return {};
+    }
+    return m_playProxy.urlFor(uid, name);
+}
+
+bool ViewerBackend::mediaAvailable() const
+{
+    return PlaybackProxy::mediaBackendAvailable();
+}
+
 void ViewerBackend::fetchRecordings()
 {
     // 2026-10-13 审计 2.9：m_nam 已在构造函数创建，这里直接用
