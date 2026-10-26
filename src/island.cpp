@@ -368,16 +368,25 @@ QRect IslandOverlay::geometryForContent(int shapeHeight) const
                             fm.horizontalAdvance(m_desc));
     // 2026-10-27（F 收尾第 2 项）：有渠道标签时，收起态是「标签 + 6px + 描述」同排
     // （见 IslandRoot 的 csChannel）—— 宽度必须一起算进窗口，否则描述会被标签挤成
-    // "数学 · 08…"，标签在而内容没了。标签度量与 QML 对齐：12px DemiBold + 左右各 7px。
+    // "数学 · 08…"，标签在而内容没了。
+    // ⚠️ 这里**不能沿用上面那套 iconW+textW+48**：那是"单行标题"的估算式，右侧只算了
+    //    48px；而 QML 的收起态是左内缩 48（图标 14+22+间距 12）+ 右内缩 42（鲸鱼领地），
+    //    标签行要的是 48+标签+6+描述+42。2026-10-27 生产截图实测：按旧式算 209px 时
+    //    描述被截成 "数学 · 0…"（差 ~24px），就是这么来的。
+    // ⚠️ 度量字体按 QML 实际字号取 12px（fsNote）——QWidget 的 font() 与 QML Text 的
+    //    默认字体族不同，混用会在中文上差 10%+。
     int textW = textW0;
+    int needW = 0;    // 标签行的真实需求宽（0 = 无渠道，不参与）
     if (!m_channel.isEmpty()) {
         QFont cf = font();
         cf.setPixelSize(12);
         cf.setWeight(QFont::DemiBold);
-        textW = qMax(textW, QFontMetrics(cf).horizontalAdvance(m_channel) + 14 + 6
-                                + fm.horizontalAdvance(m_desc));
+        const QFontMetrics cfm(cf);
+        const int chipW = cfm.horizontalAdvance(m_channel) + 14;   // 药丸左右各 7
+        const int descW = cfm.horizontalAdvance(m_desc);
+        needW = 48 + chipW + 6 + descW + 42;
     }
-    const int w = qBound(kMinContentW, iconW + textW + 48, maxW);
+    const int w = qBound(kMinContentW, qMax(iconW + textW + 48, needW), maxW);
     return QRect(sg.x() + (sg.width() - w) / 2, sg.y() + 24, w, shapeHeight);
 }
 
