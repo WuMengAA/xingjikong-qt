@@ -39,6 +39,13 @@ function manifest() {
           surfaces: ["panel"], entry: "panels/PptDialog.qml",
           keys: ["ppt", "fangying", "fy", "huandeng", "kejian"],
           tip: "翻页与放映状态（上一页 / 下一页 / 跳页）" },
+        // 2026-10-27（H 批）：批注 / 白板。为什么是面板而不是一颗按钮 ——
+        // 老师要"工具 / 颜色 / 背景 / 页"四组状态一起看得见，且操作有先后
+        //（先开始，再换笔），单颗按钮表达不了。
+        { id: "annotate",  title: "批注 / 白板", icon: "pencil",    order: 43,
+          surfaces: ["panel"], entry: "panels/AnnotateDialog.qml",
+          keys: ["annotate", "pizhu", "pz", "baiban", "bb", "huaban"],
+          tip: "在设备屏幕上圈画（落笔不抢课件键盘焦点）" },
         { id: "camera",    title: "监控",       icon: "camera",     order: 50,
           surfaces: ["panel"], entry: "panels/CameraCenterDialog.qml",
           keys: ["camera", "shexiangtou", "sxt"], tip: "摄像头监控 + 绑定" },

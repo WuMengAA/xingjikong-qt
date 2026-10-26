@@ -914,8 +914,10 @@ ApplicationWindow {
             volumeDlg.open(); return true
         case "schedule":
             backend.sendAction("list_schedules"); openOnly("sched"); return true
-        case "alarm":
-            backend.sendAction("list_alarms"); openOnly("alarm"); return true
+        // 2026-10-27：删掉 case "alarm"（P1 把闹钟改成面板后这里成了死分支）。
+        // test-action-manifest 的「kind=special 与 runSpecial 的 case 一一对应」一直在报
+        // “宿主有、声明没有：alarm” —— 门禁红了两天就是这么来的。
+        // 面板自己在 onOpened 里发 list_alarms，删掉不丢任何行为。
 
         // ── 语音对讲（快捷行是切换语义，命令面板是分开的开 / 停）──
         case "voice-toggle":
