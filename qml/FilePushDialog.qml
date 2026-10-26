@@ -5,14 +5,15 @@
 //
 // 分块推送的节奏在 backend（C++）里：一片一片等回执再发下一片。这里只负责
 // 选文件 / 显示进度 / 把失败原因照原样念出来，不自己攒状态。
+//
+// 2026-10-26（产品笔记 P2）：视觉换新 —— 正式吃 Md3 令牌 + fresh 组件族
+//（与班级发布中心同语言）。交互、协议、字段一律未动，只换了皮。
 
 import QtQuick
 import QtQuick.Controls
 import "components"       // 2026-10-10：SvgIcon 等组件统一显式 import（Qt6.12 严格解析）
-import "island"          // SvgIcon 的唯一真源在共享岛目录（Stelarith-shared-qml/island/，构建期拷到 qml/island/）——
-                      // 2026-10-16 修：A 档把 viewer 自己的 components/SvgIcon.qml 当"重复件"删了，
-                      // 但那 4 个同名件里只有它的接口是超集且被**全套面板 + Main.qml**在用；
-                      // 另 3 个（IslandClock/MarqueeText/WhaleMascot）确实只被岛用，删对了。
+import "island"           // SvgIcon 的唯一真源在共享岛目录（Stelarith-shared-qml/island/）
+import "components/theme" // Md3 令牌（pragma Singleton；深/浅由主外壳统一写）
 
 Popup {
     id: dlg
@@ -32,7 +33,7 @@ Popup {
 
     anchors.centerIn: parent
     width: 560
-    height: 300
+    height: 320
     modal: true
     padding: 0
     closePolicy: Popup.CloseOnEscape
@@ -50,15 +51,16 @@ Popup {
     }
 
     background: Rectangle {
-        color: dlg.theme ? dlg.theme.cream : "#141414"
-        radius: dlg.theme ? dlg.theme.rCard : 12
-        border.color: dlg.theme ? dlg.theme.stroke : "#242424"
+        color: Md3 ? Md3.frCard : (dlg.theme ? dlg.theme.cream : "#141414")
+        radius: Md3 ? Md3.frRCard : (dlg.theme ? dlg.theme.rCard : 12)
+        border.color: Md3 ? Md3.frLine : (dlg.theme ? dlg.theme.stroke : "#242424")
         border.width: 1
     }
 
     contentItem: Column {
         spacing: 0
 
+        // ── 标题栏 ──
         Item {
             width: parent.width
             height: 46
@@ -66,17 +68,25 @@ Popup {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
-                text: "文件"
-                color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
-                font.pixelSize: 13
+                text: "文件控制"
+                color: Md3 ? Md3.cOnSurface : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                font.pixelSize: 14
                 font.weight: Font.Medium
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 72
+                text: "把本机文件分发到设备收件目录"
+                color: Md3 ? Md3.cOnSurfaceVar : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                font.pixelSize: 11
             }
             SvgIcon {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 name: "x"
-                tint: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                tint: Md3 ? Md3.cOnSurfaceVar : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
                 width: 14
                 height: 14
                 MouseArea {
@@ -89,41 +99,30 @@ Popup {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: 1
-                color: dlg.theme ? dlg.theme.line : "#161616"
+                color: Md3 ? Md3.frLine : (dlg.theme ? dlg.theme.line : "#161616")
             }
         }
 
+        // ── 选文件 ──
         Item {
             width: parent.width
-            height: 30
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                x: 18
-                width: parent.width - 36
-                text: "选择一个本机文件分发到该设备，保存至其收件目录。"
-                color: dlg.theme ? dlg.theme.fg4 : "#3A3A3A"
-                font.pixelSize: 11
-                wrapMode: Text.Wrap
-            }
-        }
-
-        Item {
-            width: parent.width
-            height: 62
+            height: 66
 
             // 选文件
             Rectangle {
                 id: pickBtn
-                x: 18; y: 12
-                width: 92; height: 30
-                radius: dlg.theme ? dlg.theme.rCtrl : 9
-                color: pickArea.containsMouse ? (dlg.theme ? dlg.theme.hover : "#1E1E1E") : "transparent"
-                border.color: dlg.theme ? dlg.theme.stroke : "#242424"
+                x: 18; y: 16
+                width: 92; height: 32
+                radius: Md3 ? Md3.frRIn : (dlg.theme ? dlg.theme.rCtrl : 9)
+                color: pickArea.containsMouse
+                       ? (Md3 ? Md3.cContHigh : (dlg.theme ? dlg.theme.hover : "#1E1E1E"))
+                       : (Md3 ? Md3.cContLow : "transparent")
+                border.color: Md3 ? Md3.cOutlineVar : (dlg.theme ? dlg.theme.stroke : "#242424")
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
                     text: "选文件"
-                    color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
+                    color: Md3 ? Md3.cOnSurface : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
                     font.pixelSize: 12
                 }
                 // 选文件走 backend.pickFile()（C++ 原生 QFileDialog）。
@@ -138,29 +137,30 @@ Popup {
                 x: 124
                 width: parent.width - 142
                 text: dlg.pendingUrl ? ("已选：" + dlg.pendingName) : "（还没选文件）"
-                color: dlg.pendingUrl ? (dlg.theme ? dlg.theme.op : "#C8C8C8")
-                                      : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                color: dlg.pendingUrl
+                       ? (Md3 ? Md3.cOnSurface : (dlg.theme ? dlg.theme.op : "#C8C8C8"))
+                       : (Md3 ? Md3.cOnSurfaceVar : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A"))
                 font.pixelSize: 12
                 elide: Text.ElideMiddle
             }
         }
 
+        // ── 进度 ──
         Item {
             width: parent.width
-            height: 34
-            // 进度条：backend.fileState 是 sending 才动，其它状态留着当信息位
+            height: 38
             Rectangle {
-                x: 18; y: 6
+                x: 18; y: 15
                 width: parent.width - 108
                 height: 6
                 radius: 3
-                color: dlg.theme ? dlg.theme.line : "#161616"
+                color: Md3 ? Md3.cOutlineVar : (dlg.theme ? dlg.theme.line : "#161616")
                 Rectangle {
                     // 子项里 parent 就是这条底槽，直接按它的宽度算，别往上摸两层（折叠一次就断）
                     width: parent.width * (backend.filePercent / 100)
                     height: 6
                     radius: 3
-                    color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
+                    color: Md3 ? Md3.cPrimary : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
                 }
             }
             Text {
@@ -168,19 +168,20 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 text: backend.filePercent + "%"
-                color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
+                color: Md3 ? Md3.cOnSurfaceVar : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
                 font.pixelSize: 11
             }
         }
 
+        // ── 状态 + 操作 ──
         Item {
             width: parent.width
-            height: 40
+            height: 44
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
-                width: parent.width - 190
+                width: parent.width - 300
                 // 状态/原因一律由 backend 出：这里不自己拼一句"可能失败了"这种没信息的话
                 text: {
                     if (backend.fileState === "sending")
@@ -193,13 +194,39 @@ Popup {
                         return "已取消";
                     return "选好文件后点「开始推送」";
                 }
-                // 失败态不再用红色（#C0392B）：黑白稿集里"强调"只有反白+描边一种手段，
+                // 失败态不用红色：黑白稿集里"强调"只有反白+描边一种手段，
                 // 这里改成反白字加粗、前缀 ✕，深色下是白字压深底，浅色下是黑字压白底。
-                color: (backend.fileState === "failed") ? (dlg.theme ? dlg.theme.fg : "#FAFAFA")
-                                                        : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: (backend.fileState === "failed")
+                       ? (Md3 ? Md3.cError : (dlg.theme ? dlg.theme.fg : "#FAFAFA"))
+                       : (Md3 ? Md3.cOnSurfaceVar : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A"))
                 font.pixelSize: 12
                 font.bold: backend.fileState === "failed"
                 elide: Text.ElideMiddle
+            }
+
+            Rectangle {
+                id: cancelBtn
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: goBtn.left
+                anchors.rightMargin: 8
+                width: 56; height: 30
+                radius: Md3 ? Md3.frRIn : (dlg.theme ? dlg.theme.rCtrl : 9)
+                color: cancelArea.containsMouse
+                       ? (Md3 ? Md3.cContHigh : (dlg.theme ? dlg.theme.hover : "#1E1E1E"))
+                       : (Md3 ? Md3.cContLow : "transparent")
+                border.color: Md3 ? Md3.cOutlineVar : (dlg.theme ? dlg.theme.stroke : "#242424")
+                border.width: 1
+                Text {
+                    anchors.centerIn: parent
+                    text: "取消"
+                    color: Md3 ? Md3.cOnSurfaceVar : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                    font.pixelSize: 12
+                }
+                MouseArea {
+                    id: cancelArea
+                    anchors.fill: parent
+                    onClicked: { backend.cancelPush(); dlg.close() }
+                }
             }
 
             Rectangle {
@@ -207,15 +234,19 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.right: parent.right
                 anchors.rightMargin: 18
-                width: 76; height: 30
-                radius: dlg.theme ? dlg.theme.rCtrl : 9
-                color: goArea.containsMouse ? (dlg.theme ? dlg.theme.hover : "#1E1E1E") : "transparent"
-                border.color: dlg.theme ? dlg.theme.stroke : "#242424"
+                width: 88; height: 30
+                radius: Md3 ? Md3.frRIn : (dlg.theme ? dlg.theme.rCtrl : 9)
+                color: (goArea.enabled && goArea.containsMouse)
+                       ? (Md3 ? Md3.cPrimaryCont : (dlg.theme ? dlg.theme.hover : "#1E1E1E"))
+                       : (Md3 ? Md3.cPrimary : (dlg.theme ? dlg.theme.fg : "#FAFAFA"))
+                border.color: Md3 ? Md3.cPrimary : "transparent"
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
                     text: "开始推送"
-                    color: dlg.theme ? dlg.theme.fg : "#FAFAFA"
+                    color: (goArea.enabled)
+                           ? (Md3 ? Md3.cOnPrimary : (dlg.theme ? dlg.theme.fg : "#FAFAFA"))
+                           : (Md3 ? Md3.cOnSurfaceVar : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A"))
                     font.pixelSize: 12
                 }
                 MouseArea {
@@ -230,29 +261,14 @@ Popup {
                 }
             }
 
-            Rectangle {
-                id: cancelBtn
+            Text {
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.right: goBtn.left
-                anchors.rightMargin: 8
-                width: 56; height: 30
-                radius: dlg.theme ? dlg.theme.rCtrl : 9
-                color: cancelArea.containsMouse ? (dlg.theme ? dlg.theme.hover : "#1E1E1E") : "transparent"
-                border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
-                Text {
-                    anchors.centerIn: parent
-                    text: "取消"
-                    color: dlg.theme ? dlg.theme.fg3 : "#5A5A5A"
-                    font.pixelSize: 12
-                }
-                MouseArea {
-                    id: cancelArea
-                    anchors.fill: parent
-                    onClicked: { backend.cancelPush(); dlg.close() }
-                }
+                anchors.right: cancelBtn.left
+                anchors.rightMargin: 10
+                text: "推完即保存到设备收件目录"
+                color: Md3 ? Md3.cOnSurfaceVar : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                font.pixelSize: 11
             }
         }
     }
-
 }

@@ -7,12 +7,16 @@
 // 契约来源（**别凭记忆改，去读**）：control-qt `src/main.cpp` 的 notifyFromParams()
 //   action = "notify"
 //   params = {
-//     kind:    "popup" | "island" | "fullscreen"   // 未知/缺省 → 被控端一律按 popup 处理
+//     kind:    "popup" | "banner" | "fullscreen"  // 未知/缺省 → 被控端一律按 popup 处理
 //     title:   string                              // 必填；空 → 被控端回 failed "notify 缺 title"
 //     content: string
 //     seconds: int                                 // **>0 才带**；不带 = 被控端按字数自适应
 //     flags: { speech: bool, severity?: "remind"|"inform"|"urgent", emergency_confirm?: bool }
 //   }
+//
+// ⚠️ 2026-10-26（产品笔记 P0）：通知形态收敛为 弹窗/角标/跑马灯/全屏 四类。
+//    被控端 kind=island（胶囊）已归一为弹窗，发送侧不再提供该形态；
+//    banner（顶部通栏即跑马灯）替代 island 成为可选项。
 //
 // ⚠️ 不发 notice_id：那是站点侧对账用的（站点有 notice_kinds 表 + receiptsByNotice()），
 //    管理端没有这张表，带了也没人认。
@@ -23,7 +27,7 @@ var CAP_TITLE = 24;
 var CAP_CONTENT = 64;
 var MAX_SECONDS = 3600;
 
-var KINDS = ["popup", "island", "fullscreen"];
+var KINDS = ["popup", "banner", "fullscreen"];
 var SEVERITIES = ["remind", "inform", "urgent"];
 
 /** 形态归一化：未知值一律 popup —— 与被控端 notifyFromParams() 的安全默认同口径。 */

@@ -909,6 +909,8 @@ ApplicationWindow {
             volumeDlg.open(); return true
         case "schedule":
             backend.sendAction("list_schedules"); openOnly("sched"); return true
+        case "alarm":
+            backend.sendAction("list_alarms"); openOnly("alarm"); return true
 
         // ── 语音对讲（快捷行是切换语义，命令面板是分开的开 / 停）──
         case "voice-toggle":

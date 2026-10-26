@@ -75,12 +75,12 @@ t("标题两端空白被 trim", () => {
 
 // ── 3. 形态归一化（与被控端"未知值一律 popup"同口径）────────────────────────
 t("三种形态原样透传", () => {
-	for (const k of ["popup", "island", "fullscreen"]) {
+	for (const k of ["popup", "banner", "fullscreen"]) {
 		eq(NP.buildNotifyParams({ title: "x", kind: k }).params.kind, k);
 	}
 });
-t("未知形态 → 回落 popup", () => {
-	eq(NP.buildNotifyParams({ title: "x", kind: "banner" }).params.kind, "popup");
+t("未知形态 → 回落 popup（island 已退役归此列）", () => {
+	eq(NP.buildNotifyParams({ title: "x", kind: "island" }).params.kind, "popup");
 	eq(NP.buildNotifyParams({ title: "x", kind: "" }).params.kind, "popup");
 	eq(NP.buildNotifyParams({ title: "x" }).params.kind, "popup", "缺省也是 popup");
 });
@@ -94,7 +94,7 @@ t("fullscreen 带 severity，未知值回落 remind", () => {
 });
 t("非全屏**不带** severity 键（带一个被忽略的值会让人误以为被控端有 bug）", () => {
 	ok(!("severity" in NP.buildNotifyParams({ title: "x", kind: "popup", severity: "urgent" }).params.flags), "popup 不该有 severity");
-	ok(!("severity" in NP.buildNotifyParams({ title: "x", kind: "island", severity: "urgent" }).params.flags), "island 不该有 severity");
+	ok(!("severity" in NP.buildNotifyParams({ title: "x", kind: "island", severity: "urgent" }).params.flags), "island（已退役→回落 popup）不该有 severity");
 });
 
 // ── 5. seconds：>0 才带 ────────────────────────────────────────────────────
