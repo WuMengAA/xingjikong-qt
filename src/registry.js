@@ -6,6 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { appendFile } from 'node:fs/promises';
 import { EV_LIMIT, KEEP_LAST_FRAME, EVENTS_FILE, HEARTBEAT_TIMEOUT_MS,
   EVENTS_MAX_BYTES, EVENTS_KEEP_FILES } from './config.js';
@@ -57,6 +58,91 @@ function pruneKnown() {
     n++;
   }
   pushEvent('warn', '已知设备表超上限，淘汰最久未见记录', { keep: KNOWN_KEEP, dropped: n });
+}
+
+// ── 被控端访问密码（2026-10-26）────────────────────────────────────────────────
+// 设备访问密码 = 远端接管（VNC 远控）前的第二道闸：即便有班级权限（canAccess），
+// 也要先凭设备访问密码过鉴权才能看/控这台设备。密码由云端统一存储与下发修改。
+//
+// 为什么独立持久化：knownDevices 不落盘（重连重建），而密码必须跨重启保留，
+// 所以单独存一份 vnc-access.json（uid -> { enabled, salt, verifier }）。
+// 安全：云端只存 salted verifier（scrypt），绝不存明文；明文只在"已鉴权的设备 WS"
+// 上下发给 agent 本地持久化用（agent 才是被控端本体）。
+const VNC_ACCESS_FILE = path.join(process.env.CLOUD_DATA_DIR || process.cwd(), 'vnc-access.json');
+const vncAccessStore = new Map();   // uid -> { enabled, salt(hex), verifier(hex) }
+
+function loadVncAccess() {
+  try {
+    if (!fs.existsSync(VNC_ACCESS_FILE)) return;
+    const raw = JSON.parse(fs.readFileSync(VNC_ACCESS_FILE, 'utf8'));
+    if (raw && typeof raw === 'object') {
+      for (const [uid, rec] of Object.entries(raw)) {
+        if (rec && typeof rec.salt === 'string' && typeof rec.verifier === 'string')
+          vncAccessStore.set(uid, { enabled: !!rec.enabled, salt: rec.salt, verifier: rec.verifier });
+      }
+    }
+    pushEvent('info', '被控端访问密码表已加载', { count: vncAccessStore.size });
+  } catch (e) {
+    pushEvent('warn', '访问密码表加载失败（忽略，按无密码处理）', { error: String(e?.message || e) });
+  }
+}
+function saveVncAccess() {
+  try {
+    const obj = {};
+    for (const [uid, rec] of vncAccessStore) obj[uid] = rec;
+    fs.mkdirSync(path.dirname(VNC_ACCESS_FILE), { recursive: true });
+    fs.writeFileSync(VNC_ACCESS_FILE, JSON.stringify(obj, null, 2));
+  } catch (e) {
+    pushEvent('warn', '访问密码表保存失败', { error: String(e?.message || e) });
+  }
+}
+loadVncAccess();
+
+/** 仅返回是否启用了访问密码（不泄露任何密钥材料）。 */
+export function getVncAccess(uid) {
+  const rec = vncAccessStore.get(String(uid || '').trim());
+  return rec ? { enabled: !!rec.enabled } : { enabled: false };
+}
+
+/** 设置/清除设备访问密码。password 空/省略 = 关闭（清除）。返回 { ok, enabled, error? }。 */
+export function setVncAccess(uid, password) {
+  uid = String(uid || '').trim();
+  if (!uid) return { ok: false, error: '缺 uid' };
+  if (!password || !String(password).length) {
+    vncAccessStore.delete(uid);          // 清空 = 关闭访问密码
+    saveVncAccess();
+    return { ok: true, enabled: false };
+  }
+  const pw = String(password);
+  if (pw.length > 64) return { ok: false, error: '密码过长（≤64 字符）' };
+  const salt = crypto.randomBytes(16);
+  const verifier = crypto.scryptSync(pw, salt, 32);   // 32B
+  vncAccessStore.set(uid, {
+    enabled: true,
+    salt: salt.toString('hex'),
+    verifier: verifier.toString('hex'),
+  });
+  saveVncAccess();
+  return { ok: true, enabled: true };
+}
+
+/** 校验设备访问密码（恒定时间比较）。设备未启用密码时一律返回 false（调用方据此放行）。 */
+export function verifyVncPassword(uid, password) {
+  const rec = vncAccessStore.get(String(uid || '').trim());
+  if (!rec || !rec.enabled) return false;
+  const pw = String(password || '');
+  try {
+    const salt = Buffer.from(rec.salt, 'hex');
+    const want = Buffer.from(rec.verifier, 'hex');
+    const got = crypto.scryptSync(pw, salt, 32);
+    return crypto.timingSafeEqual(want, got);
+  } catch { return false; }
+}
+
+/** uid 是否启用了访问密码（供中继门控内联判断）。 */
+export function isVncAccessEnabled(uid) {
+  const rec = vncAccessStore.get(String(uid || '').trim());
+  return !!(rec && rec.enabled);
 }
 
 /**
@@ -1025,8 +1111,11 @@ export function vncDataToAgent(uid, buf) {
 export function vncDataToViewer(uid, buf) {
   const key = String(uid || '').trim();
   let hits = 0;
+  // 2026-10-26：被控端访问密码门控——设了密码的设备，只有过密码鉴权的管理端才收得到画面
+  const locked = isVncAccessEnabled(key);
   for (const [ws, v] of viewers) {
     if (!v.subs.has(key) && !v.live.has(key)) continue;
+    if (locked && !(ws.__vncAuthed && ws.__vncAuthed.has(key))) continue;
     if (ws.readyState !== 1) { viewers.delete(ws); continue; }
     try {
       ws.send(buf, { binary: true });

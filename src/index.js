@@ -206,6 +206,7 @@ import {
   notifyClassBoundIfOnline,
   getStorageInfo, isClassCodeValid, hydrateClassesFromDir,
   recomputeDeviceEnv,
+  getVncAccess, setVncAccess, verifyVncPassword,
 } from './registry.js';
 // 班级身份唯一真源（2026-10-20）：码/名/别名的解析与落盘。所有绑班入口只认它。
 import { initClassDir, resolveClassCode, registerExternalCode, listClassDir, classDirSize } from './class-dir.js';
@@ -1066,6 +1067,50 @@ const server = http.createServer((req, res) => {
       return send(r.ok ? 200 : 400, { ok: r.ok, ...r });
     });
     return;
+  }
+
+  // ── 被控端访问密码（2026-10-26）：设置/清除 + 查询状态 ──
+  // 设备访问密码 = 远端接管（VNC 远控）前的第二道闸，由云端统一存储与下发修改。
+  // 鉴权：viewer 令牌 + 按设备班级 canAccess（与远控同一口径）。
+  if (u.pathname === '/api/device/vnc-access') {
+    const who = req.__auth;
+    if (!who) return send(401, { ok: false, error: '未鉴权' });
+    const ident = identityFromAuth(who);
+    if (req.method === 'GET') {
+      const uid = String(u.searchParams.get('uid') || '').trim();
+      if (!uid) return send(400, { ok: false, error: '缺 uid' });
+      if (!canAccess(ident, getDeviceClassCode(uid)))
+        return send(403, { ok: false, error: '无权限访问该设备' });
+      return send(200, { ok: true, enabled: getVncAccess(uid).enabled });
+    }
+    if (req.method === 'POST') {
+      let raw = '';
+      req.on('data', (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
+      req.on('end', () => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { /* 非法 JSON → 走 query */ }
+        const uid = String(body.uid ?? u.searchParams.get('uid') ?? '').trim();
+        const password = String(body.password ?? u.searchParams.get('password') ?? '').valueOf();
+        if (!uid) return send(400, { ok: false, error: '缺 uid' });
+        if (!canAccess(ident, getDeviceClassCode(uid)))
+          return send(403, { ok: false, error: '无权限访问该设备' });
+        if (password.length > 64) return send(400, { ok: false, error: '密码过长（≤64 字符）' });
+        const r = setVncAccess(uid, password);   // password 空 = 清除（关闭）
+        if (!r.ok) return send(400, { ok: false, error: r.error || '设置失败' });
+        // 下发到被控端本地持久化（明文只在已鉴权的设备 WS 上走，云端不存明文）。
+        if (r.enabled) {
+          const okPush = sendToAgentMsg(uid, 'vnc-access', { enabled: true, password });
+          if (!okPush.ok)
+            pushEvent('warn', '访问密码已存云端，但下发被控端失败（设备可能不在线）', { uid });
+        } else {
+          sendToAgentMsg(uid, 'vnc-access', { enabled: false, password: '' });
+        }
+        pushEvent('info', '被控端访问密码已' + (r.enabled ? '设置' : '清除'), { uid, who: who.uid ?? who.mode ?? '?' });
+        return send(200, { ok: true, enabled: r.enabled });
+      });
+      return;
+    }
+    return send(405, { ok: false, error: '方法不支持' });
   }
 
   // 班级管理（2026-10-24）：POST /api/class/{create,rename,delete,unbind,
@@ -2045,6 +2090,12 @@ viewerWss.on('connection', (ws) => {
             sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限远控设备 ${uid}`);
             return;
           }
+          // 2026-10-26：被控端访问密码门控——设了密码的设备，未过鉴权的管理端一帧都不转发。
+          if (getVncAccess(uid).enabled && !(ws.__vncAuthed && ws.__vncAuthed.has(uid))) {
+            pushEvent('warn', 'vnc-data 被拒（未过访问密码鉴权）', { uid });
+            sndErr(ws, 'VNC_AUTH_REQUIRED', `设备 ${uid} 已启用访问密码，请先鉴权`);
+            return;
+          }
           const r = vncDataToAgent(uid, buf);
           if (!r.ok) {
             pushEvent('warn', 'vnc-data 未送达设备（可能不在线）', { uid, bytes: buf.length });
@@ -2163,6 +2214,29 @@ viewerWss.on('connection', (ws) => {
         if (ok) rtcSignalToAgent(p.payload.uid, 'rtc-stop', { uid: p.payload.uid });
         return;
       }
+      // 2026-10-26：被控端访问密码鉴权。管理端在远端接管前先发这条带上设备密码；
+      // 云端校验通过后，本连接 ws.__vncAuthed 记下该 uid，之后的 vnc-data 双向中继与
+      // remote_control_start 指令才放行。未设密码的设备不用这步（中继按 enabled 跳过）。
+      case 'vnc-auth': {
+        const uid = String(p.payload?.uid || '').trim();
+        const password = String(p.payload?.password || '');
+        if (!uid) { sndErr(ws, 'BAD_PAYLOAD', 'vnc-auth 缺 uid'); return; }
+        const ident = identityFromAuth(ws.__who);
+        if (!canAccess(ident, getDeviceClassCode(uid))) {
+          sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限访问设备 ${uid}`);
+          return;
+        }
+        if (!verifyVncPassword(uid, password)) {
+          pushEvent('warn', '被控端访问密码核验失败', { uid, who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
+          snd(ws, 'vnc-auth-fail', { uid, reason: '密码错误' });
+          return;
+        }
+        if (!ws.__vncAuthed) ws.__vncAuthed = new Set();
+        ws.__vncAuthed.add(uid);
+        snd(ws, 'vnc-auth-ok', { uid });
+        pushEvent('info', '被控端访问密码核验通过', { uid, who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
+        return;
+      }
       // 班级域（2026-10-23 · #458）：按班订阅/退订。权限判断（canAccess）在
       // class-events 模块内做，与 subscribe/instruction 同一口径（契约 §4.3）。
       // 2026-10-24：订阅班级=拉班级设备清单（敏感），加重认证门。
@@ -2229,6 +2303,14 @@ viewerWss.on('connection', (ws) => {
           pushEvent('warn', '管理端越权：指令被云端拒绝（目标不在其 scopes 内）',
             { uid, action: String(action).slice(0, 48), who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
           sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限向设备 ${uid} 下发指令`);
+          return;
+        }
+        // 2026-10-26：被控端访问密码门控——远端接管需先过密码鉴权（设了密码的设备）。
+        // 落在 instruction 通道：remote_control_start 未过鉴权时直接拒发，让管理端弹密码框。
+        if (action === 'remote_control_start' && getVncAccess(uid).enabled
+            && !(ws.__vncAuthed && ws.__vncAuthed.has(String(uid)))) {
+          pushEvent('warn', '远控被访问密码拦截（未过鉴权）', { uid, who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
+          sndErr(ws, 'VNC_AUTH_REQUIRED', `设备 ${uid} 已启用访问密码，请先在管理端输入密码`);
           return;
         }
         const r = sendInstruction(uid, String(action), params ?? {});
