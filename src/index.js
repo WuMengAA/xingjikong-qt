@@ -877,26 +877,6 @@ const server = http.createServer((req, res) => {
     return send(405, { ok: false, error: '该子路由仅支持 GET / POST' });
   }
 
-  // 2026-10-26（大范围找活 · 安全审计）：下列「只读敏感数据」端点此前**完全无令牌校验**，
-  // 匿名即可拉取全局事件流 / 动作排行 / 全部设备的待下发指令与回执状态。
-  // /api/events、/api/actions/ranking 由 viewer 拉取，viewer 早已带 Bearer 令牌
-  // （见 viewerbackend.cpp fetchEvents/fetchActionRanking），补「静态令牌或登录票据」门槛
-  // 不会让管理端黑屏；/api/instructions/pending、/api/instructions/notice 由站点（website）
-  // 服务端调用，站点调云端 API 统一持 Bearer，同样安全。匿名访问一律 401。
-  const anonGuarded = u.pathname === '/api/events' || u.pathname === '/api/actions/ranking'
-    || u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice';
-  if (anonGuarded) {
-    const gauth = req.headers.authorization || '';
-    const gtoken = gauth.toLowerCase().startsWith('bearer ') ? gauth.slice(7).trim() : '';
-    const gStatic = !!gtoken && safeEqual(gtoken, VIEWER_TOKEN);
-    const gTicket = !!gtoken && !gStatic ? verifyViewerTicket(gtoken) : { ok: false };
-    if (!gtoken || (!gStatic && !gTicket.ok)) {
-      return send(401, { ok: false, ecode: 'AU1001', code: 'TOKEN_INVALID', error: '未授权：需要管理端令牌或登录票据' });
-    }
-    req.__auth = gStatic ? { ok: true, mode: 'token', uid: null } : gTicket;
-    applyStoredClaims(req.__auth);
-  }
-
   if (req.method === 'GET' && u.pathname === '/api/events') {
     return send(200, { ok: true, events: listEvents(Number(u.searchParams.get('limit') || 50)) });
   }

@@ -1,7 +1,7 @@
-// 匿名访问敏感只读端点 → 必须 401（2026-10-26 · 大范围找活安全审计）
+// 匿名访问敏感只读端点 → 必须 401（2026-10-26 · 大范围找活安全审计 · 2026-10-26 晚更正）
 //
 // 背景：/api/events、/api/actions/ranking、/api/instructions/pending、/api/instructions/notice
-//   此前完全无令牌校验，匿名即可拉取全局事件流 / 指令下发内容 / 回执状态。
+//   自 2026-10-05 起即由 isManageApi（src/index.js 649 行 401 闸门）覆盖，匿名访问本就 401；anonGuarded 冗余块已删（见加减归档）。
 //   修复后：匿名 → 401 AU1001；带令牌（静态或票据）→ 200。
 //   注：/api/instructions/notice 由站点（website）服务端调用，站点统一持 Bearer，已与被告知需回归。
 //
