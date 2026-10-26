@@ -112,6 +112,9 @@ add_executable(stelarith-agent-qt
   src/notify_domain.h
   src/annotate_domain.cpp
   src/annotate_domain.h
+  # 2026-10-27 H2：墨迹渲染/页模型从 annotate_domain.cpp 拆出（撞 600 行红线），
+  # 拆口 = Canvas(纯 Qt) / Overlay(Win32) 之间，两边零共享状态。
+  src/annotate_canvas.cpp
   # 2026-10-27 G3：时间同步域（SNTP + 人工偏移），独立文件，不进 main.cpp。
   src/timesync_domain.cpp
   src/timesync_domain.h

@@ -5451,8 +5451,10 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     //   annotate_status        只读状态
     //   annotate_pen|highlighter|eraser / annotate_tool{tool} / annotate_color{color} / annotate_width{width}
     //   annotate_undo / annotate_redo / annotate_clear / annotate_page{key} / annotate_board{board}
+    //   annotate_page_add / annotate_page_next / annotate_page_prev（H2 白板多页）
     // 本地热键（窗口无焦点，走低层键盘钩子）：ESC 收层 / Ctrl+Z 撤销 / Ctrl+Y 重做 /
-    // Ctrl+Shift+Z 重做 / Ctrl+E 清空。所以老师不需要管理端也能自救。
+    // Ctrl+Shift+Z 重做 / Ctrl+E 清空 / Ctrl+PgUp·Ctrl+PgDn 翻批注页
+    //（裸 PageUp/PageDown 不抢 —— 那两个键在 PPT 放映里是翻课件）。
     if (action.startsWith(QStringLiteral("annotate_"))) {
         auto *ov = AnnotateDomain::Overlay::instance();
         const QString sub = action.mid(9);      // "annotate_" = 9 字符
@@ -5493,12 +5495,19 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
                 c->clearAll();
             } else if (sub == QStringLiteral("page")) {
                 c->setPageKey(params.value(QStringLiteral("key")).toString());
+            } else if (sub == QStringLiteral("page_add")) {
+                c->addPage();       // 白板多页：末页之后新建并切过去
+            } else if (sub == QStringLiteral("page_next")) {
+                c->nextPage();
+            } else if (sub == QStringLiteral("page_prev")) {
+                c->prevPage();
             } else if (sub == QStringLiteral("board")) {
                 ov->setBoard(params.value(QStringLiteral("board")).toString());
             } else {
                 out.result = QStringLiteral("failed");
                 out.error = QStringLiteral("未知批注子指令：%1（支持 start/stop/status/pen/highlighter/"
-                                           "eraser/tool/color/width/undo/redo/clear/page/board）").arg(sub);
+                                           "eraser/tool/color/width/undo/redo/clear/page/page_add/"
+                                           "page_next/page_prev/board）").arg(sub);
                 return out;
             }
         }

@@ -40,6 +40,7 @@
 #include <QPointF>
 #include <QQuickPaintedItem>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 class QQuickView;
@@ -61,6 +62,8 @@ struct Stroke {
 class Canvas : public QQuickPaintedItem {
     Q_OBJECT
     Q_PROPERTY(int strokeCount READ strokeCount NOTIFY changed)
+    Q_PROPERTY(int pageIndex READ pageIndex NOTIFY changed)
+    Q_PROPERTY(int pageCount READ pageCount NOTIFY changed)
     Q_PROPERTY(QString tool READ tool NOTIFY changed)
 public:
     explicit Canvas(QQuickItem *parent = nullptr);
@@ -92,6 +95,15 @@ public:
     void setPageKey(const QString &key);
     QString pageKey() const { return m_pageKey; }
 
+    // ── 白板多页（H2）────────────────────────────────────────────
+    // 页序 = key 首次出现的顺序（不是字典序：PPT 跳到第 7 页再回第 3 页时，
+    // 列表顺序应按"进入过"排，而不是把 '10' 排到 '2' 前面）。
+    Q_INVOKABLE void addPage();      // 末页之后新建一页并切过去
+    Q_INVOKABLE void nextPage();     // 下一页；已在末页则新建（连续讲课的自然动作）
+    Q_INVOKABLE void prevPage();
+    int pageCount() const { return m_pageOrder.size(); }
+    int pageIndex() const;           // 1 基；0 = 还没分页（空 key）
+
     // 状态快照（给指令回执用）
     QString statusLine() const;
 
@@ -106,11 +118,13 @@ signals:
 private:
     void pushHistory();          // 把当前 m_strokes 压栈（改动前调用）
     QPainterPath pathOf(const Stroke &s) const;
+    void switchTo(const QString &key);   // 存旧页 → 换入新页（不动页序）
 
     QVector<Stroke> m_strokes;
     QVector<QVector<Stroke>> m_undo;   // 撤销栈（快照式，简单可靠；墨迹量级不大）
     QVector<QVector<Stroke>> m_redo;
     QHash<QString, QVector<Stroke>> m_pages;   // 页键 → 墨迹（切页时换出/换入）
+    QStringList m_pageOrder;                   // 页序（首次出现顺序）
 
     QString m_tool = QStringLiteral("pen");
     QColor  m_color = QColor(0xE5, 0x39, 0x35);   // 默认红笔（教室场景最常用、最显眼）
@@ -148,7 +162,8 @@ public:
     // 原生窗口句柄（void* = HWND；探针/诊断用，未建窗前为 nullptr）
     void *nativeHandle() const { return m_hwnd; }
 
-    // 低层键盘钩子投递进来的热键（1=ESC 收层 / 2=撤销 / 3=重做 / 4=清空）
+    // 低层键盘钩子投递进来的热键
+    // （1=ESC 收层 / 2=撤销 / 3=重做 / 4=清空 / 5=上一页 / 6=下一页）
     void handleHotkey(int action);
 
     // 原生事件过滤：拦 WM_MOUSEACTIVATE（无焦点触控最后一层保险）
