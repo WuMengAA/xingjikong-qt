@@ -256,6 +256,9 @@ Item {
         if (root.mediaFaceOn) fs.push({ id: 1, label: "媒" });
         if (root.histFaceOn)  fs.push({ id: 2, label: "史" });
         fs.push({ id: 3, label: "态" });
+        // 2026-10-27（H 批）：批注面常驻。用户裁决「这些功能大多是加入到被控端，
+        // 而且大部分和灵动岛有关」—— 老师上课点不到管理端，岛才是他的手。
+        fs.push({ id: 4, label: "笔" });
         return fs;
     }
     readonly property bool facesOn: root._expanded && !root._showActionsNow
@@ -2762,6 +2765,21 @@ Item {
                                 }
                             }
                         }
+                    }
+                }
+
+                // ── 面 4：批注 / 白板（2026-10-27 · H 批）──────────────
+                // 用户裁决：这类"老师当场要用"的能力放被控端，且长在岛上。
+                // 本面只做显示 + 转发，真状态在 AnnotateDomain 里（见 IslandAnnotateFace 头注）。
+                Item {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    visible: root.faceNow === 4
+
+                    IslandAnnotateFace {
+                        anchors.fill: parent
+                        th: root.th
+                        bridge: root.bridgeRef
                     }
                 }
             }
