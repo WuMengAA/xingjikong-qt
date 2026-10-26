@@ -1490,6 +1490,33 @@ static void loadDeviceRole()
     qInfo("[agent-qt] 已载入设备用途：广播机");
 }
 
+// 2026-10-26：被控端访问密码本地持久化（云端统一设置/修改，明文经已鉴权设备 WS 下发到本机）。
+// 真正的访问闸门在云端中继处；本机落盘仅为"被控端持有自己的访问密码"与未来本地加强。
+static QString vncAccessPath()
+{
+    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/vnc_access.txt");
+}
+/** 落盘访问密码。enabled=false → 清空文件（等于关闭）；enabled=true → 写明文（agent 本机即被控端本体，
+ *  且云端已在校验通过后下发，这里不再二次散列，避免与云端 verifier 口径耦合）。 */
+static void saveVncAccessLocally(bool enabled, const QString &password)
+{
+    QFile f(vncAccessPath());
+    if (!enabled) {
+        if (f.exists() && !f.remove())
+            qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法清除访问密码文件：%1").arg(f.errorString());
+        else
+            qInfo("[agent-qt] 已清除本地访问密码");
+        return;
+    }
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法保存访问密码：%1").arg(f.errorString());
+        return;
+    }
+    f.write(QStringLiteral("enabled=1\npassword=%1\n").arg(password).toUtf8());
+    f.close();
+    qInfo("[agent-qt] 已保存本地访问密码（enabled=1）");
+}
+
 /* ══════════ 班级绑定（2026-10-04：OOBE 里消费绑定码，把本机绑到班级） ══════════
  * 背景：管理员在管理面板生成一次性、绑班级的接入码（云端 6 位票）；教室端在配置向导里
  * 填进去，保存时调云端 `POST /api/device/activate?code=…&uid=…` 消费，
@@ -6129,6 +6156,15 @@ void handleControlText(const QString &text)
                 isl->setBroadcastTask(info);
             }
         }
+        return;
+    }
+
+    // 2026-10-26：被控端访问密码下发（云端统一设置/修改，明文经已鉴权设备 WS 到本机）。
+    // 云端是鉴权权威；本机落盘供记录与未来本地鉴权用。真正的访问闸门在云端中继处。
+    if (type == QStringLiteral("vnc-access")) {
+        const bool enabled = pay.value(QStringLiteral("enabled")).toBool(false);
+        const QString password = pay.value(QStringLiteral("password")).toString();
+        saveVncAccessLocally(enabled, password);
         return;
     }
 
