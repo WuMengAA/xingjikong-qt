@@ -66,7 +66,8 @@ t("条目数 = 52（动作）+ 14（面板）", () => {
 	//    本批未去追是哪一次加的）⇒ 这条断言在 HEAD 上就已经是红的。本批把基线改到
 	//    真实值：15（HEAD）+ 1（PPT 放映）= 16，并写明"14 是过期基线"，避免下次又靠猜。
 	eq(A.manifest().length, 53, "ActionDefs");
-	eq(U.manifest().length, 16, "UiPlugins");
+	// 2026-10-27 H 批：面板 16 → 17（新增「批注 / 白板」）。
+	eq(U.manifest().length, 17, "UiPlugins");
 });
 
 console.log("\n── 二、★ 命令面板：与改造前 38 条逐字比对 ──");
