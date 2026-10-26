@@ -73,18 +73,18 @@
       "plan": "[P3] 拆下载/校验/安装三段"
     },
     "Stelarith-viewer-qt/src/viewerbackend.cpp": {
-      "lines": 2898,
+      "lines": 2926,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 94,
-      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交） | 2026-10-25 回写 2772→2787：登记值滞后（#460/#477 增量未回写），本批未改此文件 | 2026-10-25 回写 2787→2795（+8，顶层定义 89→90）：registerUrl 属性与注册页说明（提交 61e4495，未认证链路批次） | 2026-10-25 回写 2795→2813（+18，顶层定义仍 90）：设备表按 scope 裁剪 —— m_devices 改 scopedDevices→maskDevices 两级、默认选中改从裁剪后的表取（不拿云端原始 arr）、设备表日志改口径（可见/原始 双数） | 2026-10-26 回写 2813→2822：+9 为 ef44f86 班级名单改走登录票据（10-25 23:50 已提交，非本批批准变胖） | 2026-10-26 回写 2822→2898（+76，顶层定义 90→94）：为上轮密码批次 1b704a9（beginTakeover/requestVncAccessAuth/sendVncAuth/submitVncPassword + vnc-auth 分发 + VNC_AUTH_REQUIRED 门控）未回写。据实回写"
+      "plan": "[P1] 按业务拆 DeviceService/ClassService/FileService。#460 班级域 +16：ctor 创建 ClassService+connect、onTextMessage 班级五个 type 转发、error/authed/onDisconnected 三处委托钩子；业务实现已进 src/class/ 与 viewerbackend_class.cpp，此后增长应止步于路由。台账：2718 → 2772（+54）：其中 #477 ClassAdmin 路由接线 +10（include + ctor new）；另 +44 属并行线 VNC 修复批次（2026-10-24 上午：m_pendingVncUid/2s 兜底/握手竞态修/startVnc 幂等/onVncData 诊断/STE_VNC_CAPTURE 取证，他方未提交在飞，本批只提交 ClassAdmin 部分，不代提交） | 2026-10-25 回写 2772→2787：登记值滞后（#460/#477 增量未回写），本批未改此文件 | 2026-10-25 回写 2787→2795（+8，顶层定义 89→90）：registerUrl 属性与注册页说明（提交 61e4495，未认证链路批次） | 2026-10-25 回写 2795→2813（+18，顶层定义仍 90）：设备表按 scope 裁剪 —— m_devices 改 scopedDevices→maskDevices 两级、默认选中改从裁剪后的表取（不拿云端原始 arr）、设备表日志改口径（可见/原始 双数） | 2026-10-26 回写 2813→2822：+9 为 ef44f86 班级名单改走登录票据（10-25 23:50 已提交，非本批批准变胖） | 2026-10-26 回写 2822→2898（+76，顶层定义 90→94）：为上轮密码批次 1b704a9（beginTakeover/requestVncAccessAuth/sendVncAuth/submitVncPassword + vnc-auth 分发 + VNC_AUTH_REQUIRED 门控）未回写。据实回写 | 2026-10-26 回写 2898→2926（+28）：P4 回放 playbackUrl()/mediaAvailable()（起本机回环代理并拼播放地址）"
     },
     "Stelarith-viewer-qt/src/viewerbackend.h": {
-      "lines": 1047,
+      "lines": 1056,
       "limit": 300,
       "qInvokable": 62,
       "topLevel": 16,
-      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明。台账：984 → 1001（+17）：#477 ClassAdmin +8（前向声明/Q_PROPERTY/访问器/成员）；另 +9 属并行线 VNC 批次（m_pendingVncUid/m_vncUid） | 2026-10-25 回写 1001→1005：登记值滞后，本批未改此文件 | 2026-10-25 回写 1005→1010：+5 为本批 roleLocked Q_PROPERTY + 注释（个人中心：服务端锁身份时隐藏『换身份』假按钮，原行为是点了静默失败） | 2026-10-25 回写 1010→1020（+10，顶层定义 15→16）：verified + registerUrl 两个 Q_PROPERTY 与访问器（提交 61e4495） | 2026-10-25 回写 1020→1027（+7，顶层定义仍 16）：classesFiltered Q_PROPERTY + 成员 m_classesFiltered + 访问器 + 说明注释（提交 ef44f86，班级名单走登录票据） | 2026-10-26 回写 1027→1047（+20，Q_INVOKABLE 61→62）：为上轮密码批次 1b704a9（3 信号 + submitVncPassword + 3 私有方法 + 4 成员）未回写。据实回写"
+      "plan": "[P1] 随 cpp 按域拆；61 个 Q_INVOKABLE 按组收敛。#460 +13：classService 前向声明/Q_PROPERTY/访问器/onClassDomainMessage 私有分发声明。台账：984 → 1001（+17）：#477 ClassAdmin +8（前向声明/Q_PROPERTY/访问器/成员）；另 +9 属并行线 VNC 批次（m_pendingVncUid/m_vncUid） | 2026-10-25 回写 1001→1005：登记值滞后，本批未改此文件 | 2026-10-25 回写 1005→1010：+5 为本批 roleLocked Q_PROPERTY + 注释（个人中心：服务端锁身份时隐藏『换身份』假按钮，原行为是点了静默失败） | 2026-10-25 回写 1010→1020（+10，顶层定义 15→16）：verified + registerUrl 两个 Q_PROPERTY 与访问器（提交 61e4495） | 2026-10-25 回写 1020→1027（+7，顶层定义仍 16）：classesFiltered Q_PROPERTY + 成员 m_classesFiltered + 访问器 + 说明注释（提交 ef44f86，班级名单走登录票据） | 2026-10-26 回写 1027→1047（+20，Q_INVOKABLE 61→62）：为上轮密码批次 1b704a9（3 信号 + submitVncPassword + 3 私有方法 + 4 成员）未回写。据实回写 | 2026-10-26 回写 1047→1056（+9）：P4 回放 —— 2 个 Q_INVOKABLE 声明 + PlaybackProxy 成员 + include"
     },
     "Stelarith-control-qt/qml/shell/BroadcastScheduleSheet.qml": {
       "lines": 795,
@@ -283,11 +283,11 @@
       "plan": "[P3] 拆动画帧与路径数据"
     },
     "Stelarith-cloud/src/index.js": {
-      "lines": 3014,
+      "lines": 3092,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）→ 2873（2026-10-24 #475 班级管理 API 分发 +13：import handleClassAdminApi + isViewerApi 加 /api/class/ 前缀 + POST 分发点） | 2026-10-25 回写 2873→2976：登记值滞后（班级域/发布中心增量），本批未改此文件 | 2026-10-25 回写 2976→2983：+7 为班级数据（学生/课表）接线 —— 一行 import + 建表与启动日志；业务全在新 TU src/class-data.js（307 行，红线 600 内），index.js 只留启动钩子 | 2026-10-25 回写 2983→2989：+6 为设备用途接线（register 解析 role 入 regMeta 3 行 + 回执下发 getDeviceRole 3 行）；业务在 registry.js | 2026-10-26 回写 2989→3014（+25）：上轮密码批次 7dc67ed（vnc 中继门控/vnc-auth/改密 API）未回写，据实回写使门禁可读"
+      "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）→ 2873（2026-10-24 #475 班级管理 API 分发 +13：import handleClassAdminApi + isViewerApi 加 /api/class/ 前缀 + POST 分发点） | 2026-10-25 回写 2873→2976：登记值滞后（班级域/发布中心增量），本批未改此文件 | 2026-10-25 回写 2976→2983：+7 为班级数据（学生/课表）接线 —— 一行 import + 建表与启动日志；业务全在新 TU src/class-data.js（307 行，红线 600 内），index.js 只留启动钩子 | 2026-10-25 回写 2983→2989：+6 为设备用途接线（register 解析 role 入 regMeta 3 行 + 回执下发 getDeviceRole 3 行）；业务在 registry.js | 2026-10-26 回写 2989→3014（+25）：上轮密码批次 7dc67ed（vnc 中继门控/vnc-auth/改密 API）未回写，据实回写使门禁可读 | 2026-10-26 回写 3014→3092（+78）：P4 回放传输优化 —— /recordings/* 支持 HTTP Range（206 分段 / 416 越界 / 畸形降级 200 / Accept-Ranges），使播放器可 seek、可边下边播"
     },
     "Stelarith-cloud/src/registry.js": {
       "lines": 1401,
@@ -344,6 +344,20 @@
       "qInvokable": 0,
       "topLevel": 0,
       "plan": "[QML 拆分计划] 2026-10-26 P1 新建闹钟面板：手写小组件(Seg/Tick/ToggleRow ~70 行) + 表单 + 已设列表。与 ScheduleDialog(298)/NotifyDialog(453) 同列，后续按 QML 面板拆分计划并入。"
+    },
+    "Stelarith-viewer-qt/qml/panels/PlaybackMiniWindow.qml": {
+      "lines": 240,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[QML 拆分计划] 2026-10-26 P4 新建：回放小窗（标题栏拖动+贴角吸附 / 画面 / 控制条：播放暂停·进度拖动·时间·音量静音）。电脑管家式小窗要求一体化可交互，拆成三块反而割裂；候选拆分：控制条抽 PlaybackBar.qml。"
+    },
+    "Stelarith-viewer-qt/qml/pages/control/MonitorPage.qml": {
+      "lines": 239,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[QML 拆分计划] 2026-10-26 P4 超出 200（196→239，+43 录像回放区）。候选拆分：录像列表抽 RecordingStrip.qml。"
     }
   }
 }
