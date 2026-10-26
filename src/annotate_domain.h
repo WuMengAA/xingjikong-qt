@@ -89,6 +89,9 @@ public:
 
     int strokeCount() const { return m_strokes.size(); }
     QString tool() const { return m_tool; }
+    // 当前笔的色/粗（回执要不要本地回显就看这两项在不在：不在的话管理端只能猜）
+    QString colorHex() const { return m_color.name(); }
+    qreal penWidth() const { return m_width; }
 
     // 白板背景（空 = 透明批注层；非空 = 不透明白板）
     void setBoardColor(const QColor &c);

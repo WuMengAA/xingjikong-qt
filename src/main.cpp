@@ -5521,6 +5521,8 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         // 结构化字段（管理端面板不许去解析 status 字符串：那是给人看的，不是协议）
         if (AnnotateDomain::Canvas *ac = ov->canvas()) {
             out.data.insert(QStringLiteral("tool"), ac->tool());
+            out.data.insert(QStringLiteral("color"), ac->colorHex());
+            out.data.insert(QStringLiteral("width"), ac->penWidth());
             out.data.insert(QStringLiteral("strokes"), ac->strokeCount());
             out.data.insert(QStringLiteral("page"), ac->pageKey());
             out.data.insert(QStringLiteral("pageIndex"), ac->pageIndex());
