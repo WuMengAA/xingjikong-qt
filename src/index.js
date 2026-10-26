@@ -2952,6 +2952,12 @@ wss.on('connection', (ws) => {
       // 被控端真执行完了，回的是 done/failed（不是 received）。必须如实记、如实转。
       const { id, action, result, error, data } = p.payload;
       const rec = recordResult(id, uid, action, result, error, data);
+      // 2026-10-27（WS 审计）：回执归属不符 → recordResult 拒收返回 null。
+      // 明说给设备（不许静默吞），不记流水、不转发、不动补发队列。
+      if (!rec) {
+        sndErr(ws, 'BAD_RECEIPT', `回执与下发设备不符，已拒绝（id=${id}）`);
+        return;
+      }
       // 转发给所有管理端：状态行从「已下发」变成「真做了 / 真没做成」，
       // 并带上动作的附加数据（进程列表 / 日志行 / 音量实际值 / 截图路径）
       broadcastToViewers('instruction-result', {

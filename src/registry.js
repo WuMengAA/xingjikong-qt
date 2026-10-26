@@ -11,7 +11,7 @@ import { appendFile } from 'node:fs/promises';
 import { EV_LIMIT, KEEP_LAST_FRAME, EVENTS_FILE, HEARTBEAT_TIMEOUT_MS,
   EVENTS_MAX_BYTES, EVENTS_KEEP_FILES } from './config.js';
 import { wrapOutgoing, makeFrame } from './protocol.js';
-import { enqueueDispatch, dropDispatch, settle as settleQueue, pendingFor, listPendingAll, paramsOf } from './store.js';
+import { enqueueDispatch, dropDispatch, settle as settleQueue, pendingFor, listPendingAll, paramsOf, dispatchOwnerOf } from './store.js';
 // 班级身份的唯一真源（2026-10-20）：码/名/别名的解析与落盘都在 class-dir.js。
 // 本文件只负责"设备在哪个班"的运行时索引 —— 两边职责不重叠。
 import { resolveClassCode, getClass, listClassDir } from './class-dir.js';
@@ -958,6 +958,16 @@ export function broadcastToViewers(type, payload) {
  * @returns {{id, uid, action, result, error, data, at}}
  */
 export function recordResult(id, uid, action, result, error, data) {
+  // 2026-10-27（WS 帧级审计）：回执归属校验 —— 指令 id 必须属于**本连接设备**。
+  // 否则任一已认证设备可替任意设备回执：伪造执行状态（管理端看到假回执）+
+  // settle 掉目标补发队列（目标真没收到该指令时 = 关机/重启类指令静默丢失）。
+  // 查不到下发记录（进程内降级/悬垂 id/旧数据）不拦截，保持旧行为。
+  const owner = dispatchOwnerOf(id);
+  if (owner != null && String(owner) !== String(uid)) {
+    pushEvent('error', '回执归属不符已拒绝（设备替别的设备回执）',
+      { id, from: uid, owner });
+    return null;
+  }
   const rec = {
     id,
     uid,

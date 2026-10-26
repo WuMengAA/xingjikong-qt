@@ -157,6 +157,20 @@ export function paramsOf(id) {
   }
 }
 
+/** 按指令 id 查下发目标设备 uid（2026-10-27 · WS 审计：回执归属校验用）。
+ * 返回 null = 查不到（进程内存降级 / 该条从未落盘 / id 悬垂）——调用方按"不拦截"处理，
+ * 保持旧行为兼容。 */
+export function dispatchOwnerOf(id) {
+  if (!db || id == null) return null;
+  try {
+    const r = db.prepare("SELECT uid FROM instructions WHERE id = ?").get(Number(id));
+    return r ? r.uid : null;
+  } catch (e) {
+    console.error(`[cloud] FAIL 读取指令下发设备失败 id=${id}: ${e.message}`);
+    return null;
+  }
+}
+
 /** 按 notice_id 查这批指令的回执状态（2026-10-04：站点广播对账用）。
  * 下发 notify 时 params 里带 notice_id；回执 settle 后 state=done/failed。
  * @returns [{uid, state, result}] 按 uid 去重取最新一条。 */
