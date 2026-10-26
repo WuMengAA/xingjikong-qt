@@ -1144,6 +1144,145 @@ static void rescheduleAlarms()
     qInfo("[agent-qt] 闹钟恢复：载入 %d 条并重挂", (int)tasks.size());
 }
 
+/* ══════════ 软件管理（2026-10-26 · 产品笔记 P3）══════════════════════════ */
+// 黑白名单持久化 + 进程冻结/解冻 + 去网/恢复 + 黑名单禁止运行守护。
+// 口径照抄笔记③：
+//   · 白名单 = 永不禁用，且**不显示在列表**（保护系统稳定，也免得老师误关）；
+//   · 黑名单 = 标红 + 守护开启时禁止运行（终止进程）；
+//   · 系统关键 / 安全软件 / 集控自身一律不可操作（复用 kProtected* 三张硬名单）。
+// 下方「批次 1」段定义的两个护栏函数；本域要先用，前置声明（签名须与定义逐字一致）
+QString protectedCategory(const QString &exeName);
+QHash<quint32, QString> snapshotProcessNames();
+
+struct SoftPolicy {
+    QStringList blacklist;   // 禁止运行（denyRun 开启时轮询终止）+ 界面标红
+    QStringList whitelist;   // 永不禁用；**不显示在进程列表**
+    bool denyRun = false;    // 黑名单守护开关（考试/管控场景）
+};
+static QString g_softPolicyFile;                 // %LOCALAPPDATA%\xingjikong\soft-manage.json
+static SoftPolicy g_soft;
+static QTimer *g_softGuard = nullptr;
+static QSet<quint32> g_frozenPids;              // 已冻结的 pid（避免重复冻结/误解冻）
+
+/** 归一化：去掉 .exe、小写 —— 与保护名单判定、exam_mode 的口径一致。 */
+static QString softNorm(const QString &raw)
+{
+    QString s = raw.trimmed().toLower();
+    if (s.endsWith(QStringLiteral(".exe"))) s.chop(4);
+    return s;
+}
+static bool softHit(const QStringList &list, const QString &exeName)
+{
+    const QString n = softNorm(exeName);
+    if (n.isEmpty()) return false;
+    for (const QString &raw : list)
+        if (softNorm(raw) == n) return true;
+    return false;
+}
+
+static void saveSoftPolicy()
+{
+    if (g_softPolicyFile.isEmpty()) return;
+    QJsonObject o;
+    QJsonArray bl, wl;
+    for (const QString &s : g_soft.blacklist) bl.append(s);
+    for (const QString &s : g_soft.whitelist) wl.append(s);
+    o.insert(QStringLiteral("blacklist"), bl);
+    o.insert(QStringLiteral("whitelist"), wl);
+    o.insert(QStringLiteral("denyRun"), g_soft.denyRun);
+    QFile f(g_softPolicyFile);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 软件策略持久化失败（写 soft-manage.json 打不开）");
+        return;
+    }
+    f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+static void loadSoftPolicy()
+{
+    if (g_softPolicyFile.isEmpty()) return;
+    QFile f(g_softPolicyFile);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    const auto fill = [](const QJsonArray &a) {
+        QStringList out;
+        for (const auto &v : a) { const QString s = v.toString().trimmed(); if (!s.isEmpty()) out.append(s); }
+        return out;
+    };
+    g_soft.blacklist = fill(o.value(QStringLiteral("blacklist")).toArray());
+    g_soft.whitelist = fill(o.value(QStringLiteral("whitelist")).toArray());
+    g_soft.denyRun = o.value(QStringLiteral("denyRun")).toBool(false);
+}
+
+/** pid → 可执行文件路径（去网要按 program 路径加防火墙规则）。 */
+static QString processPathOf(quint32 pid)
+{
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!h) return QString();
+    WCHAR buf[MAX_PATH * 2] = {0};
+    DWORD sz = sizeof(buf) / sizeof(WCHAR);
+    const BOOL ok = QueryFullProcessImageNameW(h, 0, buf, &sz);
+    CloseHandle(h);
+    return ok ? QString::fromWCharArray(buf) : QString();
+}
+
+// 冻结/解冻：ntdll 的 NtSuspendProcess / NtResumeProcess（未文档化但长期稳定；
+// 取不到或权限不足就如实失败，不做"假装成功"）。
+typedef LONG (NTAPI *NtSuspResPtr)(HANDLE);
+static bool setProcessFrozen(quint32 pid, bool frozen)
+{
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (!ntdll) return false;
+    const char *sym = frozen ? "NtSuspendProcess" : "NtResumeProcess";
+    FARPROC fn = GetProcAddress(ntdll, sym);
+    if (!fn) return false;
+    HANDLE h = OpenProcess(PROCESS_SUSPEND_RESUME, FALSE, (DWORD)pid);
+    if (!h) return false;
+    const LONG st = reinterpret_cast<NtSuspResPtr>(fn)(h);
+    CloseHandle(h);
+    return st >= 0;
+}
+
+// 去网 / 恢复：Windows 防火墙**出站**规则（netsh advfirewall）。
+// ⚠️ 需管理员权限 —— 权限不足时 netsh 非零退出，如实回 failed，不静默装成功。
+static bool setNetBlocked(const QString &exePath, bool block)
+{
+    if (exePath.isEmpty()) return false;
+    const QString rule = QStringLiteral("StelarithDenyNet_") + QFileInfo(exePath).completeBaseName();
+    QStringList args;
+    if (block) {
+        args << QStringLiteral("advfirewall") << QStringLiteral("firewall") << QStringLiteral("add")
+             << QStringLiteral("rule") << (QStringLiteral("name=") + rule)
+             << QStringLiteral("dir=out") << QStringLiteral("action=block")
+             << (QStringLiteral("program=") + exePath);
+    } else {
+        args << QStringLiteral("advfirewall") << QStringLiteral("firewall") << QStringLiteral("delete")
+             << QStringLiteral("rule") << (QStringLiteral("name=") + rule);
+    }
+    QProcess p;
+    p.start(QStringLiteral("netsh"), args);
+    if (!p.waitForFinished(8000)) return false;
+    return p.exitCode() == 0;
+}
+
+/** 黑名单守护：轮询终止命中黑名单的进程（保护名单优先，绝不动系统/安全/自身）。 */
+static void softGuardTick()
+{
+    if (!g_soft.denyRun || g_soft.blacklist.isEmpty()) return;
+    const QHash<quint32, QString> names = snapshotProcessNames();
+    for (auto it = names.constBegin(); it != names.constEnd(); ++it) {
+        const QString exe = it.value();
+        if (exe.isEmpty()) continue;
+        if (!protectedCategory(exe).isEmpty()) continue;      // 护栏：受保护一律跳过
+        if (!softHit(g_soft.blacklist, exe)) continue;
+        HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)it.key());
+        if (!h) continue;
+        TerminateProcess(h, 1);
+        CloseHandle(h);
+        qInfo("[agent-qt] 软件管控：已终止黑名单进程 %s (pid=%u)", qPrintable(exe), (unsigned)it.key());
+    }
+}
+
 /* ══════════ 批次 1：教室刚需动作（口径照抄 Rust process.rs / engine.rs，别重新发明） ══════════ */
 
 // 三张**硬禁止名单**：写死在代码里，不可配置、不可被下发指令绕过（Rust 版原话）。
@@ -5078,6 +5217,8 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             const auto it = names.constFind(w.second);
             if (it == names.constEnd() || it->isEmpty()) continue;
             if ((int)items.size() >= cap) { truncated = true; break; }
+            // 2026-10-26（P3）：白名单 = 永不禁用且**不显示在列表**（保护系统稳定 + 免误关）
+            if (softHit(g_soft.whitelist, *it)) continue;
             QJsonObject o;
             o.insert(QStringLiteral("pid"), (int)w.second);
             o.insert(QStringLiteral("name"), *it);
@@ -5085,6 +5226,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
             o.insert(QStringLiteral("mem_mb"), memMbOf(w.second));
             const QString prot = protectedCategory(*it);
             if (!prot.isEmpty()) o.insert(QStringLiteral("protected"), prot);
+            // 黑名单 → 标红；已冻结 → 标冻结（界面置灰"解冻"）
+            if (softHit(g_soft.blacklist, *it)) o.insert(QStringLiteral("blacklisted"), true);
+            if (g_frozenPids.contains((quint32)w.second)) o.insert(QStringLiteral("frozen"), true);
             // 2026-10-11 需求#6：管理端进程列表要显示图标。图标只能这边取
             // （管理端没有这台机器上的 exe），取不到就留空 —— 那边画首字方块兜底。
             const QString ic = windowIconBase64(w.first);
@@ -5368,6 +5512,111 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         out.data.insert(QStringLiteral("items"), items);
         out.data.insert(QStringLiteral("count"), pending);
         out.data.insert(QStringLiteral("file"), QDir::toNativeSeparators(g_schedFile));
+        return out;
+    }
+
+    // ── 软件管理（2026-10-26 · P3 产品笔记）─────────────────────────────────
+    // 读策略：黑白名单 + 守护开关
+    if (action == QStringLiteral("soft_policy_get")) {
+        QJsonArray bl, wl;
+        for (const QString &s : g_soft.blacklist) bl.append(s);
+        for (const QString &s : g_soft.whitelist) wl.append(s);
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("blacklist"), bl);
+        out.data.insert(QStringLiteral("whitelist"), wl);
+        out.data.insert(QStringLiteral("denyRun"), g_soft.denyRun);
+        out.data.insert(QStringLiteral("file"), QDir::toNativeSeparators(g_softPolicyFile));
+        return out;
+    }
+
+    // 写策略：{ blacklist?: [...], whitelist?: [...], denyRun?: bool }
+    if (action == QStringLiteral("soft_policy_set")) {
+        const QJsonValue jb = params.value(QStringLiteral("blacklist"));
+        const QJsonValue jw = params.value(QStringLiteral("whitelist"));
+        if (jb.isArray()) {
+            QStringList nl;
+            for (const auto &v : jb.toArray()) {
+                const QString s = v.toString().trimmed();
+                // 护栏：不许把受保护的进程塞进黑名单（否则守护会去杀系统/安全软件）
+                if (!s.isEmpty() && protectedCategory(s).isEmpty() && !nl.contains(s)) nl.append(s);
+            }
+            g_soft.blacklist = nl;
+        }
+        if (jw.isArray()) {
+            QStringList nl;
+            for (const auto &v : jw.toArray()) {
+                const QString s = v.toString().trimmed();
+                if (!s.isEmpty() && !nl.contains(s)) nl.append(s);
+            }
+            g_soft.whitelist = nl;
+        }
+        const QJsonValue jd = params.value(QStringLiteral("denyRun"));
+        if (jd.isBool()) g_soft.denyRun = jd.toBool();
+        saveSoftPolicy();
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("blackCount"), g_soft.blacklist.size());
+        out.data.insert(QStringLiteral("whiteCount"), g_soft.whitelist.size());
+        out.data.insert(QStringLiteral("denyRun"), g_soft.denyRun);
+        return out;
+    }
+
+    // 冻结 / 解冻进程（仅常用应用；受保护一律拒绝）
+    if (action == QStringLiteral("soft_freeze") || action == QStringLiteral("soft_unfreeze")) {
+        const bool freeze = (action == QStringLiteral("soft_freeze"));
+        const QJsonValue jpid = params.value(QStringLiteral("pid"));
+        const int pid = jpid.isDouble() ? jpid.toInt() : jpid.toString().trimmed().toInt();
+        if (pid <= 0) { out.result = QStringLiteral("failed"); out.error = QStringLiteral("需要 pid"); return out; }
+        const QString exe = snapshotProcessNames().value((quint32)pid);
+        if (exe.isEmpty()) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("找不到 pid=%1 的进程（可能已退出）").arg(pid);
+            return out;
+        }
+        const QString prot = protectedCategory(exe);
+        if (!prot.isEmpty()) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("不许对受保护进程操作：%1（%2）").arg(exe, prot);
+            return out;
+        }
+        const bool ok = setProcessFrozen((quint32)pid, freeze);
+        if (!ok) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("%1 失败：%2（ntdll 接口不可用或权限不足）").arg(freeze ? QStringLiteral("冻结") : QStringLiteral("解冻"), exe);
+            return out;
+        }
+        if (freeze) g_frozenPids.insert((quint32)pid);
+        else g_frozenPids.remove((quint32)pid);
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("pid"), pid);
+        out.data.insert(QStringLiteral("frozen"), freeze);
+        return out;
+    }
+
+    // 去网 / 恢复（防火墙出站规则；需管理员，失败如实报）
+    if (action == QStringLiteral("soft_deny_net") || action == QStringLiteral("soft_restore_net")) {
+        const bool block = (action == QStringLiteral("soft_deny_net"));
+        const QJsonValue jpid = params.value(QStringLiteral("pid"));
+        const int pid = jpid.isDouble() ? jpid.toInt() : jpid.toString().trimmed().toInt();
+        const QString path = (pid > 0) ? processPathOf((quint32)pid)
+                                       : params.value(QStringLiteral("path")).toString().trimmed();
+        if (path.isEmpty()) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("需要 pid 或 path（去网按可执行文件路径加规则）");
+            return out;
+        }
+        const QString exe = QFileInfo(path).fileName();
+        const QString prot = protectedCategory(exe);
+        if (!prot.isEmpty()) {
+            out.result = QStringLiteral("failed");
+            out.error = QStringLiteral("不许对受保护程序去网：%1（%2）").arg(exe, prot);
+            return out;
+        }
+        const bool ok = setNetBlocked(path, block);
+        out.result = ok ? QStringLiteral("done") : QStringLiteral("failed");
+        if (!ok)
+            out.error = QStringLiteral("%1 失败：netsh 非零退出（多半是**没有管理员权限**）").arg(block ? QStringLiteral("去网") : QStringLiteral("恢复网络"));
+        else
+            out.data.insert(QStringLiteral("path"), path);
         return out;
     }
 
@@ -7398,6 +7647,18 @@ int main(int argc, char *argv[])
     g_schedFile = g_schedDir + QStringLiteral("/schedules.json");
     g_alarmFile = g_schedDir + QStringLiteral("/alarms.json");   // 闹钟与开关机同目录（2026-10-26 P1）
     rescheduleAlarms();                                          // 崩溃/重启后重挂闹钟
+
+    // ── 软件管理策略（2026-10-26 P3）：黑白名单 + 黑名单守护 ──
+    g_softPolicyFile = dataDir + QStringLiteral("/soft-manage.json");
+    loadSoftPolicy();
+    g_softGuard = new QTimer(&app);
+    g_softGuard->setInterval(3000);                              // 3 秒一轮，命中黑名单即终止
+    QObject::connect(g_softGuard, &QTimer::timeout, [] { softGuardTick(); });
+    g_softGuard->start();
+    if (!g_soft.blacklist.isEmpty() || !g_soft.whitelist.isEmpty())
+        qInfo("[agent-qt] 软件策略已载入：黑 %d / 白 %d / 守护=%s",
+              (int)g_soft.blacklist.size(), (int)g_soft.whitelist.size(),
+              g_soft.denyRun ? "开" : "关");
     g_mediaDir = envOr("STE_QT_MEDIA_DIR", dataDir + QStringLiteral("/media"));
     QDir().mkpath(g_mediaDir);
 
