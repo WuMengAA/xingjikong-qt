@@ -675,6 +675,22 @@ const server = http.createServer((req, res) => {
     //   存储为空 → 不回填 ⇒ scopes=null ⇒ 全权（行为=今天，零回归）。
     applyStoredClaims(req.__auth);
 
+    // 2026-10-26（大范围找活 · 审计面三）：admin/* 平台级端点统一平台身份闸门。
+    // 此前 isManageApi 只认「有效令牌或有效票据」，而 config/ota/cims/provision/songkeys
+    // 的 handler 内部都不查 isPlatformIdent —— 于是「只属于某个班的受限教师票据」也能
+    // 改写服务端令牌、发全校 OTA、拉装机包（含设备令牌）、下发 CIMS。
+    // 现统一要求：平台超管（roles 含 platform_admin）或全权身份（静态令牌 / scopes=null）。
+    // 与既有 user-claims / broadcast-club 的守门口径一致。
+    if (isAdminApi) {
+      const __adminIdent = identityFromAuth(req.__auth);
+      const __canAdmin = __adminIdent && (isPlatformIdent(__adminIdent) || __adminIdent.scopes === null);
+      if (!__canAdmin) {
+        pushEvent('warn', 'HTTP 管理面越权：非平台身份访问 admin 平台端点，已拒绝',
+          { path: u.pathname, uid: req.__ticketUid || 'static' });
+        return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '需要平台管理员身份' });
+      }
+    }
+
   // ── 2026-10-18 · 班级点歌凭据管理（管理面鉴权，见上 isAdminApi）──────────
   // GET  /api/admin/songkeys            → 清单（**只有 tail，无明文**）
   // POST /api/admin/songkeys            → { className, apiKey } 设置某班的 VoiceHub Key
