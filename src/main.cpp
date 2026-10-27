@@ -25,6 +25,7 @@
 #include "annotate_domain.h" // 2026-10-27 H 批：批注/白板内核（替代 ICC CE）
 #include "timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
 #include "panel_domain.h"     // 2026-10-27 G4/G5/G6：岛组件面板（日期/课表/倒计时）
+#include "automation_engine.h" // 2026-10-27 Phase 3：定时自动化规则引擎（纯模型 + 1s 调度，点火转 executeAction）
 #include "ppt_domain.h"       // 2026-10-27 I：PPT 放映控制（COM/IDispatch，PowerPoint/WPS）
 #include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
 #include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
@@ -628,6 +629,10 @@ static const char *kActionNames[] = {
     // ⚠️ noise_monitor_* 之前一直漏登记 —— 设备实际能做却自称不会，本轮补上。
     "noise_monitor_start", "noise_monitor_stop",
     "study_mode_start", "study_mode_stop",
+    // 定时自动化规则引擎（2026-10-27 Phase 3）：管理端经此下发 / 拉取规则。
+    // 仅做"转发到 AutomationEngine"的薄壳，规则执行仍走 executeAction 既有词表（零新攻击面）。
+    "automation_list", "automation_upsert", "automation_remove",
+    "automation_toggle", "automation_run",
 };
 static const int kActionCount = (int)(sizeof(kActionNames) / sizeof(kActionNames[0]));
 
@@ -2820,6 +2825,7 @@ static void logNoiseSample(double db, bool active, int seq, bool study, bool ok)
 static qint64 logStudyStart(double th, int need, int recSec);
 static void logStudyStop(qint64 startTs, int alertCount);
 static PluginHost *g_pluginHost = nullptr;   // P2：插件宿主（进程外插件 ABI）；定义在 openPluginStore 之前以便对话框使用
+static AutomationEngine *g_automationEngine = nullptr; // 2026-10-27 Phase 3：规则引擎单例（executeAction 经此下发/拉取规则）
 void runSelfCheck()
 {
     static bool selfCheckOpen = false;     // 防重入
@@ -6492,6 +6498,54 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         return out;
     }
 
+    // ── 定时自动化规则引擎（2026-10-27 Phase 3）：管理端下发 / 拉取 ────────
+    // 纯转发壳：规则的真执行（notify/音量/截图/锁屏/启动程序）由 fireRule 经
+    // actionRequested → executeAction 复用既有词表完成，这里**只**负责规则的 CRUD。
+    // 若引擎未初始化（极端：构造早于引擎），如实回 failed，不静默吞。
+    if (g_automationEngine) {
+        static const QStringList kAuto = {
+            QStringLiteral("automation_list"), QStringLiteral("automation_upsert"),
+            QStringLiteral("automation_remove"), QStringLiteral("automation_toggle"),
+            QStringLiteral("automation_run")
+        };
+        if (kAuto.contains(action)) {
+            if (action == QStringLiteral("automation_list")) {
+                out.data = QJsonObject{{ QStringLiteral("rules"), g_automationEngine->listRules() }};
+                out.result = QStringLiteral("ok");
+                return out;
+            }
+            if (action == QStringLiteral("automation_upsert")) {
+                const QJsonObject rule = params.value(QStringLiteral("rule")).toObject();
+                out.result = g_automationEngine->upsertFromRemote(rule)
+                                 ? QStringLiteral("ok") : QStringLiteral("failed");
+                if (out.result == QStringLiteral("failed"))
+                    out.error = QStringLiteral("automation_upsert：规则非法（缺 id 或字段无法解析）");
+                return out;
+            }
+            const QString rid = params.value(QStringLiteral("id")).toString();
+            if (action == QStringLiteral("automation_remove")) {
+                out.result = g_automationEngine->removeRule(rid)
+                                 ? QStringLiteral("ok") : QStringLiteral("failed");
+                if (out.result == QStringLiteral("failed"))
+                    out.error = QStringLiteral("automation_remove：未找到规则 id=%1").arg(rid);
+                return out;
+            }
+            if (action == QStringLiteral("automation_toggle")) {
+                const bool en = params.value(QStringLiteral("enabled")).toBool(true);
+                out.result = g_automationEngine->toggleRule(rid, en)
+                                 ? QStringLiteral("ok") : QStringLiteral("failed");
+                if (out.result == QStringLiteral("failed"))
+                    out.error = QStringLiteral("automation_toggle：未找到规则 id=%1").arg(rid);
+                return out;
+            }
+            if (action == QStringLiteral("automation_run")) {
+                g_automationEngine->runNow(rid);   // 仍判条件，通过点才点火
+                out.result = QStringLiteral("ok");
+                return out;
+            }
+        }
+    }
+
     out.result = QStringLiteral("failed");
     out.error = QStringLiteral("未知指令：%1").arg(action);
     return out;
@@ -8642,6 +8696,22 @@ int main(int argc, char *argv[])
         mh->startEnabled();
         IslandOverlay::instance()->setQmlObjectProperty(QStringLiteral("voicehubObj"), vh);
         AgentShell::setVoicehub(vh);
+
+        // 定时自动化规则引擎（2026-10-27 Phase 3）：纯模型 + 1s 调度，本机自运行不依赖管理端在场。
+        // 点火时 emit actionRequested(action)，这里接到既有 executeAction —— 复用整套设备指令词表
+        // 及其安全白名单（launch_app 白名单 / notify 门控等），零新攻击面。
+        // 注入岛 QML 为 `automationObj`（与 voicehubObj 同模式，IslandRoot 读 automationRef 带 null 守卫）。
+        {
+            auto *engine = new AutomationEngine(qApp);
+            g_automationEngine = engine;
+            QObject::connect(engine, &AutomationEngine::actionRequested,
+                             [](const QJsonObject &a) {
+                                 executeAction(a.value(QStringLiteral("action")).toString(), a);
+                             });
+            IslandOverlay::instance()->setQmlObjectProperty(QStringLiteral("automationObj"), engine);
+            // 事件触发器：开机即评估一次 "boot" 型规则（其余事件由对应子系统在发生时调用 engine->onEvent）。
+            engine->onEvent(QStringLiteral("boot"));
+        }
 
         // 广播社成员模块（2026-10-23 #广播站移交）：独立身份登录通道，账号在云端自管。
         // 不注册为内置模块（不是可启停插件），仅作为 QObject 注入控制面板上下文属性

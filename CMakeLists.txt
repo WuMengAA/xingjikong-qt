@@ -120,6 +120,9 @@ add_executable(stelarith-agent-qt
   src/timesync_domain.h
   src/panel_domain.cpp
   src/panel_domain.h
+  # 2026-10-27 Phase 3：定时自动化规则引擎（纯模型 + 1s 调度；Q_OBJECT 头须显式列入让 AUTOMOC 必扫）
+  src/automation_engine.cpp
+  src/automation_engine.h
   # 2026-10-27 I（第七刀）：PPT 放映控制域（Win32 COM + IDispatch，PowerPoint / WPS 演示）。
   # 只用 GetActiveObject 连已在运行的实例，绝不 CoCreateInstance 拉起程序。
   src/ppt_domain.cpp

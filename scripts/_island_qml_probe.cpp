@@ -42,6 +42,7 @@
 // 而不是在 QML 里塞假 JSON：课表数据/倒计时边界/周次都来自 C++，塞假数据等于没测。
 #include "panel_domain.h"
 #include "schedule_clock.h"
+#include "automation_engine.h"   // 2026-10-27 Phase 3：探针注入真引擎验「自动化」面（面 6）
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -53,6 +54,8 @@
 #include <QPixmap>
 #include <QQuickWidget>
 #include <QQuickItem>
+#include <QQmlExpression>   // 2026-10-27 Phase 3：直接求值 faceModel.length（面签 OCR 不可靠）
+#include <QQmlContext>
 #include <QFontDatabase>
 #include <QTextStream>
 #include <QMouseEvent>
@@ -190,6 +193,7 @@ static void captureAndSave(IslandOverlay *isl, QQuickWidget *q, const QString &o
         dumpProp("_formKind");         // #330：形态串 capsule|centered|fullscreen|banner|mini
         dumpProp("_compactForm");      // #330：紧凑外框（Banner/Mini）判据
         dumpProp("_miniOrb");          // #330：Mini 正圆档（无描述）判据
+        dumpProp("_morphOn");          // 2026-10-27：6 形态层是否接管收起态
         dumpProp("_spectrumActive");   // §6.3：频谱态（2026-10-13）
         dumpProp("_mediaPresenting");  // 组件1：媒体占据岛面标志（2026-10-15）
         dumpProp("mediaIsContent");    // 组件1：presenting && 标题==媒体标题
@@ -204,6 +208,17 @@ static void captureAndSave(IslandOverlay *isl, QQuickWidget *q, const QString &o
         dumpProp("histFaceOn");        // #330：历史面可用性
         dumpProp("faceModel");         // #330：面清单
         dumpProp("faceNow");           // #330：有效面（失效自动回 0）
+        // 2026-10-27 Phase 3：验证「自」面（面 6）入模 —— 面签是老师唯一的到达路径，
+        // 面能渲染但面签不在 model 里 ⇒ 讲台上够不着（swipe 翻不到、也没有可点的签）。
+        dumpProp("automationFaceOn");
+        dumpProp("automationObj");
+        // 面签是 11px 单字，截图 OCR 不可靠（自/记 易混）⇒ 直接问 QML 面清单长度。
+        // 期望 6：概(0) 史(2) 态(3) 笔(4) 设(5) 自(6)（媒面按需，本轮无媒体）。
+        {
+            QQmlExpression expr(qmlContext(ri), ri, QStringLiteral("faceModel.length"));
+            QVariant v = expr.evaluate();
+            out << "  root.faceModel.length = " << v.toString() << "\n";
+        }
         dumpProp("facePanelOn");       // #330：面面板是否可见
         dumpProp("facesOn");           // #330：切换器是否可见（≥2 面才开）
         dumpProp("searchQuotaUsed");   // 组件2：已点歌数
@@ -409,11 +424,16 @@ int main(int argc, char *argv[])
     QString panelArg;
     QString panelJsonArg;
     QString profileArg;
+    // 2026-10-27（灵动岛 6 形态骨架）：--morph <mode> 直接走 C++ 演示入口
+    //   progress | countdown | alert | marquee | audio | dock | notice | cycle | auto
+    // 强制形态层接管收起态胶囊，给 6 形态各自的渲染抓一张图（验证 QML 守 §10.9 纯净渲染）。
+    QString morphModeArg;
     // 2026-10-17：--hold <sec> 让通知**多停留**若干秒再截图/退出。
     // 用途：分辨历史 ts 取的是"通知出现时刻"还是"归档时刻"——
     //   停留 N 秒后归档，若 ts 仍是出现时刻，则 ts 比分文件写入时刻早约 N 秒。
     int holdSec = 0;
     bool vhclear = false;   // #Win7 排障：vh 模块销毁清空路径验收（见文件头注释）
+    bool automation = false; // 2026-10-27 Phase 3：注入真 AutomationEngine 验「自」面
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
     for (int i = 1; i < argc; ++i) {
         const QString a = QString::fromLocal8Bit(argv[i]);
@@ -461,6 +481,9 @@ int main(int argc, char *argv[])
         if (a == QLatin1String("--hold") && i + 1 < argc)
             holdSec = QString::fromLocal8Bit(argv[++i]).toInt();
         if (a == QLatin1String("--vhclear"))  vhclear = true;   // #Win7 排障
+        if (a == QLatin1String("--automation")) automation = true; // 2026-10-27 Phase 3：注入真引擎验「自」面
+        if (a == QLatin1String("--morph") && i + 1 < argc)
+            morphModeArg = QString::fromLocal8Bit(argv[++i]);   // 6 形态演示入口
     }
 
     qInstallMessageHandler(vhclearMsgHandler);   // 必须在岛（QML）创建前装
@@ -468,6 +491,32 @@ int main(int argc, char *argv[])
     IslandOverlay *isl = IslandOverlay::instance();
     isl->setIdleEnabled(true);
     if (light) isl->setLightMode(true);
+
+    if (automation) {
+        // 2026-10-27 Phase 3：注入真 AutomationEngine，验「自」面（面 6）加载 + 真数据
+        // 链路（ruleSummaries / ruleCount）。生产里这段在 main.cpp，探针独立复现。
+        auto *engine = new AutomationEngine(isl);
+        isl->setQmlObjectProperty(QStringLiteral("automationObj"), engine);
+        // 预置一条规则，让面有内容可渲染（验证 summaries 非空路径）。
+        QJsonObject rule;
+        rule.insert(QStringLiteral("id"), QStringLiteral("probe-bell"));
+        rule.insert(QStringLiteral("name"), QStringLiteral("探针·每日上课铃"));
+        rule.insert(QStringLiteral("enabled"), true);
+        QJsonObject trig; trig.insert(QStringLiteral("type"), QStringLiteral("time"));
+        trig.insert(QStringLiteral("time"), QStringLiteral("08:00"));
+        rule.insert(QStringLiteral("trigger"), trig);
+        QJsonObject cond; cond.insert(QStringLiteral("days"), QJsonArray{1,2,3,4,5});
+        rule.insert(QStringLiteral("condition"), cond);
+        QJsonObject act; act.insert(QStringLiteral("kind"), QStringLiteral("notify"));
+        act.insert(QStringLiteral("title"), QStringLiteral("上课了"));
+        act.insert(QStringLiteral("content"), QStringLiteral("请安静，准备上课"));
+        rule.insert(QStringLiteral("action"), act);
+        engine->upsertFromRemote(rule);   // 走与管理端下发同一入口（幂等）
+        QTimer::singleShot(300, [engine] {
+            fprintf(stderr, "AUTOMATION-ruleCount=%d\n", engine->ruleCount());
+            fflush(stderr);
+        });
+    }
 
     if (vhclear) {
         // #Win7 排障（2026-10-25）：岛已建（QML 已同步加载）⇒ 300ms 后注入假
@@ -490,6 +539,15 @@ int main(int argc, char *argv[])
 
     if (idle) {
         isl->ensureIdle();
+    } else if (!morphModeArg.isEmpty()) {
+        // 2026-10-27（灵动岛 6 形态骨架）：强制形态层接管收起态 —— 先给一条占位通知
+        // 让岛以「可见收起态」上屏（morph 层 visible 与 idle 无关，但岛本身得先可见），
+        // 再 setMorphDemo 强制模式（m_morphForced=true，recomputeMorph 让路，QML 读 bridge.morphMode）。
+        isl->showIsland(QStringLiteral("灵动岛形态演示"),
+                        QStringLiteral("下方为形态渲染层"),
+                        QStringLiteral("sparkles"), 0);
+        isl->setMorphDemo(morphModeArg);
+        if (expand) isl->setExpanded(true);   // 进度/跑马灯等形态在展开态有附加控件
     } else if (!formArg.isEmpty()) {
         // #330 三档场景（2026-10-17）
         //   banner      长文案通栏：验"单行 elide 不折行、高度不涨"
