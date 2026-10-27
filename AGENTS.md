@@ -209,6 +209,21 @@ ls -t <另一仓>/src | head -3       # 或看 mtime
 
 ---
 
+### 8.2 `class_admin.cpp` 被外部修正一行 include（2026-10-24 09:50 登记 · WorkBuddy）
+
+**现象**：本会话 Write `Stelarith-viewer-qt/src/class/class_admin.cpp` 时第 2 行是
+`#include "viewerbackend.h"`（无注释）；构建失败（C1083 找不到头）后读文件，
+该行已变成 `#include "../viewerbackend.h"   // logf / ViewerBackend（与其他 src/class 文件同口径）`。
+其余 91 行与本会话写入逐字一致。文件是**未跟踪新文件**（无历史版本可 diff），
+构建脚本 `_build_viewer.py` 无任何 patch 源码逻辑 ⇒ 写入者无法确证
+（疑似平台在网络错误恢复间隙的自动修正，无证据）。
+
+**处置（§5 精神：不覆盖、登记、继续）**：保留该修正（`../` 正是子目录 TU 的
+正确写法，覆盖回去=把正确改错）；本次不覆盖、不追写。**若后续发现同一文件
+再次出现非本会话改动，立即停手并上报用户。**
+
+---
+
 ## 9. 全局 UI 构建红线（2026-10-22 立 · 用户点单「全局统一」）
 
 > **目的**：不让 AI 一个页面一个页面地"猜"样式。所有星集控 QML 界面必须长在
@@ -380,6 +395,13 @@ ls -t <另一仓>/src | head -3       # 或看 mtime
 - 现状（2026-10-22 实测）：`control-qt` **0 个 Model**，`main.cpp` 里 **108 处** `QVariantMap`/`QJsonObject` 直喂 QML；
   `viewer` 全端 138 个 `Q_INVOKABLE`。**这是当前最疼的一条**——QML 侧无类型、无补全、无编译期检查，
   改一个字段名要全库猜哪里在读。
+- **2026-10-27 QML 侧审计（见 §10.9）**：全库 QML/JS 搜 `WebSocket`/`XMLHttpRequest`/`fetch`/`JSON.parse`/`encodeURIComponent` ——
+  结论：QML **几乎不直连网**。MonitorPage/ControlPage 里的 "WebSocket" 仅是注释（VNC 走 C++ `image://vnc/live` provider）；
+  CameraBindDialog/NotifyDialog 走 `backend.sendAction(...)`（C++ 桥）。**唯一真·QML 侧违例是
+  `Stelarith-viewer-qt/qml/pages/class/ClassTimetablePane.qml` 两处 `JSON.parse`**，解析 C++ 经信号 / `readTextFile`
+  丢来的**原始 JSON 字符串**——这正好印证本条：C++ 把原始 JSON 丢给 QML 解析，正是 §10.7 要消灭的反模式。
+  修法：C++ 改传强类型 Model / 对象（归入 §10.8 步 2/3）。SvgIcon.qml 的 `encodeURIComponent` 仅用于拼
+  `image://svgicon/` URI（颜色 tint 给 image provider），非网络、非业务，属可接受。
 - **正解样板（照抄它）**：`Stelarith-viewer-qt/src/schedule/{schedule,subject,timeslot}_model.h`
   —— 它们就是这个规范第 5 条要求的形态，已经跑在产线上。
 - 迁移顺序：从**设备清单**这一个最高频列表开始，新旧字段双轨过渡，不一次性切。
@@ -392,6 +414,38 @@ ls -t <另一仓>/src | head -3       # 或看 mtime
 | 1 | 拆 `main.cpp`：按指令域搬家（media / ota / devices / ws），只搬不改逻辑，每域一提交 | 待点单 |
 | 2 | 设备清单 `QVariantMap` → `QAbstractListModel`，双轨过渡 | 待点单 |
 | 3 | `viewerbackend` 按业务拆 Service；`Main.qml` / `CameraCenter.qml` 抽子组件 | 待点单 |
+| 4 | QML 侧审计 + 封杀令（§10.9）落地：加 `qml-no-network` 门禁（禁 `XMLHttpRequest` / `WebSocket` / `fetch` / `JSON.parse`） | 审计✅ 2026-10-27；门禁待点单 |
+| 5 | `ClassTimetablePane.qml` 去 `JSON.parse`：C++ 改传强类型 Model/对象（并入步 2/3） | 待点单 |
 
 **纪律**：第 1/2/3 步都是结构性改动，**开工前必须拿到明确点单**（哪个域、哪个文件、要不要同步发版）。
 自己顺手发现的问题只登记、只上报，不动手。
+
+### 10.9 QML 纯净 UI 铁律 · 封杀令（2026-10-27 立 · 用户点单）
+
+> **一句话**：**QML 只画图、只接收点击；所有脏活累活（网络 / JSON 解析 / Win32 / DB / 日志）都在 C++。**
+> 与 §10.7 是同一枚硬币的两面：§10.7 管「C++ 怎么把数据喂给 QML」（强类型），本条管「QML 自己不许干什么」。
+
+**绝对边界**
+- **C++（大脑与神经）**：WebSocket/HTTP 通信、JSON/Protobuf 解析、VNC 数据包、Win32 API（杀进程/抓屏）、
+  本地 DB 读写、日志。**绝不允许阻塞 UI 线程**（耗时任务进子线程）。
+- **QML（皮肤与五官）**：只「看」和「点」。把 C++ 经 `Q_PROPERTY` 传来的数据画出来；用户点击呼叫 C++ 的
+  `Q_INVOKABLE`。**不解析数据、不连网、不判断业务逻辑。**
+
+**【QML 架构红线指令 / 封杀令】—— 写任何 QML 时强制生效**
+1. **纯净 UI 原则**：QML 文件中**绝对禁止**出现 `XMLHttpRequest`、`WebSocket`、`fetch` 等任何网络请求代码。
+   （`image://<provider>/...` 这种 C++ 图像提供者是允许的，它不是网络。）
+2. **绝对禁止处理业务逻辑**：QML 不允许解析原始 JSON 字符串（`JSON.parse`/`JSON.stringify` 处理业务数据），
+   不允许做复杂数据计算。所有计算在 C++ 完成后，通过强类型属性（`Q_PROPERTY`）或数据模型
+   （`QAbstractListModel`）传给 QML。
+3. **统一入口**：QML 的交互（点击、滑动）**只能**调用 C++ 注入的 `Q_INVOKABLE` 方法（如 `backend.sendAction(...)`）。
+4. **禁止阻塞**：C++ 传给 QML 的数据处理必须轻量；所有耗时任务（读文件、网络请求）必须在 C++ 子线程完成，
+   QML 侧不得出现 `while`/同步等待/同步 IO。
+
+**正确骨架（照抄）**
+- 状态展示：`Q_PROPERTY(Type name READ ... NOTIFY ...)` → QML 直接绑 `backend.name`，变化自动刷新。
+- 用户动作：`Q_INVOKABLE void sendXxx(...)` → QML `onClicked: backend.sendXxx()`，**只发指令、不管结果**。
+- 列表数据：`QAbstractListModel` 子类 + `roleNames()`，QML `ListView`/`GridView` 直接 `model.deviceName`；
+  C++ 数据变 → `dataChanged` → QML 瞬时重绘。**严禁**把 `QVariantMap`/`QJsonObject`/`QVariantList` 当模型传（见 §10.7）。
+
+**2026-10-27 审计结论**：本库 QML 已约 90% 合规（仅 `ClassTimetablePane.qml` 两处 `JSON.parse` 解析 C++ 丢来的原始
+JSON 字符串，属 §10.7/§10.9 要消灭的反模式，见 §10.8 步 5）。后续靠 §10.8 步 4 的 `qml-no-network` 门禁守住，不靠人肉 review。

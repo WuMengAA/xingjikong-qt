@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "_comment": "QML 网络/JSON 门禁已知违例基线（test-qml-no-network.mjs 读取）。每项 = 一处已登记、待 §10.8 步5 修复的遗留违例。key = (file, pattern)。落在表里的 (文件, pattern) 只报不拦；不在表里的新违例直接判失败。修掉后（C++ 改传强类型、QML 去 JSON.parse）删除对应项即可。",
+  "known": [
+    {
+      "file": "Stelarith-viewer-qt/qml/pages/class/ClassTimetablePane.qml",
+      "pattern": "JSON.parse",
+      "count": 2,
+      "why": "§10.8 步5：C++ 经 onTimetableLoaded 信号 / readTextFile 把原始 JSON 字符串丢给 QML 解析（L78 解析文件、L107 解析信号载荷）。修法 = C++ 改传强类型 Model/对象，QML 去 JSON.parse 后删此项。"
+    }
+  ]
+}

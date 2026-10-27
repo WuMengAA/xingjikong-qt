@@ -23,7 +23,7 @@
 ## 3 仓库 / UI / 门禁
 - github `WuMengAA/xingjikong-qt`；根仓即 meta（gitlink，无 remote）。⚠️ shared-qml 是 meta 子目录非独立仓库，随 meta 提交。
 - QML 纪律：字号 12/13/14/16；锚只锚 parent；禁原生控件；NSIS .nsi 带 BOM。
-- **UI 单一真源 = `shared-qml/ui/Md3.qml`+12 件组件**；骨架唯一外壳=viewer `qml/shell/MainWindow.qml`、被控端 `qml/shell/AgentShell.qml`。AGENTS.md §9=UI 红线、§10=工程架构红线。
+- **UI 单一真源 = `shared-qml/ui/Md3.qml`+12 件组件**；骨架唯一外壳=viewer `qml/shell/MainWindow.qml`、被控端 `qml/shell/AgentShell.qml`。AGENTS.md §9=UI 红线、§10=工程架构红线；**§10.9=QML 纯净 UI 封杀令**（QML 禁 `XMLHttpRequest`/`WebSocket`/`fetch`/`JSON.parse`，脏活全归 C++）。
 - 门禁九件在 `shared-qml/scripts/`：file-size（`fixtures/oversize-legacy.json` 47 项台账，**回写只手工改 lines+plan，禁用 `--update-whitelist`**）/ ui-terms（扫字符串字面量，**禁用词含 教室机·机器·电脑·节点·黑屏·投屏·学生机 ⇒ 一律「设备」/「X端」**）/ ui-contract / action-manifest / manifest-scope / module-registry（既有 7-3 失败）/ agent-qml-deps / island 三件。
 - 被控端页 = `qml/shell/AgentPages.js` 声明表（`manifestFor(role)` 按用途过滤，order 过滤后重排）；加页只改这张表。
 
