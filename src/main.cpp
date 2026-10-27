@@ -37,6 +37,9 @@
 #include <QQmlContext>
 #include <QQuickImageProvider>
 #include "class/class_thumb_provider.h"   // 班级缩略图 → QML（image://classthumb/<uid>，#460）
+#include "class/class_center_controller.h" // 2026-10-28 B0：班级中心控制器（QML 零逻辑的落点）
+#include "class/class_service.h"          // B1：缩略图修订号（ClassService::thumbnailChanged）
+#include "class/class_admin.h"            // B1：抽屉「班级编辑」改绑（ClassAdmin::bindDevice）
 #include "svgiconprovider.h"
 #include "vnc_image_provider.h"   // 2026-10-18：远控画面 image://vnc/live
 #include <QTimer>
@@ -322,7 +325,7 @@ void stelarithNotifyTray(const QString &title, const QString &msg)
 // ⚠️ 命名标准为 DeepSeek Harness 同款：正式 X.Y.Z / 候选 X.Y.Z-rc.N（rc 号同核心递增、
 //    换核心归零、转正剥离后缀）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //    这一行是 CMake 校验用的回落值 —— 正常构建下由 CMakeLists.txt 的真源强制对齐。
-static constexpr const char *kViewerVersion = "0.6.50-rc.2";
+static constexpr const char *kViewerVersion = "0.6.50-rc.3";
 
 /**
  * 把窗口拉回屏幕内（2026-10-08）。
@@ -553,6 +556,82 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("undoManager"), &schedUndo);
     engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), schedRepo.defaultProfilePath());
     engine.rootContext()->setContextProperty(QStringLiteral("scheduleToday"), &schedToday);
+    // 2026-10-28 B0：班级中心控制器。承载原写在 QML 里的全部计算/配色/状态，
+    // 落实用户铁律「QML 永远不写逻辑与通信代码，全部交给 C++」。
+    // QML 侧只读 `classCenter.xxx` 属性、只调其 Q_INVOKABLE，不自己算。
+    // ⚠️ 用普通自动变量而非 static：lambda 需要捕获它（static 局部捕获在
+    //    /permissive- 下报 C3495，2026-10-28 实测）；main() 期间它始终存活。
+    ClassCenterController classCenterCtl;
+    // B1：控制器只把按钮名翻成既有指令词表，真正下发由宿主一行接线
+    // （2026-10-28 解耦：控制器不再持有 ViewerBackend，探针可单独链它验收）。
+    QObject::connect(&classCenterCtl, &ClassCenterController::actionOut,
+                     &backend, [&backend](const QString &uid, const QString &action,
+                                          const QJsonObject &params) {
+        backend.sendActionTo(uid, action, params);
+    });
+    // 目标设备跟随主画面：当前在看哪台，班级中心的按钮就发给哪台
+    QObject::connect(&backend, &ViewerBackend::currentUidChanged,
+                     &classCenterCtl, [&backend, &classCenterCtl]() {
+        classCenterCtl.setTargetUid(backend.currentUid());
+    });
+
+    // ── B1 数据面：控制器不认识 backend，三路真数据由宿主推进来 ─────────────
+    // 都是既有属性/既有拉取动作（requestClasses / requestDevices / fetchEvents），
+    // 不新增端点、不新增权限面。控制器只在页面可见时按 15s 发 refreshRequested。
+    QObject::connect(&classCenterCtl, &ClassCenterController::refreshRequested, &backend,
+                     [&backend]() {
+        backend.requestClasses();
+        backend.requestDevices();
+        backend.fetchEvents();
+    });
+    QObject::connect(&backend, &ViewerBackend::classesChanged, &classCenterCtl,
+                     [&backend, &classCenterCtl]() {
+        classCenterCtl.setClasses(backend.classes());
+        // 班级归属变了 ⇒ 设备名/在线态要跟着重算（不额外发请求，直接复用已有快照）
+        classCenterCtl.setDevices(backend.devices());
+    });
+    QObject::connect(&backend, &ViewerBackend::devicesChanged, &classCenterCtl,
+                     [&backend, &classCenterCtl]() {
+        classCenterCtl.setDevices(backend.devices());
+    });
+    QObject::connect(&backend, &ViewerBackend::eventsChanged, &classCenterCtl,
+                     [&backend, &classCenterCtl]() {
+        classCenterCtl.setEvents(backend.events());
+    });
+    // 缩略图：ClassService 只缓存**当前订阅班**的图 ⇒ 图源 rev 也只在订阅班内有意义
+    QObject::connect(backend.classService(), &ClassService::thumbnailChanged, &classCenterCtl,
+                     [&backend, &classCenterCtl](const QString &uid) {
+        classCenterCtl.setThumb(uid, backend.classService()->thumbRev(uid));
+    });
+    // 进/出远程桌面：走既有「选中即接管」（setCurrentUid 内部发 remote_control_start，
+    // 等回执后再拉 VNC，2026-10-24 修的竞态就在这里）；退出照 MonitorPage 的口径。
+    QObject::connect(&classCenterCtl, &ClassCenterController::remoteEntered, &backend,
+                     [&backend, &classCenterCtl](const QString &uid) { backend.setCurrentUid(uid); });
+    QObject::connect(&classCenterCtl, &ClassCenterController::remoteLeft, &backend,
+                     [&backend, &classCenterCtl](const QString &uid) {
+        if (!uid.isEmpty())
+            backend.sendActionTo(uid, QStringLiteral("remote_control_stop"), QJsonObject());
+        backend.stopVnc();
+    });
+    // 画面指针：归一化坐标与夹取已在控制器里做完，这里只转给既有 sendPointer
+    QObject::connect(&classCenterCtl, &ClassCenterController::pointerOut, &backend,
+                     [&backend, &classCenterCtl](const QString &kind, qreal nx, qreal ny,
+                                                 const QString &btn) {
+        backend.sendPointer(kind, nx, ny, btn);
+    });
+    // 远程画面帧：tick 由 C++ 递增（QML 侧不写计数器 —— 那是逻辑）
+    QObject::connect(&backend, &ViewerBackend::vncFrameReady, &classCenterCtl,
+                     [&classCenterCtl](const QImage &) { classCenterCtl.bumpLiveFrame(); });
+    QObject::connect(&backend, &ViewerBackend::frameSourceChanged, &classCenterCtl,
+                     [&backend, &classCenterCtl]() {
+        classCenterCtl.setLiveActive(backend.frameSource() == QStringLiteral("vnc"));
+    });
+    // 抽屉「班级编辑」改绑：走既有 ClassAdmin::bindDevice（云端 POST /api/class/bind）
+    QObject::connect(&classCenterCtl, &ClassCenterController::rebindRequested, &backend,
+                     [&backend](const QString &uid, const QString &code) {
+        if (backend.classAdmin()) backend.classAdmin()->bindDevice(code, uid);
+    });
+    engine.rootContext()->setContextProperty(QStringLiteral("classCenter"), &classCenterCtl);
     // 课表编辑器文件选择对话框（fileDlgs 声明见 engine 之前 —— 裸指针先建后析构）
     engine.rootContext()->setContextProperty(QStringLiteral("fileDialogs"), &fileDlgs);
     // 2026-10-06：QML 从**磁盘**加载，不再从 exe 里的资源读。

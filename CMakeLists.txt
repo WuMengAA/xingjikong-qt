@@ -32,7 +32,7 @@ endif()
 # 完整标准见 docs/版本号命名规范-2026-10-07.md。
 # 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
 # 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
-set(VIEWER_VERSION "0.6.50-rc.2")
+set(VIEWER_VERSION "0.6.50-rc.3")
 add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
 
 # 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补；2026-10-07 正则收严到 X.Y.Z[-rc.N]）。
@@ -211,6 +211,10 @@ qt_add_executable(viewer-qt
   src/class/class_admin.cpp
   src/class/class_admin_import.cpp
   src/class/class_admin.h
+  # 2026-10-28 B0：班级中心控制器（承载原先写在 QML 里的全部计算/配色/状态，
+  # 落实「QML 不写逻辑、全部交给 C++」）。Q_OBJECT 头须显式列入让 AUTOMOC 必扫。
+  src/class/class_center_controller.cpp
+  src/class/class_center_controller.h
   src/class/class_thumb_provider.cpp
   src/class/class_thumb_provider.h
   ${STE_SINGLEINSTANCE_SRC}

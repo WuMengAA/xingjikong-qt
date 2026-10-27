@@ -94,7 +94,13 @@ Item {
         { key: "classes",  icon: "users",       label: "班级看板" },
         { key: "control",  icon: "layout-grid", label: "设备集控" },
         { key: "monitor",  icon: "eye",          label: "运行监控" },
-        { key: "settings", icon: "settings",    label: "系统设置" }
+        { key: "settings", icon: "settings",    label: "系统设置" },
+        // 2026-10-28 模块一：全局班级阵列 + 抽屉 + 远程桌面操作面板（蓝图模块一）。
+        // 与既有「班级看板」（单班三栏工作台 ClassDashboard）**并存**：新页另挂，
+        // 不改不动旧件（用户未裁决"取代"，一律并存，避免误伤既有工作台）。
+        // 图标名必须对照 resources/icons/*.svg 实体（写不存在的名字会静默空白）：
+        // 本工程**没有** "grid"，只有 "layout-grid"。
+        { key: "classcenter", icon: "layout-grid", label: "班级中心" }
     ]
 
     /** 侧栏菜单：按身份裁剪（过滤，不是另抄一份表 —— 否则加页又会漏一边）。 */
@@ -147,6 +153,7 @@ Item {
         if (shell.section === "monitor") return 3
         if (shell.section === "settings") return 4
         if (shell.section === "account") return 5
+        if (shell.section === "classcenter") return 6
         return 0
     }
 
@@ -157,6 +164,7 @@ Item {
         if (shell.section === "monitor") return "运行监控"
         if (shell.section === "settings") return "系统设置"
         if (shell.section === "account") return "个人中心"
+        if (shell.section === "classcenter") return "班级中心"
         return "设备监控"
     }
 
@@ -408,6 +416,13 @@ Item {
                         Loader {
                             source: "../pages/account/AccountCenterPage.qml"
                             onLoaded: if (item) item.ctx = shell.ctx
+                        }
+
+                        // ⑦ 班级中心（2026-10-28 模块一）：全局班级阵列 + 右侧抽屉 + 远程桌面操作面板。
+                        //    本件是**纯声明式**：数据与几何全在 C++ ClassCenterController（context: classCenter），
+                        //    点击只调 classCenter.requestOp("名字")，QML 里零 Math / 零三元 / 零 function。
+                        Loader {
+                            source: "../pages/class/ClassCenterPage.qml"
                         }
                     }
                 }
