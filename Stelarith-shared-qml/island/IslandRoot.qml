@@ -2699,103 +2699,17 @@ Item {
                     }
                 }
 
-                // ── 面 2：历史（最多 4 条 + 余量提示）──────────────────
-                // 行版式照搬概览面历史面板（48px 固定行高 + 三行文字 + clip），
-                // 只是把"可滚动"换成"限量展示"——面板高度有限，多了给余量提示。
-                Item {
+                // ── 面 2：历史（紧凑预览，最多 4 条 + 余量提示）────────────
+                // 2026-10-27 抽离为 IslandHistoryFace（统一布局规范 Phase 1）：
+                // 复用 IslandListRow，消除"各面手搓 48px 行"的漂移；右侧让位鲸鱼 44px。
+                IslandHistoryFace {
                     anchors.fill: parent
                     anchors.margins: 10
+                    anchors.rightMargin: 50   // 10 基础 + 40 余量给右下角鲸鱼（z:100）
                     visible: root.faceNow === 2
-                    clip: true
-
-                    Column {
-                        id: faceHistCol
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.rightMargin: 40   // 让位鲸鱼（右下 36px）
-                        anchors.top: parent.top
-                        spacing: 4
-
-                        Repeater {
-                            model: Math.min(4, root._history.length)
-                            delegate: Item {
-                                required property int index
-                                width: faceHistCol.width
-                                height: 48
-                                readonly property var entry: root._history[index] || ({})
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: 8
-                                    color: root.th.light ? Qt.rgba(0, 0, 0, 0.04) : Qt.rgba(1, 1, 1, 0.05)
-                                }
-                                // 未读小蓝点（2026-10-17）：与概览面历史面板同口径
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 3
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 5
-                                    height: 5
-                                    radius: 2.5
-                                    visible: parent.entry.read !== true
-                                    color: root.th.accent
-                                }
-                                SvgIcon {
-                                    id: fhIcon
-                                    name: parent.entry.icon || "bell"
-                                    tint: root.th.sub
-                                    px: 14
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 8
-                                    anchors.top: parent.top
-                                    anchors.topMargin: 6
-                                }
-                                Text {
-                                    id: fhTime
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: 8
-                                    anchors.top: parent.top
-                                    anchors.topMargin: 5
-                                    // face 2 是平铺列表，**没有分组标题兜日期** ⇒ 用 timeFull
-                                    // （今天只给 HH:mm，昨天/更早带前缀）；概览面有分组，用 timeStr。
-                                    text: parent.entry.timeFull || parent.entry.timeStr || ""
-                                    color: root.th.sub
-                                    font.pixelSize: 10
-                                }
-                                Text {
-                                    id: fhTitle
-                                    anchors.left: fhIcon.right
-                                    anchors.leftMargin: 6
-                                    anchors.right: fhTime.left
-                                    anchors.rightMargin: 6
-                                    anchors.top: parent.top
-                                    anchors.topMargin: 4
-                                    text: parent.entry.title || ""
-                                    color: root.th.fg
-                                    font.pixelSize: 12
-                                    // 未读加粗（同概览面）
-                                    font.weight: (parent.entry.read !== true) ? Font.DemiBold : Font.Medium
-                                    elide: Text.ElideRight
-                                }
-                                Text {
-                                    anchors.left: fhTitle.left
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: 8
-                                    anchors.top: fhTitle.bottom
-                                    anchors.topMargin: 1
-                                    text: parent.entry.desc || ""
-                                    color: root.th.sub
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-                            }
-                        }
-                        Text {
-                            visible: root._history.length > 4
-                            text: "还有 " + (root._history.length - 4) + " 条（回概览面看完整列表）"
-                            color: root.th.sub
-                            font.pixelSize: 10
-                        }
-                    }
+                    th: root.th
+                    history: root._history
+                    bridgeRef: root.bridgeRef
                 }
 
                 // ── 面 3：状态（桥/模块已给的展示态，不新造数据源）──────
@@ -2919,7 +2833,7 @@ Item {
         anchors.left: parent.left
         anchors.leftMargin: root.padH
         anchors.right: parent.right
-        anchors.rightMargin: root.padH
+        anchors.rightMargin: root.padH + 44   // 让位右下角鲸鱼（z:100，~44px 占右下），避免压住列表
         anchors.top: parent.top
         // 2026-10-12 修「历史显示不全」：原写法 headH + 36，但 implicitHeight 预算里
         // 顶部只算了 padH ⇒ 那 36 属于"预算外占位"，把历史面板整体往下顶、越顶越矮。
@@ -2937,54 +2851,37 @@ Item {
         z: 40
 
         // 独立容器：比 shell 略深/浅一档，有圆角
-        Rectangle {
+        IslandCard {
             id: histContainer
             anchors.fill: parent
-            radius: 10
-            clip: true
-            color: root.th.light ? Qt.rgba(0, 0, 0, 0.05) : Qt.rgba(1, 1, 1, 0.06)
-            border.width: 1
-            border.color: root.th.light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.10)
+            th: root.th
+            pad: 0
+            radius: root.th.rCard
+            clipContent: true
 
             // ── 标题头 ──────────────────────────────
-            Item {
+            // ── 标题头（2026-10-27 · 统一布局规范：IslandFaceHeader）──────
+            IslandFaceHeader {
                 id: histHeader
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                height: 32
-
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 10
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "历史通知"
-                    color: root.th.fg
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                }
-
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 68
-                    anchors.verticalCenter: parent.verticalCenter
-                    // 2026-10-17：有未读时显示"· N 未读"，比光给总数有用
-                    text: root._unread > 0
+                th: root.th
+                title: "历史通知"
+                showDot: root._unread > 0
+                subtitle: root._unread > 0
                           ? ("(" + root._history.length + ") · " + root._unread + " 未读")
                           : ("(" + root._history.length + ")")
-                    color: root._unread > 0 ? root.th.accent : root.th.sub
-                    font.pixelSize: 11
-                }
 
-                // 工具按钮组：筛选 / 已读 / 清空（右起，自右向左排）
+                // 工具按钮组：筛选 / 已读 / 清空（走 header 尾部操作槽）
                 Row {
-                    anchors.right: parent.right
-                    anchors.rightMargin: 8
+                    // 走 header 的 trailing 槽（trailArea 已钉在右缘、零宽），
+                    // 必须自钉右缘，否则会落在 trailArea 原点（右缘外侧）被裁掉。
                     anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
                     spacing: 5
 
                     Repeater {
-                        // 顺序即显示顺序（左→右）。"已读" 无未读时整颗隐藏。
                         model: [
                             { t: "筛选", act: "filter" },
                             { t: "已读", act: "read"   },
@@ -2995,7 +2892,6 @@ Item {
                             height: 20
                             radius: height / 2
                             visible: modelData.act !== "read" || root._unread > 0
-                            // 筛选按钮选中态给底色，一眼看出筛子开着
                             color: (modelData.act === "filter" && root.histFilterOn)
                                    ? (root.th.light ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(1, 1, 1, 0.16))
                                    : (btnMa.pressed
@@ -3003,7 +2899,6 @@ Item {
                                       : (btnMa.containsMouse
                                          ? (root.th.light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.10))
                                          : Qt.rgba(0, 0, 0, 0)))
-
                             Text {
                                 id: btnTxt
                                 anchors.centerIn: parent
@@ -3012,7 +2907,6 @@ Item {
                                        ? root.th.fg : root.th.sub
                                 font.pixelSize: 10
                             }
-
                             MouseArea {
                                 id: btnMa
                                 anchors.fill: parent
@@ -3022,8 +2916,6 @@ Item {
                                     if (!root.bridgeRef) return
                                     if (modelData.act === "filter") {
                                         root.histFilterOn = !root.histFilterOn
-                                        // 收起筛选行时把筛子一并清空 —— 否则用户看不到筛子，
-                                        // 列表却还是被过滤的，会以为"历史丢了"。
                                         if (!root.histFilterOn) {
                                             if (root.bridgeRef.setHistoryCategoryFilter)
                                                 root.bridgeRef.setHistoryCategoryFilter("")
@@ -3036,21 +2928,23 @@ Item {
                                     } else {
                                         if (root.bridgeRef.clearHistory)
                                             root.bridgeRef.clearHistory()
+                                        histToast.show("已清空历史")
                                     }
                                 }
                             }
                         }
                     }
                 }
+            }
 
-                // 分割线
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: 1
-                    color: root.th.light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.10)
-                }
+            // 分割线（独立，不在 header 组件内）
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: 31
+                height: 1
+                color: root.th.light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.10)
             }
 
             // ── 筛选行（2026-10-17，默认收起）──────────────────────
@@ -3181,133 +3075,39 @@ Item {
                 // 2026-10-17：按"今天/昨天/M月d日"分段（分组串在 C++ 归档时就算好，
                 // 不让 QML 现算日期 —— 见 island.h HistoryItem 注释）。
                 section.property: "dateGroup"
-                section.delegate: Item {
+                section.delegate: IslandSectionLabel {
                     width: historyList.width
-                    height: 18
-                    Text {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 8
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: section
-                        color: root.th.sub
-                        font.pixelSize: 10
-                        font.weight: Font.DemiBold
-                    }
+                    th: root.th
+                    text: section
                 }
 
-                delegate: Item {
+                delegate: IslandListRow {
                     width: historyList.width
-                    // 2026-10-12：行高 40→48（配描述 2 行 + 字号放大），与 histH 的 48/条一致
-                    height: 48
-
-                    // 每条独立行底色
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: 1
-                        radius: 6
-                        color: maHov.containsMouse
-                            ? (root.th.light ? Qt.rgba(0, 0, 0, 0.06) : Qt.rgba(1, 1, 1, 0.10))
-                            : (root.th.light ? Qt.rgba(0, 0, 0, 0.02) : Qt.rgba(1, 1, 1, 0.04))
-                        // 2026-10-18：悬停底色走 durInstant（原硬编码 80，差 10ms 无感）
-                        Behavior on color { ColorAnimation { duration: root.th ? root.th.durInstant : 80 } }
-                    }
-
-                    // 未读小蓝点（设计稿 §4.3：未读项左侧有标记）
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 3
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 5
-                        height: 5
-                        radius: 2.5
-                        visible: modelData.read !== true
-                        color: root.th.accent
-                    }
-
-                    SvgIcon {
-                        id: hIcon
-                        name: modelData.icon || ""
-                        tint: root.th.sub
-                        px: 15
-                        anchors.left: parent.left
-                        anchors.leftMargin: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-
-                    Text {
-                        id: hTitle
-                        anchors.left: hIcon.right
-                        anchors.leftMargin: 6
-                        anchors.right: hTime.left
-                        anchors.rightMargin: 6
-                        anchors.top: parent.top
-                        anchors.topMargin: 5
-                        text: modelData.title || ""
-                        color: root.th.fg
-                        // 2026-10-12「字太小」：标题 12→13
-                        font.pixelSize: 13
-                        // 未读加粗、已读常规 —— 不用额外图标也能一眼分出
-                        font.weight: (modelData.read !== true) ? Font.DemiBold : Font.Medium
-                        elide: Text.ElideRight
-                    }
-
-                    Text {
-                        anchors.left: hTitle.left
-                        anchors.right: hCat.left
-                        anchors.rightMargin: 6
-                        anchors.top: hTitle.bottom
-                        text: modelData.desc || ""
-                        color: root.th.sub
-                        // 2026-10-12「字数太少」：描述 10→12，并允许 2 行（原来一行就 … 截掉）
-                        font.pixelSize: 12
-                        wrapMode: Text.WordWrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
-                    }
-
-                    // 分类标签（2026-10-17）：只在描述行右侧，占位很小
-                    Text {
-                        id: hCat
-                        anchors.right: hTime.right
-                        anchors.top: hTitle.bottom
-                        anchors.topMargin: 2
-                        text: modelData.category || ""
-                        color: (modelData.level === "error") ? "#e5484d"
-                               : (modelData.level === "warning") ? "#f5a623"
-                               : root.th.sub
-                        font.pixelSize: 10
-                        opacity: 0.85
-                    }
-
-                    Text {
-                        id: hTime
-                        anchors.right: parent.right
-                        anchors.rightMargin: 6
-                        anchors.top: parent.top
-                        anchors.topMargin: 5
-                        text: modelData.timeStr || ""
-                        color: root.th.sub
-                        // 2026-10-12：时间 9→11
-                        font.pixelSize: 11
-                    }
-
-                    MouseArea {
-                        id: maHov
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            // 2026-10-17：改按 **id** 打开。原来的 index 是"当前显示序"，
-                            // 加了筛选后同一 index 指向的条目会变（筛掉几条就整体前移），
-                            // 用 id 才不会"点第 2 条开第 4 条"。旧接口保留兼容。
-                            if (!root.bridgeRef) return
-                            if (root.bridgeRef.showHistoryById && modelData.id)
-                                root.bridgeRef.showHistoryById(modelData.id)
-                            else if (root.bridgeRef.showHistoryItem)
-                                root.bridgeRef.showHistoryItem(index)
-                        }
+                    th: root.th
+                    icon: modelData.icon || ""
+                    title: modelData.title || ""
+                    desc: modelData.desc || ""
+                    time: modelData.timeStr || ""
+                    category: modelData.category || ""
+                    level: modelData.level || ""
+                    unread: modelData.read !== true
+                    onClicked: {
+                        if (!root.bridgeRef) return
+                        if (root.bridgeRef.showHistoryById && modelData.id)
+                            root.bridgeRef.showHistoryById(modelData.id)
+                        else if (root.bridgeRef.showHistoryItem)
+                            root.bridgeRef.showHistoryItem(index)
                     }
                 }
+            }
+
+            // 清空/已读反馈（取代此前"清完无反应"）—— MD3 Snackbar 风，跨深浅可读
+            IslandToast {
+                id: histToast
+                th: root.th
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 8
             }
         }
     }

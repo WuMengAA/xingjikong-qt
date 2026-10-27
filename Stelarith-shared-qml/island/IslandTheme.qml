@@ -74,6 +74,27 @@ QtObject {
     property int shapeCollapsed: 56
     property int shapeExpanded:  320
 
+    // ── 间距（2026-10-27 · 统一布局规范：对齐 MD3 spacing 阶梯）──────────
+    // ⚠️ 新增但**不改既有行为**：各 face 之前硬编码的 4/8/12/16/20 现统一引这里，
+    //   调用方若不引这些令牌、继续用裸数字，渲染结果与改造前完全一致。
+    property real spXS: 4
+    property real spS:  8
+    property real spM:  12
+    property real spL:  16
+    property real spXL: 20
+
+    // ── 圆角（2026-10-27 · 统一布局规范：对齐 IslandSurface 当前取值）────
+    //   各 face 之前散落的 10/8/6 现统一引用，杜绝"同语义不同半径"。
+    property real rCard:    10   // 独立容器（历史面板 / 卡片）
+    property real rRow:     8    // 列表行
+    property real rSection: 6    // 分组标签
+    property real rPill:    999  // 胶囊 / 按钮 / chip
+
+    // ── 列表 / 头部度量（2026-10-27 · 取代各面硬编码 48/32/18）─────────
+    property real rowH:     48   // 列表单行高（标题+描述两行）
+    property real headH:    32   // 面头部高
+    property real sectionH: 18   // 分组标签高
+
     // ── 动效（2026-10-18 · 用户指令「统一动画时长为主题令牌」）──────────────
     // 之前只有 durShape/durFade 两个令牌，岛内另有 14 处**硬编码时长**
     // （60/75/80/90/120×6/160×2/180/200×2/600×2/1600×2）——
