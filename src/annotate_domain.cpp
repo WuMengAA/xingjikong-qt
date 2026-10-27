@@ -163,6 +163,9 @@ bool Overlay::ensureView(QString *err)
     // QML 侧 ESC → 收起批注层（键盘走钩子，见 installKeyboardHook；这条链路留给
     // 将来可能出现的"可聚焦模式"与程序内触发）
     QObject::connect(m_canvas, &Canvas::stopRequested, m_canvas, [this] { stop(); });
+    // 底部工具条的「白板」按钮 → 同一个 setBoard（保持 m_boardMode / 停跟页码的唯一裁决点）
+    QObject::connect(m_canvas, &Canvas::boardRequested, m_canvas,
+                     [this](const QString &bg) { setBoard(bg); });
 
     // 原生事件过滤只装一次：拦 WM_MOUSEACTIVATE（见 nativeEventFilter）
     if (auto *app = QCoreApplication::instance())
@@ -276,6 +279,11 @@ void Overlay::tickPpt()
 bool Overlay::isActive() const
 {
     return m_view && m_view->isVisible();
+}
+
+QObject *Overlay::rootItem() const
+{
+    return m_view ? m_view->rootObject() : nullptr;
 }
 
 bool Overlay::createHidden(QString *err)
@@ -412,6 +420,7 @@ void Overlay::setBoard(const QString &bg)
         m_boardMode = false;
         m_boardBg.clear();
         m_canvas->setBoardColor(QColor());      // 无效色 = 透明
+        m_canvas->setBoardKey(QString());       // 工具条据此灭掉「白板」高亮
         armPptTimer();                          // 回透明批注 = 恢复跟随 PPT
         return;
     }
@@ -427,6 +436,7 @@ void Overlay::setBoard(const QString &bg)
     m_boardMode = c.isValid();
     m_boardBg = bg.trimmed();
     m_canvas->setBoardColor(c);
+    m_canvas->setBoardKey(b);       // 语义名（white/black/green/#rrggbb）给 QML 用
     armPptTimer();      // 切白板 = 停止跟随 PPT（页码对白板无意义）
 }
 

@@ -224,7 +224,17 @@ void Canvas::setWidth(qreal w)
 void Canvas::setBoardColor(const QColor &c)
 {
     m_boardColor = c;
+    // 必须通知：底部工具条的「白板」高亮绑的就是 board 属性，
+    // 不 emit 的话点了白板按钮、按钮自己不会亮（老师以为没生效）。
+    emit changed();
     update();
+}
+
+void Canvas::setBoardKey(const QString &k)
+{
+    if (m_boardKey == k) return;
+    m_boardKey = k;
+    emit changed();
 }
 
 void Canvas::switchTo(const QString &key)

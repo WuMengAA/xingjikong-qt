@@ -5,7 +5,7 @@
 //
 // 分工：
 //   · 墨迹与工具状态全在 C++ 的 AnnotateCanvas（QQuickPaintedItem）里，
-//     本文件只做**输入采集**，不存任何绘制状态。
+//     本文件只做**输入采集 + 摆一个底部工具条**，不存任何绘制状态。
 //   · 所以这里没有 Canvas/Shape 之类的 QML 绘制 —— 墨迹一多 QML Canvas 会掉帧。
 //
 // ⚠️ **本层不接受焦点**（无焦点触控，2026-10-27 用户点单）：
@@ -14,6 +14,10 @@
 //    窗口永不成为活动窗口，QML 一辈子收不到按键事件，写了只会误导后来人。
 //    键盘逃生口（ESC 收层 / Ctrl+Z 撤销 / Ctrl+Y 重做 / Ctrl+E 清空）
 //    在 C++ 侧用低层键盘钩子实现，见 annotate_domain.cpp 的 annotateKeyboardProc。
+//
+// ⚠️ **底部工具条是必达出口**（2026-10-27 用户实测后加）：
+//    用户原话「开了之后就关不了了」。当时唯一的出口是 ESC 钩子或顶部灵动岛，
+//    任一条失效就把老师困在全屏批注层里。所以工具条第一项就是「鼠标」= 退出。
 import QtQuick
 import Stelarith.Annotate 1.0
 
@@ -22,7 +26,7 @@ Item {
 
     // 墨迹层（C++ 渲染，铺满）
     AnnotateCanvas {
-        id: canvas
+        id: inkCanvas
         objectName: "annotateCanvas"     // C++ 侧 findChild 靠它
         anchors.fill: parent
     }
@@ -42,15 +46,27 @@ Item {
         onPressed: function (mouse) {
             // 右键 = 撤销一笔（手写板上的快速纠错，比伸到工具栏快）
             if (mouse.button === Qt.RightButton) {
-                canvas.undo()
+                inkCanvas.undo()
                 return
             }
-            canvas.beginStroke(mouse.x, mouse.y)
+            inkCanvas.beginStroke(mouse.x, mouse.y)
         }
         onPositionChanged: function (mouse) {
             if (pressed)
-                canvas.addPoint(mouse.x, mouse.y)
+                inkCanvas.addPoint(mouse.x, mouse.y)
         }
-        onReleased: canvas.endStroke()
+        onReleased: inkCanvas.endStroke()
+    }
+
+    // 底部工具条：鼠标 / 批注 / 橡皮 / 白板 + 撤销 / 清空
+    // 声明在输入层**之后** ⇒ 叠在它上面 ⇒ 点在按钮上不会落笔
+    // （QML 按声明顺序堆叠，命中测试从最上层往下找，工具条先吃到事件）。
+    AnnotateToolBar {
+        id: toolbar
+        objectName: "annotateToolBar"    // 探针断言"工具条真的被实例化"靠它
+        canvas: inkCanvas
+        anchors.horizontalCenter: parent.horizontalCenter
+        // 56 = 给任务栏留的余量（任务栏 40~48，多留一点免得太贴边）
+        y: root.height - height - 56
     }
 }

@@ -67,6 +67,8 @@ class Canvas : public QQuickPaintedItem {
     Q_PROPERTY(int pageIndex READ pageIndex NOTIFY changed)
     Q_PROPERTY(int pageCount READ pageCount NOTIFY changed)
     Q_PROPERTY(QString tool READ tool NOTIFY changed)
+    // 白板背景（QML 底部工具条要显示「白板」是否生效，并据此循环切换）
+    Q_PROPERTY(QString board READ boardName NOTIFY changed)
 public:
     explicit Canvas(QQuickItem *parent = nullptr);
 
@@ -95,6 +97,11 @@ public:
 
     // 白板背景（空 = 透明批注层；非空 = 不透明白板）
     void setBoardColor(const QColor &c);
+    // 语义名（white / black / green / #rrggbb / 空）—— 由 Overlay::setBoard 同步过来。
+    // 为什么不让 QML 反查 RGB：三种命名色在 C++ 里是 0xFAFAFA / 0x1E1E1E / 0x1B5E3A，
+    // 若在 QML 里硬编码这三个值，以后调配色就两边悄悄对不上（工具条高亮永远不亮）。
+    void setBoardKey(const QString &k);
+    QString boardName() const { return m_boardKey; }
 
     // 按页存取（I3：PPT 每页批注）。key 为空表示不分页。
     void setPageKey(const QString &key);
@@ -116,9 +123,14 @@ public:
     // 否则老师被自己的批注层困住，只能等管理端发 stop）
     Q_INVOKABLE void requestStop() { emit stopRequested(); }
 
+    // 底部工具条点「白板」→ 请域切背景。**不能**让 QML 直接改颜色：
+    // 单一真源是 Overlay::setBoard（它还要管 m_boardMode 与「白板时停跟 PPT 页码」）。
+    Q_INVOKABLE void requestBoard(const QString &bg) { emit boardRequested(bg); }
+
 signals:
     void changed();
     void stopRequested();
+    void boardRequested(const QString &bg);
 
 private:
     void pushHistory();          // 把当前 m_strokes 压栈（改动前调用）
@@ -135,6 +147,7 @@ private:
     QColor  m_color = QColor(0xE5, 0x39, 0x35);   // 默认红笔（教室场景最常用、最显眼）
     qreal   m_width = 4.0;
     QColor  m_boardColor;                         // 无效 = 透明（批注模式）
+    QString m_boardKey;                           // 语义名（给 QML 工具条判断用）
     QString m_pageKey;
 
     bool m_drawing = false;
@@ -153,6 +166,10 @@ public:
     bool isActive() const;
 
     Canvas *canvas() const { return m_canvas; }
+    // QML 根对象（未创建时为空）。给探针/自检用来确认"某某件真的被实例化了"——
+    // 只看 canvas 是否非空不够：QML 里某一层类型解析失败时，根对象仍会建出来，
+    // canvas 照样能找到，坏掉的那一层却整块是空（2026-10-27 部署漏件就是这么发生的）。
+    QObject *rootItem() const;
 
     // 白板模式：bg 为空 → 透明批注层；"white"/"black"/"green"/"#RRGGBB" → 不透明白板
     void setBoard(const QString &bg);
