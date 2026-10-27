@@ -41,21 +41,32 @@ Item {
     //   ⇒ 岛内的按钮照常点。MouseArea 方案会把整片区域的点击都吃掉。
     // 为什么放在根 Item 的最前面：PointerHandler 的优先级按"离事件源越近越高"，
     //   根部的 handler 优先级最低，子项里的控件优先接管。
-    // ⚠️ 只在**概览面**启用：媒体面有进度条拖动，抢走会让老师拖不动进度；
-    //    态/笔/史面也都有各自控件。概览面只有按钮（不拖动就不抢），最安全。
+    // ⚠️ 2026-10-27（本批修订）：原来只在**概览面**(faceNow===0)启用，怕媒体进度条 /
+    //    设置音量滑块的横拖被抢。其实不用禁面 —— 用 grabPermissions 去掉
+    //    "CanTakeOverFromItems" 即可：岛内控件（进度条 / 滑块）是 MouseArea(Item)
+    //    先抢到 grab，DragHandler 抢不过 ⇒ 在控件上横拖归控件、不切面；在空白区横拖
+    //    没有任何 Item 抢 ⇒ DragHandler 正常接管切到下一面。于是**所有展开面都能左右
+    //    滑切换**，且天然不与横拖控件冲突，不需要到处埋"锁"。
     // ⚠️ 不要写 grabPermissions: PointerHandler.CanTakeOverFromNothing ——
     //    这个枚举名在 Qt 6.12 不存在，会被赋成 undefined 并在加载时报
     //    "Unable to assign [undefined] to QFlags<GrabPermission>"（实测踩到）。
+    //    正确写法：保留 CanTakeOverFromHandlers*，去掉 CanTakeOverFromItems。
     DragHandler {
         id: faceSwipe
         target: null                      // 只观测手势，不移动任何东西
-        enabled: root._expanded && root.faceNow === 0
+        enabled: root._expanded          // 所有展开面都允许滑动切面
         dragThreshold: 20                 // 默认 10 太灵敏，讲台上一抖就误判
+        // 关键：不抢 Item（MouseArea）已经拿到的 grab —— 控件上的横拖归控件，空白区横拖才切面
+        grabPermissions: PointerHandler.CanTakeOverFromHandlersOfDifferentType
+                         | PointerHandler.CanTakeOverFromHandlersOfSameType
         property real lastDx: 0
         property real lastDy: 0
+        property bool _didActive: false   // 只有真正接管过手势才允许切面（防控件拖拽误触发）
         onTranslationChanged: { lastDx = translation.x; lastDy = translation.y }
         onActiveChanged: {
-            if (active) { lastDx = 0; lastDy = 0; return }
+            if (active) { lastDx = 0; lastDy = 0; _didActive = true; return }
+            if (!_didActive) return       // 没接管过（在控件上拖）⇒ 不切面
+            _didActive = false
             if (!root._expanded) return
             if (Math.abs(lastDx) < 56) return                    // 手抖不算切面
             if (Math.abs(lastDx) < Math.abs(lastDy) * 1.4) return // 纵向为主，放行
@@ -482,7 +493,7 @@ Item {
     property real likePop: 1.0         // 计数回弹缩放（1.0 ⇄ 1.35，150ms 两段）
 
     // ── 尺寸（显式，不靠隐式推导）───────────────────────────
-    readonly property int padH: 14
+    readonly property int padH: 16
     // 展开态"标题 + 描述"占的头部高度（自适应字号后标题可达 64px，2 行 128px）。
     // 给列表/历史面板定位当 top 锚点，避免压到标题。
     readonly property int headH: root._expanded
@@ -659,7 +670,7 @@ Item {
     //    探针实证：--media 收起态 geom=200x56（内容定宽），加媒体宽度分支后才 320x56。
     //    高度取 max(320, 内容预算)：内容比 320 高时不裁掉，正常就稳在 320（正好放 3 条历史）。
     implicitWidth: root._idle ? root.th.shapeIdle * 3    // 4:3 比例 (44*3=132)
-                               : (root._expanded ? 640 : 320)
+                               : (root._expanded ? 680 : 320)
     implicitHeight: root._idle ? root.th.shapeIdle
                                : (root._expanded
                                   ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.specH + root.mediaH + root.vhH + root.interactH + root.danmakuH + root.searchH + root.submitH + root.actH + root.padH)
