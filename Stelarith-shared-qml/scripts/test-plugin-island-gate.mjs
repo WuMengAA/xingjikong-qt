@@ -27,6 +27,7 @@ const F = {
   agentUi: 'Stelarith-control-qt/src/agent_ui.h',
   page:    'Stelarith-control-qt/qml/shell/pages/AgentSettingsPage.qml',
   islandH: 'Stelarith-control-qt/src/island.h',
+  agentSettings: 'Stelarith-control-qt/src/core/AgentSettings.h',
 };
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
@@ -73,6 +74,7 @@ const mainCpp = strip(read(F.main));
 const agentUi = strip(read(F.agentUi));
 const pageQml = strip(read(F.page));
 const islandH = strip(read(F.islandH));
+const agentSettingsH = strip(read(F.agentSettings));
 
 // ── 一、常量真源（pluginhost.h::PluginIslandGate）────────────────────────────
 console.log('── 一、治理常量真源（pluginhost.h）──');
@@ -183,8 +185,10 @@ check(/m_noticeHintMs\s*=\s*0;\s*\n/.test(strip(read('Stelarith-control-qt/src/i
 
 // ── 四、开关三处一致：键名 / 默认值 / Q_PROPERTY / QML ───────────────────────
 console.log('── 四、第三方推岛开关三处一致 ──');
+// 键真源在 AgentSettings.h（f78389d 第 4 刀后 main.cpp 不再直读 QSettings）；
+// 门禁契约 = 键名 + 默认值一致（改前先看注释里的"键名是门禁契约"）。
 check(/QSettings\(\)\.value\(QStringLiteral\("feature\/pluginIslandPush"\),\s*true\)\.toBool\(\)/
-        .test(mainCpp), 'QSettings 键 feature/pluginIslandPush，默认 true');
+        .test(agentSettingsH), 'QSettings 键 feature/pluginIslandPush，默认 true（AgentSettings.h 真源）');
 check(/Q_PROPERTY\(bool\s+pluginIslandPush\s+READ\s+pluginIslandPush\s+WRITE\s+setPluginIslandPush/
         .test(agentUi), 'agent_ui.h 暴露 Q_PROPERTY pluginIslandPush');
 check(/switchChanged\(QStringLiteral\("pluginIslandPush"\)/.test(agentUi),

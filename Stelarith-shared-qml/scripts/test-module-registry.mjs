@@ -62,8 +62,24 @@ const mainSrc = read(MAIN);
 const pluginSrc = read(PLUGINHOST);
 
 // CMakeLists 的 add_executable 源列表（取第一个 add_executable 段）
-const execMatch = cmake.match(/add_executable\s*\(([\s\S]*?)\)/);
-const execSources = execMatch ? execMatch[1] : "";
+// ⚠️ 2026-10-27 修：原来用 /add_executable\s*\(([\s\S]*?)\)/ 非贪婪匹配到第一个 `)`，
+// 但 CMakeLists 的注释里也含括号（如「Canvas(纯 Qt) / Overlay(Win32)」），会提前截断，
+// 导致 modulehost/usbmodule/voicehubmodule 恒报「未列入」（假阴性）。改为按括号深度配对。
+function extractParen(src, keyword) {
+	const idx = src.indexOf(keyword);
+	if (idx < 0) return null;
+	let i = src.indexOf("(", idx);
+	if (i < 0) return null;
+	let depth = 0, j = i;
+	for (; j < src.length; j++) {
+		const ch = src[j];
+		if (ch === "(") depth++;
+		else if (ch === ")") { depth--; if (depth === 0) break; }
+	}
+	return src.slice(i + 1, j);
+}
+const execSources = extractParen(cmake, "add_executable") || "";
+const execMatch = cmake.includes("add_executable");
 
 t("CMakeLists 里有 add_executable 段", () => {
 	if (!execMatch) throw new Error("没找到 add_executable(");

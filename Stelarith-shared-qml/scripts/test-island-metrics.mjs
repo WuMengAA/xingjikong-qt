@@ -90,7 +90,9 @@ const TH = {
 
 // IslandRoot: implicitWidth: root._idle ? root.th.shapeIdle * N : (root._expanded ? A : B)
 const rootIdleMul = num(rootSrc, /shapeIdle\s*\*\s*(\d+)/, "IslandRoot idle 宽度倍数");
-const rootWide = rootSrc.match(/_expanded\s*\?\s*(\d+)\s*:\s*(\d+)/);
+// implicitWidth 行里的三元式（不能全文件 match：IslandRoot 里 _expanded ? N : N
+// 还出现在标题字号预算（640）与 px（36/28）等别处，取第一个会抓到错的那个）
+const rootWide = rootSrc.match(/implicitWidth:[^;]*?_expanded\s*\?\s*(\d+)\s*:\s*(\d+)/);
 if (!rootWide) throw new Error("IslandRoot 的 implicitWidth 三元式没抓到");
 const ROOTW = { expanded: Number(rootWide[1]), collapsed: Number(rootWide[2]) };
 
