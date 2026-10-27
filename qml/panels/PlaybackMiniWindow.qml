@@ -10,6 +10,10 @@
 //
 // 交互与提示（笔记"要保留视觉与可交互"）：播放/暂停、进度拖动、时间显示、
 // 音量与静音切换、缓冲与失败文字提示、双击放大/还原、拖动释放后自动贴角。
+//
+// 2026-10-27 翻新：对齐《灵动岛统一布局规范》—— 间距/圆角/字阶走 Md3 令牌，
+// 图标优先、克制动效；**只改显示层**：不动 viewerbackend.cpp、不引入 backend
+// 新接口、不塞进灵动岛（岛只属被控端，本窗是管理端浮层）。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -24,9 +28,19 @@ Item {
     property string recName: ""
     property string deviceLabel: ""
 
+    // 两档尺寸：小窗（默认）/ 大窗（双击放大）。不做自由缩放 —— 省心且不糊。
+    readonly property int smallW: 420
+    readonly property int smallH: 268
+    readonly property int largeW: 680
+    readonly property int largeH: 430
+    // 结构度量（对齐 MD3 阶梯，不再散落裸数字）
+    readonly property int headerH: 36      // 标题栏高
+    readonly property int controlH: 44     // 控制条高
+    readonly property int playBtn: 32      // 播放/暂停圆钮直径
+
     visible: false
-    width: 420
-    height: 268
+    width: smallW
+    height: smallH
     z: 900                      // 浮在面板之上
 
     function openFor(uidVal, nameVal, labelVal) {
@@ -74,163 +88,167 @@ Item {
         }
     }
 
+    // 背景面：MD3 容器（surface + 浅描边），统一圆角 rM
     Rectangle {
         anchors.fill: parent
-        radius: win.theme ? win.theme.rCard : 10
+        radius: win.theme ? win.theme.rM : 12
         color: win.theme ? win.theme.cSurface : "#1E1E1E"
         border.width: 1
-        border.color: win.theme ? win.theme.cOutline : "#444"
-    }
+        border.color: win.theme ? win.theme.cOutlineVar : "#3A3A3A"
+        clip: true
 
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
 
-        // ── 标题栏（拖动区）──
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 34
-            color: "transparent"
-            radius: win.theme ? win.theme.rCard : 10
-
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                text: "回放 · " + (win.deviceLabel || win.uid)
-                font.pixelSize: 13
-                color: win.theme ? win.theme.fg : "#FAFAFA"
-                elide: Text.ElideRight
-                width: parent.width - 60
-            }
-            SvgIcon {
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.right: parent.right
-                anchors.rightMargin: 10
-                name: "x"
-                MouseArea {
-                    anchors.fill: parent
-                    anchors.margins: -6
-                    onClicked: win.closeWin()
-                }
-            }
-            MouseArea {
-                anchors.fill: parent
-                drag.target: win
-                drag.minimumX: 0
-                drag.minimumY: 0
-                onDoubleClicked: {
-                    // 双击放大/还原（小窗与大窗两档，不做自由缩放 —— 省心且不糊）
-                    if (win.width > 500) { win.width = 420; win.height = 268 }
-                    else { win.width = 680; win.height = 430 }
-                }
-                onReleased: {
-                    // 贴角吸附：拖到哪边就贴哪边的角（电脑管家那种植入感）
-                    const hostW = win.parent ? win.parent.width : 1200
-                    const hostH = win.parent ? win.parent.height : 800
-                    const midX = win.x + win.width / 2
-                    const midY = win.y + win.height / 2
-                    win.x = midX > hostW / 2 ? hostW - win.width - 16 : 16
-                    win.y = midY > hostH / 2 ? hostH - win.height - 16 : 16
-                }
-            }
-        }
-
-        // ── 画面 ──
-        Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            clip: true
-
-            VideoOutput {
-                id: videoOut
-                anchors.fill: parent
-                fillMode: VideoOutput.PreserveAspectFit
-            }
-
-            Text {
-                id: statusText
-                anchors.centerIn: parent
-                width: parent.width - 32
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
-                font.pixelSize: 12
-                color: win.theme ? win.theme.op : "#C8C8C8"
-                text: ""
-            }
-        }
-
-        // ── 控制条 ──
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 44
-            color: "transparent"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 8
-
-                // 播放/暂停（图标只有 play / square 可用，暂停用方形停符）
-                Rectangle {
-                    width: 30; height: 30; radius: 15
-                    color: win.theme ? win.theme.cPrimary : "#3B82F6"
-                    SvgIcon {
-                        anchors.centerIn: parent
-                        name: player.playbackState === MediaPlayer.PlayingState ? "square" : "play"
-                        // ⚠️ SvgIcon 的着色属性叫 tint（不是 color）—— 写 color 会
-                        //    "Cannot assign to non-existent property"，整块 QML 加载不出来
-                        tint: win.theme ? win.theme.cOnPrimary : "#FFFFFF"
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            if (player.playbackState === MediaPlayer.PlayingState) player.pause()
-                            else player.play()
-                        }
-                    }
-                }
+            // ── 标题栏（拖动区）──
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: win.headerH
+                color: "transparent"
 
                 Text {
-                    text: win.fmt(player.position)
-                    font.pixelSize: 12
+                    anchors.left: parent.left
+                    anchors.leftMargin: win.theme ? win.theme.spS : 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "回放 · " + (win.deviceLabel || win.uid)
+                    font.pixelSize: win.theme ? win.theme.body13 : 13
                     color: win.theme ? win.theme.fg : "#FAFAFA"
+                    elide: Text.ElideRight
+                    width: parent.width - 56
                 }
-
-                Slider {
-                    id: seek
-                    Layout.fillWidth: true
-                    from: 0
-                    to: Math.max(1, player.duration)
-                    enabled: player.seekable
-                    value: player.position
-                    // 拖动中不要被 position 回写打断（否则"拖了又跳回去"）
-                    onMoved: player.setPosition(value)
-                }
-
-                Text {
-                    text: win.fmt(player.duration)
-                    font.pixelSize: 12
-                    color: win.theme ? win.theme.op : "#C8C8C8"
-                }
-
-                // 音量 / 静音切换
                 SvgIcon {
-                    name: "volume-2"
-                    opacity: audioOut.muted ? 0.4 : 1.0
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: win.theme ? win.theme.spS : 8
+                    name: "x"
+                    tint: win.theme ? win.theme.fg : "#FAFAFA"
                     MouseArea {
                         anchors.fill: parent
                         anchors.margins: -6
-                        onClicked: audioOut.muted = !audioOut.muted
+                        onClicked: win.closeWin()
                     }
                 }
-                Slider {
-                    id: volSlider
-                    Layout.preferredWidth: 64
-                    from: 0.0
-                    to: 1.0
-                    value: 0.8
+                MouseArea {
+                    anchors.fill: parent
+                    drag.target: win
+                    drag.minimumX: 0
+                    drag.minimumY: 0
+                    onDoubleClicked: {
+                        // 双击放大/还原（小窗与大窗两档，不做自由缩放 —— 省心且不糊）
+                        if (win.width > win.smallW + 1) { win.width = win.smallW; win.height = win.smallH }
+                        else { win.width = win.largeW; win.height = win.largeH }
+                    }
+                    onReleased: {
+                        // 贴角吸附：拖到哪边就贴哪边的角（电脑管家那种植入感）
+                        const hostW = win.parent ? win.parent.width : 1200
+                        const hostH = win.parent ? win.parent.height : 800
+                        const midX = win.x + win.width / 2
+                        const midY = win.y + win.height / 2
+                        win.x = midX > hostW / 2 ? hostW - win.width - 16 : 16
+                        win.y = midY > hostH / 2 ? hostH - win.height - 16 : 16
+                    }
+                }
+            }
+
+            // ── 画面 ──
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                VideoOutput {
+                    id: videoOut
+                    anchors.fill: parent
+                    fillMode: VideoOutput.PreserveAspectFit
+                }
+
+                Text {
+                    id: statusText
+                    anchors.centerIn: parent
+                    width: parent.width - 32
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: win.theme ? win.theme.bodyS : 12
+                    color: win.theme ? win.theme.op : "#C8C8C8"
+                    text: ""
+                }
+            }
+
+            // ── 控制条 ──
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: win.controlH
+                color: "transparent"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: win.theme ? win.theme.spS : 8
+                    anchors.rightMargin: win.theme ? win.theme.spS : 8
+                    spacing: win.theme ? win.theme.spS : 8
+
+                    // 播放/暂停（图标只有 play / square 可用，暂停用方形停符）
+                    Rectangle {
+                        Layout.preferredWidth: win.playBtn; Layout.preferredHeight: win.playBtn
+                        radius: win.theme ? win.theme.rFull : 16
+                        color: win.theme ? win.theme.cPrimary : "#3B82F6"
+                        SvgIcon {
+                            anchors.centerIn: parent
+                            name: player.playbackState === MediaPlayer.PlayingState ? "square" : "play"
+                            // ⚠️ SvgIcon 的着色属性叫 tint（不是 color）—— 写 color 会
+                            //    "Cannot assign to non-existent property"，整块 QML 加载不出来
+                            tint: win.theme ? win.theme.cOnPrimary : "#FFFFFF"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                if (player.playbackState === MediaPlayer.PlayingState) player.pause()
+                                else player.play()
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: win.fmt(player.position)
+                        font.pixelSize: win.theme ? win.theme.bodyS : 12
+                        color: win.theme ? win.theme.fg : "#FAFAFA"
+                    }
+
+                    Slider {
+                        id: seek
+                        Layout.fillWidth: true
+                        from: 0
+                        to: Math.max(1, player.duration)
+                        enabled: player.seekable
+                        value: player.position
+                        // 拖动中不要被 position 回写打断（否则"拖了又跳回去"）
+                        onMoved: player.setPosition(value)
+                    }
+
+                    Text {
+                        text: win.fmt(player.duration)
+                        font.pixelSize: win.theme ? win.theme.bodyS : 12
+                        color: win.theme ? win.theme.op : "#C8C8C8"
+                    }
+
+                    // 音量 / 静音切换
+                    SvgIcon {
+                        name: "volume-2"
+                        tint: win.theme ? win.theme.fg : "#FAFAFA"
+                        opacity: audioOut.muted ? 0.4 : 1.0
+                        MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -6
+                            onClicked: audioOut.muted = !audioOut.muted
+                        }
+                    }
+                    Slider {
+                        id: volSlider
+                        Layout.preferredWidth: 64
+                        from: 0.0
+                        to: 1.0
+                        value: 0.8
+                    }
                 }
             }
         }
