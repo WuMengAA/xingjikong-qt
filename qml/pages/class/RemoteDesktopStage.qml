@@ -72,7 +72,9 @@ Item {
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        text: "4:3 容器内居中 16:9 · 上下留黑边"
+                        // 用户向文案（原来的「4:3 容器内居中 16:9 · 上下留黑边」是
+                        // 开发规格说明，不该给学生/老师看到，2026-10-28 验收修正）
+                        text: "等待设备回传画面"
                         color: "#64748B"
                         font.pixelSize: 12
                     }
