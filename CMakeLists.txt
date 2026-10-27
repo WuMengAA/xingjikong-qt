@@ -124,6 +124,8 @@ add_executable(stelarith-agent-qt
   # 只用 GetActiveObject 连已在运行的实例，绝不 CoCreateInstance 拉起程序。
   src/ppt_domain.cpp
   src/ppt_domain.h
+  src/ppt_com.cpp
+  src/ppt_com.h
   src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
   src/singleinstance.cpp
   src/singleinstance.h
