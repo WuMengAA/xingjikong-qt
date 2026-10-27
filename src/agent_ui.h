@@ -38,6 +38,8 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QRect>
+#include <QVariantList>
+#include <QVariantMap>
 
 class AgentUi : public QObject
 {
@@ -84,6 +86,20 @@ class AgentUi : public QObject
     Q_PROPERTY(bool autostart       READ autostart       WRITE setAutostart       NOTIFY infoChanged)
     Q_PROPERTY(bool desktopShortcut READ desktopShortcut WRITE setDesktopShortcut NOTIFY infoChanged)
 
+    // ── 2026-10-28 B4：更新渠道（临时测试开关）────────────────────────────
+    // 用户点单原文：「被控端设置界面添加临时的测试更新渠道切换按钮」+「切换逻辑在 C++，
+    // QML 只绑定」。为什么需要它：云端灰度目前只有 channel 一个维度（见
+    // docs/OTA灰度-按机型-方案-2026-10-28.md），运维要在机器上把某一台切到 rc/gray
+    // 才能做"单机自助灰度"。**标注「临时」**：档 A 服务端 targeting 上线后本按钮退役。
+    // 生效面：g_channel（register 上报 + otaSelfCheck 查询） + 落盘 channel.txt（重启/升级后仍生效）。
+    Q_PROPERTY(QString updateChannel READ updateChannel WRITE setUpdateChannel NOTIFY infoChanged)
+    /** 可选渠道清单 [{key,label,note,variant}]：选项与"选中态样式"都由 C++ 算好，
+     *  QML 只绑 `variant: modelData.variant` —— 否则 QML 里就要写
+     *  `current === key ? "filled" : "tonal"`，正是铁律禁止的三元配色判断。 */
+    Q_PROPERTY(QVariantList channelOptions READ channelOptions NOTIFY infoChanged)
+    /** 渠道说明（生效来源 / 落盘位置 / 切换后行为），由 main.cpp 填。 */
+    Q_PROPERTY(QString channelNoteText READ channelNoteText NOTIFY infoChanged)
+
 public:
     explicit AgentUi(QObject *parent = nullptr) : QObject(parent) {}
 
@@ -113,6 +129,8 @@ public:
     bool pluginIslandPush() const { return m_pluginIslandPush; }
     bool autostart() const { return m_autostart; }
     bool desktopShortcut() const { return m_desktopShortcut; }
+    QString updateChannel() const { return m_updateChannel; }
+    QString channelNoteText() const { return m_channelNoteText; }
     QVariantList selfCheckItems() const { return m_selfCheckItems; }
     QVariantList plugins() const { return m_plugins; }
     QVariantList modules() const { return m_modules; }
@@ -133,6 +151,19 @@ public:
     void setDesktopShortcut(bool v) { if (m_desktopShortcut == v) return; m_desktopShortcut = v; emit infoChanged(); emit switchChanged(QStringLiteral("desktopShortcut"), v); }
     void setPlayScheduleEnabled(bool v) { if (m_playScheduleEnabled == v) return; m_playScheduleEnabled = v; emit infoChanged(); emit switchChanged(QStringLiteral("playScheduleEnabled"), v); }
     void setPlayWindowsText(const QString &v) { if (m_playWindowsText == v) return; m_playWindowsText = v; emit infoChanged(); }
+    // 渠道切换：只写成员 + 上抛请求；真实落盘/重查在 main.cpp（那里才有 g_channel 与 channel.txt）
+    void setUpdateChannel(const QString &v)
+    {
+        if (m_updateChannel == v) return;
+        m_updateChannel = v;
+        emit infoChanged();
+        emit channelChangedRequested(v);
+    }
+
+    // 渠道选项：常量表，唯一真源在 C++（QML 里不许出现数组字面量）
+    /** 生成选项清单；current 命中哪一项，那一项的 variant = "filled"，其余 "tonal"。 */
+    static QVariantList channelOptionList(const QString &current);
+    QVariantList channelOptions() const { return m_channelOptions; }
 
     // 快照写入专用（main.cpp 的 agentUiFill 经 friend 直接改成员，不触发 switchChanged）
     friend void agentUiFill(AgentUi *ui);
@@ -183,6 +214,8 @@ signals:
     void noiseFolderRequested();
     void studyFolderRequested();
     void playScheduleSaveRequested();
+    /** 渠道切换请求（main.cpp 接：写 channel.txt → 重查更新 → fill+publish 回弹）。 */
+    void channelChangedRequested(const QString &channel);
 
 private:
     QString m_appVersion, m_uid, m_cloudUrl, m_connState, m_dataDir, m_logPath;
@@ -197,11 +230,37 @@ private:
     QVariantList m_selfCheckItems, m_plugins, m_modules;
     QString m_noiseLogText, m_studyLogText, m_playWindowsText, m_playStateText;
     bool m_playScheduleEnabled = false;
+    // 2026-10-28 B4：更新渠道快照 + 说明（fill 时从 main.cpp 的 g_channel / channel.txt 重读）
+    QString m_updateChannel = QStringLiteral("stable");
+    QString m_channelNoteText;
+    QVariantList m_channelOptions;
 };
 
 // 由 main.cpp 提供（那里能访问匿名域的 static 自由函数与 AgentSettings）：
 // 填快照（agentUiFill，friend）+ 接全部请求信号（agentUiWire）。AgentShell 构造时调用。
 void agentUiWire(AgentUi *ui);
+
+// 渠道清单（2026-10-28 B4）：云端按 channel 分文件存清单 ——
+//   stable → ota.json；rc → ota-rc.json；gray → ota-gray.json（见 cloud/src/ota.js manifestFileFor）。
+// 三个渠道名都过云端白名单 /^[a-z0-9_-]{1,16}$/，不会参与文件名拼接（防路径穿越）。
+inline QVariantList AgentUi::channelOptionList(const QString &current)
+{
+    QVariantList out;
+    auto add = [&out, &current](const QString &key, const QString &label, const QString &note) {
+        QVariantMap m;
+        m.insert(QStringLiteral("key"), key);
+        m.insert(QStringLiteral("label"), label);
+        m.insert(QStringLiteral("note"), note);
+        // 选中态样式也由 C++ 定：QML 侧不多写一个三元
+        m.insert(QStringLiteral("variant"),
+                 key == current ? QStringLiteral("filled") : QStringLiteral("tonal"));
+        out.append(m);
+    };
+    add(QStringLiteral("stable"), QStringLiteral("稳定"), QStringLiteral("对外正式版"));
+    add(QStringLiteral("rc"),     QStringLiteral("测试"), QStringLiteral("候选测试版"));
+    add(QStringLiteral("gray"),   QStringLiteral("灰度"), QStringLiteral("指定机型/班级灰度"));
+    return out;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AgentShell：QML 控制面板窗口（QQuickWidget 顶格承载；懒建单例，防托盘连点叠窗）

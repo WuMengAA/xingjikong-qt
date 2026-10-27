@@ -264,6 +264,71 @@ Item {
                 }
             }
 
+            // ── 卡：更新渠道（临时测试开关 · 2026-10-28 B4）─────────
+            // 用户点单原文：「被控端设置界面添加临时的测试更新渠道切换按钮」+「切换逻辑在 C++」。
+            // 本卡只有绑定与转发：选项/选中态/说明文本全部来自 agentUi（C++），
+            // 没有数组字面量、没有三元、没有 JS function（铁律）。
+            // 生效面：g_channel（register 上报 + OTA 查询）+ channel.txt（重启/升级后仍生效）。
+            M.Md3Card {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                variant: "filled"
+
+                Column {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    spacing: 8
+
+                    Row {
+                        spacing: 8
+                        Text {
+                            text: "更新渠道"
+                            font.pixelSize: 14
+                            font.weight: Font.Medium
+                            color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                        }
+                        // 「临时」角标：让现场一眼看出这不是长期能力（服务端灰度上线后撤）
+                        Rectangle {
+                            width: 42
+                            height: 19
+                            radius: 9.5
+                            color: "#F59E0B"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "临时"
+                                font.pixelSize: 11
+                                font.weight: Font.Medium
+                                color: "#3B2600"
+                            }
+                        }
+                    }
+                    InfoRow {
+                        label: "当前渠道"
+                        value: agentUi.updateChannel
+                    }
+                    Row {
+                        spacing: 8
+                        Repeater {
+                            model: agentUi.channelOptions
+                            M.Md3Btn {
+                                text: modelData.label
+                                variant: modelData.variant
+                                onClicked: agentUi.updateChannel = modelData.key
+                            }
+                        }
+                    }
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        text: agentUi.channelNoteText
+                        font.pixelSize: 11
+                        color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+
             // ── 卡：VoiceHub 联动（#329 · 2026-10-17）─────────────
             // 只读展示 VoiceHub 服务端的权威广播状态：灵动岛展开态一行
             // 「正在播放 / 进度 / 下一首 / 人数」+ 开播提醒一次。

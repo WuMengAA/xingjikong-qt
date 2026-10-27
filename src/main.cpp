@@ -7433,8 +7433,16 @@ void agentUiFill(AgentUi *ui)
             : QStringLiteral("立刻（有网就试）");
     }
 
-    ui->m_notifyEnabled   = AgentSettings::notifyEnabled();
-    ui->m_voiceEnabled    = AgentSettings::voiceEnabled();
+    // ── 2026-10-28 B4：更新渠道（临时测试开关）──
+    // 快照取**当前生效**的 g_channel（不是环境变量那份）：切过之后界面要显示新值。
+    ui->m_updateChannel = g_channel;
+    ui->m_channelOptions = AgentUi::channelOptionList(g_channel);   // 选中态样式也在这里定
+    ui->m_channelNoteText = QStringLiteral("生效渠道写在 %1；切换后立刻按新渠道重查一次更新，"
+                                           "重启/升级后仍沿用。此按钮为临时手段，"
+                                           "服务端按机型灰度上线后退役。")
+                                .arg(channelFilePath());
+
+    ui->m_notifyEnabled   = AgentSettings::notifyEnabled();    ui->m_voiceEnabled    = AgentSettings::voiceEnabled();
     ui->m_noiseEnabled    = AgentSettings::noiseEnabled();
     ui->m_islandIdle      = AgentSettings::islandIdle();
     ui->m_lightMode       = AgentSettings::lightMode();
@@ -7465,6 +7473,44 @@ void agentUiWire(AgentUi *ui)
 
     // 打开面板 / QML 主动刷新：重读快照（连接/升级状态是"点开那一刻"的）。
     QObject::connect(ui, &AgentUi::refreshRequested, ui, [ui] {
+        agentUiFill(ui);
+        ui->publish();
+    });
+
+    // ── 2026-10-28 B4：更新渠道切换（临时测试开关）──────────────────────────
+    // 用户点单：「被控端设置界面添加临时的测试更新渠道切换按钮」，要求切换逻辑在 C++。
+    // 生效面两条，都必须走：
+    //   ① g_channel —— register 上报给云端（云端据此决定推哪个清单）与 otaSelfCheck 的查询参数；
+    //   ② channel.txt —— 落盘，重启/OTA 升级后仍沿用该渠道（否则升级一次就悄悄掉回 stable）。
+    // 白名单三个渠道名：与云端 manifestFileFor 的三份清单一一对应；不认识的值**不落盘**
+    // （脏写 channel.txt 会让设备永久查到一个不存在的清单 ⇒ 永远"无更新"，且现场看不出来）。
+    QObject::connect(ui, &AgentUi::channelChangedRequested, ui, [ui](const QString &ch) {
+        const QString v = ch.trimmed();
+        const bool known = (v == QLatin1String("stable") || v == QLatin1String("rc")
+                            || v == QLatin1String("gray"));
+        if (!known) {
+            qWarning("[agent-shell] 未知更新渠道「%s」——拒绝落盘（界面回弹当前值）",
+                     qPrintable(ch));
+            agentUiFill(ui);
+            ui->publish();
+            return;
+        }
+        if (v == g_channel) {           // 幂等：同值不重查、不重写（省一次网络）
+            agentUiFill(ui);
+            ui->publish();
+            return;
+        }
+        g_channel = v;
+        persistChannel(v);
+        // 上一渠道的查询结果必须作废：不然界面还写着"已是最新（云端 v0.6.50）"，
+        // 而那个版本号其实是另一个渠道的 —— 比不显示更容易误导。
+        g_updateChecked = false;
+        g_latestVer.clear();
+        g_updateUrl.clear();
+        g_updateSha.clear();
+        g_updateNotes.clear();
+        qInfo("[agent-qt] 更新渠道已切换为 %s（channel.txt 已落盘），立即重查一次", qPrintable(v));
+        otaSelfCheck();                 // 立刻按新渠道查（不用等 30min 周期）
         agentUiFill(ui);
         ui->publish();
     });
