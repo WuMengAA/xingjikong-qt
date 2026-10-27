@@ -35,6 +35,34 @@ import "."
 Item {
     id: root
 
+    // ── C 批（2026-10-27）：左右滑动切面 ────────────────────────────────
+    // 为什么用 DragHandler 而不是 MouseArea：
+    //   DragHandler 只处理"拖动"（超过 dragThreshold 才 active），不碰"单击"
+    //   ⇒ 岛内的按钮照常点。MouseArea 方案会把整片区域的点击都吃掉。
+    // 为什么放在根 Item 的最前面：PointerHandler 的优先级按"离事件源越近越高"，
+    //   根部的 handler 优先级最低，子项里的控件优先接管。
+    // ⚠️ 只在**概览面**启用：媒体面有进度条拖动，抢走会让老师拖不动进度；
+    //    态/笔/史面也都有各自控件。概览面只有按钮（不拖动就不抢），最安全。
+    // ⚠️ 不要写 grabPermissions: PointerHandler.CanTakeOverFromNothing ——
+    //    这个枚举名在 Qt 6.12 不存在，会被赋成 undefined 并在加载时报
+    //    "Unable to assign [undefined] to QFlags<GrabPermission>"（实测踩到）。
+    DragHandler {
+        id: faceSwipe
+        target: null                      // 只观测手势，不移动任何东西
+        enabled: root._expanded && root.faceNow === 0
+        dragThreshold: 20                 // 默认 10 太灵敏，讲台上一抖就误判
+        property real lastDx: 0
+        property real lastDy: 0
+        onTranslationChanged: { lastDx = translation.x; lastDy = translation.y }
+        onActiveChanged: {
+            if (active) { lastDx = 0; lastDy = 0; return }
+            if (!root._expanded) return
+            if (Math.abs(lastDx) < 56) return                    // 手抖不算切面
+            if (Math.abs(lastDx) < Math.abs(lastDy) * 1.4) return // 纵向为主，放行
+            root.faceStep(lastDx < 0 ? 1 : -1)                    // 左滑 = 下一个面
+        }
+    }
+
     // ⚠️⚠️ 属性名**不能**叫 bridge！
     //    QML 的名字解析顺序里，**对象自身的属性**优先于上下文属性（context property）。
     //    写 `property var bridge: typeof bridge !== "undefined" ? bridge : null`
@@ -260,6 +288,22 @@ Item {
         // 而且大部分和灵动岛有关」—— 老师上课点不到管理端，岛才是他的手。
         fs.push({ id: 4, label: "笔" });
         return fs;
+    }
+    // C 批（2026-10-27）：按 faceModel 的顺序翻一面（左右滑动 & 将来的键盘/遥控都走它）。
+    // ⚠️ 必须按 model 顺序而不是 id±1：媒体(1)/历史(2) 是按需出现的，
+    //    id 连号不代表它们在 model 里连号（历史关掉时就是 1 → 3）。
+    // 到头即停、不循环：循环会"划过头又回到原点"，讲台上没法解释。
+    function faceStep(delta) {
+        const fs = root.faceModel
+        let i = 0
+        for (let k = 0; k < fs.length; ++k) {
+            if (fs[k].id === root.faceNow) { i = k; break }
+        }
+        const j = i + delta
+        if (j < 0 || j >= fs.length) return false
+        root.face = fs[j].id
+        root.faceUserPick = fs[j].id      // 记成"用户主动选"，否则媒体/历史复活会把面拽回去
+        return true
     }
     readonly property bool facesOn: root._expanded && !root._showActionsNow
         && !root.searchPageOn && !root.submitPageOn && root.faceModel.length >= 2
