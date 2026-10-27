@@ -158,6 +158,8 @@ Item {
     readonly property string _panelFace: (bridgeRef && bridgeRef.panelFace) ? bridgeRef.panelFace : ""
     readonly property var    _panelInfo: (bridgeRef && bridgeRef.panelData) ? bridgeRef.panelData : ({})
     readonly property bool   _panelOn: root._panelFace !== "" && root._expanded
+    // 灵动岛 6 形态是否激活（C++ 单点裁决）：激活时由 IslandMorph 接管收起态内容
+    readonly property bool   _morphOn: bridgeRef ? (bridgeRef.morphMode !== "" && bridgeRef.morphMode !== "none") : false
     // ⚠️ 2026-10-18 · 新通知到来时复位多面切换（face 自动逻辑缺陷修复）
     // 原行为：face / faceUserPick 是**永久 property**，收起、展开、换内容都不复位。
     //   ⇒ 用户上次展开看了媒体面，岛收起后来了条新通知，再展开**仍停在媒体面**，
@@ -939,10 +941,20 @@ Item {
         // 2026-10-18：走 durShort 令牌（原硬编码 160）
         Behavior on opacity { NumberAnimation { duration: root.th ? root.th.durShort : 160 } }
 
+        // ── 灵动岛 6 形态叠加层（2026-10-27 收口蓝图）──
+        // 仅在 C++ 裁决出形态（morphMode !== none）时接管收起态胶囊内容；
+        // 与既有通知胶囊互斥（collapsedRow 在其激活时让位），互不打架。
+        IslandMorph {
+            id: morphLayer
+            anchors.fill: parent
+            z: 5
+            visible: root._morphOn
+        }
+
         // ── 收起态 ───────────────────────────────────────
         Item {
             id: collapsedRow
-            visible: !root._expanded
+            visible: !root._expanded && !root._morphOn
             anchors.fill: parent
 
             SvgIcon {
