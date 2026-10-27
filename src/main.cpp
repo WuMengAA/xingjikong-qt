@@ -7553,6 +7553,11 @@ void agentUiWire(AgentUi *ui)
         QDesktopServices::openUrl(QUrl::fromLocalFile(
             qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong")));
     });
+    // 2026-10-28 模块三：托盘右键的「打开配置目录」移植进设置页（通用 › 高级）。
+    // 落点与托盘菜单**同一处**（agent.env 所在目录），不另造一条路径。
+    QObject::connect(ui, &AgentUi::openConfigDirRequested, ui, [] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(agentEnvPath()).absolutePath()));
+    });
     // 「立即升级」：走的就是云端下发 self_update 用的同一条链路（含四条护栏）。
     QObject::connect(ui, &AgentUi::upgradeNowRequested, ui, [ui] {
         if (!ui->canUpgrade()) return;

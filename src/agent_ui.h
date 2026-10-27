@@ -40,6 +40,8 @@
 #include <QRect>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QColor>        // 2026-10-28 模块三：设置页结果属性要给 QColor（connStateColor 等）
+#include <QFont>         // 同上：分类行的字重（QFont::Medium/Normal）由 C++ 给
 
 class AgentUi : public QObject
 {
@@ -99,6 +101,39 @@ class AgentUi : public QObject
     Q_PROPERTY(QVariantList channelOptions READ channelOptions NOTIFY infoChanged)
     /** 渠道说明（生效来源 / 落盘位置 / 切换后行为），由 main.cpp 填。 */
     Q_PROPERTY(QString channelNoteText READ channelNoteText NOTIFY infoChanged)
+
+    // ══ 设置页分类（2026-10-28 模块三：界面按参考重做）════════════════════
+    // 参考原型是「左侧分类菜单 + 右侧内容区」。分类切换属于**状态**，
+    // 按铁律归 C++：QML 只绑 `settingsSections`（含 active）与 7 个布尔，
+    // 里面不出现 `tab === "general"` 这种比较。
+    Q_PROPERTY(QString settingsTab READ settingsTab WRITE setSettingsTab NOTIFY settingsTabChanged)
+    /** 左侧菜单项 [{key,label,icon,active}]：active = 选中态，样式与判断都在 C++。 */
+    Q_PROPERTY(QVariantList settingsSections READ settingsSections NOTIFY settingsTabChanged)
+    // 右侧每个区块是否可见（一区块一个布尔，宁可属性多几句，也不让 QML 写比较）
+    Q_PROPERTY(bool tabGeneral READ tabGeneral NOTIFY settingsTabChanged)
+    Q_PROPERTY(bool tabInterface READ tabInterface NOTIFY settingsTabChanged)
+    Q_PROPERTY(bool tabNotify READ tabNotify NOTIFY settingsTabChanged)
+    Q_PROPERTY(bool tabAutomation READ tabAutomation NOTIFY settingsTabChanged)
+    Q_PROPERTY(bool tabUpdate READ tabUpdate NOTIFY settingsTabChanged)
+    Q_PROPERTY(bool tabPlugin READ tabPlugin NOTIFY settingsTabChanged)
+    Q_PROPERTY(bool tabAbout READ tabAbout NOTIFY settingsTabChanged)
+
+    // ══ 设置页用的「结果属性」（2026-10-28 模块三）════════════════════════
+    // 这些原先写在 QML 里（`connState.indexOf("已连接") === 0 ? cOk : cWarn` 之类），
+    // 按「QML 不写逻辑」铁律全部搬到 C++。深浅色也在 C++ 判 —— agentUi 本来就有
+    // lightMode，不缺这个信息（QML 那边若自己判主题就又变成三元了）。
+    Q_PROPERTY(QColor connStateColor READ connStateColor NOTIFY infoChanged)
+    Q_PROPERTY(QColor latestColor READ latestColor NOTIFY infoChanged)
+    Q_PROPERTY(QColor otaModeColor READ otaModeColor NOTIFY infoChanged)
+    Q_PROPERTY(QColor otaAutoColor READ otaAutoColor NOTIFY infoChanged)
+    /** 「暂停自动升级 / 恢复自动升级」按钮文案（当前状态决定，C++ 给）。 */
+    Q_PROPERTY(QString pauseBtnText READ pauseBtnText NOTIFY infoChanged)
+    /** 用途的中文名：classroom⇒「教室端」/ broadcast⇒「广播端」（QML 不做映射）。 */
+    Q_PROPERTY(QString deviceRoleText READ deviceRoleText NOTIFY infoChanged)
+    /** 下面三条同样是"把数据翻成文案"（空值回落 / 加版本前缀），一律 C++ 做。 */
+    Q_PROPERTY(QString versionText READ versionText NOTIFY infoChanged)
+    Q_PROPERTY(QString uidText READ uidText NOTIFY infoChanged)
+    Q_PROPERTY(QString classCodeText READ classCodeText NOTIFY infoChanged)
 
 public:
     explicit AgentUi(QObject *parent = nullptr) : QObject(parent) {}
@@ -165,6 +200,46 @@ public:
     static QVariantList channelOptionList(const QString &current);
     QVariantList channelOptions() const { return m_channelOptions; }
 
+    // ── 设置页分类 getter（见上方 Q_PROPERTY 注释）──────────────────────
+    QString settingsTab() const { return m_settingsTab; }
+    QVariantList settingsSections() const;
+    bool tabGeneral() const    { return m_settingsTab == QLatin1String("general"); }
+    bool tabInterface() const  { return m_settingsTab == QLatin1String("interface"); }
+    bool tabNotify() const     { return m_settingsTab == QLatin1String("notify"); }
+    bool tabAutomation() const { return m_settingsTab == QLatin1String("automation"); }
+    bool tabUpdate() const     { return m_settingsTab == QLatin1String("update"); }
+    bool tabPlugin() const     { return m_settingsTab == QLatin1String("plugin"); }
+    bool tabAbout() const      { return m_settingsTab == QLatin1String("about"); }
+    /** 切分类（QML 只报 key，合法性由 C++ 判；未知 key 忽略并回原值）。 */
+    void setSettingsTab(const QString &key);
+
+    // ── 结果属性 getter（配色与文案见上方 Q_PROPERTY 注释）──────────────
+    // 深浅两套色值直接取自 Md3 令牌的同一组十六进制（cOk/cWarn/cError 的明暗值），
+    // 这样 C++ 给的色与 QML 令牌在两种主题下完全一致，不会出现"同一状态两种绿"。
+    QColor connStateColor() const;
+    QColor latestColor() const;
+    QColor otaModeColor() const;
+    QColor otaAutoColor() const;
+    QString pauseBtnText() const
+    {
+        return m_otaPaused ? QStringLiteral("恢复自动升级")
+                           : QStringLiteral("暂停自动升级");
+    }
+    QString deviceRoleText() const
+    {
+        return m_deviceRole == QLatin1String("broadcast") ? QStringLiteral("广播端")
+                                                          : QStringLiteral("教室端");
+    }
+    QString versionText() const { return QStringLiteral("v") + m_appVersion; }
+    QString uidText() const
+    {
+        return m_uid.isEmpty() ? QStringLiteral("（未注册）") : m_uid;
+    }
+    QString classCodeText() const
+    {
+        return m_classCode.isEmpty() ? QStringLiteral("（未绑定）") : m_classCode;
+    }
+
     // 快照写入专用（main.cpp 的 agentUiFill 经 friend 直接改成员，不触发 switchChanged）
     friend void agentUiFill(AgentUi *ui);
 
@@ -175,6 +250,9 @@ public slots:
     void publish() { emit infoChanged(); }
     void openLogDir() { emit openLogDirRequested(); }
     void openDataDir() { emit openDataDirRequested(); }
+    /** 打开配置目录（2026-10-28 模块三：从托盘右键菜单移植进设置页）。
+     *  托盘的「打开配置目录」与设置页的「通用 › 高级」是同一个动作，都走这里。 */
+    void openConfigDir() { emit openConfigDirRequested(); }
     void upgradeNow() { emit upgradeNowRequested(); }
     void toggleOtaPause() { emit toggleOtaPauseRequested(); }
     // ── A-3 第二批 ──
@@ -198,6 +276,8 @@ signals:
     void switchChanged(const QString &key, bool value);
     void openLogDirRequested();
     void openDataDirRequested();
+    /** 打开配置目录（托盘右键同款动作，2026-10-28 移植进设置页）。 */
+    void openConfigDirRequested();
     void upgradeNowRequested();
     void toggleOtaPauseRequested();
     // ── A-3 第二批 ──
@@ -216,6 +296,8 @@ signals:
     void playScheduleSaveRequested();
     /** 渠道切换请求（main.cpp 接：写 channel.txt → 重查更新 → fill+publish 回弹）。 */
     void channelChangedRequested(const QString &channel);
+    /** 设置页分类变了（右侧区块可见性靠它驱动）。 */
+    void settingsTabChanged();
 
 private:
     QString m_appVersion, m_uid, m_cloudUrl, m_connState, m_dataDir, m_logPath;
@@ -234,6 +316,8 @@ private:
     QString m_updateChannel = QStringLiteral("stable");
     QString m_channelNoteText;
     QVariantList m_channelOptions;
+    // 2026-10-28 模块三：设置页当前分类（默认「通用」—— 用户点开设置最先想知道"这台是谁"）
+    QString m_settingsTab = QStringLiteral("general");
 };
 
 // 由 main.cpp 提供（那里能访问匿名域的 static 自由函数与 AgentSettings）：
@@ -260,6 +344,103 @@ inline QVariantList AgentUi::channelOptionList(const QString &current)
     add(QStringLiteral("rc"),     QStringLiteral("测试"), QStringLiteral("候选测试版"));
     add(QStringLiteral("gray"),   QStringLiteral("灰度"), QStringLiteral("指定机型/班级灰度"));
     return out;
+}
+
+// 设置页分类清单（2026-10-28 模块三：界面按参考重做）。
+//   · 图标名必须是 resources/icons 里**真实存在**的文件名 —— 写不存在的名字会静默空白
+//     （项目踩过一次："grid"/"users" 在 viewer 那边根本不存在）。
+//   · active 由 C++ 定：QML 直接绑 `active`，不写 `key === current` 这种比较。
+//   · 分类与内容的一一对应关系见各 tabXxx 布尔 —— 七块内容只显示一块。
+inline QVariantList AgentUi::settingsSections() const
+{
+    QVariantList out;
+    auto add = [&out, this](const QString &key, const QString &label, const QString &icon) {
+        const bool on = (key == m_settingsTab);
+        QVariantMap m;
+        m.insert(QStringLiteral("key"), key);
+        m.insert(QStringLiteral("label"), label);
+        m.insert(QStringLiteral("icon"), icon);
+        m.insert(QStringLiteral("active"), on);
+        // 选中态样式也由 C++ 定 —— QML 里不能写 `active ? A : B`（那是三元配色判断）。
+        // 色值与 Md3 令牌同源：cSecondaryCont(#E8DEF8/#4A4458)、
+        // cOnSecondaryCont(#1D192B/#E8DEF8)、cOnSurfaceVar(#49454F/#CAC4D0)。
+        m.insert(QStringLiteral("rowBg"),
+                 on ? (m_lightMode ? QStringLiteral("#E8DEF8") : QStringLiteral("#4A4458"))
+                    : QStringLiteral("transparent"));
+        m.insert(QStringLiteral("fg"),
+                 on ? (m_lightMode ? QStringLiteral("#1D192B") : QStringLiteral("#E8DEF8"))
+                    : (m_lightMode ? QStringLiteral("#49454F") : QStringLiteral("#CAC4D0")));
+        // QFont::Normal=50 / Medium=57，与 QML 的 Font.Normal/Font.Medium 同值
+        m.insert(QStringLiteral("weight"), on ? int(QFont::Medium) : int(QFont::Normal));
+        out.append(m);
+    };
+    // 七个分类对齐用户蓝图（通用/主界面/通知与音量/自动化/更新/插件/关于）。
+    // 「关于」并进「诊断」：配置自检、噪音记录、自习记录是原托盘右键的能力，
+    // 蓝图七类里没有独立位置，挂在「关于」下比新造第八类更贴近参考。
+    add(QStringLiteral("general"),    QStringLiteral("通用"),       QStringLiteral("sliders"));
+    add(QStringLiteral("interface"),  QStringLiteral("主界面"),     QStringLiteral("layout-grid"));
+    add(QStringLiteral("notify"),     QStringLiteral("通知与音量"), QStringLiteral("bell"));
+    add(QStringLiteral("automation"), QStringLiteral("自动化"),     QStringLiteral("clock"));
+    add(QStringLiteral("update"),     QStringLiteral("更新"),       QStringLiteral("download"));
+    add(QStringLiteral("plugin"),     QStringLiteral("插件"),       QStringLiteral("rocket"));
+    add(QStringLiteral("about"),      QStringLiteral("关于与诊断"), QStringLiteral("info"));
+    return out;
+}
+
+inline void AgentUi::setSettingsTab(const QString &key)
+{
+    // 只认上面那张表里的 key：乱传一律忽略，不留"点空"的假状态。
+    static const QStringList kKeys{
+        QStringLiteral("general"),    QStringLiteral("interface"),
+        QStringLiteral("notify"),     QStringLiteral("automation"),
+        QStringLiteral("update"),     QStringLiteral("plugin"),
+        QStringLiteral("about"),
+    };
+    if (!kKeys.contains(key)) return;
+    if (m_settingsTab == key) return;
+    m_settingsTab = key;
+    emit settingsTabChanged();
+}
+
+// 结果属性（2026-10-28 模块三）：色值与 Md3 令牌**同一组十六进制**，
+// 保证 C++ 给的色和 QML 侧令牌在两种主题下看起来是同一个颜色。
+//   cOk        亮 #1B7A43 / 暗 #4CC38A
+//   cWarn      亮 #A87C0A / 暗 #D4A017
+//   cError     亮 #B3261E / 暗 #F2B8B5
+//   cOnSurface 亮 #1C1B1F / 暗 #E6E1E5
+inline QColor AgentUi::connStateColor() const
+{
+    const bool ok = m_connState.startsWith(QStringLiteral("已连接"));
+    if (ok) return m_lightMode ? QColor(QStringLiteral("#1B7A43"))
+                               : QColor(QStringLiteral("#4CC38A"));
+    return m_lightMode ? QColor(QStringLiteral("#A87C0A"))
+                       : QColor(QStringLiteral("#D4A017"));
+}
+
+inline QColor AgentUi::latestColor() const
+{
+    if (m_hasNewer) return m_lightMode ? QColor(QStringLiteral("#A87C0A"))
+                                       : QColor(QStringLiteral("#D4A017"));
+    return m_lightMode ? QColor(QStringLiteral("#1B7A43"))
+                       : QColor(QStringLiteral("#4CC38A"));
+}
+
+inline QColor AgentUi::otaModeColor() const
+{
+    // 「强制」档是不可回避的升级，标红让现场一眼看到；其余档用正文色。
+    if (!m_otaModeText.startsWith(QStringLiteral("强制")))
+        return m_lightMode ? QColor(QStringLiteral("#1C1B1F"))
+                           : QColor(QStringLiteral("#E6E1E5"));
+    return m_lightMode ? QColor(QStringLiteral("#B3261E"))
+                       : QColor(QStringLiteral("#F2B8B5"));
+}
+
+inline QColor AgentUi::otaAutoColor() const
+{
+    if (!m_otaPaused) return m_lightMode ? QColor(QStringLiteral("#1C1B1F"))
+                                         : QColor(QStringLiteral("#E6E1E5"));
+    return m_lightMode ? QColor(QStringLiteral("#B3261E"))
+                       : QColor(QStringLiteral("#F2B8B5"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
