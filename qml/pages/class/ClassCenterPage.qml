@@ -57,8 +57,18 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: 176; height: 40
             radius: 20
-            color: "#EF4444"
+            color: classCenter.dangerBase
             clip: true
+
+            // 按住时轻微内缩：长按控件必须有"按到了"的反馈，否则用户不知道计时有没开始。
+            // 只做 scale（不碰内部进度条宽度 —— 那是 3s linear，加 Behavior 会把线性变成缓动）。
+            scale: 1.0
+            Behavior on scale { NumberAnimation { duration: Md3.durShort } }
+            states: State {
+                name: "held"
+                when: holdArea.pressed
+                PropertyChanges { target: emergencyBtn; scale: 0.97 }
+            }
 
             // 进度：宽度 = 按钮宽 × C++ 给的比例（比例是结果值，不是判断）
             Rectangle {
@@ -66,16 +76,17 @@ Item {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 width: emergencyBtn.width * classCenter.emergencyHoldProgress
-                color: "#7F1D1D"
+                color: classCenter.dangerShade
             }
             Text {
                 anchors.centerIn: parent
                 text: "按住 3 秒 · 紧急通知"
-                color: "#FFFFFF"
+                color: classCenter.dangerFg
                 font.pixelSize: 13
                 font.bold: true
             }
             MouseArea {
+                id: holdArea
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onPressed: classCenter.beginEmergencyHold()
@@ -128,7 +139,7 @@ Item {
                     Shape {
                         anchors.fill: parent
                         ShapePath {
-                            strokeColor: "#22C55E"
+                            strokeColor: Md3.cOk
                             strokeWidth: 8
                             fillColor: "transparent"
                             capStyle: ShapePath.RoundCap
@@ -182,7 +193,7 @@ Item {
                 spacing: 8
                 Text {
                     text: "最近异常"
-                    color: "#EF4444"
+                    color: Md3.cError
                     font.pixelSize: 16
                     font.bold: true
                 }
@@ -239,6 +250,30 @@ Item {
             border.width: 1
             border.color: Md3.cOutlineVar
 
+            // 果冻曲线（原型 .jelly-effect）：
+            //   hover  scale(1.05) —— 400ms cubic-bezier(.34,1.7,.64,1) ⇒ Easing.OutBack（overshoot）
+            //   press  scale(0.90)
+            // 刻度与时长都取自 Md3 令牌（jellyHover / jellyPress / durJelly），本件不写裸数字。
+            scale: 1.0
+            Behavior on scale {
+                NumberAnimation { duration: Md3.durJelly; easing.type: Easing.OutBack }
+            }
+
+            // hover 描边层：原型 hover:border-green-200。
+            // ⚠️ QML 无法对 grouped property（border.color）加 Behavior，
+            //    所以另起一层只动 opacity —— 切色有过渡，且不触发 "Property value set multiple times"。
+            Rectangle {
+                id: hoverRing
+                anchors.fill: parent
+                anchors.margins: -1
+                radius: card.radius + 1
+                color: "transparent"
+                border.width: 1
+                border.color: Md3.cAccent
+                opacity: 0
+                Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
+            }
+
             Column {
                 anchors.fill: parent
                 anchors.margins: 20
@@ -254,14 +289,27 @@ Item {
                         font.pixelSize: 20
                         font.bold: true
                     }
-                    // 状态点颜色由 C++ 给（modelData.dot），QML 不做 online>0 判断
-                    Rectangle {
+                    // 状态点颜色由 C++ 给（modelData.dot），QML 不做 online>0 判断。
+                    // 外圈微光是原型的 shadow-[0_0_8px_rgba(...)] 的等价物：
+                    // Qt 没有 drop-shadow，用「同色半透明放大圈」近似，不引额外模块。
+                    Item {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         width: 12; height: 12
-                        radius: 6
-                        color: modelData.dot
-                        opacity: modelData.dotOpacity
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 20; height: 20
+                            radius: 10
+                            color: modelData.dot
+                            opacity: modelData.dotOpacity * 0.25
+                        }
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 12; height: 12
+                            radius: 6
+                            color: modelData.dot
+                            opacity: modelData.dotOpacity
+                        }
                     }
                 }
                 Text {
@@ -272,18 +320,18 @@ Item {
             }
 
             // 果冻曲线与 hover 描边：用 State 表达，不用三元
-            scale: 1.0
-            Behavior on scale { NumberAnimation { duration: 400; easing.type: Easing.OutBack } }
             states: [
                 State {
                     name: "pressed"
                     when: ma.pressed
-                    PropertyChanges { target: card; scale: 0.96; border.color: "#22C55E" }
+                    PropertyChanges { target: card; scale: Md3.jellyPress }
+                    PropertyChanges { target: hoverRing; opacity: 1 }
                 },
                 State {
                     name: "hovered"
                     when: ma.containsMouse && !ma.pressed
-                    PropertyChanges { target: card; scale: 1.03; border.color: "#22C55E" }
+                    PropertyChanges { target: card; scale: Md3.jellyHover }
+                    PropertyChanges { target: hoverRing; opacity: 1 }
                 }
             ]
             MouseArea {
@@ -318,7 +366,10 @@ Item {
     }
 
     // ── 下发结果条（点完按钮要说话：成功绿/失败红由 C++ 给色）────────
+    // 出现/消失走淡入淡出（原型是瞬时插入，但瞬时会有"闪一下"的观感，这里补过渡）。
+    // ⚠️ 不用 `visible` 硬切（关闭时看不到淡出），也不用三元（铁律），改用 State。
     Rectangle {
+        id: resultBar
         anchors.left: parent.left; anchors.leftMargin: 32
         anchors.bottom: parent.bottom; anchors.bottomMargin: 32
         height: 32
@@ -327,8 +378,13 @@ Item {
         color: Md3.cSurface
         border.width: 1
         border.color: classCenter.lastOpColor
-        visible: classCenter.lastOpText.length > 0
-        opacity: 0.96
+        opacity: 0
+        Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
+        states: State {
+            name: "shown"
+            when: classCenter.lastOpText.length > 0
+            PropertyChanges { target: resultBar; opacity: 0.96 }
+        }
         Text {
             id: resultText
             anchors.centerIn: parent
@@ -339,32 +395,59 @@ Item {
     }
 
     // ── 遮罩（透明度由 C++ 给）────────────────────────────────────
+    // 原型：bg-black/20 + backdrop-blur-sm，transition: opacity 300ms ease。
+    // 不用 visible 硬切 —— 那会在关闭时"啪"一下消失，看不到淡出；
+    // 鼠标拦截改由 MouseArea.enabled 控制（opacity 归零后不再吃掉点击）。
     Rectangle {
         anchors.fill: parent
         color: "#000000"
         opacity: classCenter.overlayOpacity
-        visible: classCenter.drawerOpen
-        Behavior on opacity { NumberAnimation { duration: 300 } }
-        MouseArea { anchors.fill: parent; onClicked: classCenter.closeDrawer() }
+        Behavior on opacity {
+            NumberAnimation { duration: Md3.durModal; easing.type: Easing.OutQuad }
+        }
+        MouseArea {
+            anchors.fill: parent
+            enabled: classCenter.drawerOpen
+            onClicked: classCenter.closeDrawer()
+        }
     }
 
     // ── 右侧抽屉：班级设备面板 ────────────────────────────────────
+    // 原型：transition: transform 400ms cubic-bezier(.2,.8,.2,1) ⇒ Easing.OutCubic
     ClassDeviceDrawer {
         id: drawer
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: classCenter.drawerWidth
         x: classCenter.drawerX
-        Behavior on x { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+        Behavior on x {
+            NumberAnimation { duration: Md3.durDrawer; easing.type: Easing.OutCubic }
+        }
         onCloseDrawer: classCenter.closeDrawer()
         onEnterRemote: classCenter.enterRemote()
     }
 
     // ── 远程桌面（可见性由 C++ 给）────────────────────────────────
+    // 进入补一段淡入 + 轻微放大：网格 ↔ 远程桌面是**页面级**切换，
+    // 硬切会让人觉得"画面闪了一下"（原型没画这段，属缺啥补啥）。
     Rectangle {
+        id: remoteLayer
         anchors.fill: parent
         visible: classCenter.remoteVisible
         color: Md3.cSurface
+        opacity: 0
+        scale: 0.98
+        states: State {
+            name: "shown"
+            when: classCenter.remoteVisible
+            PropertyChanges { target: remoteLayer; opacity: 1.0; scale: 1.0 }
+        }
+        Behavior on opacity {
+            NumberAnimation { duration: Md3.durModal; easing.type: Easing.OutQuad }
+        }
+        Behavior on scale {
+            NumberAnimation { duration: Md3.durModal; easing.type: Easing.OutCubic }
+        }
         RemoteDesktopStage {
             anchors.fill: parent
             anchors.margins: 24

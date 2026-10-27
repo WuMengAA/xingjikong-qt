@@ -266,6 +266,36 @@ void ClassCenterController::setClasses(const QJsonArray &classes)
     rebuildAnomalies();
     emit dataChanged();
     emit selectionChanged();
+
+    // 模块二：老师身份且云端只回了一个班 ⇒ 直接进这个班（"沉浸式本班面板"）
+    maybeAutoEnterMyClass();
+}
+
+// ── 模块二（2026-10-28 蓝图）：老师/班主任的"独立主页"────────────────
+// 蓝图原话：「不再从多班级列表中新建或跳转，直接沉浸式展示本班面板，
+//           省去老师的筛选成本。」
+//
+// 数据侧不需要新端点：云端 /api/classes 带登录票据时本来就只回"自己的班"
+// （viewerbackend 的 classesFiltered 注释记着这件事，2026-10-25 已生效）。
+// 所以这里只做一件事：**老师身份 + 恰好一个班 + 用户还没选过 ⇒ 自动打开该班抽屉**。
+void ClassCenterController::setTeacherScope(bool on)
+{
+    if (m_teacherScope == on) return;
+    m_teacherScope = on;
+    maybeAutoEnterMyClass();
+}
+
+void ClassCenterController::maybeAutoEnterMyClass()
+{
+    if (!m_teacherScope) return;
+    if (m_autoEnteredClass) return;          // 只自动一次，之后尊重用户的选择
+    if (m_classes.size() != 1) return;       // 多班 = 管理员视图，不擅自替人挑班
+
+    const QString code = m_classes.first().toMap()
+                             .value(QStringLiteral("code")).toString();
+    if (code.isEmpty()) return;
+    m_autoEnteredClass = true;
+    openClass(code);
 }
 
 // ── 班级改绑选项（抽屉「班级编辑」）──────────────────────────────

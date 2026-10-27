@@ -28,19 +28,18 @@ Item {
 
     // 滑入动效由宿主的 Behavior on x 承担（原型 400ms cubic-bezier(.2,.8,.2,1) ⇒ OutCubic）
 
-    Rectangle {
+    // 底板：原型 rounded-l-[32px] —— 只有**左侧**两角是 32，右侧贴屏幕边保持直角。
+    // QML 的 Rectangle 四角共用同一个 radius，所以用「矩形向右溢出 + 父级 clip」
+    // 得到真正的半边圆角。（旧写法是拿一个 32 宽的矩形补左边，视觉上其实是直角。）
+    Item {
         anchors.fill: parent
-        color: Md3.cSurface
-        radius: 0
-    }
-
-    // 左侧圆角（原型 rounded-l-[32px]）
-    Rectangle {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: 32
-        color: Md3.cSurface
+        clip: true
+        Rectangle {
+            anchors.fill: parent
+            anchors.rightMargin: -40      // 右侧溢出 40 > 圆角 32 ⇒ 裁出来就是干净直角
+            radius: 32
+            color: Md3.cSurface
+        }
     }
 
     Column {
@@ -128,6 +127,7 @@ Item {
                         }
                     }
                     Rectangle {
+                        id: editBtn
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         width: 64
@@ -136,6 +136,26 @@ Item {
                         color: Md3.cSurface
                         border.width: 1
                         border.color: Md3.cOutlineVar
+
+                        // 果冻曲线 + hover 提亮（原型是灰底胶囊，hover 加深一档）
+                        scale: 1.0
+                        Behavior on scale {
+                            NumberAnimation { duration: Md3.durJelly; easing.type: Easing.OutBack }
+                        }
+                        Behavior on color { ColorAnimation { duration: Md3.durShort } }
+                        states: [
+                            State {
+                                name: "pressed"
+                                when: editMa.pressed
+                                PropertyChanges { target: editBtn; scale: Md3.jellyPress; color: Md3.cContHigh }
+                            },
+                            State {
+                                name: "hovered"
+                                when: editMa.containsMouse && !editMa.pressed
+                                PropertyChanges { target: editBtn; scale: Md3.jellyHover; color: Md3.cContHigh }
+                            }
+                        ]
+
                         Text {
                             anchors.centerIn: parent
                             text: "编辑"
@@ -143,17 +163,38 @@ Item {
                             font.pixelSize: 13
                         }
                         MouseArea {
+                            id: editMa
                             anchors.fill: parent
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: classCenter.requestOp("class_edit")
                         }
                     }
                 }
 
-                // ── 编辑区（visible / 内容全部来自 C++）────────────
-                Rectangle {
-                    visible: classCenter.editing
+                // ── 编辑区（内容全部来自 C++；开合态也在 C++）────────────
+                // 展开/收起补过渡：直接 visible 硬切会让表单"啪"地弹出来。
+                // 做法：外层 Item 动 height + opacity 并 clip 住溢出，内层卡片照旧绑内容高度。
+                // 不写三元 —— 开合由 State.when 判。
+                Item {
+                    id: editWrap
                     width: body.width - 48
+                    height: 0
+                    clip: true
+                    opacity: 0
+                    Behavior on height {
+                        NumberAnimation { duration: Md3.durDrawer; easing.type: Easing.OutCubic }
+                    }
+                    Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
+                    states: State {
+                        name: "open"
+                        when: classCenter.editing
+                        PropertyChanges { target: editWrap; height: editCard.height; opacity: 1 }
+                    }
+
+                Rectangle {
+                    id: editCard
+                    width: editWrap.width
                     height: editCol.height + 24
                     radius: 16
                     color: Md3.cSurface
@@ -209,6 +250,7 @@ Item {
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
                         }
+                        }
                     }
                 }
 
@@ -234,11 +276,15 @@ Item {
                             border.width: 1
                             border.color: Md3.cOutline
 
-                            // 选中态：State 表达（QML 不写三元）
+                            // 选中态：State 表达（QML 不写三元）；配色走令牌（深浅主题都正常）
                             states: State {
                                 name: "picked"
                                 when: modelData.selected
-                                PropertyChanges { target: chip; color: "#DCFCE7"; border.color: "#22C55E" }
+                                PropertyChanges {
+                                    target: chip
+                                    color: Md3.cOkCont
+                                    border.color: Md3.cOk
+                                }
                             }
 
                             Rectangle {
@@ -311,20 +357,23 @@ Item {
                             }
                         }
 
+                        // 果冻曲线：与班级卡片同一套刻度（Md3.jellyHover / jellyPress / durJelly）
                         scale: 1.0
                         Behavior on scale {
-                            NumberAnimation { duration: 400; easing.type: Easing.OutBack }
+                            NumberAnimation { duration: Md3.durJelly; easing.type: Easing.OutBack }
                         }
                         states: [
                             State {
                                 name: "pressed"
                                 when: thumbMa.pressed
-                                PropertyChanges { target: thumbCard; scale: 0.96 }
+                                PropertyChanges { target: thumbCard; scale: Md3.jellyPress }
+                                PropertyChanges { target: thumbRing; opacity: 1 }
                             },
                             State {
                                 name: "hovered"
                                 when: thumbMa.containsMouse && !thumbMa.pressed
-                                PropertyChanges { target: thumbCard; scale: 1.03; border.color: "#22C55E" }
+                                PropertyChanges { target: thumbCard; scale: Md3.jellyHover }
+                                PropertyChanges { target: thumbRing; opacity: 1 }
                             }
                         ]
                         MouseArea {
@@ -334,6 +383,22 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: drawer.enterRemote("")
                         }
+                    }
+
+                    // hover 描边（原型 hover:border-green-200）：独立一层只动 opacity ——
+                    // QML 对 grouped property（border.color）加不了 Behavior。
+                    // 必须放在 thumbCard **外面**：卡片自己 clip:true，环在里面会被裁掉。
+                    // 显隐由 thumbCard 内的 State 驱动（不写三元、不写函数）。
+                    Rectangle {
+                        id: thumbRing
+                        anchors.fill: thumbCard
+                        anchors.margins: -1
+                        radius: thumbCard.radius + 1
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Md3.cAccent
+                        opacity: 0
+                        Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
                     }
 
                     Column {

@@ -24,21 +24,34 @@ Item {
 
     /** 分类表：key 决定内容页，icon 必须是 resources/icons 里实存的（calendar 不存在，用 clock）。 */
     readonly property var cats: [
-        { key: "conn",  icon: "wifi",     label: "连接" },
-        { key: "acct",  icon: "users",    label: "账户与登录" },
-        { key: "sched", icon: "clock",    label: "课表" },
-        { key: "upd",   icon: "download", label: "更新" },
-        { key: "about", icon: "info",     label: "关于与诊断" }
+        // 2026-10-28 模块三（用户蓝图）：设置页按「通用 / 主界面 / 通知与音量 / 自动化 /
+        // 更新 / 插件 / 关于」分区。管理端把自己的既有四类（账户/课表）保留为独立项 ——
+        // 它们在蓝图里没有对应位置，硬塞进"通用"会把一张卡塞成三层。
+        { key: "general", icon: "sliders",     label: "通用" },
+        { key: "appearance", icon: "layout-grid", label: "主界面外观" },
+        { key: "notify", icon: "bell",         label: "通知与音量" },
+        { key: "automation", icon: "clock",    label: "自动化" },
+        { key: "upd",   icon: "download",      label: "更新" },
+        { key: "plugin", icon: "rocket",       label: "插件" },
+        { key: "acct",  icon: "users",         label: "账户与登录" },
+        { key: "sched", icon: "clock",         label: "课表" },
+        { key: "about", icon: "info",          label: "关于与诊断" }
     ]
 
-    property string cat: "conn"
+    property string cat: "general"
 
+    /** 分类 → 内容文件。这是**页面骨架级路由**（和 MainWindow 的 sectionIndex 同类），
+     *  不是业务判断；内容里的业务一律绑 C++ 结果属性。 */
     function srcOf(k) {
-        if (k === "acct") return "SecAccount.qml"
-        if (k === "sched") return "SecSchedule.qml"
-        if (k === "upd") return "SecUpdate.qml"
-        if (k === "about") return "SecAbout.qml"
-        return "SecConnection.qml"
+        if (k === "appearance") return "SecAppearance.qml"
+        if (k === "notify")     return "SecNotify.qml"
+        if (k === "automation") return "SecAutomation.qml"
+        if (k === "plugin")     return "SecPlugin.qml"
+        if (k === "acct")       return "SecAccount.qml"
+        if (k === "sched")      return "SecSchedule.qml"
+        if (k === "upd")        return "SecUpdate.qml"
+        if (k === "about")      return "SecAbout.qml"
+        return "SecGeneral.qml"
     }
 
     Rectangle { anchors.fill: parent; color: th ? th.body : "#FFFBFE" }

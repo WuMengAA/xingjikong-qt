@@ -46,7 +46,9 @@ import QtQuick.Layouts
 import "../components/md3"     // Md3Card / Md3Chip / Md3Btn（全局组件库，AGENTS.md §9.3）
 import "../shell"              // Sidebar / TopBar / ActionBar / DeviceCard / SideSheet（同目录骨架件）
 import "../pages/dashboard"     // DashPage（仪表盘三件）
-import "../pages/class"          // ClassDashboard（班级工作台 · #472）
+// 2026-10-28 用户裁决「取代」：不再 import "../pages/class" ——
+//   旧的单班三栏工作台（ClassDashboard 及其 20 余个子件）已下线，班级中心改为
+//   Loader 按路径直接加载 ClassCenterPage.qml，不需要把整个目录注册成类型模块。
 import "../island"             // SvgIcon
 import "../components/theme"   // Md3 令牌（pragma Singleton）
 
@@ -91,16 +93,15 @@ Item {
     /** 菜单全集：加页只改这一处。 */
     readonly property var navItemsAll: [
         { key: "dash",     icon: "monitor",     label: "仪表盘" },
-        { key: "classes",  icon: "users",       label: "班级看板" },
+        // 2026-10-28 用户裁决「取代」：全局班级阵列（ClassCenterPage）取代旧的单班三栏
+        // 工作台（ClassDashboard / ClassDeviceGrid / ClassRightRail…共 20 余件，已下线）。
+        // 原来的 key "classes" 也一并收归此处 —— 班级中心成为**唯一**班级入口。
+        // 图标名必须对照 resources/icons/*.svg 实体（写不存在的名字会静默空白）：
+        // 本工程**没有** "grid" 与 "users"，只有 "layout-grid"。
+        { key: "classes",  icon: "layout-grid", label: "班级中心" },
         { key: "control",  icon: "layout-grid", label: "设备集控" },
         { key: "monitor",  icon: "eye",          label: "运行监控" },
-        { key: "settings", icon: "settings",    label: "系统设置" },
-        // 2026-10-28 模块一：全局班级阵列 + 抽屉 + 远程桌面操作面板（蓝图模块一）。
-        // 与既有「班级看板」（单班三栏工作台 ClassDashboard）**并存**：新页另挂，
-        // 不改不动旧件（用户未裁决"取代"，一律并存，避免误伤既有工作台）。
-        // 图标名必须对照 resources/icons/*.svg 实体（写不存在的名字会静默空白）：
-        // 本工程**没有** "grid"，只有 "layout-grid"。
-        { key: "classcenter", icon: "layout-grid", label: "班级中心" }
+        { key: "settings", icon: "settings",    label: "系统设置" }
     ]
 
     /** 侧栏菜单：按身份裁剪（过滤，不是另抄一份表 —— 否则加页又会漏一边）。 */
@@ -122,6 +123,44 @@ Item {
      * 后端另有 LRU 32 台硬上限兜底 —— 超出只保留最近订阅的那批。
      */
     readonly property int thumbLimit: 9
+
+    /**
+     * 选中班级 —— **唯一入口**（2026-10-28 用户裁决「取代」后接管
+     * ClassDashboard.activateClass 的唯一职责，旧三栏已下线）。
+     *
+     * 三件事缺一不可：
+     *   ① 后端双写：`setCurrentClass`（旧筛选，仪表盘/集控用它）+ `subscribeClass`
+     *      （新班级域 typed 服务）。只写其中一个就会出现「网格空着不说话」。；
+     *   ② 视图切到班级中心段（section 键沿用 "classes"，不新造键）；
+     *   ③ 让控制器打开该班抽屉（C++ 侧 openClass 里做设备/事件/在线率重算）。
+     */
+    function pickClass(code) {
+        shell.section = "classes"
+        if (typeof backend !== "undefined" && backend) {
+            backend.setCurrentClass(code)
+            if (backend.classService) backend.classService.subscribeClass(code)
+        }
+        if (typeof classCenter !== "undefined" && classCenter) classCenter.openClass(code)
+    }
+
+    /** 模块二（2026-10-28 蓝图）：按身份决定**初始落点**。
+     *  蓝图原话：「提取管理员中的"班级面板"，作为班主任/老师登录后的独立主页；
+     *  不再从多班级列表中新建或跳转，直接沉浸式展示本班面板，省去老师的筛选成本。」
+     *
+     *  落哪一栏由 C++ 的 `backend.homeSection` 给（teacher⇒classes / admin⇒dash），
+     *  QML 里不写 `role === "teacher"` 这种身份判断。
+     *
+     *  只种一次：用户手动切走之后不再抢回来 —— 否则每次数据刷新都把老师弹回首页。
+     */
+    property bool __homeSeeded: false
+    function seedHomeSection() {
+        if (__homeSeeded) return
+        if (typeof backend === "undefined" || !backend) return
+        const home = backend.homeSection
+        if (!home || home.length === 0) return
+        __homeSeeded = true
+        shell.section = home
+    }
 
     /** 本班设备：按班级码过滤；currentClass 为空 = 「全部班级」⇒ 不过滤（理由见文件头）。 */
     function classDevices() {
@@ -148,23 +187,25 @@ Item {
 
     /** 当前栏目在 StackLayout 里的下标（顺序与 navItems 一致）。 */
     readonly property int sectionIndex: {
+        // 顺序与 navItemsAll 一致（① dash ② 班级中心 ③ 集控 ④ 监控 ⑤ 设置 ⑥ 个人中心）。
+        // "classcenter" 是模块一时的旧键，保留兼容（老代码可能还在写它），同一段。
         if (shell.section === "classes") return 1
+        if (shell.section === "classcenter") return 1
         if (shell.section === "control") return 2
         if (shell.section === "monitor") return 3
         if (shell.section === "settings") return 4
         if (shell.section === "account") return 5
-        if (shell.section === "classcenter") return 6
         return 0
     }
 
     /** 顶栏标题（随栏目变，避免四个栏目都写「设备监控」）。 */
     readonly property string sectionTitle: {
-        if (shell.section === "classes") return "班级看板"
+        if (shell.section === "classes") return "班级中心"
+        if (shell.section === "classcenter") return "班级中心"
         if (shell.section === "control") return "设备集控"
         if (shell.section === "monitor") return "运行监控"
         if (shell.section === "settings") return "系统设置"
         if (shell.section === "account") return "个人中心"
-        if (shell.section === "classcenter") return "班级中心"
         return "设备监控"
     }
 
@@ -260,27 +301,26 @@ Item {
             Layout.fillHeight: true
             spacing: 0
 
-            // ══ 左侧班级导航（240px · #473 点单①：左班级导航 + 右班级工作台）══
-            // 与 Sidebar 的分工：Sidebar 是功能菜单（竖屏 BottomNav 仍用它那份 navItems），
-            // ClassNav 是"以班为单位"的入口——班级列表在上（人数一眼可见），系统组在下。
+            // ══ 左侧全局导航（240px · 2026-10-28 蓝图还原）══
+            // 蓝图的手写稿里，左侧是**功能菜单**：品牌「星集控」+ 账号卡 + 栏目列表。
+            // 原来这里挂的是 ClassNav（"以班为单位"的入口，班级列表在上、系统组在下）——
+            // 按用户裁决「取代」，班级选择已收进班级中心的网格阵列（点卡片开抽屉），
+            // 左栏不再重复一份班级列表，改回蓝图的菜单形态（Sidebar，之前零引用）。
             // 竖屏让位给 BottomNav（visible:false 的项不占布局空间）。
-            ClassNav {
+            Sidebar {
                 id: nav
                 visible: !shell.portrait
                 ctx: shell.ctx
-                classes: backend ? backend.classes : []
-                classesFiltered: backend ? backend.classesFiltered : false
-                devices: backend ? backend.devices : []
-                currentClass: backend ? backend.currentClass : ""
-                section: shell.section
-                navItems: shell.navItems
-                onClassPicked: function (code) {
-                    // 点班级 = 双写（旧筛选 + 新班级域）并切到工作台段
-                    shell.section = "classes"
-                    classDash.activateClass(code)
-                }
-                onSystemActivated: function (key) { shell.navActivated(key) }
-                onClassicRequested: if (shell.ctx) shell.ctx.window.goPage(1)
+                items: shell.navItems
+                current: shell.section
+                // 账号卡文案全部取自后端（取首字 / 角色→中文都在 C++，QML 不做映射）：
+                //   avatarText  = 账号名首字，没登录时回落到角色首字（管/师）
+                //   accountTitle= 角色中文名（管理员 / 老师）
+                //   accountSub  = 账号名（没登录就是空串，不编一个假学校名出来）
+                avatarText: backend ? backend.accountAvatarText : ""
+                accountTitle: backend ? backend.roleText : ""
+                accountSub: backend ? backend.accountName : ""
+                onActivated: function (key) { shell.navActivated(key) }
             }
 
             // ══ 主内容区（Surface）══
@@ -304,10 +344,10 @@ Item {
                         // ⚠️ 班级列表与当前班**不在这里传参** —— TopBar 内部直接读
                         //    backend.classes / backend.currentClass。曾经多传不存在的属性，
                         //    结果 `Type Md3Shell unavailable` 整页起不来（qmllint 0 Error）。
-                        // 2026-10-23 #472：班级选择改为**双写**——activateClass 同时
-                        // 写旧筛选（setCurrentClass）与新班级域（subscribeClass）。
-                        // 只写旧的话，班级工作台永远订不到班（网格空着不说话）。
-                        onClassPicked: function (code) { classDash.activateClass(code) }
+                        // 2026-10-23 #472：班级选择必须**双写**（旧筛选 setCurrentClass +
+                        // 新班级域 subscribeClass）。2026-10-28 裁决「取代」后，双写收进
+                        // shell.pickClass() 这个唯一入口，ClassDashboard 已下线。
+                        onClassPicked: function (code) { shell.pickClass(code) }
                         // 头像 = 账户入口。2026-10-25：落点从「系统设置」改成「个人中心」——
                         //   系统设置受 system:settings 门禁（teacher 无此权限），老师点自己头像
                         //   会被一句"当前身份不能进系统设置"挡回来，等于个人中心根本进不去。
@@ -362,17 +402,13 @@ Item {
                             }
                         }
 
-                        // ② 班级工作台（#461-#472）：左身份 / 中设备网格+展板 / 右动作+Timeline
-                        // 数据走班级域 backend.classService（#460 typed 服务）。
-                        // 旧「班级看板」页（AdminDashboard.qml）文件保留，page 4 仍用它。
-                        ClassDashboard {
-                            id: classDash
-                            host: shell.ctx ? shell.ctx.window : null
-                            cs: backend ? backend.classService : null
-                            devices: backend ? backend.devices : []
-                            toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
-                            // 走 openSection 统一入口，门禁才生效（直接写 section 会绕过 navActivated）
-                            openControlFn: function () { shell.openSection("control") }
+                        // ② 班级中心（2026-10-28 模块一 · 用户裁决「取代」）
+                        //    原先这里是 ClassDashboard 单班三栏工作台（左身份/中网格/右动作），
+                        //    已按裁决整体下线；班级域数据仍走 backend.classService（未变）。
+                        //    本页是**纯声明式**：数据、几何、配色全在 C++ ClassCenterController
+                        //    （context property: classCenter），点击只调 classCenter.requestOp("名字")。
+                        Loader {
+                            source: "../pages/class/ClassCenterPage.qml"
                         }
 
                         // ③ 设备集控（旧界面迁移 2026-10-24 · 用户裁决 A「先搬后拆」）：
@@ -416,13 +452,6 @@ Item {
                         Loader {
                             source: "../pages/account/AccountCenterPage.qml"
                             onLoaded: if (item) item.ctx = shell.ctx
-                        }
-
-                        // ⑦ 班级中心（2026-10-28 模块一）：全局班级阵列 + 右侧抽屉 + 远程桌面操作面板。
-                        //    本件是**纯声明式**：数据与几何全在 C++ ClassCenterController（context: classCenter），
-                        //    点击只调 classCenter.requestOp("名字")，QML 里零 Math / 零三元 / 零 function。
-                        Loader {
-                            source: "../pages/class/ClassCenterPage.qml"
                         }
                     }
                 }
@@ -587,6 +616,16 @@ Item {
         }
     }
 
+    // 模块二（2026-10-28）：身份变了（站点登录换票 / 服务端下发锁定身份）⇒ 重新按身份落点。
+    // 这里**允许重种**：登录是显著事件，「登录完直接看到本班」正是蓝图要的效果。
+    Connections {
+        target: backend
+        function onRoleChanged() {
+            shell.__homeSeeded = false
+            shell.seedHomeSection()
+        }
+    }
+
     // ── 帧订阅：进页面订本班前 N 台在线设备，离开时退订 ────────────────
     // ⚠️ 为什么必须退订：云端按订阅推帧，不退订 = 后台一直拉流。
     function syncThumbs() {
@@ -617,6 +656,9 @@ Item {
     }
 
     Component.onCompleted: {
+        // 模块二（2026-10-28）：先定初始落点 —— 老师进本班面板、管理员进仪表盘。
+        // 必须排在下面依赖 section 的动作之前，否则首帧的拉流开关会按错的栏目判一次。
+        shell.seedHomeSection()
         shell.syncThumbs()
         // S3：进页面拉一次排行（云端 instructions 近 7 天；失败静默，界面自己会显示空态）
         if (backend) backend.fetchActionRanking()

@@ -283,6 +283,11 @@ public:
     void setClasses(const QJsonArray &classes);
     void setDevices(const QJsonArray &devices);
     void setEvents(const QJsonArray &events);
+    /** 模块二（2026-10-28 蓝图）：老师/班主任身份标记。
+     *  置 true 后，若云端只回了一个班（带票据时 /api/classes 本来就是"自己的班"），
+     *  自动选中并打开该班抽屉 —— 这就是蓝图说的"直接沉浸式展示本班面板"。
+     *  管理员保持总览阵列（多班时不擅自替人挑班）。 */
+    void setTeacherScope(bool on);
     /** 缩略图修订号（ClassService::thumbnailChanged）：rev 变化 ⇒ 图源换 t 参数。 */
     void setThumb(const QString &uid, int rev);
     /** 远控画面：宿主按 backend.frameSource 与帧到达驱动。 */
@@ -356,6 +361,12 @@ private:
     void updateLiveText();
     void tickHold();
     void setOpResult(bool ok, const QString &text);
+    /** 模块二：老师身份 + 恰好一个班 + 还没自动进过 ⇒ 打开该班（只做一次）。 */
+    void maybeAutoEnterMyClass();
+
+    // 模块二状态
+    bool m_teacherScope = false;
+    bool m_autoEnteredClass = false;
 
     qreal m_viewW = 1200.0;
     qreal m_viewH = 800.0;

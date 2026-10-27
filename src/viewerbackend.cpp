@@ -425,6 +425,49 @@ bool ViewerBackend::loggedIn() const
 }
 QString ViewerBackend::accountName() const { return m_accountUser; }
 QString ViewerBackend::role() const { return m_role; }
+
+// 2026-10-28 蓝图还原：左侧导航账号卡要显示「管理员 / 老师」与头像首字。
+// 这两个映射属于"把数据翻成文案"，按 QML 零逻辑铁律必须留在 C++。
+QString ViewerBackend::roleText() const
+{
+    return m_role == QLatin1String("admin") ? QStringLiteral("管理员")
+                                            : QStringLiteral("老师");
+}
+
+QString ViewerBackend::accountAvatarText() const
+{
+    const QString who = m_accountUser.trimmed();
+    if (!who.isEmpty()) return who.left(1).toUpper();
+    // 没登录：用角色首字占位（底色/形状由 QML 决定，这里只给字）
+    return m_role == QLatin1String("admin") ? QStringLiteral("管") : QStringLiteral("师");
+}
+
+// 模块二（2026-10-28 蓝图）：老师的"主页"是本班面板，不是全校仪表盘。
+// 注意后端不需要额外请求 —— 云端 /api/classes 带票据时本来就只回"自己的班"
+// （见 classesFiltered 的注释），所以这边只负责"落哪一栏"。
+QString ViewerBackend::homeSection() const
+{
+    return m_role == QLatin1String("admin") ? QStringLiteral("dash")
+                                            : QStringLiteral("classes");
+}
+
+// 主题三档的选项（2026-10-28 模块三）：选中态 `strong` 由 C++ 判，
+// QML 里就不能写 `themeMode === 0 ? filled : tonal` 那种三元配色判断。
+QVariantList ViewerBackend::themeOptions() const
+{
+    QVariantList out;
+    auto add = [&out, this](int key, const QString &label) {
+        QVariantMap m;
+        m.insert(QStringLiteral("key"), key);
+        m.insert(QStringLiteral("label"), label);
+        m.insert(QStringLiteral("strong"), key == m_themeMode);
+        out.append(m);
+    };
+    add(0, QStringLiteral("浅色"));
+    add(1, QStringLiteral("深色"));
+    add(2, QStringLiteral("跟随系统"));
+    return out;
+}
 bool ViewerBackend::mayDo(const QString &perm) const
 {
     // 2026-10-14 修（审计 P0）：这里原来漏了一个 `!`，把权限门控整个判反。

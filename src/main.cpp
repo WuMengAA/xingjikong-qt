@@ -631,6 +631,18 @@ int main(int argc, char *argv[])
                      [&backend](const QString &uid, const QString &code) {
         if (backend.classAdmin()) backend.classAdmin()->bindDevice(code, uid);
     });
+
+    // ── 模块二（2026-10-28 蓝图）：老师/班主任的"独立主页" ────────────────
+    // 蓝图："不再从多班级列表中新建或跳转，直接沉浸式展示本班面板。"
+    // 数据侧不需要新端点 —— 云端 /api/classes 带登录票据时本来就只回"自己的班"
+    // （viewerbackend::classesFiltered 的注释记着这件事，2026-10-25 已生效）。
+    // 这里只告诉控制器"当前是老师视角"，让它在一个班时自动进班。
+    const auto applyRole = [&classCenterCtl, &backend]() {
+        classCenterCtl.setTeacherScope(backend.role() != QStringLiteral("admin"));
+    };
+    applyRole();
+    QObject::connect(&backend, &ViewerBackend::roleChanged, &classCenterCtl, applyRole);
+
     engine.rootContext()->setContextProperty(QStringLiteral("classCenter"), &classCenterCtl);
     // 课表编辑器文件选择对话框（fileDlgs 声明见 engine 之前 —— 裸指针先建后析构）
     engine.rootContext()->setContextProperty(QStringLiteral("fileDialogs"), &fileDlgs);

@@ -117,6 +117,10 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QString currentUid READ currentUid WRITE setCurrentUid NOTIFY currentUidChanged)
     // 主题三档（E4，2026-10-11）：0 浅色 / 1 深色 / 2 跟随系统。持久化在 QSettings ui/themeMode。
     Q_PROPERTY(int themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
+    /** 主题三档的选项 [{key,label,strong}]（2026-10-28 模块三 · 纯增量）：
+     *  strong = 当前选中，由 C++ 判 —— QML 里不能写 `themeMode === 0 ? filled : tonal`。 */
+    Q_PROPERTY(QVariantList themeOptions READ themeOptions NOTIFY themeModeChanged)
+    QVariantList themeOptions() const;
     Q_PROPERTY(bool systemDark READ systemDark NOTIFY systemDarkChanged)
     /** 当前选中设备上报的指令能力全集（老版本被控端没这字段 → 空）。
      *  管端据此把不支持的按钮置灰，而不是让人点下去才吃到一句「未知指令」。 */
@@ -177,6 +181,14 @@ class ViewerBackend : public QObject
     bool verified() const { return m_verified; }
     /** 当前身份："admin"（管理员）／"teacher"（教师）。未登录时也是 teacher（按最低权限看）。 */
     Q_PROPERTY(QString role READ role NOTIFY roleChanged)
+    /** 身份的**中文显示名**（2026-10-28 蓝图还原补，纯增量）：
+     *  左侧导航的账号卡要显示「管理员 / 老师」，映射放 C++ ——
+     *  QML 里写 `role === "admin" ? "管理员" : "老师"` 违反「QML 不写逻辑」铁律。
+     *  未登录时与 role 同口径（按最低权限显示"老师"）。 */
+    Q_PROPERTY(QString roleText READ roleText NOTIFY roleChanged)
+    /** 账号卡头像里的那个字（2026-10-28 纯增量）：取账号名首字符；空账号回落到角色首字。
+     *  取首字也是逻辑，不下放给 QML。 */
+    Q_PROPERTY(QString accountAvatarText READ accountAvatarText NOTIFY accountChanged)
     /** 身份是否由**服务端**下发锁定（2026-10-25）。锁定后本地切换一律被拒 ——
      *  界面必须据此隐藏"换成管理员/教师"，否则就是一颗点了没反应的假按钮
      *  （用户报的"按钮按不动"里，这类静默失败最招人烦）。 */
@@ -360,8 +372,18 @@ public:
     bool loggedIn() const;
     /** 登录的是谁（没登录是空串）。 */
     QString accountName() const;
+    /** 账号卡头像里的那个字：账号名首字符；账号为空时回落到角色首字（"管"/"师"）。 */
+    QString accountAvatarText() const;
     /** 当前身份："admin" / "teacher"。 */
     QString role() const;
+    /** 身份的中文显示名："管理员" / "老师"（QML 不做这个映射）。 */
+    QString roleText() const;
+    /** 登录后**默认落在哪一栏**（2026-10-28 模块二 · 纯增量）：
+     *    teacher ⇒ "classes"（直接进本班面板，省掉"从多班级列表里挑班"这一步）
+     *    admin   ⇒ "dash"（他管全校，先看总览）
+     *  分流的判断留在 C++，QML 只做 `section = backend.homeSection`。 */
+    Q_PROPERTY(QString homeSection READ homeSection NOTIFY roleChanged)
+    QString homeSection() const;
     /** 主题三档（E4）：0 浅色 / 1 深色 / 2 跟随系统。读来自 QSettings，写回即持久化。 */
     int themeMode() const { return m_themeMode; }
     void setThemeMode(int m);

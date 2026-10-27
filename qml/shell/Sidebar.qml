@@ -26,6 +26,14 @@ Item {
     /** 宿主上下文（同 _pageCtx 契约）；用于「返回经典界面」走 ctx.window.goPage。 */
     property var ctx: null
 
+    // ── 账号卡（2026-10-28 蓝图还原）────────────────────────────────
+    // 蓝图左侧导航：品牌行下面是一张账号卡（头像 + 账号名 + 角色）。
+    // 三个文案全部由 C++ 给（backend.accountAvatarText / accountName / roleText）——
+    // 取首字、角色→中文这类映射是逻辑，不下放给 QML。
+    property string avatarText: ""
+    property string accountTitle: ""
+    property string accountSub: ""
+
     // ── 骨架结构尺寸（AGENTS.md §9.2：命名常量集中声明，不散落魔法数）──
     readonly property int navWidth: 240        // 规范：NavigationDrawer 宽 240
     readonly property int navItemH: 56         // MD3 导航项高（规范 48 的 MD3 口径取 56）
@@ -60,18 +68,87 @@ Item {
         anchors.margins: 12
         spacing: 4
 
-        // 品牌行
+        // ── 品牌行（蓝图：w-8 h-8 绿色圆角方块 + 品牌名，font-extrabold）──
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: root.brandRowH
-            Text {
+            Row {
                 anchors.left: parent.left
-                anchors.leftMargin: Md3.spM
+                anchors.leftMargin: Md3.spXS
                 anchors.verticalCenter: parent.verticalCenter
-                text: "星集控"
-                font.pixelSize: Md3.titleM
-                font.weight: Font.Medium
-                color: Md3.cOnSurfaceVar
+                spacing: Md3.spS
+
+                Rectangle {
+                    width: 28; height: 28
+                    radius: Md3.rS
+                    color: Md3.cOk            // 蓝图 bg-green-500 ⇒ 本项目成功绿令牌
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        anchors.centerIn: parent
+                        text: "星"
+                        color: Md3.cOnPrimary
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "星集控"
+                    font.pixelSize: Md3.titleM
+                    font.weight: Font.ExtraBold
+                    color: Md3.cOnSurface
+                }
+            }
+        }
+
+        // ── 账号卡（蓝图：头像 + 账号名 + 角色）──
+        // 文案全来自 C++；这里只摆位置。accountTitle 为空（未拿到身份）时整卡不出现，
+        // 不摆一个空框占位 —— 那看起来像加载失败。
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 56
+            Layout.leftMargin: Md3.spXS
+            Layout.rightMargin: Md3.spXS
+            radius: Md3.rM
+            color: Md3.cCont
+            visible: root.accountTitle.length > 0
+
+            Row {
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 10
+                Rectangle {
+                    width: 36; height: 36
+                    radius: 18
+                    color: Md3.cContHighest
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        anchors.centerIn: parent
+                        text: root.avatarText
+                        color: Md3.cOnSurface
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+                }
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 2
+                    Text {
+                        text: root.accountTitle
+                        color: Md3.cOnSurface
+                        font.pixelSize: 13
+                        font.bold: true
+                        elide: Text.ElideRight
+                        width: parent.parent.width - 54
+                    }
+                    Text {
+                        text: root.accountSub
+                        color: Md3.cOnSurfaceVar
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        width: parent.parent.width - 54
+                    }
+                }
             }
         }
 
