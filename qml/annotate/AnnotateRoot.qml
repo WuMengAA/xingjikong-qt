@@ -66,7 +66,7 @@ Item {
         objectName: "annotateToolBar"    // 探针断言"工具条真的被实例化"靠它
         canvas: inkCanvas
         anchors.horizontalCenter: parent.horizontalCenter
-        // 56 = 给任务栏留的余量（任务栏 40~48，多留一点免得太贴边）
-        y: root.height - height - 56
+        // 展开态给任务栏留 56（任务栏 40~48）；收起态只是条小凸条，贴底 20 就够
+        y: root.height - height - (toolbar.collapsed ? 20 : 56)
     }
 }

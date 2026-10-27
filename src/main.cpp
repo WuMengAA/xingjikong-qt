@@ -318,7 +318,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.50-rc.3";
+constexpr const char *kAppVersion = "0.6.50-rc.4";
 
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
@@ -7858,6 +7858,17 @@ int main(int argc, char *argv[])
     AnnotateDomain::init([]() -> int {
         const PptDomain::Status st = PptDomain::query();
         return (st.ok && st.presenting) ? st.slide : 0;
+    });
+    // 用户 2026-10-27 点单「PPT自动打开」：批注一起来，就让**已在运行**的演示软件进放映。
+    // 不拉起进程（ppt_domain 红线）：老师没开 PPT 时这里只会拿到一条失败原因，
+    // 静默记日志即可 —— 他也许只是想批注桌面。
+    AnnotateDomain::setAutoShowFn([]() -> bool {
+        PptDomain::Status st;
+        QString  why;
+        const bool on = PptDomain::autoStartShow(&st, &why);
+        if (!on && !why.isEmpty())
+            qInfo("[agent-qt] 批注自动放映未触发：%s", qPrintable(why));
+        return on;
     });
 
     // ── 软件管理策略（2026-10-26 P3）：黑白名单 + 黑名单守护 ──

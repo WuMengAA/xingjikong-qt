@@ -104,6 +104,11 @@ void init(std::function<int()> slideFn)
     Overlay::instance()->setSlideProvider(std::move(slideFn));
 }
 
+void setAutoShowFn(std::function<bool()> fn)
+{
+    Overlay::instance()->setAutoShowProvider(std::move(fn));
+}
+
 Overlay *Overlay::instance()
 {
     static Overlay *s = new Overlay();
@@ -199,6 +204,24 @@ bool Overlay::start(QString *err)
 
     installKeyboardHook();
     armPptTimer();
+
+    // 用户点单「PPT自动打开」（2026-10-27）：批注一起来就让演示软件进放映。
+    // 三条纪律：
+    //  ① **异步**：COM 拉起放映要 1~2 秒，同步做会把"点一下批注"卡住；
+    //  ② **不拉起进程**：注入的函数只对已在运行的演示软件生效（ppt_domain.h 红线），
+    //     没开 PPT 就静默不做事 —— 老师可能只是想批注桌面；
+    //  ③ 放映窗口本身也是 topmost，它一起来会压住我们 ⇒ 1.5s 后再纠一次层级
+    //     （连同岛一起重新排到它上面）。
+    if (m_autoShowFn) {
+        std::function<bool()> fn = m_autoShowFn;
+        QTimer::singleShot(0, this, [this, fn] {
+            if (!isActive()) return;              // 期间被收了就别折腾了
+            const bool on = fn();
+            qInfo("[agent-qt] 批注自动放映 PPT：%s", on ? "已进入放映" : "未触发（没开课件或没开演示软件）");
+            assertZOrder();
+        });
+        QTimer::singleShot(1500, this, [this] { assertZOrder(); });
+    }
 
     qInfo("[agent-qt] 批注层已显示：%dx%d %s", m_view->width(), m_view->height(),
           qPrintable(m_canvas->statusLine()));

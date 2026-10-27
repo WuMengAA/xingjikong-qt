@@ -69,6 +69,10 @@ class Canvas : public QQuickPaintedItem {
     Q_PROPERTY(QString tool READ tool NOTIFY changed)
     // 白板背景（QML 底部工具条要显示「白板」是否生效，并据此循环切换）
     Q_PROPERTY(QString board READ boardName NOTIFY changed)
+    // 笔色 / 笔粗（底部工具条的色块与粗细按钮靠它们亮起来；
+    // 没有这两个属性，QML 只能自己记"我点过哪个色"，一旦被岛或管理端改了就显示错）
+    Q_PROPERTY(QString colorHex READ colorHex NOTIFY changed)
+    Q_PROPERTY(qreal penWidth READ penWidth NOTIFY changed)
 public:
     explicit Canvas(QQuickItem *parent = nullptr);
 
@@ -207,6 +211,11 @@ public:
     bool followPpt() const { return m_follow; }
     // 注入页码取数函数（0 = 没在放映）；传空函数即彻底关掉跟随
     void setSlideProvider(std::function<int()> fn);
+
+    // 2026-10-27（用户点单「PPT自动打开」）：注入"进入放映"函数。
+    // 只对**已在运行**的演示软件生效 —— 绝不拉起 PowerPoint（见 ppt_domain.h 红线）。
+    void setAutoShowProvider(std::function<bool()> fn) { m_autoShowFn = std::move(fn); }
+
     // I3 的核心一行：页码 → 墨迹页键。返回"这次是否真的换了页"。
     // slide<=0 表示没在放映 → 不动页（否则会把老师刚写的墨迹切走）。
     // 独立成公开方法是为了能被探针直接验（定时器 + 可见性不好在离屏环境验）。
@@ -225,6 +234,7 @@ private:
     Canvas     *m_canvas = nullptr;   // QML 创建后 findChild 回填
     bool        m_boardMode = false;
     QString     m_boardBg;
+    std::function<bool()> m_autoShowFn;   // 批注开始时自动进入 PPT 放映（可空）
 
     void  *m_hwnd = nullptr;          // HWND 缓存（void* 以免头文件拖进 <windows.h>）
     void  *m_above = nullptr;         // 必须压在批注层之上的窗口（灵动岛）
@@ -241,6 +251,11 @@ private:
 // 域之间不互相依赖（与 AlarmDomain 注入 TTS 同一套办法），
 // 将来 PPT 换成别的放映器也不用改批注域。
 void init(std::function<int()> slideFn);
+
+// 2026-10-27（用户点单「PPT自动打开」）：注入"进入放映"函数。
+// 语义约束（见 ppt_domain.h 红线）：**只对已在运行的演示软件生效**，绝不拉起进程。
+// 返回 true = 这次让它进了放映（或本来就在放映）。
+void setAutoShowFn(std::function<bool()> fn);
 
 // 注册 QML 类型（在创建 view 之前调用一次；重复调用安全）
 void registerQmlTypes();

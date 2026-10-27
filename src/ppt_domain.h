@@ -68,6 +68,13 @@ Status query();
 bool step(int delta, Status *out, QString *error);
 bool gotoSlide(int index, Status *out, QString *error);
 
+// 2026-10-27（批注层「PPT自动打开」）：让**已在运行**的演示软件进入放映。
+// 严格限制（每条都是防事故）：
+//   · 不 CoCreateInstance、不启动进程 —— 老师没开 PPT 就返回 false，什么都不做；
+//   · 不打开文件 —— 课件路径不归本域管；
+//   · 已在放映 → 直接 true，不重放（重放会跳回第一页）。
+bool autoStartShow(Status *out, QString *error);
+
 // I3（与批注层联动）预留的**唯一**接缝：翻页后由调用方自己 `query()` 取新页码。
 // 本批不做轮询钩子 —— 没有消费者的定时器是纯负担，等 H（批注内核）落地后
 // 在 annotate_domain 里按页存取墨迹时再定"推送还是拉取"。

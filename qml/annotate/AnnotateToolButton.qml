@@ -14,9 +14,10 @@ Rectangle {
 
     property string label: ""
     property bool active: false
+    property int minWidth: 62          // 收起按钮（▾）这类窄按钮用它压窄
     signal clicked()
 
-    implicitWidth: Math.max(62, lbl.implicitWidth + 26)
+    implicitWidth: Math.max(btn.minWidth, lbl.implicitWidth + 26)
     height: 36
     radius: 18
     color: btn.active ? "#FF5A5F"

@@ -589,4 +589,77 @@ bool gotoSlide(int index, Status *out, QString *error) {
     return true;
 }
 
+/* ── 2026-10-27（用户点单「PPT自动打开」）────────────────────────
+ * 让**已在运行**的演示软件进入放映。三条限制都是为了不制造事故：
+ *   ① 不 CoCreateInstance、不启动进程 —— 见文件头红线。老师没开 PPT 就什么都不做；
+ *   ② 不打开文件 —— 本域不知道课件在哪，"自动打开某个 pptx"不属这里的能力；
+ *   ③ 已经在放映 → 直接成功返回，**不重放**（重放会跳回第一页，
+ *      把老师讲到一半的位置清掉，是不可挽回的现场事故）。
+ */
+bool autoStartShow(Status *out, QString *error) {
+    ComScope com;
+    if (!com.usable()) {
+        if (error) *error = QStringLiteral("COM 初始化失败（%1）").arg(hresultText(com.hr));
+        return false;
+    }
+
+    Pick p = pickApp(g_pref);
+    if (!p.app) {
+        if (error) {
+            *error = p.reasons.isEmpty() ? QStringLiteral("没有演示软件在运行")
+                                         : p.reasons.join(QStringLiteral("；"));
+        }
+        return false;
+    }
+
+    Status s;
+    s.app = p.id;
+    s.running = true;
+    QString err;
+    if (!readShow(p.app, &s, &err)) {
+        releasePick(&p);
+        if (error) *error = err;
+        return false;
+    }
+    if (s.presenting) {                 // ③ 已在放映：什么也不动
+        releasePick(&p);
+        if (out) *out = s;
+        return true;
+    }
+
+    // 已运行但没放映 ⇒ ActivePresentation.SlideShowSettings.Run()
+    IDispatch *pres = nullptr;
+    if (!asDispatch(p.app, L"ActivePresentation", &pres, &err)) {
+        const QString label = appLabel(s.app);
+        releasePick(&p);
+        if (error) {
+            *error = QStringLiteral("%1 里没有打开的课件（先打开课件，再点批注）").arg(label);
+        }
+        return false;
+    }
+
+    bool ok = false;
+    IDispatch *ss = nullptr;
+    if (!asDispatch(pres, L"SlideShowSettings", &ss, &err)) {
+        if (error) *error = err;
+    } else {
+        VARIANT v;
+        ok = invoke(ss, L"Run", DISPATCH_METHOD, &v, 0, nullptr, &err);
+        ::VariantClear(&v);
+        releaseDisp(ss);
+        if (!ok && error) *error = err;
+    }
+    releaseDisp(pres);
+    releasePick(&p);
+
+    if (!ok) return false;
+
+    // Run 之后放映窗口要几百毫秒才建起来，这里**不**同步等待：
+    // 回报"已发起放映"，真实页码由下一次 query() 拉准（step 那边也是这个口径）。
+    s.presenting = true;
+    s.slide = 1;
+    if (out) *out = s;
+    return true;
+}
+
 }   // namespace PptDomain
