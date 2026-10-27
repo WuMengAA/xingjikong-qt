@@ -234,6 +234,11 @@ Item {
     // ⚠️ 不能写成 readonly 直绑 voicehub —— 那样属性在模块注入前就定死成 null；
     //    必须经中间 property var（setProperty 可写、绑定可重算）。
     property var voicehubObj: null
+    // 自动化规则引擎（Phase 3 · 2026-10-27）：main.cpp 经 setQmlObjectProperty 注入
+    // （同 voicehub 模式）。引擎是纯 QObject，QML 只调其 Q_INVOKABLE / 读 Q_PROPERTY。
+    property var automationObj: null
+    readonly property var automationRef: root.automationObj
+    readonly property bool automationFaceOn: !!root.automationObj
     readonly property var vhRef: root.voicehubObj
     // ⚠️ 2026-10-25（Win7 现场排障）：以下所有 vhRef 守卫一律用**真值**判断
     // （`root.vhRef` / `!root.vhRef`），禁写 `!== null` / `=== null`：
@@ -303,6 +308,9 @@ Item {
         // 2026-10-27（C 批）：设置面常驻（音量双滑块 + 通知黑名单）。
         // 用户裁决「这些功能大多在被控端、且和岛有关」—— 音量/黑名单老师上课当场要调，岛才是他的手。
         fs.push({ id: 5, label: "设" });
+        // 2026-10-27（Phase 3）：自动化规则面常驻（被控端 AutomationEngine）。
+        // 用户裁决「自动化是被控端能力、主入口在岛」—— 老师在讲台上当场配规则，岛才是他的手。
+        if (root.automationFaceOn) fs.push({ id: 6, label: "自" });
         return fs;
     }
     // C 批（2026-10-27）：按 faceModel 的顺序翻一面（左右滑动 & 将来的键盘/遥控都走它）。
@@ -2780,6 +2788,21 @@ Item {
                         anchors.fill: parent
                         th: root.th
                         bridge: root.bridgeRef
+                    }
+                }
+
+                // ── 面 6：自动化规则（2026-10-27 · Phase 3）────────────
+                // 用户裁决：自动化是被控端能力、主入口在岛；老师在讲台上当场配规则。
+                Item {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    visible: root.faceNow === 6
+
+                    IslandAutomationFace {
+                        anchors.fill: parent
+                        th: root.th
+                        automationRef: root.automationRef
+                        bridgeRef: root.bridgeRef
                     }
                 }
             }
