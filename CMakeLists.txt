@@ -47,7 +47,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus ${CMAKE_BINARY_
 # 命名同为 DeepSeek Harness 同款：正式 X.Y.Z / 内测 X.Y.Z-alpha.N / 候选 X.Y.Z-rc.N
 # （阶段序 alpha < rc < 正式；号同核心递增、换核心归零、转正即剥离后缀）。
 # 成熟度标记不进版本号，归 ota.json 的 mandatory / notes 管。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
-set(AGENT_VERSION "0.6.50-rc.5")
+set(AGENT_VERSION "0.6.50-rc.6")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" _agent_src)
 if(_agent_src MATCHES "kAppVersion[ \t\r\n]*=[ \t\r\n]*\"([^\"]+)\"")
   set(_src_agent_version "${CMAKE_MATCH_1}")
@@ -187,6 +187,8 @@ add_executable(stelarith-agent-qt
   # ── 灵动岛 QML 桥（2026-10-11 加：视觉层改 QML，本桥把状态推给 QML / 接 QML 回调）──
   src/island_bridge.cpp
   src/island_bridge.h
+  # 2026-10-27（C 批）：岛「设」面方法（系统音量 / 通知音量 / 黑名单），从 bridge 拆出守 600 行红线
+  src/island_bridge_settings.cpp
   # ── SVG 图标 provider（QML Image 的 image://svgicon 协议；与 viewer 同份实现）──
   src/svgiconprovider.cpp
   src/svgiconprovider.h

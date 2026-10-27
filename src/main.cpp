@@ -318,7 +318,7 @@ constexpr int kProcessListLimit = 50;    // process_list 默认条数（与 Rust
 //     （rc 号同核心递增、换核心归零、转正剥离后缀；成熟度标记不进版本号，归 ota.json 的
 //      mandatory / notes 管）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //     这一行是 CMake 校验用的回落值 —— 正常构建下由 set(AGENT_VERSION ...) 强制拉齐。
-constexpr const char *kAppVersion = "0.6.50-rc.5";
+constexpr const char *kAppVersion = "0.6.50-rc.6";
 
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
@@ -3685,7 +3685,9 @@ static void speakText(const QString &text)
     }
 
     // 先让 Edge 读；它会异步报成功(finished)或失败(failed)
-    edge.speak(say);
+    // C 批（2026-10-27）：通知音量（Edge TTS 响度）走 AgentSettings::notifyVolume，
+    // 与「系统主音量」是两回事——系统音量管整台设备，这里只管通知播报多大声。
+    edge.speak(say, QString(), AgentSettings::notifyVolume() / 100.0);
 }
 
 // ── 灵动岛统一入口（2026-10-07 · #98）──────────────────────────────────
@@ -3783,6 +3785,14 @@ static QString notifyFromParams(const QJsonObject &params, const QString &id = Q
     if (gated) return QStringLiteral("skipped:exam-active-gated");
     // P0-1（2026-10-14）：本地「通知与弹窗」开关关了就整体静默（考试门控优先，已在上方处理）。
     if (!AgentSettings::notifyEnabled()) return QStringLiteral("notify-disabled-by-local-setting");
+    // C 批（2026-10-27）：岛黑名单 —— 把"老弹烦人通知的来源"静默丢弃（不弹/不响/不入历史）。
+    // 来源键取自通知载荷 `from`（应用名/插件 id/通道名，由下发方给，空 = 不适用）。
+    // 与系统统一配置：黑名单落 QSettings（设备级），岛和管理端读到的是同一份。
+    {
+        const QString from = params.value(QStringLiteral("from")).toString().trimmed();
+        if (!from.isEmpty() && AgentSettings::notifyBlacklist().contains(from))
+            return QStringLiteral("skipped:blacklisted");
+    }
     const int seconds = params.value(QStringLiteral("seconds")).toInt(0);
     // flags.speech → TTS 朗读（缺省不读，避免每教室都响）
     const QJsonObject flags = params.value(QStringLiteral("flags")).toObject();

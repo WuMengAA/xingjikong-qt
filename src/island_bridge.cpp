@@ -3,6 +3,8 @@
 #include "whale_audio.h"
 // 2026-10-27（H 批）：岛的「笔」面直接调批注域（本机直调，不经云端）
 #include "annotate_domain.h"
+// 2026-10-27（C 批）：岛「设」面的方法实现挪到 island_bridge_settings.cpp（600 行红线拆分），
+// 这里只留声明与批注动作；实现侧需要的 system_volume.h / core/AgentSettings.h 也在那边 include。
 
 #include <QRegularExpression>
 #include <QSettings>
@@ -555,3 +557,7 @@ void IslandBridge::annotateAction(const QString &cmd)
     }
     sync();
 }
+
+// ── 以下「设」面方法（systemVolume / setSystemVolume / notifyVolume / setNotifyVolume /
+//    notifyBlacklist / settingsAction）实现见 island_bridge_settings.cpp ──
+

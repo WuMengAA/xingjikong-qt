@@ -45,4 +45,20 @@ namespace AgentSettings {
     inline void setPlayScheduleEnabled(bool v) { QSettings().setValue(QStringLiteral("play/scheduleEnabled"), v); }
     inline QStringList playWindows() { return QSettings().value(QStringLiteral("play/windows"), QStringList()).toStringList(); }
     inline void setPlayWindows(const QStringList &v) { QSettings().setValue(QStringLiteral("play/windows"), v); }
+
+    // ── C 批（2026-10-27）· 通知音量（岛态面双滑块的第二根）──────────────
+    // 语义：**通知朗读（Edge TTS）的响度**，0-100，默认 75（对齐 edge_tts 既有默认 0.75）。
+    // 与系统主音量的分工：系统音量管"整台设备多大声"（含课件/视频），
+    // 通知音量只管"通知播报多大声"——老师把课堂内容开大、又不想通知炸耳，就要这个。
+    // ⚠️ 提示音（whale_audio / winmm PlaySoundW）不在此列：winmm 没有音量参数，
+    //    它只能跟系统音量（既有事实，别在 UI 上谎称能单独调）。
+    inline int notifyVolume() { return qBound(0, QSettings().value(QStringLiteral("notify/volume"), 75).toInt(), 100); }
+    inline void setNotifyVolume(int v) { QSettings().setValue(QStringLiteral("notify/volume"), qBound(0, v, 100)); }
+
+    // ── C 批（2026-10-27）· 岛黑名单（通知来源）───────────────────────────
+    // 老师把"老弹烦人通知的来源"拉黑后，该来源的通知**静默丢弃**（不弹、不响、不入历史）。
+    // 来源键取自通知载荷 `from`（应用名 / 插件 id / 通道名，由下发方给，空 = 不适用）。
+    // 与系统统一配置：落 QSettings（设备级），岛和管理端读到的是同一份。
+    inline QStringList notifyBlacklist() { return QSettings().value(QStringLiteral("notify/blacklist"), QStringList()).toStringList(); }
+    inline void setNotifyBlacklist(const QStringList &v) { QSettings().setValue(QStringLiteral("notify/blacklist"), v); }
 }

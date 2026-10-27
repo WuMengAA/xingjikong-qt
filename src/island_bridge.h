@@ -145,6 +145,17 @@ class IslandBridge : public QObject
     Q_PROPERTY(QString annotatePage   READ annotatePage   NOTIFY changed)
     Q_PROPERTY(QString annotateHint   READ annotateHint   NOTIFY changed)
 
+    // ── C 批（2026-10-27）· 岛设置面：音量双滑块 + 通知黑名单 ──
+    // 用户裁决「这些功能大多在被控端、且和岛有关」：音量/黑名单是老师当场要调的，
+    // 入口放在岛「设」面，本机直调（系统音量走 Core Audio，通知音量/黑名单走 QSettings）。
+    // 系统音量：读 = getSystemMasterVolume（Core Audio 当前值，避免滑块一加载就显示 0）；
+    //           写 = setSystemMasterVolume（整台设备输出响度，含课件/视频）。
+    // 通知音量：Edge TTS 朗读响度（0-100，默认 75），只管"通知播报多大声"，不影响课件。
+    // 黑名单：通知来源（载荷 `from`）列表，命中即静默丢弃；与系统统一配置（设备级 QSettings）。
+    Q_PROPERTY(int          systemVolume    READ systemVolume    WRITE setSystemVolume    NOTIFY changed)
+    Q_PROPERTY(int          notifyVolume    READ notifyVolume    WRITE setNotifyVolume    NOTIFY changed)
+    Q_PROPERTY(QVariantList notifyBlacklist READ notifyBlacklist                           NOTIFY changed)
+
 public:
     explicit IslandBridge(IslandOverlay *host, QObject *parent = nullptr);
 
@@ -252,6 +263,14 @@ public:
     QString annotatePage() const;    // "3/8"（未分页时 "1/1"）
     QString annotateHint() const;    // 一句话状态（成功/失败原因）
     Q_INVOKABLE void annotateAction(const QString &cmd);
+
+    // ── C 批（2026-10-27）· 岛设置面：音量双滑块 + 黑名单 ──
+    int    systemVolume() const;
+    void   setSystemVolume(int v);
+    int    notifyVolume() const;
+    void   setNotifyVolume(int v);
+    QVariantList notifyBlacklist() const;
+    Q_INVOKABLE void settingsAction(const QString &cmd);
 
 private:
     // 2026-10-13（用户「历史通知第一位优先显示管理端通知」）：历史**显示序** ——

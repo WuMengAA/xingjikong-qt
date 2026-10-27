@@ -73,3 +73,50 @@ bool setSystemMasterVolume(int v, QString *errOut)
         qInfo("[agent-qt] 系统主音量已设为 %d%%（Core Audio）", v);
     return ok;
 }
+
+bool getSystemMasterVolume(int *out, QString *errOut)
+{
+    if (!out) return false;
+    *out = -1;
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool needUninit = (hr == S_OK);
+    if (hr == RPC_E_CHANGED_MODE) hr = S_OK;
+    if (FAILED(hr)) {
+        if (errOut) *errOut = QStringLiteral("COM 初始化失败（0x%1）").arg((quint32)hr, 8, 16, QLatin1Char('0'));
+        return false;
+    }
+
+    bool ok = false;
+    IMMDeviceEnumerator *enumer = nullptr;
+    IMMDevice *dev = nullptr;
+    IAudioEndpointVolume *vol = nullptr;
+
+    do {
+        hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                              __uuidof(IMMDeviceEnumerator), (void **)&enumer);
+        if (FAILED(hr) || !enumer) { if (errOut) *errOut = QStringLiteral("建设备枚举器失败（0x%1）").arg((quint32)hr, 8, 16, QLatin1Char('0')); break; }
+
+        hr = enumer->GetDefaultAudioEndpoint(eRender, eConsole, &dev);
+        if (FAILED(hr) || !dev) { if (errOut) *errOut = QStringLiteral("取不到默认播放设备（可能没插声卡或在远程会话里）"); break; }
+
+        hr = dev->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, (void **)&vol);
+        if (FAILED(hr) || !vol) { if (errOut) *errOut = QStringLiteral("打不开主音量接口（0x%1）").arg((quint32)hr, 8, 16, QLatin1Char('0')); break; }
+
+        float scalar = 0.0f;
+        hr = vol->GetMasterVolumeLevelScalar(&scalar);
+        if (FAILED(hr)) { if (errOut) *errOut = QStringLiteral("读主音量失败（0x%1）").arg((quint32)hr, 8, 16, QLatin1Char('0')); break; }
+
+        *out = qBound(0, int(scalar * 100.0f + 0.5f), 100);
+        ok = true;
+    } while (false);
+
+    if (vol) vol->Release();
+    if (dev) dev->Release();
+    if (enumer) enumer->Release();
+    if (needUninit) CoUninitialize();
+
+    if (ok)
+        qInfo("[agent-qt] 系统主音量当前 %d%%（Core Audio）", *out);
+    return ok;
+}

@@ -16,3 +16,15 @@
  * @return true 成功；false 失败（调用方应回落到 waveOutSetVolume）
  */
 bool setSystemMasterVolume(int v, QString *errOut);
+
+/**
+ * 读**系统主音量** 0-100（Core Audio / WASAPI，同一端点）。
+ *
+ * 2026-10-27（C 批）：灵动岛态面要放「系统音量」滑块 —— 没有 get 就只能盲拖，
+ * 滑块一加载就显示 0，老师拖一下才跳对值，那是把用户当傻子。
+ *
+ * @param out    输出音量（0-100，取整）
+ * @param errOut 失败原因（人话）
+ * @return true 成功；false 失败（调用方应显示 -1 / 禁用滑块）
+ */
+bool getSystemMasterVolume(int *out, QString *errOut);
