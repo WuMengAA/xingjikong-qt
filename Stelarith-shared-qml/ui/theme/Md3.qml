@@ -73,6 +73,9 @@ QtObject {
     property color cInverseOn:     dark ? "#313033" : "#F4EFF4"
     // 状态色（MD3 baseline 未定义语义状态，沿用项目 WCAG 校准值，err 归 MD3 error）
     property color cOk:            dark ? "#4CC38A" : "#1B7A43"
+    // 成功容器（2026-10-28 蓝图还原补）：选中胶囊 / 在线标记的**浅底**，
+    // 配 cOk 边框用。深浅两套都给了值 —— 原来各处硬编码 "#DCFCE7" 在深色主题上会刺眼。
+    property color cOkCont:        dark ? "#123B2A" : "#DCFCE7"
     property color cWarn:          dark ? "#D4A017" : "#A87C0A"
     property color cInfo:          dark ? "#7FB3E0" : "#2A6394"
     // 品牌点缀色「终末地工业青」（2026-10-22 收编为令牌）：在线设备的"数据在流"左缘细规、
@@ -129,6 +132,19 @@ QtObject {
     property int durShort: 200    // 颜色 / 开关 / 指示器
     property int durMedium: 350   // 进入 / 退出
     property int durLong: 500     // 几何形变（大元素）
+    // 2026-10-28 蓝图还原：原型（手写稿附的 Tailwind 原型）里三处动效的时长
+    // 与 MD3 默认刻度不一致，且果冻曲线带 overshoot。这三条是**还原参考**用的，
+    // 不是替代上面三条 —— 新代码优先用语义名（durJelly/durDrawer/durModal），
+    // 老代码里的 durShort/durMedium 保持不动。
+    //   果冻：transition: transform 400ms cubic-bezier(.34,1.7,.64,1) ⇒ Easing.OutBack
+    //   抽屉：transition: transform 400ms cubic-bezier(.2,.8,.2,1)  ⇒ Easing.OutCubic
+    //   模态：transition: opacity 300ms ease                       ⇒ Easing.OutQuad
+    property int durJelly: 400    // 果冻曲线（hover 1.05 / press 0.90 回弹）
+    property int durDrawer: 400   // 抽屉滑入滑出
+    property int durModal: 300    // 模态/遮罩淡入淡出
+    // 果冻缩放刻度（原型 .jelly-effect:hover / :active）
+    property real jellyHover: 1.05
+    property real jellyPress: 0.90
     // emphasized decelerate（进入）/ standard（通用）
     property var easeEmph: [0.05, 0.7, 0.1, 1.0]
     property var easeStd:  [0.2, 0.0, 0.0, 1.0]
