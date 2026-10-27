@@ -349,28 +349,28 @@ QRect IslandOverlay::geometryForContent(int shapeHeight) const
     if (!screen) return QRect(0, 0, 200, shapeHeight);
     const QRect sg = screen->geometry();
 
-    // ── 面板（2026-10-27 · G4/G5/G6 组件）：定宽 640 ──────────────────────
+    // ── 面板（2026-10-27 · G4/G5/G6 组件）：定宽 680 ──────────────────────
     // 与媒体同一口径：面板内容是**多行表格/大数字**，宽度由内容定会算成"标题那行"
     // 的宽度（200 出头），课表一行都排不下。
     // ⚠️ 放在媒体分支**之前**：面板与媒体互斥，面板优先（showPanel 会顶掉媒体内容）。
     if (!m_panelFace.isEmpty()) {
-        const int pw = qMin(640, qMax(kMinContentW, sg.width() - 48));
+        const int pw = qMin(680, qMax(kMinContentW, sg.width() - 48));
         return QRect(sg.x() + (sg.width() - pw) / 2, sg.y() + 24, pw, shapeHeight);
     }
 
     // 2026-10-15 组件1（点歌互动）：媒体呈现时按 QML 预算宽度走 ——
-    // 收起 320 / 展开 640（与 IslandRoot.implicitWidth 逐字一致）。
+    // 收起 320 / 展开 680（与 IslandRoot.implicitWidth 逐字一致）。
     // 内容定宽对短曲名只给 ~200：互动区 + 弹幕输入行在 200 宽下放不下
     // （探针实测 danmakuRow 被推到 320 高度线外，根本看不见），
     // 且 fitTitlePx 的宽度预算也按 640/320 算，窄岛下大标题会被挤成 3 行 192px。
     // ⚠️ 只对媒体呈现生效：通知类仍走内容定宽，不动既有 100+ 调用方的观感。
     if (m_mediaPresenting) {
-        const int mw = m_expanded ? 640 : 320;
+        const int mw = m_expanded ? 680 : 320;
         return QRect(sg.x() + (sg.width() - mw) / 2, sg.y() + 24, mw, shapeHeight);
     }
 
     // 内容决定宽度（标题/描述最长行）
-    const int maxW = qMin(sg.width() * 6 / 10, 640);
+    const int maxW = qMin(sg.width() * 6 / 10, 680);
     QFontMetrics fm(font());
     const int iconW = m_icon.isEmpty() ? 0 : 28;
     const int textW0 = qMax(fm.horizontalAdvance((m_title.isEmpty() ? "" : m_title) + "  "),
