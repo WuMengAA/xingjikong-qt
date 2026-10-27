@@ -287,6 +287,9 @@ Item {
         // 2026-10-27（H 批）：批注面常驻。用户裁决「这些功能大多是加入到被控端，
         // 而且大部分和灵动岛有关」—— 老师上课点不到管理端，岛才是他的手。
         fs.push({ id: 4, label: "笔" });
+        // 2026-10-27（C 批）：设置面常驻（音量双滑块 + 通知黑名单）。
+        // 用户裁决「这些功能大多在被控端、且和岛有关」—— 音量/黑名单老师上课当场要调，岛才是他的手。
+        fs.push({ id: 5, label: "设" });
         return fs;
     }
     // C 批（2026-10-27）：按 faceModel 的顺序翻一面（左右滑动 & 将来的键盘/遥控都走它）。
@@ -2821,6 +2824,22 @@ Item {
                     visible: root.faceNow === 4
 
                     IslandAnnotateFace {
+                        anchors.fill: parent
+                        th: root.th
+                        bridge: root.bridgeRef
+                    }
+                }
+
+                // ── 面 5：设置（2026-10-27 · C 批）──────────────────
+                // 用户裁决：音量/黑名单这类"老师当场要调"的能力放被控端，且长在岛上。
+                // 本面只做显示 + 拖动跟手 + 转发，真值在 C++ 域 / QSettings（见 IslandSettingsFace 头注）。
+                Item {
+                    anchors.fill: parent
+                    // 比其它面多留 4px 内边距：本面有贴边滑块，要避开 IslandSurface 的圆角裁剪边。
+                    anchors.margins: 14
+                    visible: root.faceNow === 5
+
+                    IslandSettingsFace {
                         anchors.fill: parent
                         th: root.th
                         bridge: root.bridgeRef
