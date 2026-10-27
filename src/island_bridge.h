@@ -156,6 +156,12 @@ class IslandBridge : public QObject
     Q_PROPERTY(int          notifyVolume    READ notifyVolume    WRITE setNotifyVolume    NOTIFY changed)
     Q_PROPERTY(QVariantList notifyBlacklist READ notifyBlacklist                           NOTIFY changed)
 
+    // ── 灵动岛 6 形态（2026-10-27 收口蓝图）──────────────────────────
+    // morphMode = 当前应显示的形态（C++ recomputeMorph 单点裁决）；
+    // morphData = 该形态专属强类型数据（QML 直接 .field 读，绝不 JSON.parse）。
+    Q_PROPERTY(QString     morphMode READ morphMode NOTIFY changed)
+    Q_PROPERTY(QVariantMap morphData READ morphData NOTIFY changed)
+
 public:
     explicit IslandBridge(IslandOverlay *host, QObject *parent = nullptr);
 
@@ -271,6 +277,12 @@ public:
     void   setNotifyVolume(int v);
     QVariantList notifyBlacklist() const;
     Q_INVOKABLE void settingsAction(const QString &cmd);
+
+    // ── 灵动岛 6 形态（2026-10-27 收口蓝图）──
+    QString     morphMode() const;
+    QVariantMap morphData() const;
+    Q_INVOKABLE void morphDemo(const QString &mode);     // 演示/测试：强制切形态（"auto" 解除）
+    Q_INVOKABLE void morphAction(const QString &cmd);    // 形态按钮动作（路由骨架）
 
 private:
     // 2026-10-13（用户「历史通知第一位优先显示管理端通知」）：历史**显示序** ——

@@ -329,6 +329,10 @@ bool    IslandBridge::mediaPresenting() const { return m_host ? m_host->m_mediaP
 // 组件7：播放四态相位（走公开 getter，不直读成员 —— 相位由 IslandOverlay 单点维护）
 QString IslandBridge::mediaPhase() const { return m_host ? m_host->mediaPhase() : QString(); }
 
+// ── 灵动岛 6 形态（2026-10-27 收口蓝图）──
+QString     IslandBridge::morphMode() const { return m_host ? m_host->morphMode() : QStringLiteral("none"); }
+QVariantMap IslandBridge::morphData() const { return m_host ? m_host->morphData() : QVariantMap(); }
+
 // ── 组件5 祝福弹幕（2026-10-15）────────────────────────────────
 int IslandBridge::blessingCooldownSec() const
 {
@@ -442,6 +446,8 @@ void IslandBridge::whaleLongPressed()
 
 void IslandBridge::sync()
 {
+    // 每次广播前先让 C++ 单点裁决当前该显示哪个形态（大脑算，QML 只渲染）。
+    if (m_host) m_host->recomputeMorph();
     emit changed();
 }
 
@@ -468,6 +474,17 @@ void IslandBridge::requestExpand(bool on)
 {
     if (!m_host) return;
     m_host->setExpanded(on);
+}
+
+// ── 灵动岛 6 形态（2026-10-27 收口蓝图）──
+void IslandBridge::morphDemo(const QString &mode)
+{
+    if (m_host) m_host->setMorphDemo(mode);
+}
+
+void IslandBridge::morphAction(const QString &cmd)
+{
+    if (m_host) m_host->morphAction(cmd);
 }
 
 /* ══════════════════════════════════════════════════════════════

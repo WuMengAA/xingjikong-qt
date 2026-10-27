@@ -1866,6 +1866,111 @@ void IslandOverlay::setQmlObjectProperty(const QString &name, QObject *obj)
     }
 }
 
+// ── 灵动岛 6 形态（2026-10-27 收口蓝图）────────────────────────────────────
+// 优先级（高→低）：countdown > alert > notice > marquee > progress > audio > none
+// 单条信息中枢：收起态胶囊同一时刻只展示一个形态，避免信息打架。
+// ⚠️ 只认既有成员（m_panelFace/m_severity/m_title/m_desc/m_ftActive/m_spectrumOn），
+//    不引入 exam/dock 等新状态位 —— 那些是后续「自动化规则引擎」批次的事，本骨架只渲染 6 形态。
+void IslandOverlay::recomputeMorph()
+{
+    if (m_morphForced) return;            // 演示强制模式不走自动裁决
+    QString mode = QStringLiteral("none");
+    if (m_panelFace == QStringLiteral("countdown"))
+        mode = QStringLiteral("countdown");
+    else if (m_severity == QStringLiteral("alert"))
+        mode = QStringLiteral("alert");
+    else if (!m_title.isEmpty()) {
+        // 长文案（>36 字）走跑马灯形态；短通知走静态通知形态
+        const bool longText = m_desc.size() > 36;
+        mode = longText ? QStringLiteral("marquee") : QStringLiteral("notice");
+    }
+    else if (m_ftActive)
+        mode = QStringLiteral("progress");
+    else if (m_spectrumOn)
+        mode = QStringLiteral("audio");
+    m_morphMode = mode;
+    if (m_morphMode == QStringLiteral("none")) m_morphData.clear();
+}
+
+void IslandOverlay::setMorphDemo(const QString &mode)
+{
+    static const QStringList modes = {
+        QStringLiteral("auto"), QStringLiteral("progress"), QStringLiteral("countdown"),
+        QStringLiteral("alert"), QStringLiteral("marquee"),  QStringLiteral("audio"),
+        QStringLiteral("dock"),  QStringLiteral("notice")
+    };
+    QString m = mode.trimmed();
+    if (m.isEmpty() || m == QStringLiteral("cycle")) {
+        const int i = modes.indexOf(m_morphForced ? m_morphMode : QStringLiteral("auto"));
+        m = modes.at((i + 1) % modes.size());
+    }
+    if (m == QStringLiteral("auto")) {
+        m_morphForced = false;
+        m_morphMode = QStringLiteral("none");
+        m_morphData.clear();
+        recomputeMorph();
+        if (m_bridge) m_bridge->sync();
+        return;
+    }
+    m_morphForced = true;
+    m_morphMode = m;
+    QVariantMap d;                        // 给演示数据：让 6 形态都有可看的内容
+    if (m == QStringLiteral("progress")) {
+        d.insert(QStringLiteral("name"),   QStringLiteral("试卷-高三二模.pdf"));
+        d.insert(QStringLiteral("bytes"),  qint64(45 * 1024 * 1024));
+        d.insert(QStringLiteral("total"),  qint64(100 * 1024 * 1024));
+        d.insert(QStringLiteral("speedKbps"), 3200);
+    } else if (m == QStringLiteral("countdown")) {
+        d.insert(QStringLiteral("remainSec"), 45 * 60);
+        d.insert(QStringLiteral("label"),     QStringLiteral("距离考试结束"));
+        d.insert(QStringLiteral("sub"),       QStringLiteral("本场考试为数学"));
+    } else if (m == QStringLiteral("alert")) {
+        d.insert(QStringLiteral("title"), QStringLiteral("已拦截 1 个应用"));
+        d.insert(QStringLiteral("apps"),  QVariantList{QStringLiteral("原神"), QStringLiteral("Bilibili")});
+        d.insert(QStringLiteral("reason"), QStringLiteral("考试期间禁止运行无关程序"));
+    } else if (m == QStringLiteral("marquee")) {
+        d.insert(QStringLiteral("text"), QStringLiteral(
+            "天气转凉，请各班注意添衣保暖；本周五下午进行消防演练，请提前安排好疏散路线。"));
+    } else if (m == QStringLiteral("audio")) {
+        d.insert(QStringLiteral("live"), true);   // 用真频谱（m_spectrumBands）即可
+    } else if (m == QStringLiteral("dock")) {
+        d.insert(QStringLiteral("actions"), QVariantList{
+            QVariantMap{{QStringLiteral("cmd"),  QStringLiteral("lock")},
+                        {QStringLiteral("icon"), QStringLiteral("lock")}},
+            QVariantMap{{QStringLiteral("cmd"),  QStringLiteral("mute")},
+                        {QStringLiteral("icon"), QStringLiteral("volume-x")}},
+            QVariantMap{{QStringLiteral("cmd"),  QStringLiteral("notice")},
+                        {QStringLiteral("icon"), QStringLiteral("bell")}},
+            QVariantMap{{QStringLiteral("cmd"),  QStringLiteral("broadcast")},
+                        {QStringLiteral("icon"), QStringLiteral("radio")}}});
+    } else if (m == QStringLiteral("notice")) {
+        d.insert(QStringLiteral("title"), QStringLiteral("收到张老师通知"));
+        d.insert(QStringLiteral("desc"),  QStringLiteral("下午第一节课调至录播教室"));
+    }
+    m_morphData = d;
+    if (m_bridge) m_bridge->sync();
+}
+
+void IslandOverlay::morphAction(const QString &cmd)
+{
+    // 路由骨架：完整业务接线（锁屏/静音/广播/文件传输控制）留给后续「自动化规则引擎」批次。
+    const QString c = cmd.trimmed();
+    if (c == QStringLiteral("confirm") || c == QStringLiteral("close")
+        || c == QStringLiteral("dismiss")) {
+        dismiss();
+        return;
+    }
+    if (c == QStringLiteral("pause") || c == QStringLiteral("resume")
+        || c == QStringLiteral("cancel")) {
+        qWarning("[island] morphAction(%s)：文件传输控制未接线，仅同步状态", qPrintable(c));
+        if (m_bridge) m_bridge->sync();
+        return;
+    }
+    qWarning("[island] morphAction(%s)：动作未接线（后续批次接 AutomationEngine/云端指令）",
+             qPrintable(c));
+    if (m_bridge) m_bridge->sync();
+}
+
 void IslandOverlay::dismiss()
 {
     // 空闲态开启时，"收起"不是消失，而是收回成顶部那条半胶囊

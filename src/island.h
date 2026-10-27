@@ -240,6 +240,22 @@ public:
     QString panelFace() const { return m_panelFace; }
     QJsonObject panelData() const { return m_panelData; }
 
+    // ── 灵动岛 6 形态（2026-10-27 · 收口蓝图）────────────────────────
+    // 形态 = 状态表达的「内容形态」（进度环 / 倒计时 / 拦截告警 / 跑马灯 / 声波 / 快捷坞），
+    // 与 faceModel 的 6 个**功能切面**（概/媒/史/态/笔/设）正交：切面是导航、形态是表达。
+    // morphMode 由 C++ 单点裁决（优先级见 recomputeMorph），QML 只按 mode 渲染 —— 不自己判断业务逻辑（§10.9）。
+    //   "none" | "progress" | "countdown" | "alert" | "marquee" | "audio" | "dock" | "notice"
+    // morphData 是该形态专属的强类型数据（QVariantMap，QML 直接 .field 读，绝不 JSON.parse —— §10.9）。
+    QString morphMode() const { return m_morphMode; }
+    QVariantMap morphData() const { return m_morphData; }
+    // 自动裁决：根据当前岛状态算出应显示的形态（优先级 countdown>alert>notice>marquee>progress>audio>none）。
+    void recomputeMorph();
+    // QML → C++：演示/测试用，强制切到某一形态（"auto" 解除强制回到自动裁决）。
+    void setMorphDemo(const QString &mode);
+    // QML → C++：形态的按钮动作（pause/cancel/confirm/mute/lock/broadcast…）。
+    //   现阶段只做路由骨架（confirm/close→dismiss；其余记日志+sync）；完整业务接线留给后续批次。
+    void morphAction(const QString &cmd);
+
     // 时间文本格式化（唯一口径；归档与 bridge 组装共用这三个函数，别各写一套）
     //   timeStr  = HH:mm —— 概览面历史面板有日期分组，行内再带日期是冗余；
     //   timeFull = 今天 HH:mm / 昨天 HH:mm / M/d HH:mm —— 历史面(face 2)是平铺
@@ -539,6 +555,11 @@ private:
     bool m_spectrumOn = false;        // 对讲中（展开态显示频谱区）
     QVector<float> m_spectrumBands;   // 16 个 0..1 能量（IslandBridge 读它给 QML）
     qint64 m_spectrumLastMs = 0;      // 最近一次有数据的时刻（静音 800ms 归零，与旧件同口径）
+
+    // ── 灵动岛 6 形态状态（见上方 morphMode 说明）──
+    QString     m_morphMode = QStringLiteral("none");  // 当前应显示的形态（C++ 单点裁决）
+    QVariantMap m_morphData;                           // 该形态专属强类型数据
+    bool        m_morphForced = false;                // setMorphDemo 强制模式时不参与自动裁决
 
     // ── P3 播放时段管理：岛底「正在播放」状态 ──
     bool   m_mediaOn = false;         // 当前有媒体在播（岛底栏显隐）
