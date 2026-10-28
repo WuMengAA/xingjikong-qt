@@ -94,11 +94,11 @@
       "plan": "[P2] 拆排期行组件/时间轴/拖拽三段；按日隔离+拖拽修复（2026-10-23 探针 25 断言全绿后登记）"
     },
     "Stelarith-control-qt/qml/shell/pages/AgentSettingsPage.qml": {
-      "lines": 1016,
+      "lines": 169,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P3] 拆分组卡为子组件 | 2026-10-28 回写 380→785（+405）：本批重写 —— 按蓝图改「左侧分类 + 右侧内容」（七类：通用/主界面/通知与音量/自动化/更新/插件/关于与诊断），并把托盘右键的自检/插件/记录/时段/三个目录做成入口（ctx.goToId，不复制实现）。拆分计划升为 [P1]：七个分类各自抽成 Sec*.qml 子件（与 viewer 的 pages/settings/Sec*.qml 同构），抽出后本文件应回到 ~120 行骨架 | 2026-10-28 回写 785→790（+5）：分类行图标从 24×24 色块占位换成真 SvgIcon（+ import island 注释 3 行 + SvgIcon 组件 8 行 − 色块 8 行）；拆分计划仍是 [P1]（七个 Sec*.qml 子件） | 2026-10-28 回写 790→1016（+226）：按蓝图原文补「通用」五项卡片（云端与服务/安全模式/时间/存储与备份/高级选项）+ 动作结果条 + 重置二次确认 Dialog。⚠️ 拆分计划升为 [P0]**立即执行**：剩余四个分类（主界面/通知与音量/自动化/更新-插件细化）还要再加同等篇幅，不拆会到 1500+ 行。拆法：七个 Sec*.qml 子件（与 viewer 同构），主文件只留分类菜单 + 滚动容器 + 七块可见性绑定 + Dialog + 滚动条（目标 ~150 行）"
+      "plan": "[已拆] 2026-10-28 拆分完成 1016→169：内容按分类搬进 shell/pages/settings/ 九个 Sec*.qml（SecGeneral 87 / SecGeneralService 138 / SecGeneralLocal 165 / SecAppearance 82 / SecNotify 129 / SecAutomation 88 / SecUpdate 132 / SecPlugin 64 / SecAbout 83），分类菜单抽成 SettingsNav 93 行，公共小件 SecInfoRow / SecCardTitle。主文件只剩骨架：根属性 + SettingsNav + Flickable + 九个可见性绑定 + 重置确认 + 滚动条。零行为变化判据：探针 72 PASS / 0 FAIL（拆前后同值）、截图逐像素同布局。残留 plan：[P3] 拆分组卡为子组件"
     },
     "Stelarith-viewer-qt/qml/components/AccountMenu.qml": {
       "lines": 308,
