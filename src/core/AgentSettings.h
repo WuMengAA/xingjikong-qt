@@ -61,4 +61,17 @@ namespace AgentSettings {
     // 与系统统一配置：落 QSettings（设备级），岛和管理端读到的是同一份。
     inline QStringList notifyBlacklist() { return QSettings().value(QStringLiteral("notify/blacklist"), QStringList()).toStringList(); }
     inline void setNotifyBlacklist(const QStringList &v) { QSettings().setValue(QStringLiteral("notify/blacklist"), v); }
+
+    // ── 2026-10-28 模块三 · 设置页按原文补全（通用分类）──────────────────
+    // 「安全模式（意外崩溃防护）」：上次没走有序退出（崩溃/断电/强杀）⇒ 本次不加载
+    // 第三方插件。默认**开**：教室里一台机器被插件拖崩后，重启还要人跑去托盘关插件
+    // 才能用，那是最糟的现场体验；默认开的代价只是"崩溃后少一个插件"。
+    // 键名 settings/safeModeAuto（键名是契约，改它等于让老机器的设置失效）。
+    inline bool safeModeAuto() { return QSettings().value(QStringLiteral("settings/safeModeAuto"), true).toBool(); }
+    inline void setSafeModeAuto(bool v) { QSettings().setValue(QStringLiteral("settings/safeModeAuto"), v); }
+
+    // 「自动校时」（时间配置）：开 = 启动后与每 30 分钟跟 NTP 对一次（TimesyncDomain::start()
+    // 的实际开关，关掉后只保留人工偏移）。默认开，与 TimesyncDomain 既有行为一致。
+    inline bool timeAutoSync() { return QSettings().value(QStringLiteral("settings/timeAutoSync"), true).toBool(); }
+    inline void setTimeAutoSync(bool v) { QSettings().setValue(QStringLiteral("settings/timeAutoSync"), v); }
 }

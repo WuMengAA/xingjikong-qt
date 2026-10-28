@@ -117,6 +117,7 @@ add_executable(stelarith-agent-qt
   src/annotate_canvas.cpp
   # 2026-10-27 G3：时间同步域（SNTP + 人工偏移），独立文件，不进 main.cpp。
   src/timesync_domain.cpp
+  src/settings_domain.cpp     # 2026-10-28 模块三：安全模式/存储统计/备份/重置
   src/timesync_domain.h
   src/panel_domain.cpp
   src/panel_domain.h

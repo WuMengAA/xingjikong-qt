@@ -24,6 +24,7 @@
 #include "notify_domain.h"  // 2026-10-27 第六刀：定时通知域（F 收尾）
 #include "annotate_domain.h" // 2026-10-27 H 批：批注/白板内核（替代 ICC CE）
 #include "timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
+#include "settings_domain.h" // 2026-10-28 模块三：安全模式/存储统计/备份/重置（独立域）
 #include "panel_domain.h"     // 2026-10-27 G4/G5/G6：岛组件面板（日期/课表/倒计时）
 #include "automation_engine.h" // 2026-10-27 Phase 3：定时自动化规则引擎（纯模型 + 1s 调度，点火转 executeAction）
 #include "ppt_domain.h"       // 2026-10-27 I：PPT 放映控制（COM/IDispatch，PowerPoint/WPS）
@@ -52,6 +53,7 @@
 #include <QScreen>
 #include <QPixmap>
 #include <QDateTime>
+#include <QTime>          // 2026-10-28：存储统计的"统计于 HH:mm:ss"（别指望 QDateTime 间接带进来）
 #include <QDir>
 #include <QFile>
 #include <QBuffer>
@@ -7465,6 +7467,51 @@ void agentUiFill(AgentUi *ui)
         ui->m_playStateText = QStringLiteral("当前状态：%1 · 时段内允许播放：%2")
                                   .arg(cur).arg(MediaSession::isPlayAllowedNow() ? QStringLiteral("是") : QStringLiteral("否"));
     }
+
+    // ── 2026-10-28 模块三 · 通用分类（按蓝图原文六项：开机自启/url/安全模式/时间/存储/高级）──
+    // 前两项（开机自启、桌面快捷方式）在文件上半部已有，这里补后四项的展示值。
+    ui->m_serverUrl    = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
+    ui->m_safeModeAuto = AgentSettings::safeModeAuto();
+    ui->m_safeModeNow  = SettingsDomain::safeModeActive();
+    ui->m_lastExitText = SettingsDomain::lastExitText();
+    ui->m_timeAutoSync = AgentSettings::timeAutoSync();
+    {
+        // 时间：判定时间取 TimesyncDomain::now()，**不是** QDateTime::currentDateTime()
+        // —— 后者没算人工偏移，页面上就会显示"改了偏移但时间没动"。
+        const TimesyncDomain::Status st = TimesyncDomain::status();
+        ui->m_timeNowText = TimesyncDomain::now().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        if (st.ntpOk)
+            ui->m_timeStateText = QStringLiteral("已与 NTP 对齐");
+        else if (!st.error.isEmpty())
+            ui->m_timeStateText = QStringLiteral("对时失败：") + st.error;
+        else
+            ui->m_timeStateText = QStringLiteral("还没对上（等首轮同步，或手动点「立即对时」）");
+
+        if (!st.server.isEmpty())
+            ui->m_timeServerText = st.server;
+        else if (!st.lastAttempt.isEmpty())
+            ui->m_timeServerText = st.lastAttempt + QStringLiteral("（未成功）");
+        else
+            ui->m_timeServerText = QStringLiteral("（还没尝试过）");
+
+        // 偏差：deltaMs = 真时 − 系统钟；正 = 系统钟慢
+        const qint64 absMs = qAbs(st.deltaMs);
+        if (!st.ntpOk)
+            ui->m_timeSkewText = QStringLiteral("未知（未成功对时）");
+        else if (absMs < 500)
+            ui->m_timeSkewText = QStringLiteral("系统钟与本机时钟一致");
+        else
+            ui->m_timeSkewText = QStringLiteral("系统钟比标准时间%1 %2 秒")
+                                     .arg(st.deltaMs > 0 ? QStringLiteral("慢") : QStringLiteral("快"))
+                                     .arg(QString::number(double(absMs) / 1000.0, 'f', 1));
+
+        ui->m_timeOffsetText = QStringLiteral("%1%2 分钟")
+                                   .arg(st.offsetMin >= 0 ? QStringLiteral("+") : QString())
+                                   .arg(st.offsetMin);
+        ui->m_timeLastSyncText = st.lastSyncMs > 0
+            ? QDateTime::fromMSecsSinceEpoch(st.lastSyncMs).toString(QStringLiteral("MM-dd HH:mm:ss"))
+            : QStringLiteral("从未成功同步");
+    }
 }
 
 void agentUiWire(AgentUi *ui)
@@ -7541,6 +7588,17 @@ void agentUiWire(AgentUi *ui)
                 qWarning("[agent-shell] 桌面快捷方式没改成（多半 UAC 被拒）—— 界面将回弹真实状态");
         } else if (key == QLatin1String("playScheduleEnabled")) {
             AgentSettings::setPlayScheduleEnabled(v);
+        } else if (key == QLatin1String("safeModeAuto")) {
+            // 2026-10-28 模块三：安全模式开关只落盘；本次是否进安全模式在启动时已定，
+            // 改开关影响**下一次**启动（在面板里就地切"本次"没有意义，且容易让人以为
+            // 插件当场回来了）。文案由 safeModeStateText 讲清楚。
+            AgentSettings::setSafeModeAuto(v);
+            qInfo("[agent-shell] 安全模式（异常退出后自动进）→ %s", v ? "开" : "关");
+        } else if (key == QLatin1String("timeAutoSync")) {
+            // 自动校时：关掉只停周期同步，人工偏移保留（偏移是老师自己调的，不该被开关清掉）。
+            AgentSettings::setTimeAutoSync(v);
+            if (v) TimesyncDomain::start();
+            qInfo("[agent-shell] 自动校时 → %s", v ? "开" : "关（只保留人工偏移）");
         }
         agentUiFill(ui);
         ui->publish();
@@ -7557,6 +7615,115 @@ void agentUiWire(AgentUi *ui)
     // 落点与托盘菜单**同一处**（agent.env 所在目录），不另造一条路径。
     QObject::connect(ui, &AgentUi::openConfigDirRequested, ui, [] {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(agentEnvPath()).absolutePath()));
+    });
+
+    // ══ 2026-10-28 模块三 · 通用分类（严格按蓝图原文六项）════════════════════
+    // ① url 配置：写 agent.env + 覆盖进程环境（saveAgentEnv 内部 qputenv）+
+    //    断线回调里立刻重连（g_reconnectNow，不等指数退避）。
+    //    校验只认 ws:// 与 wss://：写成 http:// 会让 QUdpSocket/QWebSocket 一起静默失败，
+    //    现场表现为"一直在重连"却不报错 —— 比直接拒绝更糟。
+    QObject::connect(ui, &AgentUi::serverUrlApplyRequested, ui, [ui](const QString &url) {
+        const QString v = url.trimmed();
+        if (!v.startsWith(QLatin1String("ws://")) && !v.startsWith(QLatin1String("wss://"))) {
+            ui->setActionResultText(QStringLiteral("地址必须以 ws:// 或 wss:// 开头（当前未保存）"));
+            ui->publish();
+            return;
+        }
+        // token/uid 保持不动：改地址通常只是换域名/端口，不该顺手把绑定冲掉。
+        const bool ok = saveAgentEnv(v,
+                                     qEnvironmentVariable("STE_QT_WS_TOKEN"),
+                                     qEnvironmentVariable("STE_QT_UID"),
+                                     QString());
+        ui->setActionResultText(ok
+            ? QStringLiteral("已保存并立即重连：%1").arg(v)
+            : QStringLiteral("保存失败（写不进 agent.env，见日志）"));
+        if (ok) {
+            g_reconnectNow = true;
+            if (g_ws) g_ws->close();   // 断线回调里看到 g_reconnectNow 就立刻重连
+        }
+        agentUiFill(ui);
+        ui->publish();
+    });
+    // ② 时间配置：立即校时 / 人工偏移步进 / 归零（全部走 TimesyncDomain 真实现）
+    QObject::connect(ui, &AgentUi::timeSyncRequested, ui, [ui] {
+        const bool started = TimesyncDomain::syncNow();
+        ui->setActionResultText(started
+            ? QStringLiteral("正在与 NTP 对时…（结果几秒后回来）")
+            : QStringLiteral("上一轮对时还没结束，稍后再试"));
+        agentUiFill(ui);
+        ui->publish();
+    });
+    QObject::connect(ui, &AgentUi::timeOffsetAdjustRequested, ui, [ui](int deltaMinutes) {
+        const int next = TimesyncDomain::offsetMinutes() + deltaMinutes;
+        if (!TimesyncDomain::setOffsetMinutes(next)) {
+            ui->setActionResultText(QStringLiteral("人工偏移超出范围（-720 ~ +720 分钟）"));
+        } else {
+            ui->setActionResultText(QStringLiteral("人工偏移已设为 %1%2 分钟")
+                                         .arg(next >= 0 ? QStringLiteral("+") : QString())
+                                         .arg(next));
+        }
+        agentUiFill(ui);
+        ui->publish();
+    });
+    QObject::connect(ui, &AgentUi::timeOffsetResetRequested, ui, [ui] {
+        TimesyncDomain::setOffsetMinutes(0);
+        ui->setActionResultText(QStringLiteral("人工偏移已归零（只用 NTP 校时结果）"));
+        agentUiFill(ui);
+        ui->publish();
+    });
+    // ③ 存储与备份
+    QObject::connect(ui, &AgentUi::storageRefreshRequested, ui, [ui] {
+        const QString dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
+        const QString cfgDir  = QFileInfo(agentEnvPath()).absolutePath();
+        const QString logDir  = QFileInfo(g_logPath).absolutePath();
+        const qint64 cfg  = SettingsDomain::dirSizeBytes(cfgDir);
+        const qint64 data = SettingsDomain::dirSizeBytes(dataDir);
+        const qint64 logs = SettingsDomain::dirSizeBytes(logDir);
+        const QString cfgTxt  = SettingsDomain::humanSize(cfg) + QStringLiteral("  ·  ") + cfgDir;
+        const QString dataTxt = SettingsDomain::humanSize(data) + QStringLiteral("  ·  ") + dataDir;
+        const QString logTxt  = SettingsDomain::humanSize(logs) + QStringLiteral("  ·  ") + logDir;
+        // 总计按"去重"算：数据目录通常已包含日志目录，重复加会把数报大（现场会质疑）。
+        qint64 total = cfg + data;
+        if (!logDir.startsWith(dataDir, Qt::CaseInsensitive)) total += logs;
+        ui->setStorageTexts(cfgTxt, dataTxt, logTxt, SettingsDomain::humanSize(total),
+                            QStringLiteral("统计于 %1")
+                                .arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss"))));
+        emit ui->storageChanged();
+    });
+    QObject::connect(ui, &AgentUi::backupRequested, ui, [ui] {
+        const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+        const QString dir = QDir(QStandardPaths::writableLocation(QStandardPaths::DesktopLocation))
+                                .filePath(QStringLiteral("星集控备份-%1").arg(stamp));
+        QString err;
+        const int n = SettingsDomain::backupConfig(
+            qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong"), dir, &err);
+        if (n > 0) {
+            ui->setActionResultText(QStringLiteral("已备份 %1 个文件 → %2").arg(n).arg(dir));
+            QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+        } else {
+            ui->setActionResultText(err.isEmpty()
+                ? QStringLiteral("没有可备份的配置文件")
+                : QStringLiteral("备份失败：%1").arg(err));
+        }
+        agentUiFill(ui);
+        ui->publish();
+    });
+    QObject::connect(ui, &AgentUi::clearLogsRequested, ui, [ui] {
+        const qint64 freed = SettingsDomain::clearOldLogs(
+            qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong"));
+        ui->setActionResultText(QStringLiteral("已清理旧日志，释放 %1")
+                                     .arg(SettingsDomain::humanSize(freed)));
+        agentUiFill(ui);
+        ui->publish();
+    });
+    // ④ 高级选项：重置设置（QML 侧已二次确认；这里只执行 + 说明下一步）
+    QObject::connect(ui, &AgentUi::resetAllRequested, ui, [ui] {
+        const int n = SettingsDomain::resetSettings(
+            qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong"));
+        ui->setActionResultText(QStringLiteral("已重置 %1 个配置文件。请退出被控端并重新打开 —— "
+                                                "设备身份（用途/归属码）已保留，不用重新绑定。").arg(n));
+        agentUiFill(ui);
+        ui->publish();
     });
     // 「立即升级」：走的就是云端下发 self_update 用的同一条链路（含四条护栏）。
     QObject::connect(ui, &AgentUi::upgradeNowRequested, ui, [ui] {
@@ -7764,6 +7931,13 @@ int main(int argc, char *argv[])
     // 截图目录默认**不再**落在当前工作目录 —— 装机后 cwd 是哪全看启动器，落在那儿等于丢了。
     const QString dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
     QDir().mkpath(dataDir);
+
+    // 2026-10-28 模块三：设置域初始化（**必须在此处、越早越好**）。
+    //   它做两件事：① 读上次的运行标记 → 判定上次是否异常退出；
+    //   ② 写本次标记（有序退出时 aboutToQuit 删掉）。
+    //   放在日志/单例锁之前的原因：这是"上一次为什么没起来/为什么崩"的第一手证据，
+    //   后续任何一步 fail-silent 都不该把这条判据吃掉。
+    SettingsDomain::init(dataDir);
     // 2026-10-21（审查 #11）：原来用 qEnvironmentVariable(key, default) —— 变量存在但
     // 为空字符串时返回空（不是 default），部署脚本写了 `set STE_QT_SHOT_DIR=` 就会把
     // 截图路径顶成空、图写到盘根。与本文件其他目录统一走 envOr（空串回落默认值）。
@@ -8674,7 +8848,15 @@ int main(int argc, char *argv[])
     api.subscribeEvents = [](const QString &, const QStringList &) { /* 订阅登记在宿主侧，事件经 forwardEvent 推送 */ };
     g_pluginHost->setAgentApi(api);
     if (g_pluginHost->start()) {
-        g_pluginHost->loadEnabled();   // 启动 QSettings 中已启用的插件
+        // 2026-10-28 模块三「安全模式（意外崩溃防护）」：
+        // 宿主照常起来（本地 WS / 能力注入都在，插件市场对话框不会空指针），
+        // 但**不加载**已启用插件 —— 一台被插件拖崩过的机器，重启后能直接上课，
+        // 而不是"又崩一次"。老师改完设置页里的开关再重启即恢复。
+        if (SettingsDomain::safeModeActive()) {
+            qInfo("[agent-qt] 安全模式：插件宿主已就绪，**跳过** loadEnabled（本次不加载任何第三方插件）");
+        } else {
+            g_pluginHost->loadEnabled();   // 启动 QSettings 中已启用的插件
+        }
     }
 
     // ── 内置模块层启动（2026-10-16「模块化插件」）──

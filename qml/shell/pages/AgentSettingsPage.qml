@@ -257,6 +257,215 @@ Item {
                     }
                 }
 
+                // ── 蓝图「通用设置」第 2 项：url 配置（2026-10-28）──────────────
+                // 原文：「开机自启、url 配置、安全模式（意外崩溃防护）、时间配置、
+                //        存储与备份、高级选项。」开机自启在上卡，本卡起依次补齐。
+                M.Md3Card {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    variant: "filled"
+                    Column {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 10
+                        CardTitle { text2: "云端与服务" }
+                        InfoRow { label: "当前地址"; value: agentUi.serverUrlText }
+                        M.Md3TextField {
+                            id: urlField
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            placeholder: agentUi.serverUrlPlaceholder
+                            helper: "只接受 ws:// 或 wss://。保存后立即重连，不用重启。"
+                        }
+                        Row {
+                            spacing: 10
+                            M.Md3Btn {
+                                text: "保存并重连"
+                                variant: "filled"
+                                onClicked: agentUi.applyServerUrl(urlField.text)
+                            }
+                            M.Md3Btn {
+                                text: "重新读取状态"
+                                variant: "text"
+                                onClicked: agentUi.refresh()
+                            }
+                        }
+                    }
+                }
+
+                // ── 蓝图「通用设置」第 3 项：安全模式（意外崩溃防护）────────────
+                M.Md3Card {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    variant: "filled"
+                    Column {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 0
+                        CardTitle { text2: "安全模式（意外崩溃防护）" }
+                        InfoRow { label: "上次退出"; value: agentUi.lastExitText }
+                        InfoRow { label: "本次状态"; value: agentUi.safeModeStateText }
+                        M.Md3SwitchRow {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            text: "异常退出后自动进入安全模式"
+                            supporting: "安全模式下不加载第三方插件 —— 一台被插件拖崩的设备重启就能直接上课；改完开关重启即恢复"
+                            checked: agentUi.safeModeAuto
+                            onToggled: function (v) { agentUi.safeModeAuto = v }
+                        }
+                    }
+                }
+
+                // ── 蓝图「通用设置」第 4 项：时间配置 ────────────────────────
+                M.Md3Card {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    variant: "filled"
+                    Column {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 0
+                        CardTitle { text2: "时间" }
+                        InfoRow { label: "当前判定时间"; value: agentUi.timeNowText }
+                        InfoRow { label: "校时状态";     value: agentUi.timeStateText }
+                        InfoRow { label: "NTP 服务器";   value: agentUi.timeServerText }
+                        InfoRow { label: "本机偏差";     value: agentUi.timeSkewText }
+                        InfoRow { label: "人工偏移";     value: agentUi.timeOffsetText }
+                        InfoRow { label: "上次成功校时"; value: agentUi.timeLastSyncText }
+                        M.Md3SwitchRow {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            text: "自动校时"
+                            supporting: "启动后与每 30 分钟跟 NTP 对一次；关掉只保留人工偏移"
+                            checked: agentUi.timeAutoSync
+                            onToggled: function (v) { agentUi.timeAutoSync = v }
+                        }
+                        Row {
+                            topPadding: 10
+                            spacing: 8
+                            M.Md3Btn {
+                                text: "立即对时"
+                                variant: "filled"
+                                onClicked: agentUi.syncTimeNow()
+                            }
+                            M.Md3Btn {
+                                text: "−15 分"
+                                variant: "tonal"
+                                onClicked: agentUi.adjustTimeOffset(-15)
+                            }
+                            M.Md3Btn {
+                                text: "+15 分"
+                                variant: "tonal"
+                                onClicked: agentUi.adjustTimeOffset(15)
+                            }
+                            M.Md3Btn {
+                                text: "归零"
+                                variant: "text"
+                                onClicked: agentUi.resetTimeOffset()
+                            }
+                        }
+                    }
+                }
+
+                // ── 蓝图「通用设置」第 5 项：存储与备份 ──────────────────────
+                M.Md3Card {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    variant: "filled"
+                    Column {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 2
+                        CardTitle { text2: "存储与备份" }
+                        Text {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            text: agentUi.storageHintText
+                            font.pixelSize: 11
+                            color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
+                            wrapMode: Text.WordWrap
+                            bottomPadding: 6
+                        }
+                        InfoRow { label: "配置"; value: agentUi.storageConfigText }
+                        InfoRow { label: "数据"; value: agentUi.storageDataText }
+                        InfoRow { label: "日志"; value: agentUi.storageLogText }
+                        InfoRow { label: "合计"; value: agentUi.storageTotalText }
+                        Row {
+                            topPadding: 10
+                            spacing: 8
+                            M.Md3Btn {
+                                text: "统计用量"
+                                variant: "filled"
+                                onClicked: agentUi.refreshStorage()
+                            }
+                            M.Md3Btn {
+                                text: "备份配置"
+                                variant: "tonal"
+                                onClicked: agentUi.backupConfigNow()
+                            }
+                            M.Md3Btn {
+                                text: "清理旧日志"
+                                variant: "text"
+                                onClicked: agentUi.clearOldLogsNow()
+                            }
+                        }
+                    }
+                }
+
+                // ── 蓝图「通用设置」第 6 项：高级选项 ────────────────────────
+                M.Md3Card {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    variant: "filled"
+                    Column {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        spacing: 10
+                        CardTitle { text2: "高级选项" }
+                        Text {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            text: agentUi.resetScopeText
+                            font.pixelSize: 11
+                            color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
+                            wrapMode: Text.WordWrap
+                        }
+                        M.Md3Btn {
+                            text: "重置全部设置…"
+                            variant: "tonal"
+                            onClicked: resetDialog.opened = true
+                        }
+                    }
+                }
+
+                // ── 动作结果条：保存地址/对时/备份/清理/重置 统一在这里反馈 ──────
+                // 没有它的话，点「备份配置」这类动作现场看不出任何变化（用户最反感
+                // 的"点了没反应"）。显隐由 C++ 的 actionResultVisible 决定。
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    visible: agentUi.actionResultVisible
+                    height: resultText.implicitHeight + 20
+                    radius: 12
+                    color: page.tok ? page.tok.cSurfaceCont : "#211F26"
+                    Text {
+                        id: resultText
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.margins: 12
+                        text: agentUi.actionResultText
+                        font.pixelSize: 12
+                        color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                        wrapMode: Text.WordWrap
+                    }
+                }
+
                 // 托盘右键的三条目录入口（2026-10-28 移植）
                 M.Md3Card {
                     anchors.left: parent.left
@@ -770,6 +979,23 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // ── 重置确认（高级选项）────────────────────────────────────────
+    // 二次确认是硬要求：这一步会删掉云端地址与令牌，点错就得现场重填地址。
+    M.Md3Dialog {
+        id: resetDialog
+        anchors.fill: parent
+        title: "重置全部设置？"
+        text: agentUi.resetScopeText
+        actions: [
+            { text: "取消", role: "cancel" },
+            { text: "确认重置", role: "danger" }
+        ]
+        onActionClicked: function (index, role) {
+            resetDialog.opened = false
+            if (role === "danger") agentUi.resetAllSettings()
         }
     }
 

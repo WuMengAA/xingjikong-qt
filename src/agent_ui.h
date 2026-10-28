@@ -135,6 +135,47 @@ class AgentUi : public QObject
     Q_PROPERTY(QString uidText READ uidText NOTIFY infoChanged)
     Q_PROPERTY(QString classCodeText READ classCodeText NOTIFY infoChanged)
 
+    // ══ 2026-10-28 模块三 · 通用分类（严格按蓝图原文六项）══════════════════
+    // 蓝图原文（docs/产品蓝图-三模块…2026-10-27.md 模块三 §2）：
+    //   「通用设置：开机自启、url 配置、安全模式（意外崩溃防护）、时间配置、
+    //     存储与备份、高级选项。」
+    // 已有：开机自启（autostart）。本批补其余五项 —— 全部真实现，不留占位。
+    //
+    // ① url 配置：可编辑并即时重连（写 agent.env + 覆盖进程环境 + 断线回调立刻重连）
+    Q_PROPERTY(QString serverUrl READ serverUrl NOTIFY infoChanged)
+    /** 输入框的 placeholder：把"当前值"拼进去，免得 QML 里写 `"当前：" + ...`（那是逻辑）。 */
+    Q_PROPERTY(QString serverUrlPlaceholder READ serverUrlPlaceholder NOTIFY infoChanged)
+    /** 展示用：空值回落「（未配置）」，QML 不写三元。 */
+    Q_PROPERTY(QString serverUrlText READ serverUrlText NOTIFY infoChanged)
+    // ② 安全模式（意外崩溃防护）
+    Q_PROPERTY(bool safeModeAuto READ safeModeAuto WRITE setSafeModeAuto NOTIFY infoChanged)
+    /** 本次是否真的运行在安全模式（上次异常退出 + 开关打开，或本次手动进入）。 */
+    Q_PROPERTY(bool safeModeNow READ safeModeNow NOTIFY infoChanged)
+    Q_PROPERTY(QString lastExitText READ lastExitText NOTIFY infoChanged)
+    /** 安全模式的一句话现状说明（给 QML 直接上屏，QML 不拼条件文案）。 */
+    Q_PROPERTY(QString safeModeStateText READ safeModeStateText NOTIFY infoChanged)
+    // ③ 时间配置（TimesyncDomain 既有能力，这里只翻成文案）
+    Q_PROPERTY(QString timeNowText READ timeNowText NOTIFY infoChanged)
+    Q_PROPERTY(QString timeStateText READ timeStateText NOTIFY infoChanged)
+    Q_PROPERTY(QString timeServerText READ timeServerText NOTIFY infoChanged)
+    Q_PROPERTY(QString timeSkewText READ timeSkewText NOTIFY infoChanged)
+    Q_PROPERTY(QString timeOffsetText READ timeOffsetText NOTIFY infoChanged)
+    Q_PROPERTY(QString timeLastSyncText READ timeLastSyncText NOTIFY infoChanged)
+    Q_PROPERTY(bool timeAutoSync READ timeAutoSync WRITE setTimeAutoSync NOTIFY infoChanged)
+    // ④ 存储与备份（用量在 refreshStorage() 里现算，不随每次 fill 递归扫盘）
+    Q_PROPERTY(QString storageConfigText READ storageConfigText NOTIFY storageChanged)
+    Q_PROPERTY(QString storageDataText READ storageDataText NOTIFY storageChanged)
+    Q_PROPERTY(QString storageLogText READ storageLogText NOTIFY storageChanged)
+    Q_PROPERTY(QString storageTotalText READ storageTotalText NOTIFY storageChanged)
+    /** 存储卡的副标题（"还没统计过，点刷新" / "统计于 HH:mm:ss"）。 */
+    Q_PROPERTY(QString storageHintText READ storageHintText NOTIFY storageChanged)
+    // ⑤ 高级选项：重置的影响范围说明（C++ 写死口径，避免 QML 里另写一段会和实现分叉的话）
+    Q_PROPERTY(QString resetScopeText READ resetScopeText CONSTANT)
+    /** 通用分类里"动作类"操作的统一结果条（保存地址 / 对时 / 备份 / 清理 / 重置）。
+     *  空串 = 还没操作过（QML 据此隐藏结果条，不写 `=== ""` 判断…… 用 visible: 绑布尔）。 */
+    Q_PROPERTY(QString actionResultText READ actionResultText NOTIFY infoChanged)
+    Q_PROPERTY(bool actionResultVisible READ actionResultVisible NOTIFY infoChanged)
+
 public:
     explicit AgentUi(QObject *parent = nullptr) : QObject(parent) {}
 
@@ -184,6 +225,10 @@ public:
     void setPluginIslandPush(bool v) { if (m_pluginIslandPush == v) return; m_pluginIslandPush = v; emit infoChanged(); emit switchChanged(QStringLiteral("pluginIslandPush"), v); }
     void setAutostart(bool v)       { if (m_autostart == v) return;       m_autostart = v;       emit infoChanged(); emit switchChanged(QStringLiteral("autostart"), v); }
     void setDesktopShortcut(bool v) { if (m_desktopShortcut == v) return; m_desktopShortcut = v; emit infoChanged(); emit switchChanged(QStringLiteral("desktopShortcut"), v); }
+    // 通用分类的两个开关（2026-10-28 模块三）：走与既有开关同一条 switchChanged 通路，
+    // main.cpp 落盘 AgentSettings 之后 fill + publish 回弹（不假勾）。
+    void setSafeModeAuto(bool v) { if (m_safeModeAuto == v) return; m_safeModeAuto = v; emit infoChanged(); emit switchChanged(QStringLiteral("safeModeAuto"), v); }
+    void setTimeAutoSync(bool v) { if (m_timeAutoSync == v) return; m_timeAutoSync = v; emit infoChanged(); emit switchChanged(QStringLiteral("timeAutoSync"), v); }
     void setPlayScheduleEnabled(bool v) { if (m_playScheduleEnabled == v) return; m_playScheduleEnabled = v; emit infoChanged(); emit switchChanged(QStringLiteral("playScheduleEnabled"), v); }
     void setPlayWindowsText(const QString &v) { if (m_playWindowsText == v) return; m_playWindowsText = v; emit infoChanged(); }
     // 渠道切换：只写成员 + 上抛请求；真实落盘/重查在 main.cpp（那里才有 g_channel 与 channel.txt）
@@ -240,6 +285,65 @@ public:
         return m_classCode.isEmpty() ? QStringLiteral("（未绑定）") : m_classCode;
     }
 
+    // ── 通用分类（2026-10-28 模块三）getter ──
+    QString serverUrl() const { return m_serverUrl; }
+    QString serverUrlText() const
+    {
+        return m_serverUrl.isEmpty() ? QStringLiteral("（未配置）") : m_serverUrl;
+    }
+    QString serverUrlPlaceholder() const
+    {
+        if (m_serverUrl.isEmpty())
+            return QStringLiteral("未配置（例：wss://control.example.com/ws/agent）");
+        return QStringLiteral("当前：%1（输入新地址后点保存）").arg(m_serverUrl);
+    }
+    bool safeModeAuto() const { return m_safeModeAuto; }
+    bool safeModeNow() const { return m_safeModeNow; }
+    QString lastExitText() const { return m_lastExitText; }
+    QString safeModeStateText() const
+    {
+        if (!m_safeModeAuto && !m_safeModeNow)
+            return QStringLiteral("已关闭：异常退出后照常加载全部插件");
+        if (m_safeModeNow)
+            return QStringLiteral("本次已在安全模式：第三方插件未加载（改完重启即可恢复）");
+        return QStringLiteral("已开启：上次异常退出后，下次启动不加载第三方插件");
+    }
+    QString timeNowText() const { return m_timeNowText; }
+    QString timeStateText() const { return m_timeStateText; }
+    QString timeServerText() const { return m_timeServerText; }
+    QString timeSkewText() const { return m_timeSkewText; }
+    QString timeOffsetText() const { return m_timeOffsetText; }
+    QString timeLastSyncText() const { return m_timeLastSyncText; }
+    bool timeAutoSync() const { return m_timeAutoSync; }
+    QString storageConfigText() const { return m_storageConfigText; }
+    QString storageDataText() const { return m_storageDataText; }
+    QString storageLogText() const { return m_storageLogText; }
+    QString storageTotalText() const { return m_storageTotalText; }
+    QString storageHintText() const { return m_storageHintText; }
+    QString actionResultText() const { return m_actionResultText; }
+    bool actionResultVisible() const { return !m_actionResultText.isEmpty(); }
+
+    // ── 给 main.cpp 的接线 lambda 用的写入口 ──────────────────────────────
+    // 为什么不用 friend：friend 只对 `agentUiFill` 那**一个函数**有效，
+    // 而动作结果是在 agentUiWire 的 lambda 里写的（lambda 的 operator() 不是 friend，
+    // 直接摸 m_* 会 C2248）。QML 侧对这俩仍只有只读属性。
+    void setActionResultText(const QString &t) { m_actionResultText = t; }
+    void setStorageTexts(const QString &cfg, const QString &data, const QString &logs,
+                         const QString &total, const QString &hint)
+    {
+        m_storageConfigText = cfg;
+        m_storageDataText   = data;
+        m_storageLogText    = logs;
+        m_storageTotalText  = total;
+        m_storageHintText   = hint;
+    }
+    QString resetScopeText() const
+    {
+        return QStringLiteral("会删掉云端地址与令牌、时间/时段/自动化配置（相当于回到「未配置」，"
+                              "需要重新填地址）。不会删设备身份（用途/归属码）与日志，"
+                              "所以设备不用重新绑定。改完必须重启被控端才生效。");
+    }
+
     // 快照写入专用（main.cpp 的 agentUiFill 经 friend 直接改成员，不触发 switchChanged）
     friend void agentUiFill(AgentUi *ui);
 
@@ -270,6 +374,21 @@ public slots:
     void openStudyFolder() { emit studyFolderRequested(); }
     void savePlaySchedule() { emit playScheduleSaveRequested(); }
 
+    // ── 通用分类（2026-10-28 模块三·按蓝图原文）────────────────────────
+    /** url 配置：写 agent.env + 覆盖进程环境 + 断线回调立刻重连（不等退避）。 */
+    void applyServerUrl(const QString &url) { emit serverUrlApplyRequested(url.trimmed()); }
+    /** 时间配置：立即与 NTP 对一次（异步，结果回来由 onChanged 刷界面）。 */
+    void syncTimeNow() { emit timeSyncRequested(); }
+    /** 人工偏移步进（分钟，正 = 判定时间往前拨）。范围由 TimesyncDomain 校验。 */
+    void adjustTimeOffset(int deltaMinutes) { emit timeOffsetAdjustRequested(deltaMinutes); }
+    void resetTimeOffset() { emit timeOffsetResetRequested(); }
+    /** 存储与备份：现算三个目录的占用（不随 infoChanged 自动跑）。 */
+    void refreshStorage() { emit storageRefreshRequested(); }
+    void backupConfigNow() { emit backupRequested(); }
+    void clearOldLogsNow() { emit clearLogsRequested(); }
+    /** 高级选项：重置设置（QML 侧必须二次确认；本函数只管发请求）。 */
+    void resetAllSettings() { emit resetAllRequested(); }
+
 signals:
     void infoChanged();
     void refreshRequested();
@@ -299,6 +418,18 @@ signals:
     /** 设置页分类变了（右侧区块可见性靠它驱动）。 */
     void settingsTabChanged();
 
+    // ── 通用分类（2026-10-28 模块三）──────────────────────────────────
+    void serverUrlApplyRequested(const QString &url);
+    void timeSyncRequested();
+    void timeOffsetAdjustRequested(int deltaMinutes);
+    void timeOffsetResetRequested();
+    void storageRefreshRequested();
+    void backupRequested();
+    void clearLogsRequested();
+    void resetAllRequested();
+    /** 存储用量重算完成（fill 之后发，避免 infoChanged 也被扫盘触发）。 */
+    void storageChanged();
+
 private:
     QString m_appVersion, m_uid, m_cloudUrl, m_connState, m_dataDir, m_logPath;
     QString m_deviceRole = QStringLiteral("classroom");   // 快照：用途（默认教室机）
@@ -318,6 +449,19 @@ private:
     QVariantList m_channelOptions;
     // 2026-10-28 模块三：设置页当前分类（默认「通用」—— 用户点开设置最先想知道"这台是谁"）
     QString m_settingsTab = QStringLiteral("general");
+
+    // 通用分类（2026-10-28 模块三）：全部是"填好就上屏"的结果值，QML 不做判断。
+    QString m_serverUrl;
+    bool    m_safeModeAuto = true;
+    bool    m_safeModeNow = false;
+    QString m_lastExitText;
+    QString m_timeNowText, m_timeStateText, m_timeServerText, m_timeSkewText;
+    QString m_timeOffsetText, m_timeLastSyncText;
+    bool    m_timeAutoSync = true;
+    QString m_storageConfigText, m_storageDataText, m_storageLogText;
+    QString m_storageTotalText, m_storageHintText;
+    /** ⚠️ agentUiFill **不清它**：这是"刚才那个动作的结果"，不是快照。 */
+    QString m_actionResultText;
 };
 
 // 由 main.cpp 提供（那里能访问匿名域的 static 自由函数与 AgentSettings）：

@@ -155,6 +155,28 @@ void agentUiFill(AgentUi *ui)
     ui->m_channelOptions = AgentUi::channelOptionList(ui->m_updateChannel);
     ui->m_channelNoteText = QStringLiteral("生效文件：C:/tmp/xingjikong/channel.txt（临时开关）");
 
+    // ── 通用分类（2026-10-28 模块三·按蓝图原文六项）的假数据 ──────────────
+    // 探针不链 main.cpp（那会起整条生产运行时），所以这里按"真实形状"给值：
+    // 文案格式必须与 agentUiFill 里的真实现一致，否则断言验的是假形状。
+    ui->m_serverUrl = QStringLiteral("wss://control.example.com/ws/agent");
+    ui->m_safeModeAuto = true;
+    ui->m_safeModeNow = false;
+    ui->m_lastExitText = QStringLiteral("上次正常退出");
+    ui->m_timeNowText = QStringLiteral("2026-10-28 10:52:00");
+    ui->m_timeStateText = QStringLiteral("已与 NTP 对齐");
+    ui->m_timeServerText = QStringLiteral("ntp.aliyun.com");
+    ui->m_timeSkewText = QStringLiteral("系统钟比标准时间慢 0.4 秒");
+    ui->m_timeOffsetText = QStringLiteral("+0 分钟");
+    ui->m_timeLastSyncText = QStringLiteral("10-28 08:30:00");
+    ui->m_timeAutoSync = true;
+    ui->m_storageConfigText = QStringLiteral("12.4 KB  ·  C:/tmp/xingjikong");
+    ui->m_storageDataText   = QStringLiteral("186.2 MB  ·  C:/tmp/xingjikong");
+    ui->m_storageLogText    = QStringLiteral("3.1 MB  ·  C:/tmp/xingjikong");
+    ui->m_storageTotalText  = QStringLiteral("186.3 MB");
+    ui->m_storageHintText   = QStringLiteral("统计于 10:52:00");
+    // 动作结果条默认空 = 不显示（真实使用中要点过按钮才出现）
+    ui->m_actionResultText = QString();
+
     // 自检条目（照 main.cpp buildSelfCheckItems 的形状）
     {
         QVariantList checks;
@@ -394,6 +416,34 @@ QtObject {
               QStringLiteral("插件页 Component.onCompleted 调了 pluginsRefresh"));
         check(calls.contains(QStringLiteral("runSelfCheckCheck")),
               QStringLiteral("自检页 Component.onCompleted 调了 runSelfCheckCheck"));
+
+        // ── 五·补2、通用分类六项（2026-10-28 模块三·严格按蓝图原文）──
+        // 蓝图原文：「通用设置：开机自启、url 配置、安全模式（意外崩溃防护）、
+        //            时间配置、存储与备份、高级选项。」
+        // 开机自启上一批已验（启动卡）；这里验新增的五项，全部按**有效可见**判定。
+        const auto shown = [&](const QString &s) { return hasShownText(root, s); };
+        check(shown(QStringLiteral("云端与服务")), QStringLiteral("通用 › url 配置卡在（云端与服务）"));
+        check(shown(QStringLiteral("wss://control.example.com/ws/agent")),
+              QStringLiteral("url 配置显示当前地址"));
+        check(shown(QStringLiteral("保存并重连")), QStringLiteral("url 配置有「保存并重连」"));
+        check(shown(QStringLiteral("安全模式（意外崩溃防护）")),
+              QStringLiteral("通用 › 安全模式卡在"));
+        check(shown(QStringLiteral("上次退出")), QStringLiteral("安全模式显示上次退出状态"));
+        check(shown(QStringLiteral("异常退出后自动进入安全模式")),
+              QStringLiteral("安全模式开关在"));
+        check(shown(QStringLiteral("时间")), QStringLiteral("通用 › 时间卡在"));
+        check(shown(QStringLiteral("当前判定时间")), QStringLiteral("时间显示判定时间"));
+        check(shown(QStringLiteral("NTP 服务器")), QStringLiteral("时间显示 NTP 服务器"));
+        check(shown(QStringLiteral("已与 NTP 对齐")), QStringLiteral("时间状态文案上屏"));
+        check(shown(QStringLiteral("立即对时")), QStringLiteral("时间有「立即对时」"));
+        check(shown(QStringLiteral("+15 分")), QStringLiteral("时间有人工偏移步进"));
+        check(shown(QStringLiteral("存储与备份")), QStringLiteral("通用 › 存储与备份卡在"));
+        check(shown(QStringLiteral("3.1 MB  ·  C:/tmp/xingjikong")), QStringLiteral("日志用量行上屏"));
+        check(shown(QStringLiteral("统计用量")), QStringLiteral("存储有「统计用量」"));
+        check(shown(QStringLiteral("备份配置")), QStringLiteral("存储有「备份配置」"));
+        check(shown(QStringLiteral("清理旧日志")), QStringLiteral("存储有「清理旧日志」"));
+        check(shown(QStringLiteral("高级选项")), QStringLiteral("通用 › 高级选项卡在"));
+        check(shown(QStringLiteral("重置全部设置…")), QStringLiteral("高级选项有重置入口"));
 
         // ── 五·补、设置页七分类与切换（2026-10-28 模块三）──
         // 分类清单来自 C++ settingsSections（icon/label/active/rowBg/fg/weight 全由 C++ 给），
