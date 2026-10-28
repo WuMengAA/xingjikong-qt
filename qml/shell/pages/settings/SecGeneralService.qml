@@ -11,14 +11,14 @@
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
 
-import "../../../components/md3" as M
+import "../../../ash"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+    property var ash
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -26,18 +26,19 @@ Column {
     // ── 蓝图「通用设置」第 2 项：url 配置（2026-10-28）──────────────
     // 原文：「开机自启、url 配置、安全模式（意外崩溃防护）、时间配置、
     //        存储与备份、高级选项。」开机自启在上卡，本卡起依次补齐。
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 10
-            SecCardTitle { text2: "云端与服务" }
-            SecInfoRow { label: "当前地址"; value: agentUi.serverUrlText }
-            M.Md3TextField {
+            AshCardTitle { text2: "云端与服务" }
+            AshInfoRow { label: "当前地址"; value: agentUi.serverUrlText }
+            AshInput {
+                th: root.ash
                 id: urlField
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -46,12 +47,14 @@ Column {
             }
             Row {
                 spacing: 10
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "保存并重连"
                     variant: "filled"
                     onClicked: agentUi.applyServerUrl(urlField.text)
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "重新读取状态"
                     variant: "text"
                     onClicked: agentUi.refresh()
@@ -61,19 +64,20 @@ Column {
     }
 
     // ── 蓝图「通用设置」第 3 项：安全模式（意外崩溃防护）────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 0
-            SecCardTitle { text2: "安全模式（意外崩溃防护）" }
-            SecInfoRow { label: "上次退出"; value: agentUi.lastExitText }
-            SecInfoRow { label: "本次状态"; value: agentUi.safeModeStateText }
-            M.Md3SwitchRow {
+            AshCardTitle { text2: "安全模式（意外崩溃防护）" }
+            AshInfoRow { label: "上次退出"; value: agentUi.lastExitText }
+            AshInfoRow { label: "本次状态"; value: agentUi.safeModeStateText }
+            AshSwitchRow {
+                th: root.ash
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "异常退出后自动进入安全模式"
@@ -85,23 +89,24 @@ Column {
     }
 
     // ── 蓝图「通用设置」第 4 项：时间配置 ────────────────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 0
-            SecCardTitle { text2: "时间" }
-            SecInfoRow { label: "当前判定时间"; value: agentUi.timeNowText }
-            SecInfoRow { label: "校时状态";     value: agentUi.timeStateText }
-            SecInfoRow { label: "NTP 服务器";   value: agentUi.timeServerText }
-            SecInfoRow { label: "本机偏差";     value: agentUi.timeSkewText }
-            SecInfoRow { label: "人工偏移";     value: agentUi.timeOffsetText }
-            SecInfoRow { label: "上次成功校时"; value: agentUi.timeLastSyncText }
-            M.Md3SwitchRow {
+            AshCardTitle { text2: "时间" }
+            AshInfoRow { label: "当前判定时间"; value: agentUi.timeNowText }
+            AshInfoRow { label: "校时状态";     value: agentUi.timeStateText }
+            AshInfoRow { label: "NTP 服务器";   value: agentUi.timeServerText }
+            AshInfoRow { label: "本机偏差";     value: agentUi.timeSkewText }
+            AshInfoRow { label: "人工偏移";     value: agentUi.timeOffsetText }
+            AshInfoRow { label: "上次成功校时"; value: agentUi.timeLastSyncText }
+            AshSwitchRow {
+                th: root.ash
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "自动校时"
@@ -112,22 +117,26 @@ Column {
             Row {
                 topPadding: 10
                 spacing: 8
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "立即对时"
                     variant: "filled"
                     onClicked: agentUi.syncTimeNow()
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "−15 分"
                     variant: "tonal"
                     onClicked: agentUi.adjustTimeOffset(-15)
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "+15 分"
                     variant: "tonal"
                     onClicked: agentUi.adjustTimeOffset(15)
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "归零"
                     variant: "text"
                     onClicked: agentUi.resetTimeOffset()

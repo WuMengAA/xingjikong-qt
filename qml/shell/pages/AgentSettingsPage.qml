@@ -22,8 +22,8 @@
 //    面板打开即空白）。壳与页只用 QtQuick 基础类型，这条由 test-agent-qml-deps.mjs 盯着。
 import QtQuick
 
-import "../../components/md3" as M
 import "settings"   // 九个分类内容件（2026-10-28 拆分）
+import "../../ash"
 // 分类行真图标：shared-qml/island/SvgIcon.qml，构建期拷到 qml/island/ ⇒ 相对路径两级。
 // 图标名由 C++ settingsSections 的 icon 字段给，着色用同一项的 fg（选中/未选中已由 C++ 算好）。
 import "../../island"
@@ -34,7 +34,11 @@ Item {
     anchors.fill: parent
 
     property var ctx
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+
+    AshTheme {
+        id: ash
+        dark: agentUi.darkTheme
+    }
     // VoiceHub 模块（#329）：main.cpp 注入的 voicehub 上下文属性。
     // typeof 守卫不能省 —— 探针/极端环境里它是未定义标识符，裸引用直接 ReferenceError。
     readonly property var vh: (typeof voicehub !== "undefined" && voicehub !== null)
@@ -46,7 +50,7 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        tok: page.tok
+        ash: ash
     }
 
 
@@ -81,18 +85,21 @@ Item {
                 visible: agentUi.tabGeneral
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
             }
             // 通用 · 服务与时间
             SecGeneralService {
                 visible: agentUi.tabGeneral
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
             }
             // 通用 · 存储·高级·目录
             SecGeneralLocal {
                 visible: agentUi.tabGeneral
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
                 // 重置确认框留在主文件（它是页面级浮层，不属于某一类）
                 onResetRequested: resetDialog.opened = true
             }
@@ -101,44 +108,51 @@ Item {
                 visible: agentUi.tabInterface
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
             }
             // 通知与音量
             SecNotify {
                 visible: agentUi.tabNotify
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
             }
             // 自动化
             SecAutomation {
                 visible: agentUi.tabAutomation
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
             }
             // 更新
             SecUpdate {
                 visible: agentUi.tabUpdate
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
             }
             // 插件
             SecPlugin {
                 visible: agentUi.tabPlugin
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
             }
             // 关于与诊断
             SecAbout {
                 visible: agentUi.tabAbout
                 ctx: page.ctx
                 vh: page.vh
+                ash: ash
             }
         }
     }
 
     // ── 重置确认（高级选项）────────────────────────────────────────
     // 二次确认是硬要求：这一步会删掉云端地址与令牌，点错就得现场重填地址。
-    M.Md3Dialog {
+    AshDialog {
         id: resetDialog
+        th: ash
         anchors.fill: parent
         title: "重置全部设置？"
         text: agentUi.resetScopeText
@@ -162,7 +176,7 @@ Item {
         x: scroller.width - 6
         y: scroller.height * (scroller.contentY / Math.max(scroller.contentHeight, 1))
         height: Math.max(28, scroller.height * (scroller.height / Math.max(scroller.contentHeight, 1)))
-        color: page.tok ? page.tok.cOutline : "#938F99"
+        color: "#938F99"   // BISECT: fixed
         opacity: scroller.moving ? 0.85 : 0.35
         Behavior on opacity { NumberAnimation { duration: 140 } }
     }

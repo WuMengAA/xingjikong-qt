@@ -83,6 +83,9 @@ class AgentUi : public QObject
     Q_PROPERTY(bool noiseEnabled    READ noiseEnabled    WRITE setNoiseEnabled    NOTIFY infoChanged)
     Q_PROPERTY(bool islandIdle      READ islandIdle      WRITE setIslandIdle      NOTIFY infoChanged)
     Q_PROPERTY(bool lightMode       READ lightMode       WRITE setLightMode       NOTIFY infoChanged)
+    /** 2026-10-28：被控端换 shadcn 语言（MD3 仅管理端）后，令牌对象要一份「深色」布尔。
+     *  给结果值而不是让 QML 写 `!lightMode` —— 配色判断一律留在 C++（QML 零逻辑铁律）。 */
+    Q_PROPERTY(bool darkTheme       READ darkTheme                                NOTIFY infoChanged)
     // P0-0（2026-10-17）：允许第三方（插件）向灵动岛推送。默认 true（见 main.cpp AgentSettings 注释）。
     Q_PROPERTY(bool pluginIslandPush READ pluginIslandPush WRITE setPluginIslandPush NOTIFY infoChanged)
     Q_PROPERTY(bool autostart       READ autostart       WRITE setAutostart       NOTIFY infoChanged)
@@ -202,6 +205,7 @@ public:
     bool noiseEnabled() const { return m_noiseEnabled; }
     bool islandIdle() const { return m_islandIdle; }
     bool lightMode() const { return m_lightMode; }
+    bool darkTheme() const { return !m_lightMode; }
     bool pluginIslandPush() const { return m_pluginIslandPush; }
     bool autostart() const { return m_autostart; }
     bool desktopShortcut() const { return m_desktopShortcut; }

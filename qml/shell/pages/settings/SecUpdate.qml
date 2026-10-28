@@ -11,14 +11,14 @@
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
 
-import "../../../components/md3" as M
+import "../../../ash"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+    property var ash
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -26,44 +26,49 @@ Column {
 // ─────────────────────────────────────────────────────
 // ⑤ 更新：自动升级台账 + 渠道（含临时切换）
 // ─────────────────────────────────────────────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 2
-            SecCardTitle { text2: "自动升级" }
-            SecInfoRow {
+            AshCardTitle { text2: "自动升级" }
+            AshInfoRow {
+                th: root.ash
                 label: "升级方式"
                 value: agentUi.otaModeText
                 vColor: agentUi.otaModeColor
             }
-            SecInfoRow {
+            AshInfoRow {
+                th: root.ash
                 label: "自动升级"
                 value: agentUi.otaAutoText
                 vColor: agentUi.otaAutoColor
             }
-            SecInfoRow { label: "上次自动升级"; value: agentUi.otaLastText }
-            SecInfoRow { label: "下次自动升级"; value: agentUi.otaNextText }
+            AshInfoRow { label: "上次自动升级"; value: agentUi.otaLastText }
+            AshInfoRow { label: "下次自动升级"; value: agentUi.otaNextText }
             Row {
                 topPadding: 10
                 spacing: 10
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "立即升级"
                     variant: "filled"
                     enabled: agentUi.canUpgrade
                     onClicked: agentUi.upgradeNow()
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     // 文案随状态变，值由 C++ 给（pauseBtnText）
                     text: agentUi.pauseBtnText
                     variant: "tonal"
                     onClicked: agentUi.toggleOtaPause()
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "重新检查"
                     variant: "text"
                     onClicked: agentUi.refresh()
@@ -75,10 +80,10 @@ Column {
     // 更新渠道（临时测试开关 · 2026-10-28 B4）
     // 用户点单原文：「被控端设置界面添加临时的测试更新渠道切换按钮」+「切换逻辑在 C++」。
     // 生效面：g_channel（register 上报 + OTA 查询）+ channel.txt（重启/升级后仍生效）。
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
@@ -90,7 +95,7 @@ Column {
                     text: "更新渠道"
                     font.pixelSize: 14
                     font.weight: Font.Medium
-                    color: root.tok ? root.tok.cOnSurface : "#E6E1E5"
+                    color: root.ash ? root.ash.foreground : "#E6E1E5"
                 }
                 // 「临时」角标：让现场一眼看出这不是长期能力（服务端灰度上线后撤）
                 Rectangle {
@@ -107,12 +112,13 @@ Column {
                     }
                 }
             }
-            SecInfoRow { label: "当前渠道"; value: agentUi.updateChannel }
+            AshInfoRow { label: "当前渠道"; value: agentUi.updateChannel }
             Row {
                 spacing: 8
                 Repeater {
                     model: agentUi.channelOptions
-                    M.Md3Btn {
+                    AshButton {
+                        th: root.ash
                         text: modelData.label
                         variant: modelData.variant
                         onClicked: agentUi.updateChannel = modelData.key
@@ -124,7 +130,7 @@ Column {
                 anchors.right: parent.right
                 text: agentUi.channelNoteText
                 font.pixelSize: 11
-                color: root.tok ? root.tok.cOnSurfaceVar : "#CAC4D0"
+                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
                 wrapMode: Text.WordWrap
             }
         }

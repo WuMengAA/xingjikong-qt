@@ -11,14 +11,14 @@
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
 
-import "../../../components/md3" as M
+import "../../../ash"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+    property var ash
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -26,34 +26,36 @@ Column {
 // ─────────────────────────────────────────────────────
 // ⑥ 插件：内置模块 + 第三方插件 + 插件市场入口（托盘移植）
 // ─────────────────────────────────────────────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 8
-            SecCardTitle { text2: "插件与模块" }
+            AshCardTitle { text2: "插件与模块" }
             Text {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "插件的安装、启停与卸载在「插件」页；托盘右键的「插件市场」也是那一页。" +
                       "这里放快捷入口，省一次底导航来回。"
                 font.pixelSize: 11
-                color: root.tok ? root.tok.cOnSurfaceVar : "#CAC4D0"
+                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
                 wrapMode: Text.WordWrap
             }
             Row {
                 topPadding: 4
                 spacing: 10
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "打开插件与模块"
                     variant: "filled"
                     onClicked: if (root.ctx) root.ctx.goToId("plugins")
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "刷新清单"
                     variant: "tonal"
                     onClicked: agentUi.pluginsRefresh()

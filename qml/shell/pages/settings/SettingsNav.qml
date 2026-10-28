@@ -13,10 +13,10 @@ import "../../../island"   // SvgIcon（lucide 图标名）
 Rectangle {
     id: root
 
-    /** 主题令牌（调用方传 root.tok） */
-    property var tok
+    /** shadcn 令牌（AshTheme 实例，页面根注入） */
+    property var ash
     width: 200
-    color: root.tok ? root.tok.cSurfaceVar : "#F3EDF7"
+    color: root.ash ? root.ash.muted : "#f5f5f5"
 
     // 右缘发丝线（与内容区分界，避免侧栏"贴"在内容上）
     Rectangle {
@@ -24,7 +24,7 @@ Rectangle {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
-        color: root.tok ? root.tok.cOutlineVar : "#E7E0EC"
+        color: root.ash ? root.ash.border : "#e4e4e7"
         opacity: 0.6
     }
 
@@ -39,7 +39,7 @@ Rectangle {
             text: "设置"
             font.pixelSize: 18
             font.weight: Font.Medium
-            color: root.tok ? root.tok.cOnSurface : "#1C1B1F"
+            color: root.ash ? root.ash.foreground : "#09090b"
             bottomPadding: 8
             leftPadding: 8
         }

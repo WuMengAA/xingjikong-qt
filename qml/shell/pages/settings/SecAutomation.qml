@@ -11,14 +11,14 @@
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
 
-import "../../../components/md3" as M
+import "../../../ash"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+    property var ash
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -26,19 +26,20 @@ Column {
 // ─────────────────────────────────────────────────────
 // ④ 自动化：播放时段（托盘移植）+ 定时规则（岛「自」面）
 // ─────────────────────────────────────────────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 2
-            SecCardTitle { text2: "播放时段"; bottomPadding: 6 }
-            SecInfoRow { label: "状态";   value: agentUi.playStateText }
-            SecInfoRow { label: "时段";   value: agentUi.playWindowsText }
-            M.Md3SwitchRow {
+            AshCardTitle { text2: "播放时段"; bottomPadding: 6 }
+            AshInfoRow { label: "状态";   value: agentUi.playStateText }
+            AshInfoRow { label: "时段";   value: agentUi.playWindowsText }
+            AshSwitchRow {
+                th: root.ash
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "启用播放时段"
@@ -49,12 +50,14 @@ Column {
             Row {
                 topPadding: 10
                 spacing: 10
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "打开时段设置"
                     variant: "filled"
                     onClicked: if (root.ctx) root.ctx.goToId("playschedule")
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "保存当前时段"
                     variant: "tonal"
                     onClicked: agentUi.savePlaySchedule()
@@ -63,16 +66,16 @@ Column {
         }
     }
 
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 8
-            SecCardTitle { text2: "定时规则" }
+            AshCardTitle { text2: "定时规则" }
             Text {
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -80,7 +83,7 @@ Column {
                       "主入口就在老师手边，不用绕到这个设置页。规则可设为通知、调音量、" +
                       "静音、锁屏、截图或启动指定程序，全部复用既有指令白名单。"
                 font.pixelSize: 11
-                color: root.tok ? root.tok.cOnSurfaceVar : "#CAC4D0"
+                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
                 wrapMode: Text.WordWrap
             }
         }

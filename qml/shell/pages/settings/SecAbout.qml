@@ -11,14 +11,14 @@
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
 
-import "../../../components/md3" as M
+import "../../../ash"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+    property var ash
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -26,53 +26,55 @@ Column {
 // ─────────────────────────────────────────────────────
 // ⑦ 关于与诊断：版本信息 + 自检 / 记录入口（托盘移植）
 // ─────────────────────────────────────────────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 2
-            SecCardTitle { text2: "关于星集控"; bottomPadding: 6 }
-            SecInfoRow { label: "被控端版本"; value: agentUi.versionText }
-            SecInfoRow { label: "设备用途";   value: agentUi.deviceRoleText }
-            SecInfoRow { label: "归属码";     value: agentUi.classCodeText }
-            SecInfoRow { label: "云端地址";   value: agentUi.cloudUrl }
+            AshCardTitle { text2: "关于星集控"; bottomPadding: 6 }
+            AshInfoRow { label: "被控端版本"; value: agentUi.versionText }
+            AshInfoRow { label: "设备用途";   value: agentUi.deviceRoleText }
+            AshInfoRow { label: "归属码";     value: agentUi.classCodeText }
+            AshInfoRow { label: "云端地址";   value: agentUi.cloudUrl }
         }
     }
 
     // 托盘右键的「配置自检…」「噪音记录…」「自习记录…」三条（2026-10-28 移植）
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 2
-            SecCardTitle { text2: "诊断与记录"; bottomPadding: 6 }
+            AshCardTitle { text2: "诊断与记录"; bottomPadding: 6 }
             Text {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "这三项原先只能从托盘右键进。内容各自在独立页里，这里只放入口 —— " +
                       "同一份实现在两处重复写，早晚会分叉。"
                 font.pixelSize: 11
-                color: root.tok ? root.tok.cOnSurfaceVar : "#CAC4D0"
+                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
                 wrapMode: Text.WordWrap
                 bottomPadding: 6
             }
             Row {
                 spacing: 10
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "配置自检"
                     variant: "tonal"
                     onClicked: if (root.ctx) root.ctx.goToId("selfcheck")
                 }
                 // 「记录」页只有教室端有（广播机没有噪音/自习语义 —— 见 AgentPages.js）
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "噪音与自习记录"
                     variant: "tonal"
                     onClicked: if (root.ctx) root.ctx.goToId("records")

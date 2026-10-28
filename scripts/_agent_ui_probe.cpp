@@ -264,8 +264,8 @@ int main(int argc, char *argv[])
     out.flush();
 
     qInstallMessageHandler([](QtMsgType type, const QMessageLogContext &ctx, const QString &msg) {
-        if (type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg)
-            g_qmlErrors << msg;
+        if (type == QtInfoMsg || type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg)
+            g_qmlErrors << msg;   // 2026-10-28：收 Info —— UiPageHost 加载失败走 console.log（Info），此前完全静默
     });
 
     // 真 AgentUi（header-only、零依赖可独立构造）：数据由上面的 agentUiFill() 填，
@@ -355,6 +355,7 @@ QtObject {
             app.exit(20);
             return;
         }
+
 
         QStringList texts, btnTexts;
         QSet<QObject *> seen;
@@ -502,6 +503,8 @@ QtObject {
             realErrors << e.left(160);
         }
         for (const QString &n : notes) out << QStringLiteral("      note %1\n").arg(n);
+        out << QStringLiteral("      [debug] g_qmlErrors raw=%1\n").arg(g_qmlErrors.size());
+        for (const QString &e : g_qmlErrors) out << QStringLiteral("      [raw] %1\n").arg(e.left(200));
         check(realErrors.isEmpty(),
               QStringLiteral("无未知 QML 运行期报错（%1 条）").arg(realErrors.size()));
         for (const QString &e : realErrors) out << QStringLiteral("      · %1\n").arg(e);

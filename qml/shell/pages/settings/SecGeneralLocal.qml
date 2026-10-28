@@ -11,57 +11,60 @@
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
 
-import "../../../components/md3" as M
+import "../../../ash"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+    property var ash
     signal resetRequested()
 
     width: parent ? parent.width : 0
     spacing: 14
 
     // ── 蓝图「通用设置」第 5 项：存储与备份 ──────────────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 2
-            SecCardTitle { text2: "存储与备份" }
+            AshCardTitle { text2: "存储与备份" }
             Text {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: agentUi.storageHintText
                 font.pixelSize: 11
-                color: root.tok ? root.tok.cOnSurfaceVar : "#CAC4D0"
+                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
                 wrapMode: Text.WordWrap
                 bottomPadding: 6
             }
-            SecInfoRow { label: "配置"; value: agentUi.storageConfigText }
-            SecInfoRow { label: "数据"; value: agentUi.storageDataText }
-            SecInfoRow { label: "日志"; value: agentUi.storageLogText }
-            SecInfoRow { label: "合计"; value: agentUi.storageTotalText }
+            AshInfoRow { label: "配置"; value: agentUi.storageConfigText }
+            AshInfoRow { label: "数据"; value: agentUi.storageDataText }
+            AshInfoRow { label: "日志"; value: agentUi.storageLogText }
+            AshInfoRow { label: "合计"; value: agentUi.storageTotalText }
             Row {
                 topPadding: 10
                 spacing: 8
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "统计用量"
                     variant: "filled"
                     onClicked: agentUi.refreshStorage()
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "备份配置"
                     variant: "tonal"
                     onClicked: agentUi.backupConfigNow()
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "清理旧日志"
                     variant: "text"
                     onClicked: agentUi.clearOldLogsNow()
@@ -71,25 +74,26 @@ Column {
     }
 
     // ── 蓝图「通用设置」第 6 项：高级选项 ────────────────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 10
-            SecCardTitle { text2: "高级选项" }
+            AshCardTitle { text2: "高级选项" }
             Text {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: agentUi.resetScopeText
                 font.pixelSize: 11
-                color: root.tok ? root.tok.cOnSurfaceVar : "#CAC4D0"
+                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
                 wrapMode: Text.WordWrap
             }
-            M.Md3Btn {
+            AshButton {
+                th: root.ash
                 text: "重置全部设置…"
                 variant: "tonal"
                 onClicked: root.resetRequested()
@@ -106,7 +110,7 @@ Column {
         visible: agentUi.actionResultVisible
         height: resultText.implicitHeight + 20
         radius: 12
-        color: root.tok ? root.tok.cSurfaceCont : "#211F26"
+        color: root.ash ? root.ash.card : "#211F26"
         Text {
             id: resultText
             anchors.left: parent.left
@@ -115,46 +119,49 @@ Column {
             anchors.margins: 12
             text: agentUi.actionResultText
             font.pixelSize: 12
-            color: root.tok ? root.tok.cOnSurface : "#E6E1E5"
+            color: root.ash ? root.ash.foreground : "#E6E1E5"
             wrapMode: Text.WordWrap
         }
     }
 
     // 托盘右键的三条目录入口（2026-10-28 移植）
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 10
-            SecCardTitle { text2: "本地目录" }
+            AshCardTitle { text2: "本地目录" }
             Text {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "配置文件、运行数据与日志分三个位置存放。托盘右键里原本也有这三项，" +
                       "现在设置页同样能到 —— 现场排障不用再去摸托盘。"
                 font.pixelSize: 11
-                color: root.tok ? root.tok.cOnSurfaceVar : "#CAC4D0"
+                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
                 wrapMode: Text.WordWrap
             }
-            SecInfoRow { label: "数据目录"; value: agentUi.dataDir }
-            SecInfoRow { label: "日志文件"; value: agentUi.logPath }
+            AshInfoRow { label: "数据目录"; value: agentUi.dataDir }
+            AshInfoRow { label: "日志文件"; value: agentUi.logPath }
             Row {
                 spacing: 10
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "打开配置目录"
                     variant: "tonal"
                     onClicked: agentUi.openConfigDir()
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "打开数据目录"
                     variant: "tonal"
                     onClicked: agentUi.openDataDir()
                 }
-                M.Md3Btn {
+                AshButton {
+                    th: root.ash
                     text: "打开日志目录"
                     variant: "tonal"
                     onClicked: agentUi.openLogDir()

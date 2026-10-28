@@ -11,14 +11,14 @@
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
 
-import "../../../components/md3" as M
+import "../../../ash"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
+    property var ash
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -26,17 +26,18 @@ Column {
 // ─────────────────────────────────────────────────────
 // ② 主界面：主题 / 灵动岛形态 / 插件推岛
 // ─────────────────────────────────────────────────────
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 0
-            SecCardTitle { text2: "外观" }
-            M.Md3SwitchRow {
+            AshCardTitle { text2: "外观" }
+            AshSwitchRow {
+                th: root.ash
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "浅色主题"
@@ -47,17 +48,18 @@ Column {
         }
     }
 
-    M.Md3Card {
+    AshCard {
+        th: root.ash
         anchors.left: parent.left
         anchors.right: parent.right
-        variant: "filled"
         Column {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             spacing: 0
-            SecCardTitle { text2: "灵动岛" }
-            M.Md3SwitchRow {
+            AshCardTitle { text2: "灵动岛" }
+            AshSwitchRow {
+                th: root.ash
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "空闲时常驻"
@@ -69,7 +71,8 @@ Column {
             // 插件经本地 WS 调 island_show / notify 时先问这个开关；
             // 关掉 = 插件推的提示一律静默丢弃（插件侧收到 dropped）。
             // ⚠️ 只管**插件**；管理端通知、本机课表/对讲/文件提示不受影响。
-            M.Md3SwitchRow {
+            AshSwitchRow {
+                th: root.ash
                 anchors.left: parent.left
                 anchors.right: parent.right
                 text: "允许第三方推送灵动岛"
