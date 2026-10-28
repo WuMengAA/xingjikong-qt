@@ -525,6 +525,17 @@ int main(int argc, char *argv[])
     //    2026-10-21：fileDlgs 原先漏在 engine 之后（L~526），已挪回这里。
     FileDialogs fileDlgs;
 
+    // 2026-10-28 B0：班级中心控制器。承载原写在 QML 里的全部计算/配色/状态，
+    // 落实用户铁律「QML 永远不写逻辑与通信代码，全部交给 C++」。
+    // QML 侧只读 `classCenter.xxx` 属性、只调其 Q_INVOKABLE，不自己算。
+    // ⚠️ 与上面 interactBridge/fileDlgs 同一条规则：**必须声明在 engine 之前**。
+    //    2026-10-28 实证：声明在 engine 之后 ⇒ 先于 engine 析构 ⇒ 关窗时
+    //    QML 解绑读 `classCenter.*` 命中已释放对象，退出码 0xC0000005。
+    //    （探针宿主同一缺陷已复现并修正，两处务必保持同序。）
+    // ⚠️ 用普通自动变量而非 static：lambda 需要捕获它（static 局部捕获在
+    //    /permissive- 下报 C3495，2026-10-28 实测）；main() 期间它始终存活。
+    ClassCenterController classCenterCtl;
+
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("frames"), new FrameImageProvider(&backend));
     // 2026-10-18 远控：QML 用 Image { source: "image://vnc/live?t=<tick>" } 渲染 VNC 画面。
@@ -556,12 +567,9 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("undoManager"), &schedUndo);
     engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), schedRepo.defaultProfilePath());
     engine.rootContext()->setContextProperty(QStringLiteral("scheduleToday"), &schedToday);
-    // 2026-10-28 B0：班级中心控制器。承载原写在 QML 里的全部计算/配色/状态，
-    // 落实用户铁律「QML 永远不写逻辑与通信代码，全部交给 C++」。
-    // QML 侧只读 `classCenter.xxx` 属性、只调其 Q_INVOKABLE，不自己算。
-    // ⚠️ 用普通自动变量而非 static：lambda 需要捕获它（static 局部捕获在
-    //    /permissive- 下报 C3495，2026-10-28 实测）；main() 期间它始终存活。
-    ClassCenterController classCenterCtl;
+    // 2026-10-28 B0：班级中心控制器（声明在上面 engine **之前**，见该处注释）。
+    // 这里只做接线，不再声明 —— 声明在 engine 之后会先于 engine 析构，
+    // QML 的 classCenter.* 绑定将指向已释放内存（关窗 0xC0000005，2026-10-28 实证）。
     // B1：控制器只把按钮名翻成既有指令词表，真正下发由宿主一行接线
     // （2026-10-28 解耦：控制器不再持有 ViewerBackend，探针可单独链它验收）。
     QObject::connect(&classCenterCtl, &ClassCenterController::actionOut,

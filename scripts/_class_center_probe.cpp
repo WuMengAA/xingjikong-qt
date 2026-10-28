@@ -129,6 +129,15 @@ int main(int argc, char *argv[])
     }
 
     QGuiApplication app(argc, argv);
+
+    // 真控制器（不是仿件）：本批的验收重点之一就是它的属性真有值。
+    // setBackend(nullptr) —— 见文件头「验不到什么」。
+    // ⚠️ 必须声明在 engine **之前**：它是注册给 QML 的裸指针上下文属性，
+    //    局部对象逆序析构 ⇒ 声明在 engine 后面会先于 engine 销毁，
+    //    engine 拆 QML 时读 `classCenter.*` 命中已释放对象 ⇒ 退出码 0xC0000005
+    //    （2026-10-28 实测，产品 main.cpp 同缺陷已一并修正）。
+    ClassCenterController ctl;
+
     QQmlApplicationEngine engine;
 
     // 内置模块导入路径：exe 在 RUNDIR（不在 Qt 安装目录旁），
@@ -139,10 +148,6 @@ int main(int argc, char *argv[])
     // ⇒ 截图里所有 SvgIcon 都是空白，导致"麦克风 +45°/关机左侧白图标"这类条目
     // 无法目视核对。这里补同款提供者 + 同款 qrc（构建脚本 rcc 生成），保真度对齐产品。
     engine.addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider);
-
-    // 真控制器（不是仿件）：本批的验收重点之一就是它的属性真有值。
-    // setBackend(nullptr) —— 见文件头「验不到什么」。
-    ClassCenterController ctl;
 
     // ── 探针假数据（2026-10-28）：控制器是"宿主推数据"模式（B1），
     //    探针作为宿主喂三份假数据，让 classes/devices/events 真有值可断。──

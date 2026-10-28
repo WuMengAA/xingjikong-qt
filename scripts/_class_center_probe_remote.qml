@@ -18,6 +18,8 @@ Window {
         anchors.fill: parent
     }
 
+    property int badCount: 0
+
     Component.onCompleted: timer.start()
 
     // 断言必须等布局完成（stageW/stageH 由 Binding 回写，onCompleted 时是中间态）
@@ -66,6 +68,17 @@ Window {
             "装饰透明度 0.5 / 0.3")
 
         console.log("── 断言结束 bad=" + bad + " ──")
-        probe.finish(bad)
+        // 断言读的是 C++ 属性（切态瞬间就对），但**画面**有淡入过渡（T2 State 驱动，
+        // durModal 300ms）。抓图必须等 settle，否则拍到的是切态前的网格页
+        // （2026-10-28 实证：remote 态截图曾是网格，remote-bottom 因多滚了一段反而正常）。
+        badCount = bad
+        settle.start()
+    }
+
+    Timer {
+        id: settle
+        interval: 600
+        repeat: false
+        onTriggered: probe.finish(badCount)
     }
 }
