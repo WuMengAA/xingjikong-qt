@@ -26,6 +26,7 @@
 #include <QMetaProperty>
 #include <QQuickItem>
 #include <QQuickWidget>
+#include <QQmlComponent>
 #include <QQmlContext>
 #include <QTextStream>
 #include <QTimer>
@@ -48,10 +49,44 @@ void check(bool ok, const QString &what)
 
 } // namespace（辅助函数；FakeAgentUi 必须在全局 —— moc 不支持匿名 namespace）
 
-#include "_agent_ui_probe_fakeui.h"
+#include "../src/agent_ui.h"
 
 
 namespace {
+
+// 有效可见性：自身 visible 且整条父链都可见。
+// 设置页的七个分类区块用 `visible: agentUi.tabXxx` 挂在**外层面板**上，
+// 里层 Text 自己的 visible 仍然是 true —— 只看自身会误判"七个分类同时显示"。
+bool effectivelyVisible(QQuickItem *it)
+{
+    for (; it; it = it->parentItem())
+        if (!it->isVisible()) return false;
+    return true;
+}
+
+// 在可见子树里找 text == s 的项（不含隐藏分支）。
+bool hasShownText(QObject *root, const QString &s, QSet<QObject *> &seen, int depth = 0)
+{
+    if (!root || depth > 24 || seen.contains(root)) return false;
+    seen.insert(root);
+    auto *it = qobject_cast<QQuickItem *>(root);
+    if (it && !it->isVisible()) return false;
+    const QVariant t = root->property("text");
+    if (t.isValid() && t.typeId() == QMetaType::QString && t.toString() == s)
+        return !it || effectivelyVisible(it);
+    for (QObject *c : root->children())
+        if (hasShownText(c, s, seen, depth + 1)) return true;
+    if (it)
+        for (QQuickItem *c : it->childItems())
+            if (hasShownText(c, s, seen, depth + 1)) return true;
+    return false;
+}
+
+bool hasShownText(QObject *root, const QString &s)
+{
+    QSet<QObject *> seen;
+    return hasShownText(root, s, seen, 0);
+}
 
 void collectTexts(QObject *root, QStringList &texts, QStringList &btnTexts,
                   QSet<QObject *> &seen, int depth = 0)
@@ -78,6 +113,118 @@ void collectTexts(QObject *root, QStringList &texts, QStringList &btnTexts,
 
 } // namespace
 
+// ── 真 AgentUi 的数据填充（2026-10-28 改造）──────────────────────────────
+// agent_ui.h 对 `void agentUiFill(AgentUi *)` 有 friend 声明，成员全 private。
+// 探针不链 main.cpp（被控端本体不能起生产进程），于是**在自己 TU 里定义同签名
+// 实现** —— 与产品同一个填充入口，不再维护 FakeAgentUi 那份"两套签名各自漂移"
+// 的伪件（fakeui 缺 20+ 个模块三新属性，加载设置页必然满屏 ReferenceError）。
+void agentUiFill(AgentUi *ui)
+{
+    ui->m_appVersion = QStringLiteral("0.6.50-probe");
+    ui->m_uid = QStringLiteral("probe-uid");
+    ui->m_cloudUrl = QStringLiteral("wss://example.invalid/ws/agent");
+    ui->m_connState = QStringLiteral("已连接（云端已确认）");
+    ui->m_deviceRole = QStringLiteral("classroom");
+    ui->m_classCode = QStringLiteral("260901");
+    ui->m_dataDir = QStringLiteral("C:/tmp/xingjikong");
+    ui->m_logPath = QStringLiteral("C:/tmp/xingjikong/agent-qt.log");
+    ui->m_latestText = QStringLiteral("已是最新（云端 v0.6.50）");
+    ui->m_hasNewer = false;
+    ui->m_canUpgrade = false;
+    ui->m_updateNotes = QString();
+    ui->m_otaModeText = QStringLiteral("可选：只有点「立即升级」才装");
+    ui->m_otaAutoText = QStringLiteral("到点自动装");
+    ui->m_otaLastText = QStringLiteral("（这台设备还没自动升级过）");
+    ui->m_otaNextText = QStringLiteral("立刻（有网就试）");
+    ui->m_otaPaused = false;
+    ui->m_notifyEnabled = true;
+    ui->m_voiceEnabled = true;
+    ui->m_noiseEnabled = true;
+    ui->m_islandIdle = true;
+    ui->m_lightMode = false;
+    ui->m_autostart = true;
+    ui->m_desktopShortcut = false;
+    ui->m_pluginIslandPush = true;
+    ui->m_noiseLogText = QStringLiteral("噪音记录目录：C:/tmp/noise");
+    ui->m_studyLogText = QStringLiteral("自习记录目录：C:/tmp/study");
+    ui->m_playScheduleEnabled = true;
+    ui->m_playWindowsText = QStringLiteral("周一至周五 12:30-13:30 / 17:00-18:00");
+    ui->m_playStateText = QStringLiteral("播放中：午间校园广播（今天还有 2 个时段）");
+    // 更新渠道（2026-10-28 B4）：选中 stable，三项清单一并给出（选中态由 C++ 定）
+    ui->m_updateChannel = QStringLiteral("stable");
+    ui->m_channelOptions = AgentUi::channelOptionList(ui->m_updateChannel);
+    ui->m_channelNoteText = QStringLiteral("生效文件：C:/tmp/xingjikong/channel.txt（临时开关）");
+
+    // 自检条目（照 main.cpp buildSelfCheckItems 的形状）
+    {
+        QVariantList checks;
+        for (int i = 0; i < 3; ++i) {
+            QVariantMap m;
+            m.insert(QStringLiteral("name"), QStringLiteral("自检项%1").arg(i + 1));
+            m.insert(QStringLiteral("ok"), i != 1);
+            m.insert(QStringLiteral("status"), i == 1 ? QStringLiteral("未配置") : QStringLiteral("正常"));
+            m.insert(QStringLiteral("fix"), i == 1 ? QStringLiteral("去修复") : QString());
+            checks << m;
+        }
+        ui->m_selfCheckItems = checks;
+    }
+    // 插件市场（照 buildPluginList 的形状；status 是 C++ 生成的展示串）
+    {
+        QVariantList plugins;
+        QVariantMap a;
+        a.insert(QStringLiteral("id"), QStringLiteral("echo-sample"));
+        a.insert(QStringLiteral("name"), QStringLiteral("示例回显插件"));
+        a.insert(QStringLiteral("version"), QStringLiteral("1.0.0"));
+        a.insert(QStringLiteral("author"), QStringLiteral("官方"));
+        a.insert(QStringLiteral("description"), QStringLiteral("把收到的指令原样回显，用于验证插件链路。"));
+        a.insert(QStringLiteral("installed"), true);
+        a.insert(QStringLiteral("enabled"), true);
+        a.insert(QStringLiteral("status"), QStringLiteral("● 运行中"));
+        plugins << a;
+        QVariantMap b;
+        b.insert(QStringLiteral("id"), QStringLiteral("voicehub-broadcast"));
+        b.insert(QStringLiteral("name"), QStringLiteral("VoiceHub 联动"));
+        b.insert(QStringLiteral("version"), QStringLiteral("1.2.0"));
+        b.insert(QStringLiteral("author"), QStringLiteral("VoiceHub"));
+        b.insert(QStringLiteral("description"), QStringLiteral("广播站点歌/歌词联动。"));
+        b.insert(QStringLiteral("installed"), false);
+        b.insert(QStringLiteral("enabled"), false);
+        b.insert(QStringLiteral("status"), QStringLiteral("— 未安装"));
+        plugins << b;
+        ui->m_plugins = plugins;
+    }
+    // 内置模块（照 ModuleHost::snapshot() 的键）
+    {
+        QVariantList modules;
+        QVariantMap a;
+        a.insert(QStringLiteral("id"), QStringLiteral("usb"));
+        a.insert(QStringLiteral("name"), QStringLiteral("U盘助手"));
+        a.insert(QStringLiteral("version"), QStringLiteral("1.0.0"));
+        a.insert(QStringLiteral("description"),
+                 QStringLiteral("U 盘插入时在灵动岛弹窗询问是否打开（只开文件夹、绝不自动运行）；考试模式可自动静默。"));
+        a.insert(QStringLiteral("builtin"), true);
+        a.insert(QStringLiteral("enabled"), true);
+        a.insert(QStringLiteral("running"), true);
+        QVariantList perms;
+        perms << QStringLiteral("island") << QStringLiteral("notify") << QStringLiteral("settings");
+        a.insert(QStringLiteral("permissions"), perms);
+        QVariantList acts;
+        acts << QStringLiteral("usb_drives");
+        a.insert(QStringLiteral("actions"), acts);
+        modules << a;
+        QVariantMap b;
+        b.insert(QStringLiteral("id"), QStringLiteral("voicehub"));
+        b.insert(QStringLiteral("name"), QStringLiteral("VoiceHub 联动"));
+        b.insert(QStringLiteral("version"), QStringLiteral("1.0.0"));
+        b.insert(QStringLiteral("description"), QStringLiteral("对接 VoiceHub：正在播放/歌词/点歌。"));
+        b.insert(QStringLiteral("builtin"), true);
+        b.insert(QStringLiteral("enabled"), false);
+        b.insert(QStringLiteral("running"), false);
+        modules << b;
+        ui->m_modules = modules;
+    }
+}
+
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
@@ -99,115 +246,77 @@ int main(int argc, char *argv[])
             g_qmlErrors << msg;
     });
 
-    FakeAgentUi ui;
-    // 数据：照 agentUiFill 的真实形状（snapshot() 的键：id/name/version/description/
-    //        builtin/enabled/running/permissions/actions）
-    ui.set_appVersion(QStringLiteral("0.6.37-probe"));
-    ui.set_uid(QStringLiteral("probe-uid"));
-    ui.set_cloudUrl(QStringLiteral("wss://example.invalid/ws/agent"));
-    ui.set_connState(QStringLiteral("已连接（云端已确认）"));
-    ui.set_dataDir(QStringLiteral("C:/tmp/xingjikong"));
-    ui.set_logPath(QStringLiteral("C:/tmp/xingjikong/agent-qt.log"));
-    ui.set_latestText(QStringLiteral("已是最新（云端 v0.6.37）"));
-    ui.set_hasNewer(false);
-    ui.set_canUpgrade(false);
-    ui.set_updateNotes(QString());
-    ui.set_otaModeText(QStringLiteral("可选：只有点「立即升级」才装"));
-    ui.set_otaAutoText(QStringLiteral("到点自动装"));
-    ui.set_otaLastText(QStringLiteral("（这台机器还没自动升级过）"));
-    ui.set_otaNextText(QStringLiteral("立刻（有网就试）"));
-    ui.set_otaPausedNow(false);
-    ui.set_notifyEnabled(true);
-    ui.set_voiceEnabled(true);
-    ui.set_noiseEnabled(true);
-    ui.set_islandIdle(true);
-    ui.set_lightMode(false);
-    ui.set_autostart(true);
-    ui.set_desktopShortcut(false);
-    ui.set_noiseLogText(QStringLiteral("噪音记录目录：C:/tmp/noise"));
-    ui.set_studyLogText(QStringLiteral("自习记录目录：C:/tmp/study"));
-    ui.set_playScheduleEnabled(true);
-    ui.set_playWindowsText(QStringLiteral("周一至周五 12:30-13:30 / 17:00-18:00"));
-    ui.set_playStateText(QStringLiteral("播放中：午间校园广播（今天还有 2 个时段）"));
+    // 真 AgentUi（header-only、零依赖可独立构造）：数据由上面的 agentUiFill() 填，
+    // 与产品同一 friend 入口；只读属性的展示串（connStateColor/versionText 等）
+    // 也走 agent_ui.h 里的真实现，探针不再复刻一遍。
+    AgentUi ui;
+    agentUiFill(&ui);
 
-    // 自检条目（照 main.cpp buildSelfCheckItems 的形状）
-    QVariantList checks;
-    for (int i = 0; i < 3; ++i) {
-        QVariantMap m;
-        m.insert(QStringLiteral("name"), QStringLiteral("自检项%1").arg(i + 1));
-        m.insert(QStringLiteral("ok"), i != 1);
-        m.insert(QStringLiteral("status"), i == 1 ? QStringLiteral("未配置") : QStringLiteral("正常"));
-        m.insert(QStringLiteral("fix"), i == 1 ? QStringLiteral("去修复") : QString());
-        checks << m;
+    // 伪件时代用 `calls` 记录页调过哪些 invokable；真件没有这个字段，
+    // 改成**收原始信号**（真件每个 slot 都是 emit 一个 xxxRequested）——
+    // 记录口径不变，而且验的是产品真实信号名。
+    QStringList calls;
+    {
+        const auto rec = [&calls](const QString &name) { calls << name; };
+        QObject::connect(&ui, &AgentUi::refreshRequested, &app, [rec] { rec(QStringLiteral("refresh")); });
+        QObject::connect(&ui, &AgentUi::openLogDirRequested, &app, [rec] { rec(QStringLiteral("openLogDir")); });
+        QObject::connect(&ui, &AgentUi::openDataDirRequested, &app, [rec] { rec(QStringLiteral("openDataDir")); });
+        QObject::connect(&ui, &AgentUi::openConfigDirRequested, &app, [rec] { rec(QStringLiteral("openConfigDir")); });
+        QObject::connect(&ui, &AgentUi::upgradeNowRequested, &app, [rec] { rec(QStringLiteral("upgradeNow")); });
+        QObject::connect(&ui, &AgentUi::toggleOtaPauseRequested, &app, [rec] { rec(QStringLiteral("toggleOtaPause")); });
+        QObject::connect(&ui, &AgentUi::selfCheckRequested, &app, [rec] { rec(QStringLiteral("runSelfCheckCheck")); });
+        QObject::connect(&ui, &AgentUi::selfCheckFixRequested, &app, [rec] { rec(QStringLiteral("selfCheckFix")); });
+        QObject::connect(&ui, &AgentUi::pluginsRefreshRequested, &app,
+                         [rec] { rec(QStringLiteral("pluginsRefresh")); });
+        QObject::connect(&ui, &AgentUi::modulesRefreshRequested, &app, [rec] { rec(QStringLiteral("modulesRefresh")); });
+        QObject::connect(&ui, &AgentUi::playScheduleSaveRequested, &app, [rec] { rec(QStringLiteral("savePlaySchedule")); });
+        QObject::connect(&ui, &AgentUi::settingsTabChanged, &app,
+                         [&calls, &ui] { calls << QStringLiteral("settingsTab:") + ui.settingsTab(); });
+        QObject::connect(&ui, &AgentUi::channelChangedRequested, &app,
+                         [rec](const QString &ch) { rec(QStringLiteral("channel:") + ch); });
     }
-    ui.set_selfCheckItems(checks);
 
-    // 插件市场（照 buildPluginList 的形状：id/name/version/author/description/
-    //        installed/enabled/status——status 是 C++ 生成的展示串，缺了页面 146 行
-    //        会把 undefined 绑进 QString（探针据此抓到过一次假数据失真））
-    QVariantList plugins;
-    {
-        QVariantMap m;
-        m.insert(QStringLiteral("id"), QStringLiteral("echo-sample"));
-        m.insert(QStringLiteral("name"), QStringLiteral("示例回显插件"));
-        m.insert(QStringLiteral("version"), QStringLiteral("1.0.0"));
-        m.insert(QStringLiteral("author"), QStringLiteral("官方"));
-        m.insert(QStringLiteral("description"), QStringLiteral("把收到的指令原样回显，用于验证插件链路。"));
-        m.insert(QStringLiteral("installed"), true);
-        m.insert(QStringLiteral("enabled"), true);
-        m.insert(QStringLiteral("status"), QStringLiteral("● 运行中"));
-        plugins << m;
-    }
-    {
-        QVariantMap m;
-        m.insert(QStringLiteral("id"), QStringLiteral("voicehub-broadcast"));
-        m.insert(QStringLiteral("name"), QStringLiteral("VoiceHub 联动"));
-        m.insert(QStringLiteral("version"), QStringLiteral("1.2.0"));
-        m.insert(QStringLiteral("author"), QStringLiteral("VoiceHub"));
-        m.insert(QStringLiteral("description"), QStringLiteral("广播站点歌/歌词联动。"));
-        m.insert(QStringLiteral("installed"), false);
-        m.insert(QStringLiteral("enabled"), false);
-        m.insert(QStringLiteral("status"), QStringLiteral("— 未安装"));
-        plugins << m;
-    }
-    ui.set_plugins(plugins);
-
-    // 内置模块（照 ModuleHost::snapshot() 的键）
-    QVariantList modules;
-    {
-        QVariantMap m;
-        m.insert(QStringLiteral("id"), QStringLiteral("usb"));
-        m.insert(QStringLiteral("name"), QStringLiteral("U盘助手"));
-        m.insert(QStringLiteral("version"), QStringLiteral("1.0.0"));
-        m.insert(QStringLiteral("description"),
-                 QStringLiteral("U 盘插入时在灵动岛弹窗询问是否打开（只开文件夹、绝不自动运行）；考试模式可自动静默。"));
-        m.insert(QStringLiteral("builtin"), true);
-        m.insert(QStringLiteral("enabled"), true);
-        m.insert(QStringLiteral("running"), true);
-        QVariantList perms;
-        perms << QStringLiteral("island") << QStringLiteral("notify") << QStringLiteral("settings");
-        m.insert(QStringLiteral("permissions"), perms);
-        QVariantList acts;
-        acts << QStringLiteral("usb_drives");
-        m.insert(QStringLiteral("actions"), acts);
-        modules << m;
-    }
-    {
-        QVariantMap m;
-        m.insert(QStringLiteral("id"), QStringLiteral("voicehub"));
-        m.insert(QStringLiteral("name"), QStringLiteral("VoiceHub 联动"));
-        m.insert(QStringLiteral("version"), QStringLiteral("1.0.0"));
-        m.insert(QStringLiteral("description"), QStringLiteral("对接 VoiceHub：正在播放/歌词/点歌。"));
-        m.insert(QStringLiteral("builtin"), true);
-        m.insert(QStringLiteral("enabled"), false);
-        m.insert(QStringLiteral("running"), false);
-        modules << m;
-    }
-    ui.set_modules(modules);
+    // 自检条目 / 插件市场 / 内置模块的数据也都在 agentUiFill() 里（与产品同一个形状）。
 
     QQuickWidget view;
     view.engine()->addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider());
     view.engine()->rootContext()->setContextProperty(QStringLiteral("agentUi"), &ui);
+
+    // 假 voicehub（2026-10-28）：壳里的「广播站排期中心」浮层（BroadcastScheduleSheet）
+    // 引用 voicehub.xxx —— 产品由 main.cpp 注入真实桥接对象，探针不链 main.cpp，
+    // 不注入就会刷 15 条 ReferenceError 把「无未知报错」这一项打红。
+    // 成员面按 `grep -o "voicehub\.[A-Za-z_]*" BroadcastScheduleSheet.qml` 全量收集，
+    // 含两个信号（Connections 里 onControlFinished / onReorderFinished）。
+    {
+        QQmlComponent vhComp(view.engine());
+        vhComp.setData(R"QML(
+import QtQuick
+QtObject {
+    property bool canRequest: false
+    property var schedule: []
+    property string baseUrl: ""
+    property string title: ""
+    property int scheduleCount: 0
+    property bool playing: false
+    property bool controlEnabled: false
+    property string artist: ""
+    // 设置页「VoiceHub 联动」卡读的是 page.vh（= voicehub）这几个成员：
+    // active / statusText / nextTitle / autoNotify —— 缺一个就会在赋值处报
+    // "Unable to assign [undefined] to QString/bool"（2026-10-28 探针实证）。
+    property bool active: false
+    property string statusText: "未在播放"
+    property string nextTitle: ""
+    property bool autoNotify: false
+    signal controlFinished(bool ok, string message)
+    signal reorderFinished(bool ok, string message)
+    function requestSong() {}
+    function refreshSchedule() {}
+    function reorderSchedule() {}
+}
+)QML", QUrl(QStringLiteral("qrc:/probe_voicehub.qml")));
+        if (QObject *vh = vhComp.create())
+            view.engine()->rootContext()->setContextProperty(QStringLiteral("voicehub"), vh);
+    }
     view.setResizeMode(QQuickWidget::SizeRootObjectToView);
     view.setSource(QUrl::fromLocalFile(
         QStringLiteral("D:/Stelarith/Stelarith-xingjikong-qt/Stelarith-control-qt/build/qml/shell/AgentShell.qml")));
@@ -248,12 +357,14 @@ int main(int argc, char *argv[])
               QStringLiteral("模块描述文案上屏"));
 
         // ── 二·补：设置页的「VoiceHub 联动」卡（#329）──
-        // 探针里没有 voicehub 上下文属性（模块只在 agent 主进程注册）⇒ 卡片必须走
-        // typeof 守卫显示「模块未加载」，且**不许**报 ReferenceError（见 §六 realErrors）。
+        // 2026-10-28：探针改为**注入假 voicehub**（同 main.cpp 的上下文属性名），
+        // 因为壳里的广播站排期浮层引用它，不注入会刷 15 条 ReferenceError。
+        // ⇒ 本卡走的是"模块已加载"分支，显示假件的 statusText（未在播放）。
+        // QML 里 typeof + null 的双重守卫仍在产品代码中，此处只验有值时的渲染。
         check(hasText(QStringLiteral("VoiceHub 联动")), QStringLiteral("设置页有「VoiceHub 联动」卡"));
         check(hasText(QStringLiteral("连接状态")), QStringLiteral("卡里有「连接状态」行"));
-        check(hasText(QStringLiteral("模块未加载")),
-              QStringLiteral("无 voicehub 属性时守卫生效=「模块未加载」（不是 ReferenceError）"));
+        check(hasText(QStringLiteral("未在播放")),
+              QStringLiteral("voicehub 注入后卡片显示模块状态（假件 statusText=未在播放）"));
         check(hasText(QStringLiteral("开播提醒")), QStringLiteral("有「开播提醒」开关"));
         check(hasText(QStringLiteral("控制接口（点歌 / 歌词 / 广播）")),
               QStringLiteral("有「控制接口」开关（留桩）"));
@@ -279,14 +390,53 @@ int main(int argc, char *argv[])
               QStringLiteral("时段页状态文案上屏"));
 
         // ── 五、页的加载钩子真的跑了（证页实例化，不是只编译）──
-        check(ui.calls.contains(QStringLiteral("pluginsRefresh")),
+        check(calls.contains(QStringLiteral("pluginsRefresh")),
               QStringLiteral("插件页 Component.onCompleted 调了 pluginsRefresh"));
-        check(ui.calls.contains(QStringLiteral("runSelfCheckCheck")),
+        check(calls.contains(QStringLiteral("runSelfCheckCheck")),
               QStringLiteral("自检页 Component.onCompleted 调了 runSelfCheckCheck"));
+
+        // ── 五·补、设置页七分类与切换（2026-10-28 模块三）──
+        // 分类清单来自 C++ settingsSections（icon/label/active/rowBg/fg/weight 全由 C++ 给），
+        // 切换由可写属性 agentUi.settingsTab 驱动，右侧区块可见性绑 tabXxx。
+        // ⚠️ 只认「有效可见」文本：七个区块都在对象树里，只看树会把全部当成已显示。
+        for (const QString &label : { QStringLiteral("通用"), QStringLiteral("主界面"),
+                                      QStringLiteral("通知与音量"), QStringLiteral("自动化"),
+                                      QStringLiteral("更新"), QStringLiteral("插件"),
+                                      QStringLiteral("关于与诊断") }) {
+            check(hasText(label), QStringLiteral("分类菜单含「%1」").arg(label));
+        }
+        check(hasShownText(root, QStringLiteral("这台设备")),
+              QStringLiteral("默认分类=通用（「这台设备」可见）"));
+        check(!hasShownText(root, QStringLiteral("自动升级")),
+              QStringLiteral("通用分类下「自动升级」不可见"));
+
+        ui.setSettingsTab(QStringLiteral("interface"));
+        QCoreApplication::processEvents();
+        check(ui.tabInterface(), QStringLiteral("切「主界面」→ tabInterface=true"));
+        check(hasShownText(root, QStringLiteral("外观")), QStringLiteral("主界面内容已显示（外观）"));
+        check(!hasShownText(root, QStringLiteral("这台设备")), QStringLiteral("切走后「这台设备」隐藏"));
+
+        ui.setSettingsTab(QStringLiteral("update"));
+        QCoreApplication::processEvents();
+        check(ui.tabUpdate(), QStringLiteral("切「更新」→ tabUpdate=true"));
+        check(hasShownText(root, QStringLiteral("自动升级")), QStringLiteral("更新内容已显示（自动升级）"));
+
+        ui.setSettingsTab(QStringLiteral("about"));
+        QCoreApplication::processEvents();
+        check(ui.tabAbout(), QStringLiteral("切「关于与诊断」→ tabAbout=true"));
+        check(hasShownText(root, QStringLiteral("诊断与记录")),
+              QStringLiteral("关于内容已显示（诊断与记录）"));
+
+        // 未知 key 不许生效：C++ setSettingsTab 有白名单，乱传应保持原分类
+        ui.setSettingsTab(QStringLiteral("general"));
+        QCoreApplication::processEvents();
+        check(ui.tabGeneral(), QStringLiteral("切回「通用」→ tabGeneral=true"));
+        ui.setSettingsTab(QStringLiteral("__not_a_tab__"));
+        QCoreApplication::processEvents();
+        check(ui.tabGeneral(), QStringLiteral("未知分类 key 被忽略（仍是通用）"));
 
         // ── 六、QML 运行期报错 ──
         // 已知项（**不许静默吞**，逐条留痕）：
-        //   · svgicon 缺图：IslandRoot 引用 check-circle 而资源叫 circle-check（存量错配，待点单）
         //   · Md3Btn「enabled 覆盖基类成员」：md3/Md3Btn.qml:11 自定义 property enabled
         //     盖掉 Item.enabled —— 存量设计味道（后果：祖先 enabled 传导到按钮会失效），
         //     动共享组件要两端一起看，**待点单**，不在这里擅自改。

@@ -109,7 +109,9 @@ Rectangle {
     }
 
     // ── 底导航（模型从页宿主派生；⚠️ 函数调用无依赖追踪 ⇒ 先触达 count/currentIndex）──
-    M.Md3NavBar {
+    // 2026-10-28 模块三：换掉共享 Md3NavBar（图标是 `Text{text: icon}` ⇒ 渲染成
+    // 方块/英文串）。本件同目录兄弟组件（SvgIcon 版），接口不变。
+    AgentBottomNav {
         id: nav
         height: implicitHeight       // ⚠️ Item 的 height 不自动跟随 implicitHeight（80 会落成 0）
         anchors.bottom: parent.bottom

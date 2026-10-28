@@ -25,7 +25,7 @@ function _all() {
             scope: ["agent"],
             order: 0,                 // 0 = 广播机首屏（排序后仍在最前）
             title: "广播台",
-            icon: "广",
+            icon: "radio",
             roles: ["broadcast"],     // 只有广播机有这一页
             entry: "pages/BroadcastConsolePage.qml"
         },
@@ -37,7 +37,9 @@ function _all() {
                                   //    2026-10-16 真机实证：白底 + 无底导航）
             order: 1,
             title: "设置",
-            icon: "设",          // 教室机 emoji 有 tofu 风险 ⇒ 导航图标用单字
+            icon: "settings",          // 2026-10-28：改回 lucide 图标名（底导航换 SvgIcon 渲染）。
+            // 旧方案是单汉字交给 Md3NavBar 的 Text 当字形画；那个 Text 没设 color，
+            // 深色主题下黑字看不见（实机截图实证）。参考图也是图标。
             entry: "pages/AgentSettingsPage.qml"
         },
         {
@@ -46,7 +48,7 @@ function _all() {
             scope: ["agent"],     // ⚠️ 必写！（理由同上）
             order: 2,
             title: "自检",
-            icon: "检",
+            icon: "circle-check",
             entry: "pages/AgentSelfCheckPage.qml"
         },
         {
@@ -55,7 +57,7 @@ function _all() {
             scope: ["agent"],     // ⚠️ 必写！
             order: 3,
             title: "插件",
-            icon: "件",
+            icon: "square",
             entry: "pages/AgentPluginsPage.qml"
         },
         {
@@ -64,7 +66,7 @@ function _all() {
             scope: ["agent"],     // ⚠️ 必写！
             order: 4,
             title: "记录",
-            icon: "录",
+            icon: "folder",
             roles: ["classroom"],  // 噪音/自习记录 = 教室现场采集，广播机不参与
             entry: "pages/AgentRecordsPage.qml"
         },
@@ -74,7 +76,7 @@ function _all() {
             scope: ["agent"],     // ⚠️ 必写！
             order: 5,
             title: "时段",
-            icon: "播",
+            icon: "hourglass",
             entry: "pages/AgentPlaySchedulePage.qml"
         },
         {
@@ -83,7 +85,7 @@ function _all() {
             scope: ["agent"],     // ⚠️ 同上：漏写会被门控全过滤
             order: 6,
             title: "广播社",
-            icon: "社",
+            icon: "users",
             // 广播社成员独立界面（2026-10-23 #广播站移交）：页内自带登录门，
             // 登录后只能看/排自己归属 station 的排期，不触及老师其它功能。
             entry: "pages/BroadcastClubPage.qml"

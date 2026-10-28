@@ -1,6 +1,11 @@
 import QtQuick
 import "../../components"
 import "../../components/md3" as M
+// 分类行真图标（2026-10-28 实机截图后补）：shared-qml/island/SvgIcon.qml，
+// 构建期拷到 qml/island/ ⇒ 相对路径两级。图标名由 C++ settingsSections 的
+// icon 字段给（sliders/layout-grid/bell/clock/download/rocket/info 七个资源都在），
+// 着色用同一项的 fg（选中/未选中已由 C++ 算好）。
+import "../../island"
 
 // 被控端 · 设置页（2026-10-28 模块三：按用户蓝图重做）
 //
@@ -128,13 +133,13 @@ Item {
                         anchors.leftMargin: 12
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 10
-                        // 图标位：现在用色块占位（被控端图标名有限，不硬凑）。
-                        // 选中时色块跟着变深，与文字同色系。
-                        Rectangle {
-                            width: 24; height: 24
-                            radius: 8
-                            color: modelData.fg
-                            opacity: 0.16
+                        // 图标：C++ 给的 icon 名 → 真 SVG（着色同 fg）。
+                        // 2026-10-28 实机截图前这里是 24×24 色块占位（注释写"图标名有限，
+                        // 不硬凑"），但七个图标资源其实全在，属于"占了位没接"的欠账。
+                        SvgIcon {
+                            name: modelData.icon
+                            tint: modelData.fg
+                            px: 20
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
