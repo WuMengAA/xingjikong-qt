@@ -45,11 +45,11 @@
       "plan": "[P3] 拆 DXGI 初始化/抓帧/错误恢复 | 2026-10-25 回写 690→700：登记值滞后，本批未改此文件（非本批批准变胖）"
     },
     "Stelarith-viewer-qt/src/main.cpp": {
-      "lines": 871,
+      "lines": 879,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P3] 拆 QML 引擎装配与 context 注入。#460 班级域 +5（classthumb provider 注册，2026-10-23） | 2026-10-28 回写 780→871（+91）：本批 —— ①班级中心控制器接线（B1 数据面三路 + 动作回传 + 指针 + 帧 tick）；②模块二 applyRole lambda（老师/管理员落点）。拆分候选：整段可搬进 ClassCenterBinder（与 viewerbackend 解耦）"
+      "plan": "[P3] 拆 QML 引擎装配与 context 注入。#460 班级域 +5（classthumb provider 注册，2026-10-23） | 2026-10-28 回写 780→871（+91）：本批 —— ①班级中心控制器接线（B1 数据面三路 + 动作回传 + 指针 + 帧 tick）；②模块二 applyRole lambda（老师/管理员落点）。拆分候选：整段可搬进 ClassCenterBinder（与 viewerbackend 解耦） | 2026-10-28 回写 871→879（+8）：关窗 0xC0000005 修复 —— ClassCenterController 声明前移到 engine 之前（局部对象逆序析构会悬垂，project 2026-10-21 已为 fileDlgs 立过同规则），另加原因注释 8 行。净 +8 全是注释+声明换位，无新逻辑"
     },
     "Stelarith-viewer-qt/src/schedule/profile.h": {
       "lines": 388,
@@ -94,11 +94,11 @@
       "plan": "[P2] 拆排期行组件/时间轴/拖拽三段；按日隔离+拖拽修复（2026-10-23 探针 25 断言全绿后登记）"
     },
     "Stelarith-control-qt/qml/shell/pages/AgentSettingsPage.qml": {
-      "lines": 785,
+      "lines": 790,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P3] 拆分组卡为子组件 | 2026-10-28 回写 380→785（+405）：本批重写 —— 按蓝图改「左侧分类 + 右侧内容」（七类：通用/主界面/通知与音量/自动化/更新/插件/关于与诊断），并把托盘右键的自检/插件/记录/时段/三个目录做成入口（ctx.goToId，不复制实现）。拆分计划升为 [P1]：七个分类各自抽成 Sec*.qml 子件（与 viewer 的 pages/settings/Sec*.qml 同构），抽出后本文件应回到 ~120 行骨架"
+      "plan": "[P3] 拆分组卡为子组件 | 2026-10-28 回写 380→785（+405）：本批重写 —— 按蓝图改「左侧分类 + 右侧内容」（七类：通用/主界面/通知与音量/自动化/更新/插件/关于与诊断），并把托盘右键的自检/插件/记录/时段/三个目录做成入口（ctx.goToId，不复制实现）。拆分计划升为 [P1]：七个分类各自抽成 Sec*.qml 子件（与 viewer 的 pages/settings/Sec*.qml 同构），抽出后本文件应回到 ~120 行骨架 | 2026-10-28 回写 785→790（+5）：分类行图标从 24×24 色块占位换成真 SvgIcon（+ import island 注释 3 行 + SvgIcon 组件 8 行 − 色块 8 行）；拆分计划仍是 [P1]（七个 Sec*.qml 子件）"
     },
     "Stelarith-viewer-qt/qml/components/AccountMenu.qml": {
       "lines": 308,
