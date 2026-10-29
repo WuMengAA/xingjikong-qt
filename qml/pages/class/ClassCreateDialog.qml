@@ -12,7 +12,7 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard
 import "../../island"               // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: dlg
@@ -25,7 +25,7 @@ Item {
     signal closed()
 
     /** 动效时长：令牌优先，({}) 兜底 200（与 ClassPublishDialog 同口径）。 */
-    readonly property int animDur: (Md3 && Md3.durShort !== undefined) ? Md3.durShort : 200
+    readonly property int animDur: (Md3 && Theme.motion.fast !== undefined) ? Theme.motion.fast : 200
 
     visible: opened
     anchors.fill: parent
@@ -102,14 +102,14 @@ Item {
                 SvgIcon {
                     name: "plus"
                     px: 16
-                    tint: Md3.frInk2 || "#6B7280"
+                    tint: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "新建班级"
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.weight: Font.Medium
-                    color: Md3.frInk || "#111827"
+                    color: Theme.color.textPrimary || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -119,8 +119,8 @@ Item {
                 width: parent.width
                 text: "给班级起个名字即可。建好后在右栏「班级管理」点「生成班级接入码」，"
                       + "把这串 6 位码给设备 —— 设备首启时输入即自动入班。"
-                font.pixelSize: Md3.bodyS
-                color: Md3.frInk2 || "#6B7280"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary || "#6B7280"
                 wrapMode: Text.WordWrap
                 lineHeight: 1.4
             }

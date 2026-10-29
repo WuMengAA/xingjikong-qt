@@ -6,7 +6,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../components"
-import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
@@ -24,23 +24,23 @@ Item {
         { k: "桌面被监控提示", s: "关闭后不显示「正在被监控」角标", on: false }
     ]
 
-    Rectangle { anchors.fill: parent; color: Md3.cContLowest }
+    Rectangle { anchors.fill: parent; color: Theme.color.background }
     Rectangle {
         anchors.fill: parent
         anchors.margins: 16
-        radius: Md3.rXL
-        color: Md3.cContLow
+        radius: Theme.radius.xl
+        color: Theme.color.background
         Column {
             anchors.left: parent.left; anchors.right: parent.right
             anchors.top: parent.top; anchors.margins: 28
             spacing: 18
 
-            Text { text: "本机设置"; font.pixelSize: Md3.headlineS; font.weight: Font.Medium; color: Md3.cOnSurface }
+            Text { text: "本机设置"; font.pixelSize: 16; font.weight: Font.Medium; color: Theme.color.textPrimary }
             Text {
                 width: parent.width
                 text: "这些开关只影响本机。关闭的项目云端不可见——是否需要「云端可强制打开」的策略，待学校确认。"
                 wrapMode: Text.Wrap
-                font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar
+                font.pixelSize: 12; color: Theme.color.textSecondary
             }
 
             // 开关组（AppCard + AppSwitchRow）
@@ -64,7 +64,7 @@ Item {
                             }
                             Rectangle {
                                 width: parent.width; height: 1
-                                color: Md3.cOutlineVar
+                                color: Theme.color.textSecondary
                                 visible: index < root.switches.length - 1
                             }
                         }

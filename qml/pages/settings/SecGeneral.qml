@@ -9,7 +9,7 @@
 import QtQuick
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Column {
     id: root
@@ -36,7 +36,7 @@ Column {
             width: parent.width
             text: "开机自启与桌面快捷方式在「个人中心 › 启动」里改 —— 那里和这里读写同一份设置。"
             wrapMode: Text.Wrap
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 13
         }
     }
@@ -54,7 +54,7 @@ Column {
                   "缓存（缩略图、课表档案副本）在 %LOCALAPPDATA%\\StarLiith\\viewer\\ 下。" +
                   "换机迁移时带上这两个目录即可保留全部本机设置。"
             wrapMode: Text.Wrap
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 13
         }
     }
@@ -74,7 +74,7 @@ Column {
                   "· 时间源配置：已有 NTP 校时与课表对时，但没有暴露成可配项。\n" +
                   "· 存储与备份（导出/导入设置包）：未实现。"
             wrapMode: Text.Wrap
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 12
             lineHeight: 1.5
         }

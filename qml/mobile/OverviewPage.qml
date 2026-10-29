@@ -4,7 +4,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../components"         // AppCard
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: page
@@ -30,11 +30,11 @@ Item {
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 2
-                        Text { text: "教室在线"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
+                        Text { text: "教室在线"; color: Theme.color.textSecondary; font.pixelSize: 14 }
                         Text {
                             text: backend.onlineCount + " 台"
-                            color: Md3.cOnSurface
-                            font.pixelSize: Md3.displayS
+                            color: Theme.color.textPrimary
+                            font.pixelSize: 20
                             font.weight: Font.Medium
                         }
                     }
@@ -42,11 +42,11 @@ Item {
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 2
-                        Text { text: "设备总数"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
+                        Text { text: "设备总数"; color: Theme.color.textSecondary; font.pixelSize: 14 }
                         Text {
                             text: backend.devices.length + " 台"
-                            color: Md3.cOnSurface
-                            font.pixelSize: Md3.titleL
+                            color: Theme.color.textPrimary
+                            font.pixelSize: 20
                         }
                     }
                 }
@@ -61,11 +61,11 @@ Item {
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 2
-                        Text { text: "连接状态"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
+                        Text { text: "连接状态"; color: Theme.color.textSecondary; font.pixelSize: 14 }
                         Text {
                             text: backend.loggedIn ? (backend.connected ? "云端就绪" : "连接断开") : "未登录"
-                            color: backend.connected ? Md3.cOk : Md3.cError
-                            font.pixelSize: Md3.titleM
+                            color: backend.connected ? Theme.color.success : Theme.color.destructive
+                            font.pixelSize: 16
                             font.weight: Font.Medium
                         }
                     }
@@ -73,11 +73,11 @@ Item {
                     Column {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 2
-                        Text { text: "账户"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
+                        Text { text: "账户"; color: Theme.color.textSecondary; font.pixelSize: 14 }
                         Text {
                             text: backend.accountName ? backend.accountName : "未登录"
-                            color: Md3.cOnSurface
-                            font.pixelSize: Md3.bodyM
+                            color: Theme.color.textPrimary
+                            font.pixelSize: 14
                             elide: Text.ElideRight
                             width: 90
                         }
@@ -89,8 +89,8 @@ Item {
                 text: "手机端为管理端伴侣：查看教室状态、发轻指令。\n远控 / 语音 / 广播 / 课表请用桌面管理端。"
                 width: parent.width
                 wrapMode: Text.Wrap
-                color: Md3.cOutline
-                font.pixelSize: Md3.bodyS
+                color: Theme.color.textSecondary
+                font.pixelSize: 12
             }
         }
     }

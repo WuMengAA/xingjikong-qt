@@ -7,7 +7,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -25,8 +25,8 @@ SettingsCard {
         visible: updater.message !== ""
         text: updater.message
         color: updater.state === "failed"
-               ? (Md3.cOnSurface)
-               : (Md3.cOnSurfaceVar)
+               ? (Theme.color.textPrimary)
+               : (Theme.color.textSecondary)
         font.pixelSize: 12
         font.bold: updater.state === "failed"
     }
@@ -41,7 +41,7 @@ SettingsCard {
               ? ("更新说明：" + updater.notes +
                  "（" + (updater.sizeBytes / 1048576).toFixed(1) + " MB）")
               : ("更新说明：" + updater.notes)
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
     }
 

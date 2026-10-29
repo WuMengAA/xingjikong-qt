@@ -12,7 +12,7 @@
 // 事件原样抛回——本页不写 backend、不改宿主状态（选择路径只有一条）。
 import QtQuick
 import QtQuick.Layouts
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: page
@@ -39,7 +39,7 @@ Item {
         ColumnLayout {
             id: col
             width: flick.width
-            spacing: Md3.spM
+            spacing: Theme.spacing.md
 
             DashDeviceSection {
                 Layout.fillWidth: true

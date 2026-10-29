@@ -14,7 +14,7 @@
 // 猜错=挂错班，所以：群不猜、名字不可信时明说不可信。
 import QtQuick
 import "../../components/fresh"  // FreshCard
-import "../../components/theme"  // Md3 令牌（pragma Singleton）
+import "../../components/theme"  // Theme 设计令牌单例（pragma Singleton）
 import "../../island"            // SvgIcon
 
 Item {
@@ -166,16 +166,16 @@ Item {
                             width: Math.max(56, (dayRow.width - (pane.days.length - 1) * 6)
                                                 / Math.max(1, pane.days.length))
                             height: 28
-                            radius: Md3.rS
-                            color: index === pane.dayIdx ? (Md3.frGreenSoft || "#E9FBF0") : "transparent"
+                            radius: Theme.radius.sm
+                            color: index === pane.dayIdx ? (Theme.color.surfaceVariant || "#E9FBF0") : "transparent"
                             border.width: index === pane.dayIdx ? 1 : 0
-                            border.color: Md3.frGreen || "#22C55E"
+                            border.color: Theme.color.success || "#22C55E"
                             Text {
                                 anchors.centerIn: parent
                                 text: (modelData.name || "") + " " + ((modelData.lessons || []).length)
-                                font.pixelSize: Md3.body13
-                                color: index === pane.dayIdx ? (Md3.frGreenD || "#16A34A")
-                                                             : (Md3.frInk2 || "#6B7280")
+                                font.pixelSize: 13
+                                color: index === pane.dayIdx ? (Theme.color.success || "#16A34A")
+                                                             : (Theme.color.textSecondary || "#6B7280")
                             }
                             MouseArea {
                                 anchors.fill: parent

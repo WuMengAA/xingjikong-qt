@@ -11,7 +11,7 @@
 import QtQuick
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -26,7 +26,7 @@ SettingsCard {
     Text {
         width: parent.width
         text: "主题"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 13
     }
     Row {
@@ -46,7 +46,7 @@ SettingsCard {
     Rectangle {
         width: parent.width
         height: 1
-        color: Md3.cOutlineVar
+        color: Theme.color.textSecondary
         opacity: 0.6
     }
 
@@ -54,7 +54,7 @@ SettingsCard {
     Text {
         width: parent.width
         text: "以下各项代码里还没有，先列清楚免得反复问："
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 13
         font.weight: Font.Medium
     }
@@ -67,7 +67,7 @@ SettingsCard {
               "拖拽排序要先改这套注册机制。\n" +
               "· 窗口置顶 / 除全屏 / 保全屏 / 最大化：未实现为可配项（当前是固定行为）。"
         wrapMode: Text.Wrap
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
         lineHeight: 1.5
     }

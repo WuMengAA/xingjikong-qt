@@ -9,7 +9,7 @@
 //   真帧订阅与在线/离线文案逻辑**完全不变**（纪律：不退回点阵占位）。
 import QtQuick
 import "../island"          // SvgIcon
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: root
@@ -33,10 +33,10 @@ Item {
     Rectangle {
         id: cardBg
         anchors.fill: parent
-        radius: Md3.rL
-        color: Md3.cContLowest
+        radius: Theme.radius.lg
+        color: Theme.color.background
         border.width: root.selected ? 1.5 : 1
-        border.color: root.selected ? Md3.cPrimary : Md3.cOutlineVar
+        border.color: root.selected ? Theme.color.primary : Theme.color.textSecondary
         z: 1
     }
 
@@ -44,14 +44,14 @@ Item {
     Rectangle {
         anchors.fill: cardBg
         anchors.topMargin: 6
-        radius: Md3.rL
+        radius: Theme.radius.lg
         color: Qt.rgba(0, 0, 0, 0.05)
         z: 0
     }
     Rectangle {
         anchors.fill: cardBg
         anchors.topMargin: 2
-        radius: Md3.rL
+        radius: Theme.radius.lg
         color: Qt.rgba(0, 0, 0, 0.04)
         z: 0
     }
@@ -59,10 +59,10 @@ Item {
     // 选中态主色薄雾（状态层之上、内容之下的半透 primary wash）
     Rectangle {
         anchors.fill: cardBg
-        radius: Md3.rL
-        color: Md3.cPrimary
+        radius: Theme.radius.lg
+        color: Theme.color.primary
         opacity: root.selected ? 0.06 : 0
-        Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
+        Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
         z: 2
     }
 
@@ -70,10 +70,10 @@ Item {
     Rectangle {
         id: stateLayer
         anchors.fill: cardBg
-        radius: Md3.rL
-        color: Md3.cOnSurface
+        radius: Theme.radius.lg
+        color: Theme.color.textPrimary
         opacity: root._stateOpacity
-        Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
+        Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
         z: 2
     }
 
@@ -89,7 +89,7 @@ Item {
         anchors.topMargin: 18
         anchors.bottomMargin: 18
         anchors.leftMargin: 5
-        color: Md3.cAccent
+        color: Theme.color.accent
         z: 3
     }
 
@@ -107,8 +107,8 @@ Item {
             Rectangle {
                 width: parent.width
                 height: 72
-                radius: Md3.rS
-                color: Md3.cCont
+                radius: Theme.radius.sm
+                color: Theme.color.surfaceVariant
                 clip: true
 
                 Image {
@@ -129,8 +129,8 @@ Item {
                     anchors.centerIn: parent
                     visible: !root.online
                     text: "未开机"
-                    font.pixelSize: Md3.bodyS
-                    color: Md3.cOutline
+                    font.pixelSize: 12
+                    color: Theme.color.textSecondary
                 }
 
                 // 在线徽标点（右下角，与卡片状态一致，不编造帧率数字）
@@ -138,7 +138,7 @@ Item {
                     width: 8
                     height: 8
                     radius: 4
-                    color: root.online ? Md3.cOk : Md3.cOutline
+                    color: root.online ? Theme.color.success : Theme.color.textSecondary
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.margins: 6
@@ -148,9 +148,9 @@ Item {
             Text {
                 width: parent.width
                 text: root.deviceName !== "" ? root.deviceName : root.uid
-                font.pixelSize: Md3.body13
+                font.pixelSize: 13
                 font.weight: Font.Medium
-                color: Md3.cOnSurface
+                color: Theme.color.textPrimary
                 elide: Text.ElideRight
             }
 
@@ -163,9 +163,9 @@ Item {
                     return root.lastSeenAgoSec < 60 ? "刚断线"
                            : Math.floor(root.lastSeenAgoSec / 60) + " 分前"
                 }
-                font.pixelSize: Md3.bodyS
+                font.pixelSize: 12
                 font.family: (root.online && root.version !== "") ? "monospace" : ""
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 elide: Text.ElideRight
             }
         }
@@ -176,10 +176,10 @@ Item {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
         hoverEnabled: true
-        onEntered: root._stateOpacity = Md3.stHover
+        onEntered: root._stateOpacity = 0.08
         onExited: root._stateOpacity = 0
-        onPressed: root._stateOpacity = Md3.stPress
-        onReleased: root._stateOpacity = (cardMa.containsMouse ? Md3.stHover : 0)
+        onPressed: root._stateOpacity = 0.10
+        onReleased: root._stateOpacity = (cardMa.containsMouse ? 0.08 : 0)
         onClicked: root.clicked()
         z: 5
     }

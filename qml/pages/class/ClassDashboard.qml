@@ -10,7 +10,7 @@
 // ── 竖屏：三栏竖排，中段以下进 Flickable；去集控页走 openControlFn（未注入回落 goPage(1)）。
 // ── 展板 ── 全屏=boardMode 隐藏左右栏；「发布到展板」与右栏共用同一个页级弹窗。
 import QtQuick
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: dash
@@ -92,7 +92,7 @@ Item {
     Row {
         anchors.fill: parent
         visible: !dash.portrait
-        spacing: dash.boardMode ? 0 : (Md3.spM)
+        spacing: dash.boardMode ? 0 : (Theme.spacing.md)
 
         // 左：身份与订阅态（260→240：给中栏让 20px，见 narrow 注释）
         ClassIdentityPane {
@@ -110,7 +110,7 @@ Item {
             id: midPane
             width: dash.boardMode
                    ? dash.width
-                   : Math.max(240, dash.width - 240 - 300 - (Md3.spM) * 2)
+                   : Math.max(240, dash.width - 240 - 300 - (Theme.spacing.md) * 2)
             height: parent.height
             deviceModel: dash.devModel
             evModel: dash.evModel

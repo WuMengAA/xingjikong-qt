@@ -14,7 +14,7 @@
 // 班级切换走 TopBar 的「全部班级」下拉。
 import QtQuick
 import QtQuick.Layouts
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 import "ClassSort.js" as ClassSort
 
 Item {
@@ -39,7 +39,7 @@ Item {
     readonly property var sortedClasses: ClassSort.byName(nav.classes)
 
     readonly property int navWidth: 240
-    readonly property int padX: Md3.spM
+    readonly property int padX: Theme.spacing.md
 
     implicitWidth: navWidth
     Layout.fillHeight: true
@@ -65,7 +65,7 @@ Item {
         return { on: on, all: all }
     }
 
-    Rectangle { anchors.fill: parent; color: Md3.cSurfaceVar}
+    Rectangle { anchors.fill: parent; color: Theme.color.surfaceVariant}
 
     // 右缘发丝线（与主内容区分界）
     Rectangle {
@@ -73,7 +73,7 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
-        color: Md3.cOutlineVar
+        color: Theme.color.textSecondary
         opacity: 0.5
     }
 
@@ -91,9 +91,9 @@ Item {
                 anchors.leftMargin: nav.padX
                 anchors.verticalCenter: parent.verticalCenter
                 text: "星集控"
-                font.pixelSize: Md3.titleM
+                font.pixelSize: 16
                 font.weight: Font.Medium
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
             }
         }
 
@@ -107,15 +107,15 @@ Item {
 
             Text {
                 text: "班级"
-                font.pixelSize: Md3.labelS
-                color: Md3.cOutline
+                font.pixelSize: 11
+                color: Theme.color.textSecondary
             }
             Item { Layout.fillWidth: true }
             Text {
                 visible: nav.classesFiltered
                 text: "仅我带的班"
-                font.pixelSize: Md3.labelS
-                color: Md3.cPrimary
+                font.pixelSize: 11
+                color: Theme.color.primary
             }
         }
 
@@ -128,9 +128,9 @@ Item {
             Layout.leftMargin: nav.padX
             visible: classList.count === 0
             text: "还没有班级\n去「班级工作台」新建"
-            font.pixelSize: Md3.bodyS
+            font.pixelSize: 12
             wrapMode: Text.WordWrap
-            color: Md3.cOutline
+            color: Theme.color.textSecondary
         }
 
         ListView {
@@ -160,7 +160,7 @@ Item {
             Layout.topMargin: 8
             Layout.bottomMargin: 4
             height: 1
-            color: Md3.cOutlineVar
+            color: Theme.color.textSecondary
             opacity: 0.6
         }
 
@@ -186,8 +186,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 // lucide 无 arrow-left（原 Sidebar 那里一直画成空白），用「‹」汉字位形更稳
                 text: "‹  返回经典界面"
-                font.pixelSize: Md3.bodyM
-                color: Md3.cOnSurfaceVar
+                font.pixelSize: 14
+                color: Theme.color.textSecondary
             }
             MouseArea {
                 anchors.fill: parent

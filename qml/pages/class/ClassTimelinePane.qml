@@ -14,7 +14,7 @@ import QtQuick
 import QtQuick.Controls          // ScrollBar
 import "../../components/fresh"    // FreshCard
 import "../../island"               // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: pane
@@ -61,8 +61,8 @@ Item {
             delegate: Rectangle {
                 width: list.width
                 height: row.implicitHeight + 12
-                radius: Md3.frRIn
-                color: evMa.containsMouse ? Md3.frLine || "#EEF0F3" : "transparent"
+                radius: Theme.radius.md
+                color: evMa.containsMouse ? Theme.color.surfaceVariant || "#EEF0F3" : "transparent"
 
                 Row {
                     id: row
@@ -73,9 +73,9 @@ Item {
                     // 时间（等宽，事件流的"刻度"）
                     Text {
                         text: pane.hhmm(model.at)
-                        font.pixelSize: Md3.bodyS
+                        font.pixelSize: 12
                         font.family: "monospace"
-                        color: Md3.frInk2 || "#6B7280"
+                        color: Theme.color.textSecondary || "#6B7280"
                         anchors.verticalCenter: parent.verticalCenter
                     }
 
@@ -83,9 +83,9 @@ Item {
                         property var st: pane.kindStyle(model.kind, model.isMember)
                         name: st.icon
                         px: 14
-                        tint: st.tint === "ok" ? (Md3.frGreen || "#22C55E")
-                              : st.tint === "out" ? (Md3.frOffDot || "#9CA3AF")
-                              : (Md3.cInfo || "#3B82F6")
+                        tint: st.tint === "ok" ? (Theme.color.success || "#22C55E")
+                              : st.tint === "out" ? (Theme.color.textSecondary || "#9CA3AF")
+                              : (Theme.color.textSecondary || "#3B82F6")
                         anchors.verticalCenter: parent.verticalCenter
                     }
 
@@ -97,8 +97,8 @@ Item {
                         Text {
                             width: parent.width
                             text: pane.kindStyle(model.kind, model.isMember).label
-                            font.pixelSize: Md3.body13
-                            color: Md3.frInk || "#111827"
+                            font.pixelSize: 13
+                            color: Theme.color.textPrimary || "#111827"
                             elide: Text.ElideRight
                         }
                         // 第二行：设备名位（uid）+ detail 里的人话（离线原因 / 发布标题）
@@ -107,8 +107,8 @@ Item {
                             property string sub: pane.subText(model.kind, model.uid, model.detail)
                             visible: sub !== ""
                             text: sub
-                            font.pixelSize: Md3.bodyS
-                            color: Md3.frInk2 || "#6B7280"
+                            font.pixelSize: 12
+                            color: Theme.color.textSecondary || "#6B7280"
                             elide: Text.ElideRight
                         }
                     }
@@ -133,19 +133,19 @@ Item {
             SvgIcon {
                 name: "clock"
                 px: 36
-                tint: Md3.frOffDot || "#9CA3AF"
+                tint: Theme.color.textSecondary || "#9CA3AF"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
             Text {
                 text: "暂无班级动态"
-                font.pixelSize: Md3.body13
-                color: Md3.frInk2 || "#6B7280"
+                font.pixelSize: 13
+                color: Theme.color.textSecondary || "#6B7280"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
             Text {
                 text: "设备上下线等事件会实时出现在这里"
-                font.pixelSize: Md3.bodyS
-                color: Md3.frOffDot || "#9CA3AF"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary || "#9CA3AF"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
         }

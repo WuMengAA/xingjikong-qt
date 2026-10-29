@@ -16,7 +16,7 @@
 import QtQuick
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -30,7 +30,7 @@ SettingsCard {
     Text {
         width: parent.width
         text: "规则在哪管"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 13
         font.weight: Font.Medium
     }
@@ -42,7 +42,7 @@ SettingsCard {
               "支持的动作：通知 / 设置音量 / 静音 / 取消静音 / 锁屏 / 截图 / 启动指定程序 ——" +
               "全部复用既有指令白名单，没有新增权限面。"
         wrapMode: Text.Wrap
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
         lineHeight: 1.5
     }
@@ -50,14 +50,14 @@ SettingsCard {
     Rectangle {
         width: parent.width
         height: 1
-        color: Md3.cOutlineVar
+        color: Theme.color.textSecondary
         opacity: 0.6
     }
 
     Text {
         width: parent.width
         text: "管理端批量下发（未接线）"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 13
         font.weight: Font.Medium
     }
@@ -67,7 +67,7 @@ SettingsCard {
               "被控端侧的执行分支也已落地；缺的是**管理端这一侧的 UI 与云端按班分发**。\n\n" +
               "在它接线之前，别在这里摆一个空表格 —— 老师会以为规则丢了。"
         wrapMode: Text.Wrap
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
         lineHeight: 1.5
     }

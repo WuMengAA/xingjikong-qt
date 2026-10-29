@@ -4,7 +4,7 @@
 // 班名 + 在线/总数 + 选中态（工业青左规 + secondaryContainer 底）。
 // 计数由调用方算好传入（countOf 在 ClassNav，那里才有 devices）。
 import QtQuick
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Rectangle {
     id: row
@@ -18,14 +18,14 @@ Rectangle {
     signal clicked()
 
     readonly property int rowH: 44
-    readonly property int padX: Md3.spM
+    readonly property int padX: Theme.spacing.md
 
     height: rowH
-    radius: Md3.rM
+    radius: Theme.radius.md
     color: active
-           ? (Md3.cSecondaryCont)
-           : (ma.containsMouse ? (Md3.cContHigh) : "transparent")
-    Behavior on color { ColorAnimation { duration: Md3.durShort} }
+           ? (Theme.color.primary)
+           : (ma.containsMouse ? (Theme.color.surface) : "transparent")
+    Behavior on color { ColorAnimation { duration: Theme.motion.fast} }
 
     // 选中态：终末地工业青左规（与 Sidebar 同一语言）
     Rectangle {
@@ -38,7 +38,7 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.topMargin: 12
         anchors.bottomMargin: 12
-        color: Md3.cAccent
+        color: Theme.color.accent
     }
 
     Text {
@@ -49,11 +49,11 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         text: row.name !== "" ? row.name : row.code
         elide: Text.ElideRight
-        font.pixelSize: Md3.body13
+        font.pixelSize: 13
         font.weight: row.active ? Font.Medium : Font.Normal
         color: row.active
-               ? (Md3.cOnSecondaryCont)
-               : (Md3.cOnSurface)
+               ? (Theme.color.primaryForeground)
+               : (Theme.color.textPrimary)
     }
 
     // 人数读数：等宽字（技术读数），有在线才染色，否则灰
@@ -63,11 +63,11 @@ Rectangle {
         anchors.rightMargin: row.padX
         anchors.verticalCenter: parent.verticalCenter
         text: row.onCount + "/" + row.totalCount
-        font.pixelSize: Md3.labelS
+        font.pixelSize: 11
         font.family: "monospace"
         color: row.onCount > 0
-               ? (Md3.cOk)
-               : (Md3.cOutline)
+               ? (Theme.color.success)
+               : (Theme.color.textSecondary)
     }
 
     MouseArea {

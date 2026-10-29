@@ -9,7 +9,7 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshPill
 import "../../island"              // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: pane
@@ -45,9 +45,9 @@ Item {
 
                 Text {
                     text: pane.nameText !== "" ? pane.nameText : "未选择班级"
-                    font.pixelSize: Md3.titleM
+                    font.pixelSize: 16
                     font.weight: Font.Medium
-                    color: Md3.frInk || "#111827"
+                    color: Theme.color.textPrimary || "#111827"
                     elide: Text.ElideRight
                     width: parent.width - 80
                     anchors.verticalCenter: parent.verticalCenter
@@ -64,9 +64,9 @@ Item {
                 width: parent.width
                 visible: pane.codeText !== ""
                 text: "班级代码  " + pane.codeText
-                font.pixelSize: Md3.bodyS
+                font.pixelSize: 12
                 font.family: "monospace"
-                color: Md3.frInk2 || "#6B7280"
+                color: Theme.color.textSecondary || "#6B7280"
                 elide: Text.ElideRight
             }
 
@@ -77,14 +77,14 @@ Item {
 
                 Text {
                     text: pane.onlineN
-                    font.pixelSize: Md3.headlineS
+                    font.pixelSize: 16
                     font.weight: Font.Medium
-                    color: Md3.frGreen || "#22C55E"
+                    color: Theme.color.success || "#22C55E"
                 }
                 Text {
                     text: "台在线 · 共 " + pane.deviceN + " 台"
-                    font.pixelSize: Md3.body13
-                    color: Md3.frInk2 || "#6B7280"
+                    font.pixelSize: 13
+                    color: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -94,8 +94,8 @@ Item {
                 width: parent.width
                 visible: pane.errText !== ""
                 height: errRow.implicitHeight + 20
-                radius: Md3.frRIn
-                color: Md3.frDangerSoft
+                radius: Theme.radius.md
+                color: Theme.color.surfaceVariant
 
                 Row {
                     id: errRow
@@ -106,13 +106,13 @@ Item {
                     SvgIcon {
                         name: "triangle-alert"
                         px: 16
-                        tint: Md3.frDanger || "#EF4444"
+                        tint: Theme.color.destructive || "#EF4444"
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: pane.errText
-                        font.pixelSize: Md3.body13
-                        color: Md3.cOnErrorCont
+                        font.pixelSize: 13
+                        color: Theme.color.destructiveForeground
                         wrapMode: Text.WordWrap
                         width: parent.width - 24
                         anchors.verticalCenter: parent.verticalCenter

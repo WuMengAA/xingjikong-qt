@@ -5,7 +5,7 @@
 import QtQuick
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -27,7 +27,7 @@ SettingsCard {
             Text {
                 id: t0
                 text: "云端"
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 13
                 width: 70
             }
@@ -36,7 +36,7 @@ SettingsCard {
                 anchors.right: parent.right
                 text: backend.cloudUrl
                 elide: Text.ElideRight
-                color: Md3.cPrimary
+                color: Theme.color.primary
                 font.pixelSize: 13
             }
         }
@@ -47,7 +47,7 @@ SettingsCard {
             Text {
                 id: t1
                 text: "状态"
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 13
                 width: 70
             }
@@ -57,8 +57,8 @@ SettingsCard {
                 // 术语换日常词：不出现协议名
                 text: backend.connected ? "连接正常" : "连不上云端"
                 color: backend.connected
-                       ? (Md3.cPrimary)
-                       : (Md3.cError)
+                       ? (Theme.color.primary)
+                       : (Theme.color.destructive)
                 font.pixelSize: 13
             }
         }
@@ -69,7 +69,7 @@ SettingsCard {
             Text {
                 id: t2
                 text: "账号"
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 13
                 width: 70
             }
@@ -79,7 +79,7 @@ SettingsCard {
                 anchors.right: parent.right
                 wrapMode: Text.Wrap
                 text: backend.accountText
-                color: Md3.cPrimary
+                color: Theme.color.primary
                 font.pixelSize: 13
             }
         }
@@ -98,7 +98,7 @@ SettingsCard {
         Text {
             anchors.centerIn: parent
             text: "点这里用网站账号登录"
-            color: Md3.cPrimary
+            color: Theme.color.primary
             font.pixelSize: 13
         }
     }

@@ -9,7 +9,7 @@
 import QtQuick
 import "../../components/fresh"   // FreshCard / FreshBtn
 import "../../island"             // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: card
@@ -35,14 +35,14 @@ Item {
                 SvgIcon {
                     name: "rocket"
                     px: 16
-                    tint: Md3.frGreen || "#22C55E"
+                    tint: Theme.color.success || "#22C55E"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "上手三步"
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.weight: Font.Medium
-                    color: Md3.frInk || "#111827"
+                    color: Theme.color.textPrimary || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -65,22 +65,22 @@ Item {
                         width: 20
                         height: 20
                         radius: 10
-                        color: Md3.frGreenSoft || "#E9FBF0"
+                        color: Theme.color.surfaceVariant || "#E9FBF0"
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {
                             anchors.centerIn: parent
                             text: modelData.n
-                            font.pixelSize: Md3.bodyS
+                            font.pixelSize: 12
                             font.weight: Font.Medium
-                            color: Md3.frGreenD || "#16A34A"
+                            color: Theme.color.success || "#16A34A"
                         }
                     }
                     Text {
                         text: modelData.t
                         width: parent.width - 28
-                        font.pixelSize: Md3.bodyS
-                        color: Md3.frInk2 || "#6B7280"
+                        font.pixelSize: 12
+                        color: Theme.color.textSecondary || "#6B7280"
                         wrapMode: Text.WordWrap
                         anchors.verticalCenter: parent.verticalCenter
                     }

@@ -14,7 +14,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../island"          // SvgIcon（lucide 图标名，禁 emoji）
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: root
@@ -32,7 +32,7 @@ Item {
     // 底色与横屏侧栏同源（surfaceContainer 一档），保证两种模式"同一块板"
     Rectangle {
         anchors.fill: parent
-        color: Md3.cCont
+        color: Theme.color.surfaceVariant
     }
     // 顶部发丝线（与 TopBar 底部那条同口径，弱分隔不抢画）
     Rectangle {
@@ -40,7 +40,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         height: 1
-        color: Md3.cOutlineVar
+        color: Theme.color.textSecondary
         opacity: 0.5
     }
 
@@ -64,14 +64,14 @@ Item {
                     width: 64
                     height: 32
                     radius: 16
-                    color: on ? (Md3.cSecondaryCont) : "transparent"
-                    Behavior on color { ColorAnimation { duration: Md3.durShort} }
+                    color: on ? (Theme.color.primary) : "transparent"
+                    Behavior on color { ColorAnimation { duration: Theme.motion.fast} }
                     SvgIcon {
                         anchors.centerIn: parent
                         name: modelData.icon
                         px: 20
-                        tint: on ? (Md3.cOnSecondaryCont)
-                                : (Md3.cOnSurfaceVar)
+                        tint: on ? (Theme.color.primaryForeground)
+                                : (Theme.color.textSecondary)
                     }
                 }
                 Text {
@@ -79,10 +79,10 @@ Item {
                     anchors.top: parent.top
                     anchors.topMargin: 48
                     text: modelData.label
-                    font.pixelSize: Md3.labelM
+                    font.pixelSize: 14
                     font.weight: Font.Medium
-                    color: on ? (Md3.cOnSurface)
-                            : (Md3.cOnSurfaceVar)
+                    color: on ? (Theme.color.textPrimary)
+                            : (Theme.color.textSecondary)
                 }
                 MouseArea {
                     anchors.fill: parent

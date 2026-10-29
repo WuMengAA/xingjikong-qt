@@ -5,7 +5,7 @@
 // 本模板演示全屏态的 MD3 形态：severity 着色 + 来源信息 + 倒计时条 + 单按钮。
 import QtQuick
 import "../components"
-import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
@@ -21,17 +21,17 @@ Item {
     property string body: "请各班同学停止当前操作，回到座位准备。广播站将于 09:55 播放第三套广播体操。"
     property string source: "广播站 · 教务处"
 
-    readonly property color sevColor: root.severity === "urgent" ? Md3.cError
-                                     : (root.severity === "remind" ? Md3.cOk : Md3.cWarn)
+    readonly property color sevColor: root.severity === "urgent" ? Theme.color.destructive
+                                     : (root.severity === "remind" ? Theme.color.success : Theme.color.warning)
 
-    Rectangle { anchors.fill: parent; color: Md3.cContLowest }
+    Rectangle { anchors.fill: parent; color: Theme.color.background }
 
     // 全屏卡（severity 淡染 + 左侧色条）
     Rectangle {
         anchors.centerIn: parent
         width: 880; height: 480
-        radius: Md3.rXL
-        color: Md3.cContLow
+        radius: Theme.radius.xl
+        color: Theme.color.background
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
@@ -64,8 +64,8 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.title
-                    font.pixelSize: Md3.headlineM; font.weight: Font.Medium
-                    color: Md3.cOnSurface
+                    font.pixelSize: 20; font.weight: Font.Medium
+                    color: Theme.color.textPrimary
                 }
             }
 
@@ -74,18 +74,18 @@ Item {
                 width: parent.width
                 text: root.body
                 wrapMode: Text.Wrap
-                font.pixelSize: Md3.bodyL
-                color: Md3.cOnSurfaceVar
+                font.pixelSize: 14
+                color: Theme.color.textSecondary
             }
 
             // 来源
             Row {
                 spacing: 8
-                Text { text: "来自："; font.pixelSize: Md3.bodyS; color: Md3.cOutline; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: "来自："; font.pixelSize: 12; color: Theme.color.textSecondary; anchors.verticalCenter: parent.verticalCenter }
                 Rectangle {
                     width: srcTxt.implicitWidth + 24; height: 28; radius: 14
-                    color: Md3.cSecondaryCont
-                    Text { id: srcTxt; anchors.centerIn: parent; text: root.source; font.pixelSize: Md3.labelM; font.weight: Font.Medium; color: Md3.cOnSecondaryCont }
+                    color: Theme.color.primary
+                    Text { id: srcTxt; anchors.centerIn: parent; text: root.source; font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.primaryForeground }
                 }
             }
         }
@@ -98,7 +98,7 @@ Item {
             spacing: 8
             Rectangle {
                 width: parent.width; height: 6; radius: 3
-                color: Md3.cContHighest
+                color: Theme.color.surfaceVariant
                 Rectangle {
                     width: parent.width * 0.62
                     height: parent.height; radius: 3
@@ -107,7 +107,7 @@ Item {
             }
             Text {
                 text: root.remainSec + " 秒后自动关闭"
-                font.pixelSize: Md3.labelM; color: Md3.cOnSurfaceVar
+                font.pixelSize: 14; color: Theme.color.textSecondary
             }
         }
 

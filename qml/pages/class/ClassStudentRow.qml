@@ -6,7 +6,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: row
@@ -23,7 +23,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: 8
-        color: row.hovered ? (Md3.cContHigh) : "transparent"
+        color: row.hovered ? (Theme.color.surface) : "transparent"
 
         RowLayout {
             anchors.fill: parent
@@ -34,14 +34,14 @@ Item {
             Text {
                 Layout.preferredWidth: 30
                 text: (row.student.seat === undefined || row.student.seat === "") ? "—" : row.student.seat
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 12
             }
             Text {
                 Layout.fillWidth: true
                 text: row.student.name === undefined ? "" : row.student.name
                 elide: Text.ElideRight
-                color: Md3.cOnSurface
+                color: Theme.color.textPrimary
                 font.pixelSize: 13
             }
             Text {
@@ -49,7 +49,7 @@ Item {
                 text: (row.student.studentNo === undefined || row.student.studentNo === "")
                       ? "无学号" : row.student.studentNo
                 elide: Text.ElideRight
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 12
             }
             Btn {

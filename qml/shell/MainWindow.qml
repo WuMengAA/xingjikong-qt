@@ -49,7 +49,7 @@ import "../pages/dashboard"     // DashPage（仪表盘三件）
 //   旧的单班三栏工作台（ClassDashboard 及其 20 余个子件）已下线，班级中心改为
 //   Loader 按路径直接加载 ClassCenterPage.qml，不需要把整个目录注册成类型模块。
 import "../island"             // SvgIcon
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 import QtShadcn                // 2026-10-29 UI 全量替换 P0：shadcn 组件 + 主题入口
 
 Item {
@@ -67,8 +67,8 @@ Item {
     // ⚠️ ThemeManager 只开放 `primary` 一个覆写口（其余 token 只读，
     //    见 third_party/qtshadcn/src/core/thememanager.h）⇒ 只对齐主色 + 明暗，
     //    **不去改三方 C++ 的 rebuildTokens()**（那属于在别人地基上叠补丁，换版本必丢）。
-    Binding { target: ThemeManager; property: "mode"; value: Md3.dark ? "dark" : "light" }
-    Binding { target: ThemeManager; property: "primary"; value: Md3.dark ? "#D0BCFF" : "#6750A4" }
+    Binding { target: ThemeManager; property: "mode"; value: Theme.dark ? "dark" : "light" }
+    Binding { target: ThemeManager; property: "primary"; value: Theme.dark ? "#D0BCFF" : "#6750A4" }
 
     property var ctx
 

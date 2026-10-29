@@ -5,24 +5,24 @@
 // 与 MaterialLab（MD3 组件库验收）、LayoutLab（布局模板验收）并列的第三张验收页。
 import QtQuick
 import "components"
-import "components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
     width: 480; height: 640
     property bool dark: false
 
-    Rectangle { anchors.fill: parent; color: Md3.cSurface }
+    Rectangle { anchors.fill: parent; color: Theme.color.surface }
 
     Column {
         anchors.left: parent.left; anchors.right: parent.right
         anchors.top: parent.top; anchors.margins: 20
         spacing: 18
 
-        Text { text: "旧 API → MD3 组件升级验证"; font.pixelSize: Md3.titleL; font.weight: Font.Medium; color: Md3.cOnSurface }
+        Text { text: "旧 API → MD3 组件升级验证"; font.pixelSize: 20; font.weight: Font.Medium; color: Theme.color.textPrimary }
 
         // ── Btn：默认(outlined) / strong(filled) / disabled ──
-        Text { text: "Btn（旧 API：theme/text/strong/disabled/tip）"; font.pixelSize: Md3.labelM; color: Md3.cOnSurfaceVar }
+        Text { text: "Btn（旧 API：theme/text/strong/disabled/tip）"; font.pixelSize: 14; color: Theme.color.textSecondary }
         Row {
             spacing: 10
             Btn { theme: Md3; width: 130; text: "默认 outlined"; tip: "悬停有提示" }
@@ -35,11 +35,11 @@ Item {
         }
 
         // ── ToggleRow：单行 / 两行 ──
-        Text { text: "ToggleRow（旧 API：theme/text/note/checked）"; font.pixelSize: Md3.labelM; color: Md3.cOnSurfaceVar }
+        Text { text: "ToggleRow（旧 API：theme/text/note/checked）"; font.pixelSize: 14; color: Theme.color.textSecondary }
         Rectangle {
             width: parent.width; height: 170
-            radius: Md3.rM
-            color: Md3.cContHigh
+            radius: Theme.radius.md
+            color: Theme.color.surface
             Column {
                 anchors.left: parent.left; anchors.right: parent.left
                 anchors.margins: 16
@@ -50,7 +50,7 @@ Item {
         }
 
         // ── InputField：空 / 有内容 ──
-        Text { text: "InputField（旧 API：th/placeholderText）"; font.pixelSize: Md3.labelM; color: Md3.cOnSurfaceVar }
+        Text { text: "InputField（旧 API：th/placeholderText）"; font.pixelSize: 14; color: Theme.color.textSecondary }
         InputField { th: Md3; width: 400; placeholderText: "广播内容（聚焦描边升 2dp）" }
         InputField { th: Md3; width: 400; text: "已输入的内容"; placeholderText: "占位" }
     }

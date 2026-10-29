@@ -8,7 +8,7 @@
 import QtQuick
 import "../../components"         // AppInput 等基础件
 import "../../components/fresh"   // FreshCard / FreshBtn
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: dlg
@@ -87,16 +87,16 @@ Item {
             Text {
                 width: parent.width
                 text: "编辑学生"
-                font.pixelSize: Md3.titleM
+                font.pixelSize: 16
                 font.weight: Font.Medium
-                color: Md3.frInk || "#111827"
+                color: Theme.color.textPrimary || "#111827"
             }
             Text {
                 width: parent.width
                 text: "学号重复会被云端当成同一个学生 —— 改名请留空学号或保持原值。"
                 wrapMode: Text.WordWrap
-                font.pixelSize: Md3.bodyS
-                color: Md3.frInk2 || "#6B7280"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary || "#6B7280"
             }
 
             AppInput {

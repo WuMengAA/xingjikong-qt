@@ -4,7 +4,7 @@
 // 高 56、全圆选中底、图标走 SvgIcon（不用 emoji，本机会渲染成方块）。
 import QtQuick
 import "../island"          // SvgIcon
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Rectangle {
     id: row
@@ -16,15 +16,15 @@ Rectangle {
     signal clicked()
 
     readonly property int rowH: 56
-    readonly property int padX: Md3.spM
+    readonly property int padX: Theme.spacing.md
     readonly property int iconPx: 20
 
     height: rowH
-    radius: Md3.rFull
+    radius: Theme.radius.full
     color: active
-           ? (Md3.cSecondaryCont)
-           : (ma.containsMouse ? (Md3.cContHigh) : "transparent")
-    Behavior on color { ColorAnimation { duration: Md3.durShort} }
+           ? (Theme.color.primary)
+           : (ma.containsMouse ? (Theme.color.surface) : "transparent")
+    Behavior on color { ColorAnimation { duration: Theme.motion.fast} }
 
     Row {
         anchors.left: parent.left
@@ -36,17 +36,17 @@ Rectangle {
             name: row.icon
             px: row.iconPx
             tint: row.active
-                  ? (Md3.cOnSecondaryCont)
-                  : (Md3.cOnSurfaceVar)
+                  ? (Theme.color.primaryForeground)
+                  : (Theme.color.textSecondary)
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {
             text: row.label
-            font.pixelSize: Md3.bodyM
+            font.pixelSize: 14
             font.weight: row.active ? Font.Medium : Font.Normal
             color: row.active
-                   ? (Md3.cOnSecondaryCont)
-                   : (Md3.cOnSurfaceVar)
+                   ? (Theme.color.primaryForeground)
+                   : (Theme.color.textSecondary)
             anchors.verticalCenter: parent.verticalCenter
         }
     }

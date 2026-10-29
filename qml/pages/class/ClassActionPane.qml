@@ -4,7 +4,7 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
 import "../../island"              // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: pane
@@ -68,9 +68,9 @@ Item {
 
                 Text {
                     text: "全班"
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.weight: Font.Medium
-                    color: Md3.frInk2 || "#6B7280"
+                    color: Theme.color.textSecondary || "#6B7280"
                 }
                 Row {
                     width: parent.width
@@ -93,8 +93,8 @@ Item {
                 Text {
                     width: parent.width
                     text: "本班 " + pane.classOnlineUids().length + " 台在线"
-                    font.pixelSize: Md3.bodyS
-                    color: Md3.frOffDot || "#9CA3AF"
+                    font.pixelSize: 12
+                    color: Theme.color.textSecondary || "#9CA3AF"
                 }
                 // 发布中心：向全班教室黑板推卡片（与锁屏/关机同属「对全班」动作，
                 // 只是它推的是内容而不是指令）。不需要选中设备 —— 对象是整班。
@@ -114,16 +114,16 @@ Item {
 
                 Text {
                     text: "单台"
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.weight: Font.Medium
-                    color: Md3.frInk2 || "#6B7280"
+                    color: Theme.color.textSecondary || "#6B7280"
                 }
                 Text {
                     width: parent.width
                     visible: pane.selectedUid === ""
                     text: "点选一台设备以操作"
-                    font.pixelSize: Md3.bodyS
-                    color: Md3.frOffDot || "#9CA3AF"
+                    font.pixelSize: 12
+                    color: Theme.color.textSecondary || "#9CA3AF"
                 }
                 Column {
                     width: parent.width
@@ -136,13 +136,13 @@ Item {
                         SvgIcon {
                             name: "circle-check"
                             px: 16
-                            tint: Md3.frGreen || "#22C55E"
+                            tint: Theme.color.success || "#22C55E"
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
                             text: "已选中：" + (pane.selectedName !== "" ? pane.selectedName : pane.selectedUid)
-                            font.pixelSize: Md3.body13
-                            color: Md3.frInk || "#111827"
+                            font.pixelSize: 13
+                            color: Theme.color.textPrimary || "#111827"
                             elide: Text.ElideRight
                             width: parent.width - 24
                             anchors.verticalCenter: parent.verticalCenter

@@ -11,7 +11,7 @@
 // 不新开共享件 —— shared-qml 不在「只改三工程」范围内，等第二处消费方再提升。
 import QtQuick
 import "../../components"           // AppInput / AppSegmentedButton
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: form
@@ -73,8 +73,8 @@ Item {
         Text {
             width: parent.width
             text: form.typeHint()
-            font.pixelSize: Md3.bodyS
-            color: Md3.frInk2 || "#6B7280"
+            font.pixelSize: 12
+            color: Theme.color.textSecondary || "#6B7280"
         }
 
         // 标题（单行）
@@ -90,21 +90,21 @@ Item {
         Rectangle {
             width: parent.width
             height: 96
-            radius: Md3.rXS
-            color: Md3.cSurfaceVar
+            radius: Theme.radius.sm
+            color: Theme.color.surfaceVariant
             Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 height: 2
-                color: bodyEdit.activeFocus ? Md3.cPrimary : Md3.cOnSurfaceVar
+                color: bodyEdit.activeFocus ? Theme.color.primary : Theme.color.textSecondary
             }
             TextEdit {
                 id: bodyEdit
                 anchors.fill: parent
                 anchors.margins: 12
-                font.pixelSize: Md3.bodyL
-                color: Md3.cOnSurface
+                font.pixelSize: 14
+                color: Theme.color.textPrimary
                 wrapMode: TextEdit.Wrap
                 text: form.bodyText
                 onTextChanged: form.bodyText = text
@@ -116,8 +116,8 @@ Item {
                 anchors.leftMargin: 12
                 anchors.topMargin: 12
                 text: "正文（可留空，支持换行）"
-                font.pixelSize: Md3.bodyL
-                color: Md3.cOnSurfaceVar
+                font.pixelSize: 14
+                color: Theme.color.textSecondary
             }
         }
     }

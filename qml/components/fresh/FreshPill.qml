@@ -6,7 +6,7 @@
 //   off  灰软底 + 灰字 —— 未订阅 / 离线
 // 高 24、全圆、字 labelM(12)。左侧可选 8px 状态点（调用方传 dot 色）。
 import QtQuick
-import "../theme"   // Md3 令牌（pragma Singleton）
+import "../theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Rectangle {
     id: root
@@ -23,18 +23,18 @@ Rectangle {
 
     implicitWidth: pillRow.implicitWidth + 20
     implicitHeight: 24
-    radius: Md3.frRPill || 999
+    radius: Theme.radius.full || 999
     color: root.bgColor()
 
     function bgColor() {
-        if (tone === "ok") return Md3.frGreenSoft || "#E9FBF0"
+        if (tone === "ok") return Theme.color.surfaceVariant || "#E9FBF0"
         if (tone === "wait") return "#F5E6C8"   // 黄软底（MD3 无 warn 容器令牌，字值随 fr 组）
-        return Md3.frLine || "#EEF0F3"
+        return Theme.color.surfaceVariant || "#EEF0F3"
     }
     function fgColor() {
-        if (tone === "ok") return Md3.frGreenD || "#16A34A"
-        if (tone === "wait") return Md3.cWarn || "#A87C0A"
-        return Md3.frInk2 || "#6B7280"
+        if (tone === "ok") return Theme.color.success || "#16A34A"
+        if (tone === "wait") return Theme.color.warning || "#A87C0A"
+        return Theme.color.textSecondary || "#6B7280"
     }
 
     Row {
@@ -52,7 +52,7 @@ Rectangle {
         }
         Text {
             text: root.text
-            font.pixelSize: Md3.labelM || 12
+            font.pixelSize: 14 || 12
             font.weight: Font.Medium
             color: root.fgColor()
             anchors.verticalCenter: parent.verticalCenter

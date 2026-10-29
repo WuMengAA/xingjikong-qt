@@ -13,7 +13,7 @@
 // 注：只 import 组件目录拿 Md3 令牌；屏幕由 Loader 按路径加载，各自文件管自己的 import。
 import QtQuick
 import "components"
-import "components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
@@ -29,12 +29,12 @@ Item {
         { name: "通知全屏",   short: "通知", icon: "📢", w: 960,  h: 600, src: "NotifyFull.qml" }
     ]
 
-    Rectangle { anchors.fill: parent; color: Md3.cContLowest }
+    Rectangle { anchors.fill: parent; color: Theme.color.background }
 
     // 左侧切换轨（56 宽，图标 + 短名）
     Rectangle {
         width: 56; height: parent.height
-        color: Md3.cCont
+        color: Theme.color.surfaceVariant
         Column {
             anchors.top: parent.top; anchors.topMargin: 8
             anchors.horizontalCenter: parent.horizontalCenter
@@ -48,9 +48,9 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         anchors.margins: 4
-                        radius: Md3.rM
-                        color: root.screen === index ? Md3.cSecondaryCont : "transparent"
-                        Behavior on color { ColorAnimation { duration: Md3.durShort } }
+                        radius: Theme.radius.md
+                        color: root.screen === index ? Theme.color.primary : "transparent"
+                        Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
                     }
                     Column {
                         anchors.centerIn: parent
@@ -60,7 +60,7 @@ Item {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: modelData.short
                             font.pixelSize: 9
-                            color: root.screen === index ? Md3.cOnSecondaryCont : Md3.cOnSurfaceVar
+                            color: root.screen === index ? Theme.color.primaryForeground : Theme.color.textSecondary
                         }
                     }
                     MouseArea { anchors.fill: parent; onClicked: root.screen = index }
@@ -71,9 +71,9 @@ Item {
         Text {
             anchors.bottom: parent.bottom; anchors.bottomMargin: 12
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Md3.dark ? "深" : "浅"
+            text: Theme.dark ? "深" : "浅"
             font.pixelSize: 10
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
         }
     }
 

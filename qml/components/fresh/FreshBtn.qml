@@ -13,7 +13,7 @@
 // 图标走 SvgIcon（lucide，随 exe 打包）—— 不用 emoji（本机渲染成方块）。
 import QtQuick
 import "../../island"            // SvgIcon
-import "../theme"   // Md3 令牌（pragma Singleton）
+import "../theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: root
@@ -34,31 +34,31 @@ Item {
     readonly property int padRight: textOnly ? 12 : 20
 
     function bgColor() {
-        if (variant === "primary") return Md3.frGreen || "#22C55E"
-        if (variant === "danger") return Md3.frDanger || "#EF4444"
-        if (variant === "tonal") return Md3.frLine || "#EEF0F3"
+        if (variant === "primary") return Theme.color.success || "#22C55E"
+        if (variant === "danger") return Theme.color.destructive || "#EF4444"
+        if (variant === "tonal") return Theme.color.surfaceVariant || "#EEF0F3"
         return "transparent"          // outlined / ghost / danger-ghost
     }
     function fgColor() {
-        if (variant === "primary" || variant === "danger") return Md3.frOnGreen || "#FFFFFF"
-        if (variant === "ghost") return Md3.frGreen || "#22C55E"
-        if (variant === "danger-ghost") return Md3.frDanger || "#EF4444"
-        return Md3.frInk || "#111827" // tonal / outlined
+        if (variant === "primary" || variant === "danger") return Theme.color.primaryForeground || "#FFFFFF"
+        if (variant === "ghost") return Theme.color.success || "#22C55E"
+        if (variant === "danger-ghost") return Theme.color.destructive || "#EF4444"
+        return Theme.color.textPrimary || "#111827" // tonal / outlined
     }
 
     Rectangle {
         anchors.fill: parent
-        radius: Md3.frRPill || 999
+        radius: Theme.radius.full || 999
         color: root.bgColor()
         border.width: variant === "outlined" ? 1 : 0
-        border.color: Md3.frLine || "#EEF0F3"
+        border.color: Theme.color.surfaceVariant || "#EEF0F3"
 
         // 状态层（hover 8% / press 10%，叠 fg 不动底色）
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
             color: root.fgColor()
-            opacity: ma.pressed ? (Md3.stPress || 0.10) : (ma.containsMouse ? (Md3.stHover || 0.08) : 0)
+            opacity: ma.pressed ? (0.10 || 0.10) : (ma.containsMouse ? (0.08 || 0.08) : 0)
             Behavior on opacity { NumberAnimation { duration: 120 } }
         }
     }
@@ -77,7 +77,7 @@ Item {
         }
         Text {
             text: root.text
-            font.pixelSize: Md3.labelL || 14
+            font.pixelSize: 14 || 14
             font.weight: Font.Medium
             color: root.fgColor()
             anchors.verticalCenter: parent.verticalCenter

@@ -8,7 +8,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 import "StudentCsv.js" as StudentCsv   // CSV 解析（逗号/制表符/表头自适应）
 
 Item {
@@ -102,7 +102,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "学生名单"
-                color: Md3.cOnSurface
+                color: Theme.color.textPrimary
                 font.pixelSize: 14
                 font.weight: Font.Medium
             }
@@ -111,7 +111,7 @@ Item {
                 text: pane.subscribed
                       ? (pane.students.length + " 人" + (pane.loading ? " · 读取中…" : ""))
                       : "未选班"
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 12
             }
             Item { width: Math.max(8, parent.width - 208); height: 1 }
@@ -192,7 +192,7 @@ Item {
             text: !pane.subscribed
                   ? "先在左上角选一个班级，再录入这个班的学生。"
                   : "这个班还没录入学生。上面填姓名点「加入」就能开始；连同考勤、座位表都按这份名单走。"
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 13
         }
     }

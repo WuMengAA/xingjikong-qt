@@ -10,7 +10,7 @@
 // 不需要用户填密钥 / token，本机只留会话凭据，下次自动接入。
 import QtQuick
 import QtQuick.Layouts
-import "./theme"   // Md3 令牌（pragma Singleton）
+import "./theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -45,7 +45,7 @@ SettingsCard {
             text: backend.accountBusy
                   ? "正在等浏览器里授权…（授权完会自动接上）"
                   : "两步接入：① 点「注册新账号」去主站创建账号（跨域）；② 点「登录」在此完成 OAuth 授权，本机即被登记为「主站的项目子服务」，自动拿到接入票。"
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 13
         }
         RowLayout {
@@ -72,7 +72,7 @@ SettingsCard {
             wrapMode: Text.Wrap
             visible: backend.registerUrl !== ""
             text: "注册页将打开：" + backend.registerUrl
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 11
         }
         Text {
@@ -80,7 +80,7 @@ SettingsCard {
             wrapMode: Text.Wrap
             visible: backend.accountText !== ""
             text: backend.accountText
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 12
         }
     }
@@ -96,7 +96,7 @@ SettingsCard {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: backend.accountName === "" ? "星璃账号" : backend.accountName
-                color: Md3.cOnSurface
+                color: Theme.color.textPrimary
                 font.pixelSize: 16
                 font.weight: Font.Medium
             }
@@ -105,12 +105,12 @@ SettingsCard {
                 height: 22
                 width: badge.implicitWidth + 16
                 radius: 11
-                color: Md3.cSecondaryCont
+                color: Theme.color.primary
                 Text {
                     id: badge
                     anchors.centerIn: parent
                     text: card.roleText(backend.role)
-                    color: Md3.cOnSecondaryCont
+                    color: Theme.color.primaryForeground
                     font.pixelSize: 12
                 }
             }
@@ -121,12 +121,12 @@ SettingsCard {
                 height: 22
                 width: unverifiedBadge.implicitWidth + 16
                 radius: 11
-                color: Md3.cErrorCont
+                color: Theme.color.destructive
                 Text {
                     id: unverifiedBadge
                     anchors.centerIn: parent
                     text: "未认证用户"
-                    color: Md3.cOnErrorCont
+                    color: Theme.color.destructiveForeground
                     font.pixelSize: 12
                 }
             }
@@ -136,7 +136,7 @@ SettingsCard {
             wrapMode: Text.Wrap
             visible: backend.loggedIn && !backend.verified
             text: "邮箱尚未验证。建议到主站（站点「账号」页）完成邮箱验证，以解除未认证限制。"
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 12
         }
 
@@ -145,7 +145,7 @@ SettingsCard {
             wrapMode: Text.Wrap
             visible: backend.roleLocked
             text: "身份由服务器下发，本机不能切换。"
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 12
         }
 
@@ -156,7 +156,7 @@ SettingsCard {
             visible: !backend.roleLocked
             Text {
                 text: "这一台的身份"
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 12
             }
             Item { Layout.fillWidth: true }

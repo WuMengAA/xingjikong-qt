@@ -11,7 +11,7 @@
 import QtQuick
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -25,7 +25,7 @@ SettingsCard {
     Text {
         width: parent.width
         text: "当前状态"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 13
         font.weight: Font.Medium
     }
@@ -35,7 +35,7 @@ SettingsCard {
               "· 语音播报（TTS）的开关在**被控端**的设置页里 —— 那台设备念不念，由那台设备决定。\n" +
               "· 本机（管理端）不播放通知音；它只负责下发。"
         wrapMode: Text.Wrap
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
         lineHeight: 1.5
     }
@@ -43,14 +43,14 @@ SettingsCard {
     Rectangle {
         width: parent.width
         height: 1
-        color: Md3.cOutlineVar
+        color: Theme.color.textSecondary
         opacity: 0.6
     }
 
     Text {
         width: parent.width
         text: "蓝图里的提供方清单（尚未接入）"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 13
         font.weight: Font.Medium
     }
@@ -62,7 +62,7 @@ SettingsCard {
               "要落地需要两步（都没做）：① 被控端 notifyFromParams 前加按 from 过滤的一层；" +
               "② 云端下发时带上 provider 字段。两步都做完，这个页面才谈得上放开关。"
         wrapMode: Text.Wrap
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
         lineHeight: 1.5
     }

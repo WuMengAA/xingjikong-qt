@@ -36,14 +36,14 @@ Item {
             spacing: 4
             Text {
                 text: "班级设备总览"
-                color: Md3.cOnSurface
+                color: Theme.color.textPrimary
                 font.pixelSize: 24
                 font.bold: true
             }
             // 概况文本由 C++ 拼（班级数/设备数/在线数），QML 不做字符串拼接
             Text {
                 text: classCenter.classSummaryText
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 13
             }
         }
@@ -63,7 +63,7 @@ Item {
             // 按住时轻微内缩：长按控件必须有"按到了"的反馈，否则用户不知道计时有没开始。
             // 只做 scale（不碰内部进度条宽度 —— 那是 3s linear，加 Behavior 会把线性变成缓动）。
             scale: 1.0
-            Behavior on scale { NumberAnimation { duration: Md3.durShort } }
+            Behavior on scale { NumberAnimation { duration: Theme.motion.fast } }
             states: State {
                 name: "held"
                 when: holdArea.pressed
@@ -110,9 +110,9 @@ Item {
             width: classCenter.statCardNarrowW
             height: 128
             radius: 24
-            color: Md3.cSurface
+            color: Theme.color.surface
             border.width: 1
-            border.color: Md3.cOutlineVar
+            border.color: Theme.color.textSecondary
 
             Row {
                 anchors.fill: parent
@@ -126,7 +126,7 @@ Item {
                     Shape {
                         anchors.fill: parent
                         ShapePath {
-                            strokeColor: Md3.cOutlineVar
+                            strokeColor: Theme.color.textSecondary
                             strokeWidth: 8
                             fillColor: "transparent"
                             capStyle: ShapePath.RoundCap
@@ -139,7 +139,7 @@ Item {
                     Shape {
                         anchors.fill: parent
                         ShapePath {
-                            strokeColor: Md3.cOk
+                            strokeColor: Theme.color.success
                             strokeWidth: 8
                             fillColor: "transparent"
                             capStyle: ShapePath.RoundCap
@@ -156,7 +156,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: classCenter.onlinePercentText
-                        color: Md3.cOnSurface
+                        color: Theme.color.textPrimary
                         font.pixelSize: 14
                         font.bold: true
                     }
@@ -166,13 +166,13 @@ Item {
                     spacing: 4
                     Text {
                         text: "设备在线率"
-                        color: Md3.cOnSurface
+                        color: Theme.color.textPrimary
                         font.pixelSize: 16
                         font.bold: true
                     }
                     Text {
                         text: classCenter.statSummaryText
-                        color: Md3.cOnSurfaceVar
+                        color: Theme.color.textSecondary
                         font.pixelSize: 13
                     }
                 }
@@ -184,16 +184,16 @@ Item {
             width: classCenter.statCardWideW
             height: 128
             radius: 24
-            color: Md3.cSurface
+            color: Theme.color.surface
             border.width: 1
-            border.color: Md3.cOutlineVar
+            border.color: Theme.color.textSecondary
             Column {
                 anchors.fill: parent
                 anchors.margins: 20
                 spacing: 8
                 Text {
                     text: "最近异常"
-                    color: Md3.cError
+                    color: Theme.color.destructive
                     font.pixelSize: 16
                     font.bold: true
                 }
@@ -202,7 +202,7 @@ Item {
                     model: classCenter.anomalies
                     delegate: Text {
                         text: modelData.line
-                        color: Md3.cOnSurfaceVar
+                        color: Theme.color.textSecondary
                         font.pixelSize: 13
                         elide: Text.ElideRight
                         width: parent.width
@@ -212,7 +212,7 @@ Item {
                 Text {
                     visible: !classCenter.hasAnomalies
                     text: classCenter.anomalyEmptyText
-                    color: Md3.cOutline
+                    color: Theme.color.textSecondary
                     font.pixelSize: 13
                 }
             }
@@ -225,7 +225,7 @@ Item {
         anchors.left: parent.left; anchors.leftMargin: 32
         anchors.top: stats.bottom; anchors.topMargin: 24
         text: "班级阵列"
-        color: Md3.cOnSurface
+        color: Theme.color.textPrimary
         font.pixelSize: 16
         font.bold: true
     }
@@ -246,9 +246,9 @@ Item {
             width: grid.cellWidth - 16
             height: 116
             radius: 20
-            color: Md3.cSurface
+            color: Theme.color.surface
             border.width: 1
-            border.color: Md3.cOutlineVar
+            border.color: Theme.color.textSecondary
 
             // 果冻曲线（原型 .jelly-effect）：
             //   hover  scale(1.05) —— 400ms cubic-bezier(.34,1.7,.64,1) ⇒ Easing.OutBack（overshoot）
@@ -256,7 +256,7 @@ Item {
             // 刻度与时长都取自 Md3 令牌（jellyHover / jellyPress / durJelly），本件不写裸数字。
             scale: 1.0
             Behavior on scale {
-                NumberAnimation { duration: Md3.durJelly; easing.type: Easing.OutBack }
+                NumberAnimation { duration: Theme.motion.slow; easing.type: Easing.OutBack }
             }
 
             // hover 描边层：原型 hover:border-green-200。
@@ -269,9 +269,9 @@ Item {
                 radius: card.radius + 1
                 color: "transparent"
                 border.width: 1
-                border.color: Md3.cAccent
+                border.color: Theme.color.accent
                 opacity: 0
-                Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
+                Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
             }
 
             Column {
@@ -285,7 +285,7 @@ Item {
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.name
-                        color: Md3.cOnSurface
+                        color: Theme.color.textPrimary
                         font.pixelSize: 20
                         font.bold: true
                     }
@@ -314,7 +314,7 @@ Item {
                 }
                 Text {
                     text: modelData.summaryText
-                    color: Md3.cOnSurfaceVar
+                    color: Theme.color.textSecondary
                     font.pixelSize: 13
                 }
             }
@@ -324,13 +324,13 @@ Item {
                 State {
                     name: "pressed"
                     when: ma.pressed
-                    PropertyChanges { target: card; scale: Md3.jellyPress }
+                    PropertyChanges { target: card; scale: Theme.motion.pressScale }
                     PropertyChanges { target: hoverRing; opacity: 1 }
                 },
                 State {
                     name: "hovered"
                     when: ma.containsMouse && !ma.pressed
-                    PropertyChanges { target: card; scale: Md3.jellyHover }
+                    PropertyChanges { target: card; scale: Theme.motion.hoverScale }
                     PropertyChanges { target: hoverRing; opacity: 1 }
                 }
             ]
@@ -353,14 +353,14 @@ Item {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "还没有班级数据"
-            color: Md3.cOnSurface
+            color: Theme.color.textPrimary
             font.pixelSize: 15
             font.bold: true
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             text: classCenter.classSummaryText
-            color: Md3.cOutline
+            color: Theme.color.textSecondary
             font.pixelSize: 13
         }
     }
@@ -375,11 +375,11 @@ Item {
         height: 32
         width: resultText.implicitWidth + 28
         radius: 16
-        color: Md3.cSurface
+        color: Theme.color.surface
         border.width: 1
         border.color: classCenter.lastOpColor
         opacity: 0
-        Behavior on opacity { NumberAnimation { duration: Md3.durShort } }
+        Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
         states: State {
             name: "shown"
             when: classCenter.lastOpText.length > 0
@@ -403,7 +403,7 @@ Item {
         color: "#000000"
         opacity: classCenter.overlayOpacity
         Behavior on opacity {
-            NumberAnimation { duration: Md3.durModal; easing.type: Easing.OutQuad }
+            NumberAnimation { duration: Theme.motion.normal; easing.type: Easing.OutQuad }
         }
         MouseArea {
             anchors.fill: parent
@@ -421,7 +421,7 @@ Item {
         width: classCenter.drawerWidth
         x: classCenter.drawerX
         Behavior on x {
-            NumberAnimation { duration: Md3.durDrawer; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Theme.motion.slow; easing.type: Easing.OutCubic }
         }
         onCloseDrawer: classCenter.closeDrawer()
         onEnterRemote: classCenter.enterRemote()
@@ -434,7 +434,7 @@ Item {
         id: remoteLayer
         anchors.fill: parent
         visible: classCenter.remoteVisible
-        color: Md3.cSurface
+        color: Theme.color.surface
         opacity: 0
         scale: 0.98
         states: State {
@@ -443,10 +443,10 @@ Item {
             PropertyChanges { target: remoteLayer; opacity: 1.0; scale: 1.0 }
         }
         Behavior on opacity {
-            NumberAnimation { duration: Md3.durModal; easing.type: Easing.OutQuad }
+            NumberAnimation { duration: Theme.motion.normal; easing.type: Easing.OutQuad }
         }
         Behavior on scale {
-            NumberAnimation { duration: Md3.durModal; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Theme.motion.normal; easing.type: Easing.OutCubic }
         }
         RemoteDesktopStage {
             anchors.fill: parent

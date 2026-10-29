@@ -19,7 +19,7 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         text: "操作面板"
-        color: Md3.cOnSurface
+        color: Theme.color.textPrimary
         font.pixelSize: 14
         font.bold: true
     }
@@ -32,7 +32,7 @@ Item {
         anchors.top: title.bottom
         anchors.topMargin: 8
         height: 1
-        color: Md3.cOutlineVar
+        color: Theme.color.textSecondary
         opacity: 0.6
     }
 
@@ -58,9 +58,9 @@ Item {
                 width: tray.width
                 height: inner.height + 24
                 radius: 24
-                color: Md3.cSurface
+                color: Theme.color.surface
                 border.width: 1
-                border.color: Md3.cOutlineVar
+                border.color: Theme.color.textSecondary
 
                 Column {
                     id: inner
@@ -176,7 +176,7 @@ Item {
                         width: inner.width
                         horizontalAlignment: Text.AlignHCenter
                         text: "—— 功能完善中 ——"
-                        color: Md3.cOutline
+                        color: Theme.color.textSecondary
                         font.pixelSize: 12
                         topPadding: 4
                         bottomPadding: 4
@@ -186,7 +186,7 @@ Item {
                     Rectangle {
                         width: inner.width
                         height: 1
-                        color: Md3.cOutlineVar
+                        color: Theme.color.textSecondary
                         opacity: 0.6
                     }
 
@@ -200,13 +200,13 @@ Item {
                             width: (parent.width - 16) / 2
                             height: parent.height
                             radius: 16
-                            color: Md3.cSurface
+                            color: Theme.color.surface
                             border.width: 1
-                            border.color: Md3.cOutline
+                            border.color: Theme.color.textSecondary
                             Text {
                                 anchors.centerIn: parent
                                 text: "班级编辑"
-                                color: Md3.cOnSurface
+                                color: Theme.color.textPrimary
                                 font.pixelSize: 14
                                 font.bold: true
                             }
@@ -220,13 +220,13 @@ Item {
                             width: (parent.width - 16) / 2
                             height: parent.height
                             radius: 16
-                            color: Md3.cSurface
+                            color: Theme.color.surface
                             border.width: 1
-                            border.color: Md3.cOutline
+                            border.color: Theme.color.textSecondary
                             Text {
                                 anchors.centerIn: parent
                                 text: "设备设置"
-                                color: Md3.cOnSurface
+                                color: Theme.color.textPrimary
                                 font.pixelSize: 14
                                 font.bold: true
                             }

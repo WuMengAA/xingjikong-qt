@@ -11,7 +11,7 @@
 import QtQuick
 import "../../components/fresh"   // FreshCard
 import "../../island"             // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: pane
@@ -35,9 +35,9 @@ Item {
 
     /** 类型 → 强调色（通知/作业分色，扫一眼能分辨）。 */
     function typeTint(t) {
-        if (t === "homework")          return Md3.frGreen || "#22C55E"
-        if (t === "fullscreen-notice") return Md3.frDanger || "#EF4444"
-        return Md3.cInfo || "#2A6394"
+        if (t === "homework")          return Theme.color.success || "#22C55E"
+        if (t === "fullscreen-notice") return Theme.color.destructive || "#EF4444"
+        return Theme.color.textSecondary || "#2A6394"
     }
 
     /** ISO 8601 → "MM-DD HH:mm"；脏数据给 "——"，不显示 Invalid Date。 */
@@ -80,22 +80,22 @@ Item {
                     height: 22
                     width: chip.implicitWidth + 16
                     radius: 11
-                    color: Md3.frLine || "#EEF0F3"
+                    color: Theme.color.surfaceVariant || "#EEF0F3"
 
                     Text {
                         id: chip
                         anchors.centerIn: parent
                         text: pane.cur ? pane.typeLabel(pane.cur.type) : ""
-                        font.pixelSize: Md3.bodyS || 12
-                        color: pane.cur ? pane.typeTint(pane.cur.type) : (Md3.frInk2 || "#6B7280")
+                        font.pixelSize: 12 || 12
+                        color: pane.cur ? pane.typeTint(pane.cur.type) : (Theme.color.textSecondary || "#6B7280")
                     }
                 }
                 Item { width: Math.max(8, parent.width - 220); height: 1 }
                 Text {
                     text: pane.cur ? pane.stamp(pane.cur.at) : ""
-                    font.pixelSize: Md3.bodyS || 12
+                    font.pixelSize: 12 || 12
                     font.family: "monospace"
-                    color: Md3.frInk2 || "#6B7280"
+                    color: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -105,12 +105,12 @@ Item {
                 width: parent.width
                 text: pane.cur ? (pane.cur.title || "") : ""
                 visible: text !== ""
-                font.pixelSize: Md3.titleL || 22
+                font.pixelSize: 20 || 22
                 font.weight: Font.Medium
                 wrapMode: Text.WordWrap
                 maximumLineCount: 3
                 elide: Text.ElideRight
-                color: Md3.frInk || "#111827"
+                color: Theme.color.textPrimary || "#111827"
             }
 
             // ── 正文 ──
@@ -118,12 +118,12 @@ Item {
                 width: parent.width
                 text: pane.cur ? (pane.cur.body || "") : ""
                 visible: pane.cur && pane.cur.body !== ""
-                font.pixelSize: Md3.body13 || 13
+                font.pixelSize: 13 || 13
                 lineHeight: 1.35
                 wrapMode: Text.WordWrap
                 maximumLineCount: Math.max(2, Math.floor((parent.height - 96) / 20))
                 elide: Text.ElideRight
-                color: Md3.frInk || "#111827"
+                color: Theme.color.textPrimary || "#111827"
             }
 
             // ── 底：轮播指示 + 计数（可点，真会跳）──
@@ -140,8 +140,8 @@ Item {
                         height: 6
                         radius: 3
                         color: index === pane.index
-                               ? (Md3.frGreen || "#22C55E")
-                               : (Md3.frOffDot || "#D1D5DB")
+                               ? (Theme.color.success || "#22C55E")
+                               : (Theme.color.textSecondary || "#D1D5DB")
 
                         MouseArea {
                             anchors.fill: parent
@@ -153,8 +153,8 @@ Item {
                 Item { width: 8; height: 1 }
                 Text {
                     text: (pane.index + 1) + " / " + pane.total
-                    font.pixelSize: Md3.bodyS || 12
-                    color: Md3.frInk2 || "#6B7280"
+                    font.pixelSize: 12 || 12
+                    color: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -173,13 +173,13 @@ Item {
             SvgIcon {
                 name: "tv"
                 px: 32
-                tint: Md3.frOffDot || "#D1D5DB"
+                tint: Theme.color.textSecondary || "#D1D5DB"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
             Text {
                 text: "展板还没有内容"
-                font.pixelSize: Md3.body13 || 13
-                color: Md3.frInk2 || "#6B7280"
+                font.pixelSize: 13 || 13
+                color: Theme.color.textSecondary || "#6B7280"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
             Text {
@@ -187,8 +187,8 @@ Item {
                 width: Math.min(320, pane.width - 64)
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
-                font.pixelSize: Md3.bodyS || 12
-                color: Md3.frOffDot || "#D1D5DB"
+                font.pixelSize: 12 || 12
+                color: Theme.color.textSecondary || "#D1D5DB"
                 anchors.horizontalCenter: parent.horizontalCenter
             }
         }

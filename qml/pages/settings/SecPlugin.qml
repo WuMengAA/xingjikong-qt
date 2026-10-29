@@ -11,7 +11,7 @@
 import QtQuick
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -25,7 +25,7 @@ SettingsCard {
     Text {
         width: parent.width
         text: "插件跑在设备端，不在这里"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 13
         font.weight: Font.Medium
     }
@@ -37,7 +37,7 @@ SettingsCard {
               "安全边界（被控端既有约定，写在这里便于对齐）：插件只能用白名单里的宿主能力，" +
               "经本地 WS 推灵动岛时要过「允许第三方推送」开关，且限 5 条/秒、标题 120 字。"
         wrapMode: Text.Wrap
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
         lineHeight: 1.5
     }
@@ -45,14 +45,14 @@ SettingsCard {
     Rectangle {
         width: parent.width
         height: 1
-        color: Md3.cOutlineVar
+        color: Theme.color.textSecondary
         opacity: 0.6
     }
 
     Text {
         width: parent.width
         text: "做到「管理端插件市场」需要三步（都没做）"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 13
         font.weight: Font.Medium
     }
@@ -63,7 +63,7 @@ SettingsCard {
               "③ 管理端下发安装/启停指令，并接住回执。\n\n" +
               "三步之前，这里只留说明 —— 摆一个点不动的「市场」按钮是最没用的东西。"
         wrapMode: Text.Wrap
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
         lineHeight: 1.5
     }

@@ -14,7 +14,7 @@
 //       Btn { ... }
 //   }
 import QtQuick
-import "./theme"   // Md3 令牌（pragma Singleton）
+import "./theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Rectangle {
     id: card
@@ -27,8 +27,8 @@ Rectangle {
     default property alias bodyData: col.data
 
     radius: 12
-    color: Md3.cContLow
-    border.color: Md3.cOutlineVar
+    color: Theme.color.background
+    border.color: Theme.color.textSecondary
     border.width: 1
     implicitHeight: col.implicitHeight + 32
 
@@ -48,7 +48,7 @@ Rectangle {
             Text {
                 width: parent.width
                 text: card.title
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 14
                 font.weight: Font.Medium
                 font.letterSpacing: 0.1
@@ -58,7 +58,7 @@ Rectangle {
                 visible: card.subtitle !== ""
                 wrapMode: Text.Wrap
                 text: card.subtitle
-                color: Md3.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 font.pixelSize: 12
             }
         }

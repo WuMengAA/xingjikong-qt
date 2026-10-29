@@ -11,7 +11,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"      // 共享 ui 组件（UiRegistry 等）
-import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 import ".."          // FilePushDialog 在 qml/ 根目录（#5：手机端文件传输入口）
 
 Item {
@@ -23,11 +23,11 @@ Item {
     Rectangle {
         anchors.fill: parent
         z: -1
-        color: Md3.cSurface
+        color: Theme.color.surface
     }
 
     // Md3 = pragma Singleton（真源 shared-qml/ui/theme/）；独立壳入口，负责写全局 dark。
-    Binding { target: Md3; property: "dark"; value: root.darkMode }
+    Binding { target: Theme; property: "dark"; value: root.darkMode }
     // 迁移桥：保留 th 旧签名（桌面 Main.qml 的旧组件读 th.*，Md3 提供 legacy 别名）
     readonly property var th: Md3
     // E4 同步：darkMode 由 backend.themeMode 派生（0 浅色 / 1 深色 / 2 跟随系统取 backend.systemDark）。
@@ -49,15 +49,15 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         height: 64
-        color: Md3.cSurface
+        color: Theme.color.surface
 
         Text {
             anchors.left: parent.left
             anchors.leftMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             text: "星集控"
-            font.pixelSize: Md3.titleL
-            color: Md3.cOnSurface
+            font.pixelSize: 20
+            color: Theme.color.textPrimary
         }
         Row {
             anchors.right: parent.right
@@ -67,12 +67,12 @@ Item {
             Rectangle {
                 width: 8; height: 8; radius: 4
                 anchors.verticalCenter: parent.verticalCenter
-                color: backend.connected ? Md3.cOk : Md3.cError
+                color: backend.connected ? Theme.color.success : Theme.color.destructive
             }
             Text {
                 text: backend.loggedIn ? (backend.connected ? "已连接" : "重连中…") : "未登录"
-                color: Md3.cOnSurfaceVar
-                font.pixelSize: Md3.labelM
+                color: Theme.color.textSecondary
+                font.pixelSize: 14
             }
         }
     }

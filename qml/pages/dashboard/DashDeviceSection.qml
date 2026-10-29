@@ -10,7 +10,7 @@ import QtQuick
 import QtQuick.Layouts
 import "../../components"         // AppChip / AppCard
 import "../../shell"              // DeviceCard
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 ColumnLayout {
     id: sec
@@ -24,7 +24,7 @@ ColumnLayout {
     signal filterChanged(string mode)
     signal deviceActivated(string uid)
 
-    spacing: Md3.spM
+    spacing: Theme.spacing.md
 
     /** 在 devices 之上按 chip 再筛一层（与集控页同名同义，但那份含其它班）。 */
     function shownDevices() {
@@ -48,7 +48,7 @@ ColumnLayout {
     // ── S1 三张统计卡（禁手绘卡片，一律 Md3Card）──
     RowLayout {
         Layout.fillWidth: true
-        spacing: Md3.spM
+        spacing: Theme.spacing.md
 
         Repeater {
             model: [
@@ -67,23 +67,23 @@ ColumnLayout {
                     // ⚠️ AppCard 内部已是 ColumnLayout：子项不能 anchors.fill，必须走 Layout
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    spacing: Md3.spXS
+                    spacing: Theme.spacing.xs
 
                     Text {
                         text: modelData.k
-                        font.pixelSize: Md3.bodyS
-                        color: Md3.cOnSurfaceVar
+                        font.pixelSize: 12
+                        color: Theme.color.textSecondary
                     }
                     Text {
                         text: modelData.v
-                        font.pixelSize: Md3.headlineM
+                        font.pixelSize: 20
                         font.weight: Font.Medium
-                        color: Md3.cOnSurface
+                        color: Theme.color.textPrimary
                     }
                     Text {
                         text: modelData.sub
-                        font.pixelSize: Md3.bodyS
-                        color: Md3.cOutline
+                        font.pixelSize: 12
+                        color: Theme.color.textSecondary
                     }
                 }
             }
@@ -93,7 +93,7 @@ ColumnLayout {
     // ── S5 筛选 chip ──
     RowLayout {
         Layout.fillWidth: true
-        spacing: Md3.spS
+        spacing: Theme.spacing.sm
 
         Repeater {
             model: [
@@ -114,8 +114,8 @@ ColumnLayout {
 
         Text {
             text: sec.shownDevices().length + " 台"
-            font.pixelSize: Md3.bodyS
-            color: Md3.cOutline
+            font.pixelSize: 12
+            color: Theme.color.textSecondary
         }
     }
 
@@ -123,8 +123,8 @@ ColumnLayout {
     GridLayout {
         Layout.fillWidth: true
         columns: sec.gridColumns(sec.width)
-        columnSpacing: Md3.spM
-        rowSpacing: Md3.spM
+        columnSpacing: Theme.spacing.md
+        rowSpacing: Theme.spacing.md
 
         Repeater {
             model: sec.shownDevices()
@@ -150,7 +150,7 @@ ColumnLayout {
         text: sec.filterMode === "all"
               ? "这个班还没有设备"
               : ("当前筛选（" + (sec.filterMode === "online" ? "在线" : "离线") + "）下没有设备")
-        font.pixelSize: Md3.bodyS
-        color: Md3.cOutline
+        font.pixelSize: 12
+        color: Theme.color.textSecondary
     }
 }

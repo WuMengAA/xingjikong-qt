@@ -12,7 +12,7 @@
 import QtQuick
 import "../../island"           // SvgIcon（FreshBtn 由 ClassBoardNoticePane 之外的子件自带）
 import "../../components/fresh" // FreshBtn
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: pane
@@ -70,22 +70,22 @@ Item {
                 SvgIcon {
                     name: "tv"
                     px: 18
-                    tint: Md3.frGreen || "#22C55E"
+                    tint: Theme.color.success || "#22C55E"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "班级展板"
-                    font.pixelSize: Md3.titleM || 16
+                    font.pixelSize: 16 || 16
                     font.weight: Font.Medium
-                    color: Md3.frInk || "#111827"
+                    color: Theme.color.textPrimary || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: pane.className !== ""
                           ? pane.className
                           : (pane.classCode !== "" ? pane.classCode : "未选择班级")
-                    font.pixelSize: Md3.body13 || 13
-                    color: Md3.frInk2 || "#6B7280"
+                    font.pixelSize: 13 || 13
+                    color: Theme.color.textSecondary || "#6B7280"
                     elide: Text.ElideRight
                     width: Math.max(48, pane.width - 400)
                     anchors.verticalCenter: parent.verticalCenter
@@ -99,9 +99,9 @@ Item {
 
                 Text {
                     text: pane.clockText
-                    font.pixelSize: Md3.titleM || 16
+                    font.pixelSize: 16 || 16
                     font.family: "monospace"
-                    color: Md3.frInk2 || "#6B7280"
+                    color: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 FreshBtn {
@@ -168,8 +168,8 @@ Item {
                     wrapMode: Text.WordWrap
                     visible: board.count === 0
                     text: pane.subscribed ? "本班暂无设备" : "未选择班级"
-                    font.pixelSize: Md3.bodyS || 12
-                    color: Md3.cOutline || "#79747E"
+                    font.pixelSize: 12 || 12
+                    color: Theme.color.textSecondary || "#79747E"
                 }
             }
         }

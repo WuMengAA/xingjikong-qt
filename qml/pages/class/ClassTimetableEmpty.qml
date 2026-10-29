@@ -3,7 +3,7 @@
 // 空态不是"没数据"这么简单：它得告诉老师「这里会显示什么」和「怎么让它有内容」，
 // 否则就是用户说的"文字游戏"——一块空白谁也不知道下一步点哪。
 import QtQuick
-import "../../components/theme"  // Md3 令牌（pragma Singleton）
+import "../../components/theme"  // Theme 设计令牌单例（pragma Singleton）
 import "../../island"            // SvgIcon
 
 Column {
@@ -16,13 +16,13 @@ Column {
     spacing: 8
 
     SvgIcon {
-        name: "clock"; px: 32; tint: Md3.frOffDot || "#D1D5DB"
+        name: "clock"; px: 32; tint: Theme.color.textSecondary || "#D1D5DB"
         anchors.horizontalCenter: parent.horizontalCenter
     }
     Text {
         text: empty.subscribed ? "本班还没导入课表" : "先从左侧选择一个班级"
-        font.pixelSize: Md3.body13
-        color: Md3.frInk2 || "#6B7280"
+        font.pixelSize: 13
+        color: Theme.color.textSecondary || "#6B7280"
         anchors.horizontalCenter: parent.horizontalCenter
     }
     Text {
@@ -30,8 +30,8 @@ Column {
         width: Math.min(empty.maxWidth, empty.parent ? empty.parent.width - 40 : empty.maxWidth)
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
-        font.pixelSize: Md3.bodyS
-        color: Md3.frOffDot || "#D1D5DB"
+        font.pixelSize: 12
+        color: Theme.color.textSecondary || "#D1D5DB"
         anchors.horizontalCenter: parent.horizontalCenter
     }
 }

@@ -4,7 +4,7 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
 import "../../island"              // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 Item {
     id: pane
 
@@ -117,22 +117,22 @@ Item {
                     // 失败 ⇒ 空白，离屏冒烟实证），改回实存的 "settings"。
                     name: "settings"
                     px: 16
-                    tint: Md3.frInk2 || "#6B7280"
+                    tint: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "班级管理"
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.weight: Font.Medium
-                    color: Md3.frInk || "#111827"
+                    color: Theme.color.textPrimary || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Item { width: Math.max(8, parent.width - 140); height: 1 }
                 Text {
                     visible: !pane.subbed
                     text: "未订阅"
-                    font.pixelSize: Md3.bodyS
-                    color: Md3.frOffDot || "#9CA3AF"
+                    font.pixelSize: 12
+                    color: Theme.color.textSecondary || "#9CA3AF"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -142,16 +142,16 @@ Item {
                 width: parent.width
                 visible: pane.subbed
                 text: "当前班：" + (pane.name !== "" ? pane.name : pane.code)
-                font.pixelSize: Md3.bodyS
-                color: Md3.frInk2 || "#6B7280"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary || "#6B7280"
                 elide: Text.ElideRight
             }
             Text {
                 width: parent.width
                 visible: !pane.subbed
                 text: "先选择左侧班级，才能执行管理操作"
-                font.pixelSize: Md3.bodyS
-                color: Md3.frOffDot || "#9CA3AF"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary || "#9CA3AF"
                 wrapMode: Text.WordWrap
             }
 
@@ -228,7 +228,7 @@ Item {
                 width: parent.width
                 height: 1
                 visible: pane.subbed
-                color: Md3.frOffDot || "#9CA3AF"
+                color: Theme.color.textSecondary || "#9CA3AF"
                 opacity: 0.3
             }
             FreshBtn {
@@ -251,15 +251,15 @@ Item {
                 Text {
                     width: parent.width
                     text: "把这串给这台设备（一次性，24 小时内有效）："
-                    font.pixelSize: Md3.bodyS
-                    color: Md3.frInk2 || "#6B7280"
+                    font.pixelSize: 12
+                    color: Theme.color.textSecondary || "#6B7280"
                     wrapMode: Text.WordWrap
                 }
                 Rectangle {
                     width: parent.width
                     height: 44
                     radius: 8
-                    color: Md3.frOffDot || "#9CA3AF"
+                    color: Theme.color.textSecondary || "#9CA3AF"
                     opacity: 0.14
                 }
                 // 码叠在上面单独一层：父 Rectangle 用低透明度做底，字才不会被一起调淡。
@@ -271,10 +271,10 @@ Item {
                     readOnly: true
                     selectByMouse: true
                     text: pane.bindCode
-                    font.pixelSize: Md3.bodyL || 16
+                    font.pixelSize: 14 || 16
                     font.family: "Consolas"
                     font.letterSpacing: 4
-                    color: Md3.frInk || "#111827"
+                    color: Theme.color.textPrimary || "#111827"
                     horizontalAlignment: TextEdit.AlignHCenter
                 }
                 Row {

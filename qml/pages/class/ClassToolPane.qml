@@ -13,7 +13,7 @@
 //    那是真实的本地状态，界面如实显示，不假装成功——所以这里不放"已开启"的常亮态。
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: pane
@@ -70,15 +70,15 @@ Item {
                 spacing: 6
                 Text {
                     text: "课堂工具"
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.weight: Font.Medium
-                    color: Md3.frInk2 || "#6B7280"
+                    color: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "对全班在线设备生效"
-                    font.pixelSize: Md3.rXS || 11
-                    color: Md3.frOffDot || "#9CA3AF"
+                    font.pixelSize: Theme.radius.sm || 11
+                    color: Theme.color.textSecondary || "#9CA3AF"
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -155,8 +155,8 @@ Item {
             Text {
                 width: parent.width
                 text: "学生在设备本地关闭噪音监测后，相关指令会显示未执行"
-                font.pixelSize: Md3.rXS || 11
-                color: Md3.frOffDot || "#9CA3AF"
+                font.pixelSize: Theme.radius.sm || 11
+                color: Theme.color.textSecondary || "#9CA3AF"
                 wrapMode: Text.WordWrap
             }
         }

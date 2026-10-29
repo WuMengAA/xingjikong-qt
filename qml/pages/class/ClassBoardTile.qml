@@ -7,7 +7,7 @@
 // 数据真源：ClassDeviceModel（typed）—— 本件只收标量属性，不碰 backend。
 import QtQuick
 import "../../island"          // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: root
@@ -21,10 +21,10 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.margins: 4
-        radius: Md3.rS
-        color: Md3.frCard || "#FFFFFF"
+        radius: Theme.radius.sm
+        color: Theme.color.surface || "#FFFFFF"
         border.width: 1
-        border.color: Md3.frLine || "#EEF0F3"
+        border.color: Theme.color.surfaceVariant || "#EEF0F3"
 
         Column {
             anchors.fill: parent
@@ -35,8 +35,8 @@ Item {
             Rectangle {
                 width: parent.width
                 height: Math.max(48, parent.height - 30)
-                radius: Md3.rS
-                color: Md3.cCont
+                radius: Theme.radius.sm
+                color: Theme.color.surfaceVariant
                 clip: true
 
                 Image {
@@ -58,13 +58,13 @@ Item {
                     SvgIcon {
                         name: "monitor"
                         px: 18
-                        tint: Md3.cOutline
+                        tint: Theme.color.textSecondary
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
                     Text {
                         text: root.online ? "暂无画面" : "未开机"
-                        font.pixelSize: Md3.bodyS
-                        color: Md3.cOutline
+                        font.pixelSize: 12
+                        color: Theme.color.textSecondary
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
@@ -74,7 +74,7 @@ Item {
                     width: 8
                     height: 8
                     radius: 4
-                    color: root.online ? Md3.cOk : Md3.cOutline
+                    color: root.online ? Theme.color.success : Theme.color.textSecondary
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.margins: 6
@@ -84,9 +84,9 @@ Item {
             Text {
                 width: parent.width
                 text: root.name !== "" ? root.name : root.uid
-                font.pixelSize: Md3.bodyS
+                font.pixelSize: 12
                 font.weight: Font.Medium
-                color: Md3.frInk || "#111827"
+                color: Theme.color.textPrimary || "#111827"
                 elide: Text.ElideRight
             }
         }

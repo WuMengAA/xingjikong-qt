@@ -32,7 +32,7 @@ Item {
             radius: 16
             color: "#0F172A"
             border.width: 1
-            border.color: Md3.cOutlineVar
+            border.color: Theme.color.textSecondary
 
             // 容器内 16:9：宽满容器，垂直居中 ⇒ 上下自然留黑边
             Rectangle {
@@ -136,9 +136,9 @@ Item {
             width: classCenter.stageRightW
             height: classCenter.stageBoxH
             radius: 16
-            color: Md3.cSurface
+            color: Theme.color.surface
             border.width: 1
-            border.color: Md3.cOutlineVar
+            border.color: Theme.color.textSecondary
 
             RemoteOpPanel {
                 anchors.fill: parent

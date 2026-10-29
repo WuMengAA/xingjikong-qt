@@ -14,7 +14,7 @@
 //      学生端提示不消失（C++ 侧有最长时长兜底，但那是兜底不是正常路径）。
 import QtQuick
 import "../../island"            // SvgIcon
-import "../../components/theme"  // Md3 令牌（pragma Singleton）
+import "../../components/theme"  // Theme 设计令牌单例（pragma Singleton）
 
 Rectangle {
     id: root
@@ -28,10 +28,10 @@ Rectangle {
     readonly property bool _hasBackend: (typeof backend !== "undefined" && backend) ? true : false
 
     implicitHeight: 40
-    radius: Md3.rM
-    color: live ? (Md3.frDanger || "#DC2626")
-                : (_hover ? (Md3.frGreenD || "#16A34A") : (Md3.frGreen || "#22C55E"))
-    Behavior on color { ColorAnimation { duration: Md3.durShort } }
+    radius: Theme.radius.md
+    color: live ? (Theme.color.destructive || "#DC2626")
+                : (_hover ? (Theme.color.success || "#16A34A") : (Theme.color.success || "#22C55E"))
+    Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
 
     property bool _hover: false
 
@@ -68,7 +68,7 @@ Rectangle {
                   ? ("正在讲话 · 还剩 " + root.leftSec + "s（松开结束）")
                   : (root._hover ? "按住说话（松开结束）" : "按住说话")
             color: "#FFFFFF"
-            font.pixelSize: Md3.body13
+            font.pixelSize: 13
             font.weight: Font.Medium
         }
     }

@@ -7,7 +7,7 @@
 import QtQuick
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -19,7 +19,7 @@ SettingsCard {
 
     Text {
         text: "星集控 · 管理端"
-        color: Md3.cOnSurface
+        color: Theme.color.textPrimary
         font.pixelSize: 13
     }
 
@@ -29,7 +29,7 @@ SettingsCard {
         Text {
             id: verLabel
             text: "版本"
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 12
             width: 70
         }
@@ -37,7 +37,7 @@ SettingsCard {
             anchors.left: verLabel.right
             anchors.right: parent.right
             text: backend.version
-            color: Md3.cPrimary
+            color: Theme.color.primary
             font.pixelSize: 12
         }
     }
@@ -47,7 +47,7 @@ SettingsCard {
         wrapMode: Text.Wrap
         text: "被控端安装在教室设备上（星集控被控端），登录同一账号后就会出现在这里。"
               + "要看某台设备，在控制页左边选。"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
     }
 
@@ -56,13 +56,13 @@ SettingsCard {
         spacing: 8
 
         Rectangle {
-            width: 96; height: 30; radius: Md3.rCtrl
+            width: 96; height: 30; radius: Theme.radius.md
             color: h1.containsMouse
-                   ? (Md3.cContHigh)
-                   : (Md3.cContLow)
-            border.color: Md3.cOutlineVar
+                   ? (Theme.color.surface)
+                   : (Theme.color.background)
+            border.color: Theme.color.textSecondary
             border.width: 1
-            Text { anchors.centerIn: parent; text: "更新日志"; color: Md3.cOnSurface; font.pixelSize: 13 }
+            Text { anchors.centerIn: parent; text: "更新日志"; color: Theme.color.textPrimary; font.pixelSize: 13 }
             MouseArea {
                 id: h1
                 anchors.fill: parent
@@ -73,13 +73,13 @@ SettingsCard {
         }
 
         Rectangle {
-            width: 80; height: 30; radius: Md3.rCtrl
+            width: 80; height: 30; radius: Theme.radius.md
             color: h2.containsMouse
-                   ? (Md3.cContHigh)
-                   : (Md3.cContLow)
-            border.color: Md3.cOutlineVar
+                   ? (Theme.color.surface)
+                   : (Theme.color.background)
+            border.color: Theme.color.textSecondary
             border.width: 1
-            Text { anchors.centerIn: parent; text: "帮助"; color: Md3.cOnSurface; font.pixelSize: 13 }
+            Text { anchors.centerIn: parent; text: "帮助"; color: Theme.color.textPrimary; font.pixelSize: 13 }
             MouseArea {
                 id: h2
                 anchors.fill: parent
@@ -90,13 +90,13 @@ SettingsCard {
         }
 
         Rectangle {
-            width: 110; height: 30; radius: Md3.rCtrl
+            width: 110; height: 30; radius: Theme.radius.md
             color: h3.containsMouse
-                   ? (Md3.cContHigh)
-                   : (Md3.cContLow)
-            border.color: Md3.cOutlineVar
+                   ? (Theme.color.surface)
+                   : (Theme.color.background)
+            border.color: Theme.color.textSecondary
             border.width: 1
-            Text { anchors.centerIn: parent; text: "诊断与反馈"; color: Md3.cOnSurface; font.pixelSize: 13 }
+            Text { anchors.centerIn: parent; text: "诊断与反馈"; color: Theme.color.textPrimary; font.pixelSize: 13 }
             MouseArea {
                 id: h3
                 anchors.fill: parent
@@ -111,7 +111,7 @@ SettingsCard {
         width: parent.width
         wrapMode: Text.Wrap
         text: "日志：Stelarith-viewer-qt/viewer.log"
-        color: Md3.cOnSurfaceVar
+        color: Theme.color.textSecondary
         font.pixelSize: 12
     }
 }

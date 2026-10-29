@@ -13,7 +13,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
-import "components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 // 2026-10-22：全局主框架（App Scaffold · MainWindow）——原 pages/Md3Shell.qml 更名移入。
 // 它是管理端唯一应用外壳（侧栏+顶栏+内容区+状态条），业务页经它挂载；见 AGENTS.md §9。
 import "shell"
@@ -92,7 +92,7 @@ ApplicationWindow {
     // 实际 th 只取其一（darkMode ? darkTh : lightTh），从未同时显示两套 ——
     // 所以「需要深浅两套并存」的旧理由不成立，singleton 后全局 binding 自动随动。
     readonly property var th: Md3
-    Binding { target: Md3; property: "dark"; value: root.darkMode }
+    Binding { target: Theme; property: "dark"; value: root.darkMode }
 
     // 界面自身的状态（只跟显示有关的东西）
     // 2026-10-22（用户点单「把新界面全面替换老界面」）：默认页由 1（旧壳集控）改为

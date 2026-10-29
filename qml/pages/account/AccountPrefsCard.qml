@@ -8,7 +8,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../../components"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 SettingsCard {
     id: card
@@ -48,7 +48,7 @@ SettingsCard {
 
         Text {
             text: "外观"
-            color: Md3.cOnSurfaceVar
+            color: Theme.color.textSecondary
             font.pixelSize: 12
         }
 
@@ -65,21 +65,21 @@ SettingsCard {
                 delegate: Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 34
-                    radius: Md3.rCtrl
+                    radius: Theme.radius.md
                     color: (backend.themeMode === modelData.m)
-                           ? (Md3.cSecondaryCont)
+                           ? (Theme.color.primary)
                            : "transparent"
                     border.color: (backend.themeMode === modelData.m)
-                                  ? (Md3.cPrimary)
-                                  : (Md3.cOutlineVar)
+                                  ? (Theme.color.primary)
+                                  : (Theme.color.textSecondary)
                     border.width: 1
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.k
                         color: (backend.themeMode === modelData.m)
-                               ? (Md3.cOnSecondaryCont)
-                               : (Md3.cOnSurfaceVar)
+                               ? (Theme.color.primaryForeground)
+                               : (Theme.color.textSecondary)
                         font.pixelSize: 13
                         font.weight: (backend.themeMode === modelData.m) ? Font.Medium : Font.Normal
                     }

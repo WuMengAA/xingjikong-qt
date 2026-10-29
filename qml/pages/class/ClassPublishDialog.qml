@@ -13,7 +13,7 @@
 import QtQuick
 import "../../components/fresh"     // FreshCard / FreshBtn
 import "../../island"               // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: dlg
@@ -31,7 +31,7 @@ Item {
     readonly property bool canSend: dlg.subbed && !dlg.sending
                                    && (form.titleText.trim() !== "" || form.bodyText.trim() !== "")
     /** 动效时长：令牌优先，({}) 兜底 200（与 Md3Dialog 同口径）。 */
-    readonly property int animDur: (Md3 && Md3.durShort !== undefined) ? Md3.durShort : 200
+    readonly property int animDur: (Md3 && Theme.motion.fast !== undefined) ? Theme.motion.fast : 200
 
     visible: opened
     anchors.fill: parent
@@ -106,22 +106,22 @@ Item {
                 SvgIcon {
                     name: "monitor"
                     px: 16
-                    tint: Md3.frInk2 || "#6B7280"
+                    tint: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "发布中心"
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.weight: Font.Medium
-                    color: Md3.frInk || "#111827"
+                    color: Theme.color.textPrimary || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Item { width: Math.max(8, parent.width - 180); height: 1 }
                 Text {
                     text: dlg.subbed ? ("当前班：" + ((dlg.cs && dlg.cs.className) ? dlg.cs.className : dlg.code))
                                      : "未订阅班级"
-                    font.pixelSize: Md3.bodyS
-                    color: dlg.subbed ? (Md3.frInk2 || "#6B7280") : (Md3.frDanger || "#EF4444")
+                    font.pixelSize: 12
+                    color: dlg.subbed ? (Theme.color.textSecondary || "#6B7280") : (Theme.color.destructive || "#EF4444")
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }

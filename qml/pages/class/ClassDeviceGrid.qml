@@ -12,7 +12,7 @@
 import QtQuick
 import QtQuick.Controls          // ScrollBar
 import "../../island"               // SvgIcon
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: pane
@@ -62,13 +62,13 @@ Item {
         SvgIcon {
             name: "users"
             px: 40
-            tint: Md3.cOutline
+            tint: Theme.color.textSecondary
             anchors.horizontalCenter: parent.horizontalCenter
         }
         Text {
             text: "从左侧选择一个班级"
-            font.pixelSize: Md3.body13
-            color: Md3.cOnSurfaceVar
+            font.pixelSize: 13
+            color: Theme.color.textSecondary
             anchors.horizontalCenter: parent.horizontalCenter
         }
     }
@@ -82,19 +82,19 @@ Item {
         SvgIcon {
             name: "monitor"
             px: 40
-            tint: Md3.cOutline
+            tint: Theme.color.textSecondary
             anchors.horizontalCenter: parent.horizontalCenter
         }
         Text {
             text: "这个班暂时没有设备"
-            font.pixelSize: Md3.body13
-            color: Md3.cOnSurfaceVar
+            font.pixelSize: 13
+            color: Theme.color.textSecondary
             anchors.horizontalCenter: parent.horizontalCenter
         }
         Text {
             text: "设备加入班级后会自动出现在这里"
-            font.pixelSize: Md3.bodyS
-            color: Md3.cOutline
+            font.pixelSize: 12
+            color: Theme.color.textSecondary
             anchors.horizontalCenter: parent.horizontalCenter
         }
     }

@@ -4,7 +4,7 @@
 // 本件只认两个入参（当天课表 + 当天作息），不持有状态、不碰 admin —— 好测也好改。
 import QtQuick
 import QtQuick.Controls          // ScrollBar
-import "../../components/theme"  // Md3 令牌（pragma Singleton）
+import "../../components/theme"  // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: view
@@ -36,31 +36,31 @@ Item {
                     text: modelData.index
                     width: 22
                     horizontalAlignment: Text.AlignRight
-                    font.pixelSize: Md3.bodyS
+                    font.pixelSize: 12
                     font.family: "monospace"
-                    color: Md3.frOffDot || "#D1D5DB"
+                    color: Theme.color.textSecondary || "#D1D5DB"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: modelData.subject || "（未命名）"
                     width: Math.max(60, view.width * 0.24)
                     elide: Text.ElideRight
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.weight: Font.Medium
-                    color: Md3.frInk || "#111827"
+                    color: Theme.color.textPrimary || "#111827"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: modelData.start + " - " + modelData.end
-                    font.pixelSize: Md3.body13
+                    font.pixelSize: 13
                     font.family: "monospace"
-                    color: Md3.frInk2 || "#6B7280"
+                    color: Theme.color.textSecondary || "#6B7280"
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: modelData.teacher || ""
-                    font.pixelSize: Md3.bodyS
-                    color: Md3.frInk2 || "#6B7280"
+                    font.pixelSize: 12
+                    color: Theme.color.textSecondary || "#6B7280"
                     elide: Text.ElideRight
                     anchors.verticalCenter: parent.verticalCenter
                 }
@@ -71,8 +71,8 @@ Item {
                 anchors.centerIn: parent
                 visible: lessonList.count === 0
                 text: "这一天没有课"
-                font.pixelSize: Md3.bodyS
-                color: Md3.frOffDot || "#D1D5DB"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary || "#D1D5DB"
             }
         }
 
@@ -93,10 +93,10 @@ Item {
 
                 Text {
                     text: modelData.start || ""
-                    font.pixelSize: Md3.bodyS
+                    font.pixelSize: 12
                     font.family: "monospace"
-                    color: modelData.kind === "lesson" ? (Md3.frInk || "#111827")
-                                                       : (Md3.frOffDot || "#D1D5DB")
+                    color: modelData.kind === "lesson" ? (Theme.color.textPrimary || "#111827")
+                                                       : (Theme.color.textSecondary || "#D1D5DB")
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
@@ -105,9 +105,9 @@ Item {
                           : modelData.kind === "action" ? "行动" : ""
                     width: 140
                     elide: Text.ElideRight
-                    font.pixelSize: Md3.bodyS
-                    color: modelData.kind === "lesson" ? (Md3.frInk2 || "#6B7280")
-                                                       : (Md3.frOffDot || "#D1D5DB")
+                    font.pixelSize: 12
+                    color: modelData.kind === "lesson" ? (Theme.color.textSecondary || "#6B7280")
+                                                       : (Theme.color.textSecondary || "#D1D5DB")
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
