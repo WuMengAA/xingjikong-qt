@@ -5,7 +5,6 @@
 import QtQuick
 import "../components"
 import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
-import "../components/md3"
 
 Item {
     id: root
@@ -149,9 +148,9 @@ Item {
             anchors.left: parent.left; anchors.leftMargin: 32
             anchors.verticalCenter: parent.verticalCenter
             spacing: 16
-            Md3Btn {
+            AppButton {
                 text: "退出考试"
-                variant: "outlined"
+                variant: "secondary"
                 onClicked: {}
             }
             Text { text: "退出需监考密码；异常情况点「求助」通知监考老师"; font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar }
@@ -160,9 +159,9 @@ Item {
             anchors.right: parent.right; anchors.rightMargin: 32
             anchors.verticalCenter: parent.verticalCenter
             spacing: 12
-            Md3Btn {
+            AppButton {
                 text: "🖐 求助"
-                variant: "tonal"
+                variant: "secondary"
                 onClicked: {}
             }
         }

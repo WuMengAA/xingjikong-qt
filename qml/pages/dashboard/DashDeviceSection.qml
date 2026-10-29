@@ -8,7 +8,8 @@
 // 事件原样抛给宿主——不自己改 openUid、不自己写 backend（选择路径只有一条）。
 import QtQuick
 import QtQuick.Layouts
-import "../../components/md3"     // Md3Card / Md3Chip
+import "../../components"         // AppChip
+import "../../components/md3"     // Md3Card（换 AppCard 需连带改子项布局，下批做）
 import "../../shell"              // DeviceCard
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
@@ -100,7 +101,7 @@ ColumnLayout {
                 { k: "offline", t: "离线" }
             ]
 
-            delegate: Md3Chip {
+            delegate: AppChip {
                 required property var modelData
                 text: modelData.t
                 selected: sec.filterMode === modelData.k

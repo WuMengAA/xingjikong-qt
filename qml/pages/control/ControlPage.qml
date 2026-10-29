@@ -6,7 +6,6 @@ import "../../components"     // Btn / ToggleRow 等本端自有通用组件
 // 真源在 Stelarith-shared-qml/ui/md3/，构建时由 CMake copy_directory 落到
 // qml/Stelarith/components/md3/ —— 源码树下 qmllint 解析不到（磁盘加载模式），
 // 以「构建 + 运行」验证为准，与岛同套路。
-import "../../components/md3"
 import "../../island"         // SvgIcon（唯一真源在共享岛目录，构建期拷到 qml/island/）
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 import "../../shell/ClassSort.js" as ClassSort   // 班级显示序（1班<…<12班；规则唯一真源）
@@ -90,7 +89,7 @@ Item {
             // 2026-10-18 MD3 布局：分组筛选从手写 42×22 方块 → Md3Chip（filter 变体）。
             // 高 32/圆角 8、选中 secondaryContainer + ✓、未选 outline 描边 + 状态层。
             // 三枚 chip 一排 + 计数，是把"分段筛选"说清楚的 MD3 标准形态。
-            delegate: Md3Chip {
+            delegate: AppChip {
                 text: modelData.l
                 selected: (ctx.window.deviceFilter === modelData.k)
                 onClicked: ctx.window.deviceFilter = modelData.k

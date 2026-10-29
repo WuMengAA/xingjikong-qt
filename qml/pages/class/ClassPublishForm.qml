@@ -10,7 +10,8 @@
 // 正文用自绘多行框：Md3TextField 是单行 TextInput，作业/通知正文必须能换行；
 // 不新开共享件 —— shared-qml 不在「只改三工程」范围内，等第二处消费方再提升。
 import QtQuick
-import "../../components/md3"       // Md3SegmentedButton / Md3TextField
+import "../../components"           // AppInput
+import "../../components/md3"       // Md3SegmentedButton（App 系分段件缺位，暂留）
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
@@ -79,7 +80,7 @@ Item {
         }
 
         // 标题（单行）
-        Md3TextField {
+        AppInput {
             id: titleField
             width: parent.width
             placeholder: "标题（可留空）"

@@ -6,8 +6,7 @@
 // 纪律：① 只认 student-update 这一条回执（其余学生写操作归 ClassStudentPane）；
 //       ② 失败保留内容可改（绝不静默清空）；③ 姓名空不许保存（云端也拒，但别让人白跑一趟）。
 import QtQuick
-import "../../components"         // Btn 等基础件
-import "../../components/md3"     // Md3TextField（共享 ui/md3 同步进来）
+import "../../components"         // AppInput 等基础件
 import "../../components/fresh"   // FreshCard / FreshBtn
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
@@ -100,13 +99,13 @@ Item {
                 color: Md3.frInk2 || "#6B7280"
             }
 
-            Md3TextField {
+            AppInput {
                 width: parent.width
                 placeholder: "姓名（必填）"
                 text: dlg.fName
                 onTextChanged: if (text !== dlg.fName) dlg.fName = text
             }
-            Md3TextField {
+            AppInput {
                 width: parent.width
                 placeholder: "学号（可空）"
                 text: dlg.fNo
@@ -115,13 +114,13 @@ Item {
             Row {
                 width: parent.width
                 spacing: 8
-                Md3TextField {
+                AppInput {
                     width: 96
                     placeholder: "座位"
                     text: dlg.fSeat
                     onTextChanged: if (text !== dlg.fSeat) dlg.fSeat = text
                 }
-                Md3TextField {
+                AppInput {
                     width: parent.width - 104
                     placeholder: "备注（可空）"
                     text: dlg.fNote

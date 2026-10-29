@@ -6,7 +6,6 @@
 import QtQuick
 import "../components"
 import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
-import "../components/md3"
 
 Item {
     id: root
@@ -118,9 +117,9 @@ Item {
             anchors.right: parent.right; anchors.rightMargin: 48
             anchors.bottom: parent.bottom; anchors.bottomMargin: 32
             spacing: 12
-            Md3Btn {
+            AppButton {
                 text: "知道了"
-                variant: "filled"
+                variant: "primary"
                 onClicked: {}
             }
         }

@@ -8,7 +8,6 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../../components"
-import "../../components/md3"
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 import "StudentCsv.js" as StudentCsv   // CSV 解析（逗号/制表符/表头自适应）
 
@@ -133,7 +132,7 @@ Item {
             spacing: 8
             visible: pane.subscribed
 
-            Md3TextField {
+            AppInput {
                 width: parent.width
                 placeholder: "姓名（必填）"
                 text: pane.inName
@@ -142,13 +141,13 @@ Item {
             RowLayout {
                 width: parent.width
                 spacing: 8
-                Md3TextField {
+                AppInput {
                     Layout.fillWidth: true
                     placeholder: "学号"
                     text: pane.inNo
                     onTextChanged: if (text !== pane.inNo) pane.inNo = text
                 }
-                Md3TextField {
+                AppInput {
                     Layout.preferredWidth: 72
                     placeholder: "座位"
                     text: pane.inSeat
