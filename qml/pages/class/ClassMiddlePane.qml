@@ -16,7 +16,7 @@
 //   ② 展板从「说明卡」换成真视图 ⇒ 需要把 evModel / 班名 / 展开态透传下去。
 import QtQuick
 import QtQuick.Layouts
-import "../../components/md3"     // Md3SegmentedButton
+import "../../components"         // AppSegmentedButton
 import "../../island"             // （SvgIcon 由子件自带，这里不直接用）
 
 Item {
@@ -80,12 +80,11 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             clip: true
 
-            Md3SegmentedButton {
+            AppSegmentedButton {
                 id: seg
                 // Flickable 不按 implicitWidth 布局子项：显式给宽，否则所有段叠在 0 宽处
                 width: implicitWidth
                 x: Math.max(0, (parent.width - width) / 2)
-                fresh: true
                 model: pane.segModel
                 current: pane.tab
                 onActivated: function (v) { pane.tabActivated(v) }

@@ -8,7 +8,6 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../../components"
-import "../../components/md3"
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 SettingsCard {
@@ -26,14 +25,14 @@ SettingsCard {
         width: parent.width
         spacing: 4
 
-        Md3SwitchRow {
+        AppSwitchRow {
             width: parent.width
             text: "操作完成时提示"
             supporting: "设备上真的做完了才说一句（云端收下不算）"
             checked: backend.notifyOnDone
             onToggled: function (on) { backend.notifyOnDone = on }
         }
-        Md3SwitchRow {
+        AppSwitchRow {
             width: parent.width
             text: "设备离线时提醒"
             supporting: "与云端断开时弹一条（后台也能看见）"
@@ -100,14 +99,14 @@ SettingsCard {
         spacing: 4
         visible: !card.phone
 
-        Md3SwitchRow {
+        AppSwitchRow {
             width: parent.width
             text: "开机自动启动"
             supporting: "登录 Windows 后自动打开（免管理员）"
             checked: backend.autoStart
             onToggled: function (on) { backend.setAutoStart(on) }
         }
-        Md3SwitchRow {
+        AppSwitchRow {
             width: parent.width
             text: "桌面快捷方式"
             supporting: "在桌面放一枚「星集控管理端」图标"

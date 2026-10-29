@@ -10,8 +10,7 @@
 // 正文用自绘多行框：Md3TextField 是单行 TextInput，作业/通知正文必须能换行；
 // 不新开共享件 —— shared-qml 不在「只改三工程」范围内，等第二处消费方再提升。
 import QtQuick
-import "../../components"           // AppInput
-import "../../components/md3"       // Md3SegmentedButton（App 系分段件缺位，暂留）
+import "../../components"           // AppInput / AppSegmentedButton
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {
@@ -61,12 +60,11 @@ Item {
             height: 32
             contentWidth: seg.implicitWidth
             clip: true
-            Md3SegmentedButton {
+            AppSegmentedButton {
                 id: seg
                 // 显式给宽：Flickable 不像 Row/Column 会按 implicitWidth 布局子项，
                 // 不写这行 width 就是 0（段位全部叠在左上角）。
                 width: implicitWidth
-                fresh: true
                 model: form.typeModel
                 current: form.type
                 onActivated: function (v) { form.type = v }

@@ -113,18 +113,18 @@ Item {
         }
     }
 
-    // ── 底部导航（MD3：80 高 + pill 指示器）──
-    Md3NavBar {
+    // ── 底部导航（AppNavBar：80 高 + primary 实底 pill；图标走 lucide，不用 emoji）──
+    AppNavBar {
         id: bottomNav
         objectName: "bottomNav"
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         items: [
-            { icon: "📊", label: "概览" },
-            { icon: "💻", label: "设备" },
-            { icon: "📹", label: "监控" },
-            { icon: "⚙️", label: "我的" }
+            { icon: "layout-grid", label: "概览" },
+            { icon: "monitor",     label: "设备" },
+            { icon: "video",       label: "监控" },
+            { icon: "settings",    label: "我的" }
         ]
     }
 
@@ -166,8 +166,8 @@ Item {
         }
     }
 
-    // ── 轻提示（MD3 Snackbar：inverse 底 + 4s 自动消失）──
-    Md3Snackbar {
+    // ── 轻提示（AppSnackbar：反色底 + 4s 自动消失，API 与旧件一致）──
+    AppSnackbar {
         id: snack
         objectName: "snack"
         anchors.horizontalCenter: parent.horizontalCenter
