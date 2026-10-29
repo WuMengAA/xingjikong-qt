@@ -36,6 +36,8 @@ Item {
 
     /** 是否启用微弱阴影（软件渲染环境可关掉，避免无谓开销）。 */
     property bool shadow: true
+    /** default = surface 底 + 柔阴影；muted = surfaceVariant 底、无阴影（次级/目录卡）。 */
+    property string variant: "default"
     /** 内部内容容器（ColumnLayout + padding md）。 */
     property alias content: contentBox
     /** 默认子项全部落到内容容器里。 */
@@ -44,20 +46,26 @@ Item {
     implicitWidth: contentBox.implicitWidth + Theme.spacing.md * 2
     implicitHeight: contentBox.implicitHeight + Theme.spacing.md * 2
 
+    /** 卡片底：muted 用次级容器色，其余用 surface。 */
+    readonly property color _bg: variant === "muted" ? Theme.color.surfaceVariant
+                                                     : Theme.color.surface
+    /** muted 本身就是「靠底色后退一层」，再加阴影会抢回视觉重量 ⇒ 默认不叠阴影。 */
+    readonly property bool _shadow: shadow && variant !== "muted"
+
     // ── 阴影源：同形同色，被上方卡片完全盖住，只露出投影 ────────────────
     Rectangle {
         id: shadowSrc
         anchors.fill: parent
         radius: Theme.radius.lg
-        color: Theme.color.surface
-        visible: root.shadow
-        layer.enabled: root.shadow
+        color: root._bg
+        visible: root._shadow
+        layer.enabled: root._shadow
     }
 
     MultiEffect {
         source: shadowSrc
         anchors.fill: shadowSrc
-        visible: root.shadow
+        visible: root._shadow
         shadowEnabled: true
         shadowColor: Theme.shadow.soft
         shadowBlur: 1.0
@@ -70,7 +78,7 @@ Item {
         id: cardBg
         anchors.fill: parent
         radius: Theme.radius.lg
-        color: Theme.color.surface
+        color: root._bg
     }
 
     // ── 默认内容容器 ────────────────────────────────────────────────────

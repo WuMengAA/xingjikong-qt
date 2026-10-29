@@ -19,6 +19,14 @@
 // 的第三类按钮（如 ActionBar 竖屏的「返回经典界面」）。若强行用 secondary（有底色），
 // 它会和两个主操作抢视觉重量 —— 正是原注释要避免的。故补 `ghost`：
 // 透明底 + 主色文字，hover 才出浅底。这是 shadcn 自带的 variant，属补齐而非另创。
+//
+// ── 关于 solid 变体（2026-10-30 用户点单「不要紫色」）────────────────────
+// `primary` 用的是 `Theme.color.primary` = 品牌紫 #6750A4/#D0BCFF。
+// 被控端（老师面对的那台讲台机）明确要求**不出现紫色主色** ⇒ 补 `solid`：
+// 底 = `Theme.color.textPrimary`、字 = `Theme.color.background`，
+// 即「深色模式白底黑字 / 浅色模式黑底白字」—— 这正是 shadcn 的默认按钮观感。
+// 语义：`solid` = 「有主操作权重，但不带品牌色」，与 `primary` 并列而非替代。
+// 被控端主操作一律用 solid；管理端（viewer）继续用 primary，本变体对既有页面零影响。
 
 import QtQuick
 import "theme"
@@ -27,7 +35,7 @@ Item {
     id: root
 
     property string text: ""
-    /** primary | secondary | destructive | ghost */
+    /** primary | solid | secondary | destructive | ghost */
     property string variant: "primary"
     /** md | sm */
     property string size: "md"
@@ -49,10 +57,12 @@ Item {
     readonly property color _bg: variant === "destructive" ? Theme.color.destructive
                                : variant === "secondary"   ? Theme.color.surfaceVariant
                                : variant === "ghost"       ? "transparent"
+                               : variant === "solid"       ? Theme.color.textPrimary
                                                            : Theme.color.primary
     readonly property color _fg: variant === "destructive" ? Theme.color.destructiveForeground
                                : variant === "ghost"       ? Theme.color.textPrimary
                                : variant === "secondary"   ? Theme.color.textPrimary
+                               : variant === "solid"       ? Theme.color.background
                                                            : Theme.color.primaryForeground
 
     opacity: enabled ? 1.0 : 0.45

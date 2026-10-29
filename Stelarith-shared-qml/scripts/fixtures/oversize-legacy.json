@@ -17,7 +17,7 @@
       "plan": "[P2] 随 island.cpp 拆，接口按段分文件 | 2026-10-27 回写（+16）：渠道能力声明与 4 个成员（channelHint/skipHistoryHint/channel/skipHistory） | 2026-10-27 回写 579→598（+19）：G4/G5/G6 —— showPanel/closePanel/panelFace()/panelData() 公开接口 + 设计注释（通知=事件 / 面板=看板）+ m_panelFace/m_panelData 成员 | 2026-10-28 回写 598→618（+20）：**非本批**（同上） | 2026-10-28 再回写 618→619（+1）：**非本批**（同上）"
     },
     "Stelarith-control-qt/src/main.cpp": {
-      "lines": 8972,
+      "lines": 8982,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 206,
@@ -94,7 +94,7 @@
       "plan": "[P2] 拆排期行组件/时间轴/拖拽三段；按日隔离+拖拽修复（2026-10-23 探针 25 断言全绿后登记）"
     },
     "Stelarith-control-qt/qml/shell/pages/AgentSettingsPage.qml": {
-      "lines": 169,
+      "lines": 183,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
@@ -318,11 +318,11 @@
       "plan": "[P2] 广播社排期页（1af60e0 2026-10-23 提交时漏登记）：按 登录门/排期代理/成员列表 三段拆；先随广播社批次实弹验收后再动，避免动半成品"
     },
     "Stelarith-control-qt/src/agent_ui.h": {
-      "lines": 708,
+      "lines": 720,
       "limit": 300,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P3] agent UI 声明头（1af60e0 同期 +15 漏登记）：随 agent_ui.cpp 拆分一并收敛 | 2026-10-25 回写 315→324：+9 为设备用途进快照（deviceRole 3 行 / classCode 2 行 / 两个访问器 2 行 / 两个成员 2 行）—— 壳按用途分流、广播台显示站码都要读它 | 2026-10-28 回写 324→564：本批模块三 —— ①设置页分类状态（settingsTab + settingsSections[含 rowBg/fg/weight] + 7 个 tab 布尔 + setSettingsTab + 校验表）；②结果属性（connStateColor/latestColor/otaModeColor/otaAutoColor/pauseBtnText/deviceRoleText/versionText/uidText/classCodeText）；③openConfigDir 槽与信号（托盘右键移植）。拆分计划升为 [P1]：设置页那批「结果属性 + 分类表」可整体抽到 AgentSettingsVm（~180 行），本头只留设备信息与 OTA 快照 | 2026-10-28 回写 564→708（+144）：模块三设置页按蓝图原文补「通用」六项 —— url 配置（serverUrl/serverUrlText/serverUrlPlaceholder）、安全模式（safeModeAuto/safeModeNow/lastExitText/safeModeStateText）、时间配置（timeNow/State/Server/Skew/Offset/LastSync + timeAutoSync）、存储与备份（4 个用量文案 + hint）、高级选项（resetScopeText）、动作结果条（actionResultText/Visible + setActionResultText/setStorageTexts 给 lambda 用）。拆分计划：[P2] 设置页属性可整体搬到 settings_ui.h 子类，避免 agent_ui.h 继续做杂货铺"
+      "plan": "[P3] agent UI 声明头（1af60e0 同期 +15 漏登记）：随 agent_ui.cpp 拆分一并收敛 | 2026-10-25 回写 315→324：+9 为设备用途进快照（deviceRole 3 行 / classCode 2 行 / 两个访问器 2 行 / 两个成员 2 行）—— 壳按用途分流、广播台显示站码都要读它 | 2026-10-28 回写 324→564：本批模块三 —— ①设置页分类状态（settingsTab + settingsSections[含 rowBg/fg/weight] + 7 个 tab 布尔 + setSettingsTab + 校验表）；②结果属性（connStateColor/latestColor/otaModeColor/otaAutoColor/pauseBtnText/deviceRoleText/versionText/uidText/classCodeText）；③openConfigDir 槽与信号（托盘右键移植）。拆分计划升为 [P1]：设置页那批「结果属性 + 分类表」可整体抽到 AgentSettingsVm（~180 行），本头只留设备信息与 OTA 快照 | 2026-10-28 回写 564→708（+144）：模块三设置页按蓝图原文补「通用」六项 —— url 配置（serverUrl/serverUrlText/serverUrlPlaceholder）、安全模式（safeModeAuto/safeModeNow/lastExitText/safeModeStateText）、时间配置（timeNow/State/Server/Skew/Offset/LastSync + timeAutoSync）、存储与备份（4 个用量文案 + hint）、高级选项（resetScopeText）、动作结果条（actionResultText/Visible + setActionResultText/setStorageTexts 给 lambda 用）。拆分计划：[P2] 设置页属性可整体搬到 settings_ui.h 子类，避免 agent_ui.h 继续做杂货铺 | 2026-10-30 回写 708→720（+12）：本批 —— 设置页分类行选中态去紫：rowBg/fg 三组 Hex 由 MD3 cSecondaryCont(#E8DEF8/#4A4458 淡紫) 改为中性锌灰(#E4E4E7/#3F3F46)，并加注释说明是共享库调色板的镜像。无新增 Q_PROPERTY / 顶层定义，纯字面量替换 + 注释。"
     },
     "Stelarith-viewer-qt/qml/pages/class/ClassMemberPane.qml": {
       "lines": 411,
