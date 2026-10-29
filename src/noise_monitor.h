@@ -41,11 +41,43 @@ public:
     // 采集是否真可用（有麦克风且最近一次分析成功）——供上层区分"安静"与"没采到"
     bool captureAvailable() const { return m_captureOk; }
 
+    // ══ 2026-10-30（P0-1 补齐 · 笔记 P0 噪音检测）══════════════════════════
+    // 三项能力补齐，但**默认行为与以前逐字一致**（不传就是老行为），避免改动面扩大。
+
+    // ① 阈值可配 + SPL 校准偏置
+    //    判定口径：`(本次 dB + splOffset) > thresholdDb`
+    //      · 未校准（默认）：offset=0、threshold=-45 ⇒ 相对满量程 dBFS（= 既有行为）
+    //      · 校准后：offset=校准偏置、threshold=80 ⇒ 按 dB SPL 判定（笔记要求）
+    //    ⚠️ **未校准时把 threshold 设成 80 没有意义**：dBFS 与 SPL 差一个未知偏置
+    //       （麦克风增益、驱动 AGC 差异可达几十 dB），必须先校准或改用自适应基线，
+    //       否则 80 这个数字纯属自欺 —— 这是本模块最容易被误用的一处。
+    void setThresholdDb(double v) { m_thresholdDb = v; }
+    double thresholdDb() const { return m_thresholdDb; }
+    void setSplOffset(double v) { m_splOffset = v; }
+    double splOffset() const { return m_splOffset; }
+    /** 换算成 SPL 口径的最近一次读数（未校准时 = lastDb()）。 */
+    double lastDbSpl() const { return m_lastDb + m_splOffset; }
+
+    // ② 触发计数：一个统计周期（建议=一节次）内累计超阈达 N 次 → 发一次 thresholdReached，
+    //    发过就锁定，直到 resetTriggerCounter()（防同周期重复上报刷屏）。
+    void setTriggerCount(int n) { m_triggerCount = n > 0 ? n : 1; }
+    int triggerCount() const { return m_triggerCount; }
+    void resetTriggerCounter();
+    int triggerHits() const { return m_hits; }
+    bool triggered() const { return m_triggered; }
+
+    // ③ 测试入口：绕过采集直接注入一个 dB 样本，走**同一套**判定与计数逻辑。
+    //    用途：容器/无麦克风环境下验证状态机（真机不调用）。
+    //    ⚠️ 不做生产用途：它只是把 evaluate() 暴露出来，不改变任何采集行为。
+    void injectSample(double db);
+
 signals:
     // 每次分析完成：dB（相对响度）、有没有噪音、事件序号
     void noiseSample(double db, bool active, int seq);
     // 设备打不开 / 采集失败
     void failed(const QString& reason);
+    // 本周期累计超阈达 N 次（默认 3）：hits=累计次数、db=触发那次的 SPL 口径读数
+    void thresholdReached(int hits, double db);
 
 private slots:
     void sample();   // 定时触发：起一次异步采集
@@ -53,6 +85,8 @@ private slots:
 private:
     class Task;                                  // 异步采集任务（QRunnable，.cpp 内定义）
     void onCaptured(double rms, int seq);        // 子线程算完 → 回主线程 emit
+    /** 判定 + 计数 + 发信号的唯一出口（onCaptured 与 injectSample 共用，保证同口径）。 */
+    void evaluate(double dbRaw, int seq);
 
     bool m_running = false;
     int m_sampleRate = 16000;
@@ -66,4 +100,11 @@ private:
     bool m_captureOk = false;   // 最近一次采集成功？
     bool m_busy = false;        // 上一次采集还没回来，跳过本轮（防重入）
     int m_seq = 0;
+
+    // ── 2026-10-30 P0-1 补齐（默认值 = 既有行为，零行为变更）──
+    double m_thresholdDb = -45.0;   // 默认按 dBFS 判（与旧代码 `db > -45.0` 一致）
+    double m_splOffset   = 0.0;     // 0 = 未校准；校准后填 dBFS→dB SPL 的偏置
+    int    m_triggerCount = 3;      // 笔记：3 次触发才上报
+    int    m_hits        = 0;       // 本周期累计超阈次数
+    bool   m_triggered   = false;   // 已发过 thresholdReached（锁定，防重复）
 };

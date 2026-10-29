@@ -133,6 +133,7 @@ void NoiseMonitor::start(int sampleRate, int intervalMs)
     m_seq = 0;
     m_busy = false;
     m_captureOk = false;
+    resetTriggerCounter();   // 新周期（建议=一节次）开始，计数归零
     m_timer.start(qMax(200, intervalMs));
     m_running = true;
 }
@@ -175,9 +176,40 @@ void NoiseMonitor::onCaptured(double rms, int seq)
     m_captureOk = true;
     // RMS 0..1 → dB（相对满量程）；rms=0（真静音）给一个下限，不是 -inf
     const double db = rms > 0.0 ? 20.0 * log10(rms * 32768.0) : -96.0;
-    const bool active = db > -45.0;   // 默认阈值（上层自习模式可用自己的 thresholdDb 重判）
-    m_lastDb = db;
-    m_lastActive = active;
+    evaluate(db, seq);   // 判定/计数统一走 evaluate（与 injectSample 同口径）
+}
 
-    emit noiseSample(db, active, seq);
+// ── 2026-10-30（P0-1）：判定 + 计数的唯一出口 ──────────────────────────────
+// 拆出来是为了让"注入测试"和"真采集"走**同一条**判定路径 —— 否则测试验的是另一套
+// 逻辑，等于没验。真机不调用 injectSample，但两者共用这里，计数语义才有保障。
+void NoiseMonitor::evaluate(double dbRaw, int seq)
+{
+    const double dbJudge = dbRaw + m_splOffset;   // 未校准时 offset=0 ⇒ 等价旧行为
+    const bool   active  = dbJudge > m_thresholdDb;
+
+    m_lastDb     = dbRaw;
+    m_lastActive = active;
+    emit noiseSample(dbRaw, active, seq);
+
+    if (!active) return;
+
+    ++m_hits;
+    // 达 N 次才发一次，且发过就锁住 —— 同一个统计周期内不重复上报（笔记：3 次才上报）
+    if (!m_triggered && m_hits >= m_triggerCount) {
+        m_triggered = true;
+        emit thresholdReached(m_hits, dbJudge);
+    }
+}
+
+void NoiseMonitor::resetTriggerCounter()
+{
+    m_hits      = 0;
+    m_triggered = false;
+}
+
+void NoiseMonitor::injectSample(double db)
+{
+    // 测试/调试用：绕过麦克风直接喂一个 dB 值，走与真采集完全相同的判定与计数。
+    // 不检查 m_running —— 无麦克风环境下也要能验状态机。
+    evaluate(db, ++m_seq);
 }
