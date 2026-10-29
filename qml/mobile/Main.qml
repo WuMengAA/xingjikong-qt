@@ -15,7 +15,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"      // 共享 ui 组件（UiRegistry 等）
 import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
-import "../components/md3"  // MD3 组件库
 import ".."          // #5：FilePushDialog.qml 在 qml/ 根目录，手机端要拿它必须相对导入上一级
 
 ApplicationWindow {
@@ -143,23 +142,48 @@ ApplicationWindow {
         width: Math.min(560, root.width * 0.94)
     }
 
-    // ── 关机/锁屏确认弹窗（MD3 对话框：scrim + 28 圆角）──
-    Md3Dialog {
+    // ── 关机/锁屏确认弹窗（AppDialog：scrim + 居中卡，无边框）──
+    // AppDialog 没有 title/text/actions 这套 API（它是「受控容器 + 自绘内容」），
+    // 故这里把弹窗内容显式写出来；行为与旧件等价：确认=destructive，取消=ghost。
+    AppDialog {
         id: confirmDialog
         objectName: "confirmDialog"
-        title: "确认操作"
-        text: "对 " + root.confirmTarget + " 执行「" + (root.confirmAction === "shutdown" ? "关机" : "锁屏") + "」？"
-        actions: [
-            { text: "取消", role: "cancel" },
-            { text: "确认", role: "danger" }
-        ]
-        onActionClicked: function (i, role) {
-            if (role === "danger") {
-                backend.currentUid = root.confirmTarget
-                backend.sendAction(root.confirmAction, {})
-                root.toast("已下发「" + root.confirmAction + "」→ " + root.confirmTarget)
+        opened: false
+        onClosed: confirmDialog.opened = false
+
+        Text {
+            Layout.fillWidth: true
+            text: "确认操作"
+            font.pixelSize: 16
+            font.weight: Font.Medium
+            color: Theme.color.textPrimary
+        }
+        Text {
+            Layout.fillWidth: true
+            text: "对 " + root.confirmTarget + " 执行「" + (root.confirmAction === "shutdown" ? "关机" : "锁屏") + "」？"
+            font.pixelSize: 14
+            wrapMode: Text.WordWrap
+            color: Theme.color.textSecondary
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.sm
+            Item { Layout.fillWidth: true }          // 右推：两枚按钮贴右
+            AppButton {
+                text: "取消"
+                variant: "ghost"
+                onClicked: confirmDialog.opened = false
             }
-            confirmDialog.opened = false
+            AppButton {
+                text: "确认"
+                variant: "destructive"
+                onClicked: {
+                    backend.currentUid = root.confirmTarget
+                    backend.sendAction(root.confirmAction, {})
+                    root.toast("已下发「" + root.confirmAction + "」→ " + root.confirmTarget)
+                    confirmDialog.opened = false
+                }
+            }
         }
     }
 

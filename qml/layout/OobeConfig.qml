@@ -5,7 +5,6 @@
 import QtQuick
 import "../components"
 import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
-import "../components/md3"
 
 Item {
     id: root
@@ -49,12 +48,19 @@ Item {
             }
 
             // 接入码输入（唯一必填项）
-            Md3TextField {
+            AppInput {
                 width: parent.width
                 placeholder: "班级接入码"
-                helper: "形如 XJK-XXXX-XXX，由管理员发放；填错可改"
                 text: root.code
                 onTextChanged: root.code = text
+            }
+            // AppInput 无 helper 槽位 ⇒ 说明文字独立成行（信息不丢）
+            Text {
+                width: parent.width
+                text: "形如 XJK-XXXX-XXX，由管理员发放；填错可改"
+                wrapMode: Text.WordWrap
+                font.pixelSize: Md3.bodyS
+                color: Md3.cOnSurfaceVar
             }
 
             // 状态行
@@ -76,10 +82,10 @@ Item {
             }
 
             // 主按钮
-            Md3Btn {
+            AppButton {
                 width: parent.width
                 text: root.status === "connecting" ? "连接中…" : "保存并连接"
-                variant: "filled"
+                variant: "primary"
                 enabled: root.code.length >= 6 && root.status !== "connecting"
                 onClicked: root.status = "connecting"
             }
@@ -101,8 +107,9 @@ Item {
                     width: parent.width
                     spacing: 12
                     visible: root.advanced
-                    Md3TextField { width: parent.width; placeholder: "云端地址（默认内置）" }
-                    Md3TextField { width: parent.width; placeholder: "设备令牌（可选）"; password: true }
+                    AppInput { width: parent.width; placeholder: "云端地址（默认内置）" }
+                    // AppInput 无 password 槽位 ⇒ 用 echoMode（等价的密文输入）
+                    AppInput { width: parent.width; placeholder: "设备令牌（可选）"; echoMode: TextInput.Password }
                 }
             }
 

@@ -4,9 +4,9 @@
 // 通知弹窗/桌面被监控提示），存 QSettings，启动前 check。
 // 策略待定项在卡内明说：本机拒绝的，云端能否强制打开。
 import QtQuick
+import QtQuick.Layouts
 import "../components"
 import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
-import "../components/md3"
 
 Item {
     id: root
@@ -43,19 +43,19 @@ Item {
                 font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar
             }
 
-            // 开关组（filled 卡 + Md3SwitchRow）
-            Md3Card {
-                variant: "filled"
+            // 开关组（AppCard + AppSwitchRow）
+            AppCard {
+                shadow: false                  // 原 variant: "filled"（无阴影）
                 width: parent.width
                 Column {
-                    width: parent.width
+                    Layout.fillWidth: true     // AppCard 内部是 ColumnLayout ⇒ 走 Layout
                     spacing: 4
                     Repeater {
                         model: root.switches
                         delegate: Column {
                             required property var modelData
                             width: parent.width
-                            Md3SwitchRow {
+                            AppSwitchRow {
                                 width: parent.width
                                 text: modelData.k
                                 supporting: modelData.s
@@ -76,8 +76,8 @@ Item {
             Row {
                 anchors.right: parent.right
                 spacing: 12
-                Md3Btn { text: "恢复默认"; variant: "text" }
-                Md3Btn { text: "保存"; variant: "filled"; onClicked: {} }
+                AppButton { text: "恢复默认"; variant: "ghost" }
+                AppButton { text: "保存"; variant: "primary"; onClicked: {} }
             }
         }
     }
