@@ -31,8 +31,8 @@ Item {
 
             Row {
                 spacing: 10
-                M.Md3Btn { text: "刷新"; variant: "filled"; onClicked: agentUi.pluginsRefresh() }
-                M.Md3Btn { text: "安装本地示例(echo)"; variant: "tonal"; onClicked: agentUi.pluginInstallSample() }
+                AppButton { text: "刷新"; variant: "primary"; onClicked: agentUi.pluginsRefresh() }
+                AppButton { text: "安装本地示例(echo)"; variant: "secondary"; onClicked: agentUi.pluginInstallSample() }
             }
 
             // ── 内置模块（2026-10-16「模块化插件」）──
@@ -89,9 +89,9 @@ Item {
                         Row {
                             topPadding: 6
                             spacing: 10
-                            M.Md3Btn {
+                            AppButton {
                                 text: modelData.enabled ? "停用" : "启用"
-                                variant: "tonal"
+                                variant: "secondary"
                                 height: 30
                                 onClicked: agentUi.moduleEnable(modelData.id, !modelData.enabled)
                             }
@@ -165,17 +165,17 @@ Item {
                         Row {
                             topPadding: 6
                             spacing: 10
-                            M.Md3Btn {
+                            AppButton {
                                 text: modelData.installed ? (modelData.enabled ? "停用" : "启用") : "安装"
-                                variant: "tonal"
+                                variant: "secondary"
                                 height: 30
                                 onClicked: modelData.installed
                                            ? agentUi.pluginEnable(modelData.id, !modelData.enabled)
                                            : agentUi.pluginInstall(modelData.id)
                             }
-                            M.Md3Btn {
+                            AppButton {
                                 text: "卸载"
-                                variant: "text"
+                                variant: "ghost"
                                 height: 30
                                 visible: modelData.installed
                                 onClicked: agentUi.pluginUninstall(modelData.id)

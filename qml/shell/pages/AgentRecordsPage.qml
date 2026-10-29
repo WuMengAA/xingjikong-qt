@@ -49,11 +49,11 @@ Item {
                             font.pixelSize: 14; font.weight: Font.Medium
                             color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
                         }
-                        M.Md3Btn {
+                        AppButton {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             text: "打开记录文件夹"
-                            variant: "text"
+                            variant: "ghost"
                             height: 30
                             onClicked: agentUi.openNoiseFolder()
                         }
@@ -91,11 +91,11 @@ Item {
                             font.pixelSize: 14; font.weight: Font.Medium
                             color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
                         }
-                        M.Md3Btn {
+                        AppButton {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             text: "打开记录文件夹"
-                            variant: "text"
+                            variant: "ghost"
                             height: 30
                             onClicked: agentUi.openStudyFolder()
                         }
