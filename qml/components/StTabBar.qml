@@ -12,9 +12,12 @@
 //   ⚠️ 命名特意加 St 前缀：避免与 QtQuick.Controls 自带的 TabBar 冲突（后者无 model 属性，
 //     同名会导致 CameraCenter 里 model: 赋值报 "Cannot assign to non-existent property"）。
 import QtQuick
+import "./theme"   // Theme 设计令牌单例（2026-10-29 迁移：弃 Md3 theme 令牌，走 Theme.color.*）
 
 Rectangle {
     id: tabbar
+    // ⚠️ 保留 theme 属性仅为兼容既有调用方（DiagFeedbackDialog 透传 theme: dlg.theme）；
+    //    本组件已不再消费 Md3 令牌，颜色一律走 Theme 单例。
     property var theme: ({})
     property var model: []
     property int currentIndex: 0
@@ -22,10 +25,10 @@ Rectangle {
     height: 40
     color: "transparent"
 
-    // 令牌便捷取值（theme 即 Md3 实例，深浅两套随 darkMode 切；缺键退回 MD3 基线）
-    readonly property color tAcc:    (tabbar.theme && tabbar.theme.cPrimary !== undefined) ? tabbar.theme.cPrimary : "#6750A4"
-    readonly property color tFg3:    (tabbar.theme && tabbar.theme.cOnSurfaceVar !== undefined) ? tabbar.theme.cOnSurfaceVar : "#49454F"
-    readonly property int  tLabelL:  (tabbar.theme && tabbar.theme.labelL !== undefined) ? tabbar.theme.labelL : 14
+    // 令牌便捷取值（统一走 Theme 单例；无字号令牌，labelL 用字面量 14）
+    readonly property color tAcc:    Theme.color.primary
+    readonly property color tFg3:    Theme.color.textSecondary
+    readonly property int  tLabelL:  14
 
     Row {
         anchors.fill: parent

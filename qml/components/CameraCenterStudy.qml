@@ -4,7 +4,6 @@
 import QtQuick
 import QtQuick.Layouts
 import "../island"
-import "md3"
 
 Rectangle {
     id: studyCard
@@ -58,15 +57,13 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
-            Md3Btn {
+            AppButton {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                radius: cc.tRM
-                variant: cc.backend.studyActive ? "outlined" : "filled"
+                radius: 12
+                variant: cc.backend.studyActive ? "secondary" : "primary"
                 text: cc.backend.studyActive ? "关闭自习" : "开启自习"
                 enabled: cc.selUid !== ""
-                tip: cc.selUid === "" ? "先在「实时」页选一台设备"
-                                      : "周期测教室噪音；连续超阈自动录一段摄像头并上传"
                 onClicked: {
                     if (cc.backend.studyActive) {
                         cc.backend.stopStudyMode()

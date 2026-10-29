@@ -19,7 +19,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtCore
 import "../island"   // SvgIcon 唯一真源在共享岛目录（构建期拷到 qml/island/）
-import "md3"         // MD3 组件库（构建期由 Stelarith-shared-qml/ui/md3/ 拷入 components/md3/）
 import "./theme"     // Theme 设计令牌单例（IconBtn 收口走 Theme，弃 Md3 th 令牌）
 
 Item {
@@ -184,20 +183,18 @@ Item {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: ctrl.tSpS
-                Md3Btn {
-                    radius: ctrl.tRM
-                    variant: "tonal"
+                AppButton {
+                    radius: 12
+                    variant: "secondary"
                     text: "截图"
                     enabled: ctrl.selUid !== ""
-                    tip: "对被控端屏幕截图（screenshot）"
                     onClicked: ctrl.screenShot()
                 }
-                Md3Btn {
-                    radius: ctrl.tRM
-                    variant: "filled"
+                AppButton {
+                    radius: 12
+                    variant: "primary"
                     text: "文件分发"
                     enabled: ctrl.selUid !== ""
-                    tip: "将本机文件分发到该设备"
                     onClicked: ctrl.pushFile()
                 }
             }
@@ -205,19 +202,17 @@ Item {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: ctrl.tSpS
-                Md3Btn {
-                    radius: ctrl.tRM
-                    variant: "outlined"
+                AppButton {
+                    radius: 12
+                    variant: "secondary"
                     text: "停止"
                     enabled: ctrl.recording || ctrl.camStreamUid !== ""
-                    tip: "一键收口：停录 + 停摄像头推流"
                     onClicked: ctrl.stopAll()
                 }
-                Md3Btn {
-                    radius: ctrl.tRM
-                    variant: "text"
+                AppButton {
+                    radius: 12
+                    variant: "ghost"
                     text: "返回"
-                    tip: "关闭监控中心"
                     onClicked: ctrl.closePanel()
                 }
             }

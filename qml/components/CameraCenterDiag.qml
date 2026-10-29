@@ -4,7 +4,6 @@
 import QtQuick
 import QtQuick.Layouts
 import "../island"
-import "md3"
 
 Rectangle {
     id: diagCard
@@ -45,12 +44,11 @@ Rectangle {
                 Text { text: "错误码"; color: cc.tFg3; font.pixelSize: cc.tLabelM }
                 Text { text: cc.errCode; color: cc.tFg; font.pixelSize: cc.tLabelM }
             }
-            Md3Btn {
+            AppButton {
                 visible: cc.canRetry
-                radius: cc.tRM
-                variant: "tonal"
+                radius: 12
+                variant: "secondary"
                 text: "重试"
-                tip: "再试一次刚才没成功的操作"
                 onClicked: cc.retryLast()
             }
 

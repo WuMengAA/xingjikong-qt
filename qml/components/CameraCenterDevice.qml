@@ -6,7 +6,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../island"
-import "md3"
 
 Rectangle {
     id: camCard
@@ -238,17 +237,16 @@ Rectangle {
     }
 
     // 绑定选中的摄像头（主操作，filled，统一 12 圆角）
-    Md3Btn {
+    AppButton {
         id: bindBtn
-        radius: cc.tRM
+        radius: 12
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: cc.tSpM
-        variant: "filled"
+        variant: "primary"
         text: "＋ 绑定选中"
         enabled: camList.currentIndex >= 0
-        tip: "把选中的摄像头设为该设备的采集源（camera_bind）"
         onClicked: {
             if (cc.selUid === "" || camList.currentIndex < 0) return
             cc.bindCamera(cc.cameras[camList.currentIndex])

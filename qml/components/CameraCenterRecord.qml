@@ -4,7 +4,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../island"
-import "md3"
 
 Rectangle {
     id: recCard
@@ -34,13 +33,11 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: cc.tSpS
-                Md3Btn {
-                    radius: cc.tRM
-                    variant: cc.recording ? "outlined" : "filled"
+                AppButton {
+                    radius: 12
+                    variant: cc.recording ? "secondary" : "primary"
                     text: cc.recording ? "停录" : "开录"
                     enabled: cc.selUid !== ""
-                    tip: cc.selUid === "" ? "先在「实时」页选一台设备"
-                                          : "让被控端录一段摄像头，停录后自动上传云端"
                     onClicked: cc.recording ? cc.stopRec() : cc.startRec()
                 }
                 Rectangle {
