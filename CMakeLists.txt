@@ -155,6 +155,14 @@ set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus ${CMAKE_BINARY_DIR}/_opus)
 
+# ── QtShadcn（2026-10-29 · UI 全量替换 P0 接入）────────────────────────────
+# shadcn/ui 风格 Qt6/QML 组件库（MIT，vendoring 在仓库根 third_party/qtshadcn）。
+# 用户裁决：两端全量采用。作为子项目引入 ⇒ examples/tests 默认关闭。
+# ⚠️ 消费方必须 QQuickStyle=Basic（见 src/main.cpp）——QtShadcn 组件是靠覆写
+#    QQC 的 background/contentItem 实现的，宿主风格（Fluent/Windows）会吃掉这些
+#    覆写，表现为"组件渲染出来了但样式完全不对"这类静默故障。
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/qtshadcn ${CMAKE_BINARY_DIR}/_qtshadcn)
+
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
 # 2026-10-11：Android target 手机 App 并入 —— 桌面临时专属件（app.rc / winmm 采集 /
 # 单实例守卫）条件化。桌面照旧，Android 用 stub/跳过。
@@ -387,7 +395,7 @@ add_dependencies(viewer-qt viewer_qml_sync)
 target_sources(viewer-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio/opus_codec.cpp")
 target_include_directories(viewer-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio")
 
-target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg Qt6::Multimedia opus)
+target_link_libraries(viewer-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets Qt6::Widgets Qt6::Svg Qt6::Multimedia opus QtShadcn)
 
 # ── OpenSSL 运行时 DLL 拷进 build/（2026-10-20 恢复 720bd8d 的规则）──────────
 # 历史：0.6.33 的 `720bd8d` 加过这条规则（作者当时的实证：干净重建后 makensis 报

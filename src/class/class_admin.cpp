@@ -274,24 +274,38 @@ void ClassAdmin::removeStudent(const QString &code, const QString &studentId)
     post(QStringLiteral("student-remove"), b, QStringLiteral("已移出该学生"));
 }
 
+bool ClassAdmin::isClassIslandArchive(const QString &text)
+{
+    if (text.isEmpty()) return false;
+    const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
+    if (!doc.isObject()) return false;
+    const QJsonObject o = doc.object();
+    // 两个键缺一不可：光有 ClassPlans 没有 TimeLayouts（作息），解析出来的课
+    // 就没有起止时间 —— 等于给班里挂一份废课表，比不导入更糟。
+    // 只判"存在且非空"（与原 QML 的 `doc.ClassPlans && doc.TimeLayouts` 同义），
+    // 不硬性要求 isArray：档案版本差异不该在这里把人挡在门外。
+    const QJsonValue plans = o.value(QStringLiteral("ClassPlans"));
+    const QJsonValue layouts = o.value(QStringLiteral("TimeLayouts"));
+    if (plans.isUndefined() || plans.isNull()) return false;
+    if (layouts.isUndefined() || layouts.isNull()) return false;
+    return true;
+}
+
 void ClassAdmin::timetable(const QString &code)
 {
     QJsonObject b;
     b.insert(QStringLiteral("classCode"), code);
     fetchJson(QStringLiteral("timetable"), b, [this, code](const QJsonObject &o) {
-        // 没排过课时 profile 是 null —— 这里显式转成空串，QML 只判 isEmpty，
-        // 不用去区分 undefined/null/缺失三种"空"（少一个坑）。
-        QString json;
-        if (o.value(QStringLiteral("profile")).isObject()
-            || o.value(QStringLiteral("profile")).isArray()) {
-            json = QString::fromUtf8(QJsonDocument(
-                o.value(QStringLiteral("profile")).isObject()
-                    ? QJsonDocument(o.value(QStringLiteral("profile")).toObject())
-                    : QJsonDocument(o.value(QStringLiteral("profile")).toArray()))
-                .toJson(QJsonDocument::Compact));
-        }
+        // 2026-10-29：profile 直接以**结构化 QVariant** 下发 —— 对象→QVariantMap、
+        // 数组→QVariantList，QML 拿到就是 JS 值，**不再 JSON.parse**（§10.9 封杀令）。
+        // 没排过课时 profile 是 null ⇒ 发一个无效 QVariant（默认构造），
+        // QML 只判真假即可，不用去区分 undefined/null/缺失三种"空"（少一个坑）。
+        const QJsonValue pv = o.value(QStringLiteral("profile"));
+        QVariant profile;                       // 默认构造 = 无效 QVariant
+        if (pv.isObject())      profile = pv.toObject().toVariantMap();
+        else if (pv.isArray())  profile = pv.toArray().toVariantList();
         emit timetableLoaded(code,
-                             json,
+                             profile,
                              static_cast<qint64>(o.value(QStringLiteral("updatedAt")).toDouble()));
     });
 }

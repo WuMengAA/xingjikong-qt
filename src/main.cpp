@@ -406,17 +406,20 @@ int main(int argc, char *argv[])
     qputenv("QT_QUICK_BACKEND", "software");
     qputenv("QSG_RENDER_LOOP", "windows");
 #endif
-    // ── 控件风格＝FluentWinUI3（2026-10-10 · UI 更新：A 全量转 Fluent）──
-    // 之前钉成 Basic 是因为默认 Windows 风格不支持 background 覆写刷 warn，
-    // 而界面本身是黑白自绘的、用不上默认外观。
-    // 现在用户裁决「直接 A」：管理端全量转 Qt 6.12 官方 FluentWinUI3 风格
-    // （与手机端同步，同为 Fluent 观感）。标准控件（Button/Dialog/ComboBox/
-    // Slider）呈现 WinUI3 外观；自绘卡片/画面区（Rectangle+th 令牌）不受影响
-    // —— Fluent 管交互控件，自绘管视觉主区，二者共存。
+    // ── 控件风格＝Basic（2026-10-29 由 FluentWinUI3 改回）─────────────────
+    // 历史：2026-10-10 用户裁决「管理端全量转 Qt 6.12 官方 FluentWinUI3」，
+    //   标准控件（Button/Dialog/ComboBox/Slider）呈现 WinUI3 观感。
+    // 2026-10-29 再改：用户裁决 UI 全量替换为 **QtShadcn**。而 QtShadcn 的组件
+    //   是靠覆写 QQC 的 background/contentItem 实现的 —— 宿主风格**必须**是
+    //   Basic，否则这些覆写会被 Fluent/Windows 风格吃掉，表现为「组件渲染出来了
+    //   但样式完全不对」的静默故障（库文档点名的坑）。
+    //   ⇒ 风格钉回 Basic。
+    // 连锁影响（过渡期预期）：还没替换成 Shadcn 的**存量**标准控件会从 Fluent
+    //   观感退回 Basic 观感；P2 逐页替换完成后消失。
     // 写进程环境而非 QQuickStyle::setStyle：风格插件加载时读，越早设越好。
     // 2026-10-21：qputenv 从 app 构造之后挪到之前 —— 风格插件可能在 app 构造
     //    期间就被加载，注释原话"越早设越好"，那就最早。
-    qputenv("QT_QUICK_CONTROLS_STYLE", "FluentWinUI3");
+    qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
     // 2026-10-12 审计 #19 记录：FluentWinUI3 是 Qt 6.12 才支持的风格，而 CMake
     // 声明的最低版本是 6.5——落在 [6.5, 6.12) 的构建环境会被静默忽略（无报错）。
     // 运行时核对（QQuickStyle::name()）需链接 QtQuickControls2 C++ 库，当前工程

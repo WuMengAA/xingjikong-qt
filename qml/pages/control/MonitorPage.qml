@@ -1,21 +1,28 @@
-// 监控页（整屏页 · U5「两端同 shell」A-2 第四页 · 2026-10-19 新增）
+// 监控页（整屏页）· QtShadcn 规范（2026-10-29 迁移）
 // ───────────────────────────────────────────────────────────────────────────
 // 解决的问题（用户反馈 2026-10-19）：「监控没有独立界面和操作 UI」——
-// 此前监控能力散落各处：摄像头在 CameraCenterDialog 弹窗、多班墙在
-// MultiThumbDialog 弹窗、实时画面在控制页中栏，老师打开管理端没有一个
-// "去监控"的整页入口。
-//
 // 本页是**监控中心**一页收拢：
-//   ① 设备选择（Md3Chip 横条，与手机端 MonitorPage 同一套心智）
-//   ② 主画面（实时帧流 image://frames/f + 远控 VNC 帧流 image://vnc/live
-//      + fps/链路徽标；#370 补 VNC 双源，点「远程控制」后本页直接出画面）
-//   ③ 操作栏（截图 / 摄像头 / 多班墙 / 远程控制 / 推文件 / 返回 / 停止）
+//   ① 设备选择（chip 横条，与手机端 MonitorPage 同一套心智）
+//   ② 主画面（实时帧流 image://frames/f + 远控 VNC 帧流 image://vnc/live）
+//   ③ 录像回放 / 操作栏
 //
-// 契约（同 ControlPage/SettingsPage，见 UiPageHost 的 _ctx()）：
-//   ctx.window = 主界面 root；backend = C++ 上下文属性（本文件内可直接访问）
+// 契约（同 ControlPage/SettingsPage）：ctx.window = 主界面 root；
+//   backend = C++ 上下文属性（本文件内可直接访问）
+//
+// ── 2026-10-29 迁移要点 ────────────────────────────────────────────────
+// · `th.*`（旧 Theme 实例，14 处十六进制兜底）→ `Theme.*` 语义令牌，**兜底 hex 全删**
+// · **删 4 处 border**（主画面 / 徽标）—— 规范铁律，改由底色差分区
+// · `Md3Chip` → `AppChip`（选中态改实底主色）
+// · `Md3Btn` → `AppButton`，**`radius: 12`**（本页属 2026-10-19「12px 方角」点单范围）
+// · **修掉既有 Bug**：原 3 个按钮没有 text（摄像头/返回/停止）⇒ 是空白按钮，
+//   用户不知道点哪个。本次补上文案。
+// · ⚠️ 保留 `Flow`：规范只列 Column/Row/Grid/StackLayout，但本页明确要
+//   「窗口窄时自动换行，不挤成一团」；Flow 是 Qt 的自然换行容器（非绝对坐标），
+//   换成 GridLayout 会变等宽格、破坏原意图。此处优先保留行为，已记录为已知偏离。
 import QtQuick
 import QtQuick.Layouts
-import "../../components/md3"
+import "../../components"        // AppButton / AppChip
+import "../../components/theme"  // Theme 令牌
 
 Item {
     id: page
@@ -23,13 +30,10 @@ Item {
     property var ctx
 
     /** 返回出口。内嵌进新外壳（MainWindow 的 monitor section）时由外壳注入，
-     *  点一下切回仪表盘；旧壳 page 3 不注入，回落原来的"跳回集控页"。
-     *  这样同一份页面在两处都成立，不用复制第二份（AGENTS.md §9.3 单一真源）。 */
+     *  点一下切回仪表盘；旧壳 page 3 不注入，回落原来的"跳回集控页"。 */
     property var backFn: null
 
-    readonly property var th: (ctx && ctx.window && ctx.window.th) ? ctx.window.th : null
     // 2026-10-26 P4：当前设备的录像列表。
-    // backend.recordings = { uid: [ { name, bytes, mtimeMs } ] }（QJsonObject → JS 对象）
     readonly property var recs: {
         const u = backend.currentUid
         if (!u) return []
@@ -38,28 +42,28 @@ Item {
         return o[u] || []
     }
 
-    Rectangle { anchors.fill: parent; color: th ? th.body : "#141414" }
+    Rectangle { anchors.fill: parent; color: Theme.color.background }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 14
-        spacing: 10
+        anchors.margins: Theme.spacing.md - 2
+        spacing: Theme.spacing.sm + 2
 
-        // ── ① 设备选择横条（MD3 filter chip，同一套心智）──────────────
+        // ── ① 设备选择横条 ────────────────────────────────────────────
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 46
-            radius: 12
-            color: th ? th.cContLow : "#1E1E1E"
+            radius: Theme.radius.md
+            color: Theme.color.surfaceVariant
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 10
+                anchors.leftMargin: Theme.spacing.sm + 4
+                anchors.rightMargin: Theme.spacing.sm + 4
+                spacing: Theme.spacing.sm
 
                 Text {
                     text: "看哪台："
-                    color: th ? th.cOnSurfaceVar : "#C8C8C8"
+                    color: Theme.color.textSecondary
                     font.pixelSize: 13
                 }
 
@@ -69,10 +73,9 @@ Item {
                     Layout.preferredHeight: 32
                     orientation: ListView.Horizontal
                     clip: true
-                    spacing: 8
+                    spacing: Theme.spacing.sm
                     model: backend.devices
-                    delegate: Md3Chip {
-                        // Md3Chip 自带 implicitWidth（text + 32），横条里随内容撑
+                    delegate: AppChip {
                         text: (modelData.name && modelData.name !== "") ? modelData.name : modelData.uid
                         selected: backend.currentUid === modelData.uid
                         onClicked: {
@@ -90,17 +93,15 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: 12
-            color: th ? th.panel : "#1E1E1E"
-            border.color: th ? th.cOutlineVar : "#3C3C3C"
-            border.width: 1
+            radius: Theme.radius.md
+            color: Theme.color.surface
+            // 无边框（规范）：靠 surface 与 background 的色差分区
             clip: true
 
-            // 实时帧（订阅帧流 image://frames/f）
             Image {
                 id: frameImg
                 anchors.fill: parent
-                anchors.margins: 8
+                anchors.margins: Theme.spacing.sm
                 fillMode: Image.PreserveAspectFit
                 cache: false
                 visible: backend.frameSource !== "vnc"
@@ -112,11 +113,10 @@ Item {
                 }
             }
 
-            // 远控画面（VNC over WebSocket · libvncclient · #370 补：点「远程控制」后本页直接出画面）
             Image {
                 id: vncImg
                 anchors.fill: parent
-                anchors.margins: 8
+                anchors.margins: Theme.spacing.sm
                 fillMode: Image.PreserveAspectFit
                 cache: false
                 visible: backend.frameSource === "vnc"
@@ -139,60 +139,71 @@ Item {
                     return ""
                 }
                 visible: text !== ""
-                color: th ? th.cOnSurfaceVar : "#C8C8C8"
+                color: Theme.color.textSecondary
                 font.pixelSize: 14
             }
 
-            // 链路徽标（与控制页同一语义：实时/轮询/远控/等待）
+            // 链路徽标（四态各自用令牌；无边框）
             Rectangle {
+                id: badge
                 visible: backend.currentUid !== ""
                 anchors.top: parent.top
                 anchors.right: parent.right
                 anchors.margins: 10
                 height: 20
-                radius: 4
-                color: backend.frameSource === "vnc" ? (th ? th.inv : "#FFFFFF")
-                     : ctx.window.linkBusy ? (th ? th.todo : "#5B8CFF")
-                     : (backend.frameSource === "jpeg" ? "transparent" : (th ? th.inv : "#FFFFFF"))
-                border.color: th ? th.stroke : "#3C3C3C"
-                border.width: 1
+                width: badgeTxt.implicitWidth + Theme.spacing.sm * 2
+                radius: Theme.radius.sm - 4
+
+                readonly property bool isVnc: backend.frameSource === "vnc"
+                readonly property bool isBusy: ctx.window.linkBusy
+                readonly property bool isJpeg: backend.frameSource === "jpeg"
+
+                color: isVnc  ? Theme.color.primary
+                     : isBusy ? Qt.rgba(Theme.color.warning.r, Theme.color.warning.g,
+                                        Theme.color.warning.b, 0.15)
+                     : isJpeg ? Theme.color.surfaceVariant
+                              : Qt.rgba(Theme.color.success.r, Theme.color.success.g,
+                                        Theme.color.success.b, 0.15)
+
                 Text {
+                    id: badgeTxt
                     anchors.centerIn: parent
-                    text: backend.frameSource === "vnc" ? "远控中"
-                        : ctx.window.linkBusy ? "正在接通…"
-                        : backend.frameSource === "jpeg" ? "轮询"
+                    text: badge.isVnc ? "远控中"
+                        : badge.isBusy ? "正在接通…"
+                        : badge.isJpeg ? "轮询"
                         : "实时"
-                    color: backend.frameSource === "vnc" ? (th ? th.win : "#000000")
-                           : ctx.window.linkBusy ? (th ? th.win : "#FFFFFF")
-                           : (backend.frameSource === "jpeg" ? (th ? th.fg3 : "#C8C8C8") : (th ? th.win : "#000000"))
+                    color: badge.isVnc  ? Theme.color.primaryForeground
+                         : badge.isBusy ? Theme.color.warning
+                         : badge.isJpeg ? Theme.color.textSecondary
+                                        : Theme.color.success
                     font.pixelSize: 11
                 }
             }
         }
 
         // ── ③ 录像回放（2026-10-26 · P4）──────────────────────────────
-        //  点一条就在右下角弹小窗播（不是跳页）。小窗是根上的浮层，
-        //  所以切去别的面板它还在 —— 老师能一边看回放一边干别的。
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 6
+            spacing: Theme.spacing.xs + 2
             visible: page.recs.length > 0
 
             Text {
                 text: "录像回放"
                 font.pixelSize: 13
-                color: th ? th.fg : "#FAFAFA"
+                color: Theme.color.textPrimary
             }
             Flow {
                 Layout.fillWidth: true
-                spacing: 8
+                spacing: Theme.spacing.sm
                 Repeater {
                     model: page.recs
-                    Md3Btn {
+                    AppButton {
+                        required property var modelData
                         text: (modelData && modelData.name)
                               ? modelData.name.replace("rec-", "").replace(".mp4", "")
                               : "录像"
-                        variant: "tonal"
+                        variant: "secondary"
+                        radius: 12            // 局部例外（12px 点单范围）
                         onClicked: {
                             if (!modelData) return
                             if (ctx.window && ctx.window.openPlayback)
@@ -204,34 +215,42 @@ Item {
             }
         }
 
-        // ── ④ 操作栏（全部复用现有后端动作，给监控场景的快捷操作）──────
-        //  #370：补「推文件」入口（走 file_push 面板）与「返回」（跳回集控页）。
-        //  用 Flow 包，窗口窄时自动换行，不挤成一团。
+        // ── ④ 操作栏 ──────────────────────────────────────────────────
         Flow {
             Layout.fillWidth: true
-            spacing: 10
+            spacing: Theme.spacing.sm + 2
 
-            Md3Btn { text: "截图"; variant: "tonal"; onClicked: ctx.window.runActionById("screenshot") }
-            Md3Btn {
+            AppButton { text: "截图"; variant: "secondary"; radius: 12
+                        onClicked: ctx.window.runActionById("screenshot") }
+            // 原为空白按钮（无 text），补「摄像头」
+            AppButton {
+                text: "摄像头"
+                variant: "secondary"
+                radius: 12
                 visible: backend.capActions.indexOf("camera_list") >= 0
                 onClicked: ctx.window.openOnly("camera")
             }
-            Md3Btn { text: "多班墙"; variant: "tonal"; onClicked: ctx.window.openOnly("multiband") }
-            Md3Btn { text: "远程控制"; variant: "tonal"; onClicked: ctx.window.runActionById("remote-start") }
-            // #370：监控页直接推文件给当前看的这台（file_push 面板走 openOnly("file")）
-            Md3Btn { text: "推文件"; variant: "tonal"; onClicked: ctx.window.runActionById("file_push") }
-            // #370：显式「返回」跳回集控（page=1），不必去点顶部标签
-            // 新外壳内嵌时 backFn 由外壳注入（切回仪表盘），旧壳仍跳 page 1。
-            Md3Btn {
+            AppButton { text: "多班墙"; variant: "secondary"; radius: 12
+                        onClicked: ctx.window.openOnly("multiband") }
+            AppButton { text: "远程控制"; variant: "secondary"; radius: 12
+                        onClicked: ctx.window.runActionById("remote-start") }
+            AppButton { text: "推文件"; variant: "secondary"; radius: 12
+                        onClicked: ctx.window.runActionById("file_push") }
+            // 原为空白按钮（无 text），补「返回」
+            AppButton {
+                text: "返回"
+                variant: "ghost"
+                radius: 12
                 onClicked: {
                     if (page.backFn) page.backFn()
                     else ctx.window.goPage(1)
                 }
             }
-
-            // 停止看当前设备（outlined 弱化；Md3Btn 无 error 变体色的 text 写法，
-            // 用 outlined + 红色 icon 近似 —— 语义仍清楚）
-            Md3Btn {
+            // 原为空白按钮（无 text），补「停止」（弱化：停止看当前设备）
+            AppButton {
+                text: "停止"
+                variant: "ghost"
+                radius: 12
                 onClicked: { backend.currentUid = ""; ctx.window.currentUid = "" }
             }
         }

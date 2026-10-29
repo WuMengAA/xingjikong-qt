@@ -1,27 +1,30 @@
-// 星集控 · 手机端监控页（#370 重构 2026-10-19）
+// 星集控 · 手机端监控页 · QtShadcn 规范（2026-10-29 迁移）
 // ───────────────────────────────────────────────────────────────────────────
 // 修复（用户反馈「对老师不友好、功能缺失、无法退出」）：
 //   ① 死摄像头 image://frames/cam（RTC 摄像头轨随 libdatachannel 移除，无数据源）
 //      → 改为实时屏 image://frames/f（与控制/桌面监控同一订阅帧流）。
-//   ② 进页订阅帧流、离页退订（setScreenActive）—— 解决"卡死/无法退出"：
-//      退订即停流，云端不再推帧；离开还顺手收掉远控，不再无声泄漏。
-//   ③ 操作栏补 截图 / 远程控制 / 推文件，停止真正清流（本地 watching 标志，
-//      不依赖 setCurrentUid("") 早返回不清场的 C++ 怪癖）。
-//   ④ 远控 VNC 画面（image://vnc/live）同屏显示，点「远程控制」直接出画面。
+//   ② 进页订阅帧流、离页退订（setScreenActive）—— 解决"卡死/无法退出"。
+//   ③ 操作栏补 截图 / 远程控制 / 推文件，停止真正清流。
+//   ④ 远控 VNC 画面（image://vnc/live）同屏显示。
 //
-// 移动端本体是 Item（非窗口），令牌走 md3 属性；backend 是全局上下文属性，可直接访问。
+// ── 2026-10-29 迁移要点 ────────────────────────────────────────────────
+// · `Md3Chip` → `AppChip`（Md3Chip 选中态靠描边，规范禁边框 ⇒ 改实底主色）
+// · **修掉一个既有 Bug**：原操作栏 4 个 `Md3Btn` **完全没有 text**，
+//   渲染出来是 4 个空白按钮，用户不知道点哪个。本次补上 截图/远程控制/推文件/停止。
+// · **删主画面区的 border**（规范铁律），改由 surface 与 background 色差分区
+// · 链路徽标原来把文字色写死成十六进制白，改为令牌派生（见 badge 段）
+// · `Md3.cOk` → `Theme.color.success`
 import QtQuick
 import QtQuick.Layouts
-import "../components"
-import "../components/md3"
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components"           // AppButton / AppChip
+import "../components/theme"    // Theme 令牌
 
 Item {
     id: page
 
     // 推文件：把目标机塞进 backend.currentUid，由壳（Main/MobileShell）开 FilePushDialog
     signal filePushRequested(var uid)
-    // 轻提示：透传给壳的 toast（壳有 Md3Snackbar，本页没有）
+    // 轻提示：透传给壳的 toast
     signal toastMsg(string s)
 
     // 是否在看某台：本地标志，独立的"停止/退出"语义，绕开 C++ currentUid 清空怪癖。
@@ -30,45 +33,41 @@ Item {
     readonly property bool frameReady: backend.frameCount > 0 && backend.frameUid === backend.currentUid
 
     // 进/出监控页：订阅或退订主画面帧流（与桌面 onPageChanged 同语义）。
-    // 退订即停流，云端不再推帧；离开还顺手收掉远控 ⇒ 不卡死、可退出。
     onVisibleChanged: {
         if (typeof backend === "undefined" || !backend) return
         if (page.visible && page.watching) backend.setScreenActive(true)
         else if (!page.visible) backend.setScreenActive(false)
     }
 
-    // ── ① 设备选择横条（MD3 filter chip，与桌面同一套心智）────────────
+    // ── ① 设备选择横条 ────────────────────────────────────────────────
     Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         height: 60
-        color: Md3.cSurface
-        Row {
+        color: Theme.color.background      // 与主画面区（surface）拉开色差
+        RowLayout {
             anchors.fill: parent
-            anchors.margins: 12
-            spacing: 8
+            anchors.margins: Theme.spacing.md - 4
+            spacing: Theme.spacing.sm
             Text {
                 text: "看哪台："
-                color: Md3.cOnSurfaceVar
-                font.pixelSize: Md3.labelL
-                anchors.verticalCenter: parent.verticalCenter
+                color: Theme.color.textSecondary
+                font.pixelSize: 14
             }
             ListView {
                 id: watchList
                 orientation: ListView.Horizontal
                 clip: true
-                width: parent.width - 76
-                height: 36
-                anchors.verticalCenter: parent.verticalCenter
+                Layout.fillWidth: true
+                Layout.preferredHeight: 36
                 model: backend.devices
-                spacing: 8
-                delegate: Md3Chip {
+                spacing: Theme.spacing.sm
+                delegate: AppChip {
                     text: (modelData.name && modelData.name !== "") ? modelData.name : modelData.uid
                     selected: backend.currentUid === modelData.uid
                     onClicked: {
                         backend.currentUid = modelData.uid
-                        // 选中的那台要真的开始拉帧（与桌面/集控同语义）
                         backend.sendAction("screenshot", {})
                         page.watching = true
                         backend.setScreenActive(true)
@@ -87,17 +86,15 @@ Item {
         anchors.right: parent.right
         anchors.bottom: actions.top
         anchors.bottomMargin: 10
-        radius: 12
-        color: Md3.cCont
-        border.color: Md3.cOutlineVar
-        border.width: 1
+        radius: Theme.radius.md
+        color: Theme.color.surface
+        // 无边框（规范）：靠 surface 与 background 的色差分区
         clip: true
 
-        // 实时帧（订阅帧流 image://frames/f）
         Image {
             id: screenImg
             anchors.fill: parent
-            anchors.margins: 8
+            anchors.margins: Theme.spacing.sm
             fillMode: Image.PreserveAspectFit
             cache: false
             visible: page.watching && backend.frameSource !== "vnc"
@@ -106,11 +103,10 @@ Item {
             Connections { target: backend; function onFrameChanged() { screenImg.tick++ } }
         }
 
-        // 远控画面（VNC over WebSocket · image://vnc/live）
         Image {
             id: vncImg
             anchors.fill: parent
-            anchors.margins: 8
+            anchors.margins: Theme.spacing.sm
             fillMode: Image.PreserveAspectFit
             cache: false
             visible: page.watching && backend.frameSource === "vnc"
@@ -130,25 +126,34 @@ Item {
                 return ""
             }
             visible: text !== ""
-            color: Md3.cOnSurfaceVar
-            font.pixelSize: Md3.labelM
+            color: Theme.color.textSecondary
+            font.pixelSize: 13
         }
 
-        // 链路徽标
+        // 链路徽标：三态各自用令牌，不再写死白色字
         Rectangle {
+            id: badge
             visible: page.watching && backend.currentUid !== ""
             anchors.top: parent.top
             anchors.right: parent.right
             anchors.margins: 10
             height: 20
-            radius: 4
-            color: backend.frameSource === "vnc" ? Md3.cPrimary
-                 : (page.frameReady ? Md3.cOk : Md3.cOutlineVar)
+            width: badgeTxt.implicitWidth + Theme.spacing.sm * 2
+            radius: Theme.radius.sm - 4
+            readonly property bool isVnc: backend.frameSource === "vnc"
+            readonly property bool isReady: page.frameReady
+            // VNC = 主色实底；已就绪 = 成功色淡底；其余 = 弱底
+            color: isVnc ? Theme.color.primary
+                 : (isReady ? Qt.rgba(Theme.color.success.r, Theme.color.success.g,
+                                      Theme.color.success.b, 0.15)
+                            : Theme.color.surfaceVariant)
             Text {
+                id: badgeTxt
                 anchors.centerIn: parent
                 text: backend.frameSource === "vnc" ? "远控中"
                     : (backend.frameSource === "jpeg" ? "轮询" : (page.frameReady ? "实时" : "接通中"))
-                color: "#FFFFFF"
+                color: badge.isVnc ? Theme.color.primaryForeground
+                     : (badge.isReady ? Theme.color.success : Theme.color.textSecondary)
                 font.pixelSize: 11
             }
         }
@@ -165,26 +170,38 @@ Item {
         rowSpacing: 10
         columnSpacing: 10
 
-        Md3Btn {
+        AppButton {
+            Layout.fillWidth: true
+            text: "截图"
+            variant: "secondary"
             onClicked: {
                 if (backend.currentUid !== "") { backend.sendAction("screenshot", {}); page.toastMsg("已请求截图") }
                 else page.toastMsg("先选一台设备")
             }
         }
-        Md3Btn {
+        AppButton {
+            Layout.fillWidth: true
+            text: "远程控制"
+            variant: "primary"
             onClicked: {
                 if (backend.currentUid !== "") { backend.sendAction("remote_control_start", {}); page.toastMsg("正在接管 " + backend.currentUid) }
                 else page.toastMsg("先选一台设备")
             }
         }
-        Md3Btn {
+        AppButton {
+            Layout.fillWidth: true
+            text: "推文件"
+            variant: "secondary"
             onClicked: {
                 if (backend.currentUid !== "") page.filePushRequested(backend.currentUid)
                 else page.toastMsg("先选一台设备")
             }
         }
         // 停止/退出：真正清流（本地 watching 标志），在 VNC 模式顺手收掉远控
-        Md3Btn {
+        AppButton {
+            Layout.fillWidth: true
+            text: "停止"
+            variant: "destructive"
             onClicked: {
                 if (backend.frameSource === "vnc") { backend.sendAction("remote_control_stop", {}); page.toastMsg("已停止远控") }
                 else { page.watching = false; backend.setScreenActive(false); page.toastMsg("已停止监控") }

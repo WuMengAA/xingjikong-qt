@@ -1,19 +1,27 @@
-// 班级工作台 · 行内输入行（新建班级 / 修改班名 共用）
+// 班级工作台 · 行内输入行（新建班级 / 修改班名 共用）· QtShadcn 规范（2026-10-29 迁移）
 //
 // 为什么抽出来：ClassAdminPane 要守 200 行红线（AGENTS.md §10）；两个输入行
 // （新建/改名）结构相同，只差提示语、预填值、确认启用条件与确认动作。
 //
-// 铁律：
+// ── 铁律（原样保留）────────────────────────────────────────────────────
 //   · text 唯一真源在本件内。父级打开输入行时调 open(t) **显式预填** —— 不能
-//     只绑 property：用户键入会摧毁 Md3TextField 内部 input.text↔root.text 的
-//     绑定（Qt 语义：原生赋值即消绑定），之后外部改值不再显示到可见输入框
-//     （2026-10-24 实证，Md3TextField.setText 就是为这个场景加的）；
-//   · 本件不碰任何班级状态：确认时把 trim 后的文本交给父级，取消只发信号；
-//   · 取消后父级收起（visible=false）即可，残留文本不影响下次 —— 下次打开
-//     必然经过 open(t) 重置。
+//     只绑 property：用户键入会摧毁输入组件的 text↔root.text 绑定
+//     （Qt 语义：原生赋值即消绑定），之后外部改值不再显示到可见输入框
+//     （2026-10-24 实证）。`AppInput` 的 text 是 `input.text` 的别名，
+//     所以 `open()` 里直接 `field.text = t` 等价于原来的 `setText()`。
+//   · 本件不碰任何班级状态：确认时把 trim 后的文本交给父级，取消只发信号。
+//
+// ── 迁移要点 ────────────────────────────────────────────────────────────
+// · `Md3TextField` → `AppInput`（规范点名必须自定义输入组件）
+// · `Md3Btn filled/text` → `AppButton primary/ghost`
+// · `Md3.bodyS`→13、`Md3.cOutline`→`Theme.color.textSecondary`
+// · `Column`/`Row` → `ColumnLayout`/`RowLayout`
+// · `onTextChanged` → `onTextEdited`：只在**用户编辑**时回写，
+//   避免 open() 程序化赋值再触发一轮回写
 import QtQuick
-import "../../components/md3"     // Md3TextField / Md3Btn
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import QtQuick.Layouts
+import "../../components"          // AppButton / AppInput
+import "../../components/theme"    // Theme 令牌
 
 Item {
     id: row
@@ -33,45 +41,49 @@ Item {
     implicitHeight: col.implicitHeight
 
     /** 打开输入行：显式预填/清空（见文件头铁律，必须显式）。 */
-    function open(t) { field.setText(t || ""); row.text = t || "" }
+    function open(t) {
+        field.text = t || ""
+        row.text = t || ""
+    }
 
-    Column {
+    ColumnLayout {
         id: col
         width: parent.width
-        spacing: 8
+        spacing: Theme.spacing.sm
 
         Text {
-            width: parent.width
+            Layout.fillWidth: true
             visible: row.hint !== ""
             text: row.hint
-            font.pixelSize: Md3.bodyS
-            color: Md3.cOutline
+            font.pixelSize: 13
+            color: Theme.color.textSecondary
             wrapMode: Text.WordWrap
         }
 
-        Md3TextField {
+        AppInput {
             id: field
-            width: parent.width
+            Layout.fillWidth: true
             placeholder: row.placeholder
             text: row.text
-            onTextChanged: row.text = text
+            onTextEdited: row.text = text
         }
 
-        Row {
-            width: parent.width
-            spacing: 8
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.sm
 
-            Md3Btn {
+            AppButton {
                 text: row.confirmText
-                variant: "filled"
+                variant: "primary"
                 enabled: row.confirmEnabled
                 onClicked: row.confirmed(row.text.trim())
             }
-            Md3Btn {
+            AppButton {
                 text: "取消"
-                variant: "text"
+                variant: "ghost"
                 onClicked: row.cancelled()
             }
+            Item { Layout.fillWidth: true }
         }
     }
 }

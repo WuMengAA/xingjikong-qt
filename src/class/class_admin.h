@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QNetworkAccessManager>
 #include <QString>
+#include <QVariant>
 #include <QVariantList>
 
 #include <functional>
@@ -58,7 +59,7 @@ public:
     Q_INVOKABLE void removeStudent(const QString &code, const QString &studentId);
 
     // ── 班级课表（同批：整份 profile 存云端，不再只存在本机）──
-    // timetable() 拉一次发 timetableLoaded（profileJson 为空串 = 这个班还没排课，
+    // timetable() 拉一次发 timetableLoaded（profile 无效 = 这个班还没排课，
     // 界面必须显示"还没排课"而不是空白表）；saveTimetable 写整份档案。
     Q_INVOKABLE void timetable(const QString &code);
     Q_INVOKABLE void saveTimetable(const QString &code, const QString &profileJson);
@@ -82,6 +83,11 @@ public:
     Q_INVOKABLE QString readTextFile(const QString &path, int maxBytes = 4 * 1024 * 1024);
     Q_INVOKABLE QString lastFileError() const { return m_fileError; }
 
+    /** 判断一段文本是不是 ClassIsland 档案：必须**同时**含 ClassPlans 与 TimeLayouts。
+     *  2026-10-29：原先 QML 自己 JSON.parse 再判 —— 既违反 §10.9（QML 禁 JSON.parse），
+     *  又让"什么算合法档案"的口径散在两端。收归 C++：QML 只拿一个布尔值。 */
+    Q_INVOKABLE bool isClassIslandArchive(const QString &text);
+
     // ── 班级接入码（2026-10-25 · 收归我方后班级管理面板的入口码）──
     // 用户裁决：「班级接入码收归我方管理，作为班级管理面板的入口码，所以去掉 CIMS
     // 时期的旧方式」。语义：**设备凭这串码进入这个班**（一次性、绑班、24h）。
@@ -98,8 +104,11 @@ signals:
     void opFinished(const QString &op, bool ok, const QString &message);
     /** 一个班的学生名单（students() 结果；空数组 = 还没录入）。 */
     void studentsList(const QString &classCode, const QVariantList &students);
-    /** 一个班的课表档案（profileJson 为空串 = 还没排课；updatedAt = 毫秒时间戳）。 */
-    void timetableLoaded(const QString &classCode, const QString &profileJson, qint64 updatedAt);
+    /** 一个班的课表档案。2026-10-29：profile 直接是**结构化 QVariant**
+     *  （对象→QVariantMap / 数组→QVariantList；无效 QVariant = 还没排课），
+     *  QML 拿到即可用，**不再 JSON.parse**（§10.9 QML 纯净封杀令）。
+     *  updatedAt = 毫秒时间戳。 */
+    void timetableLoaded(const QString &classCode, const QVariant &profile, qint64 updatedAt);
     /** 一个班的成员清单取回（members() 的结果；空数组 = 班里没人）。 */
     void membersList(const QString &classCode, const QVariantList &members);
     /** 一枚新生成的班级接入码（2026-10-25）。

@@ -74,9 +74,9 @@ Item {
         if (!path) return                       // 取消选择：不报错
         const text = a.readTextFile(path, 4 * 1024 * 1024)
         if (!text) { pane.toast(a.lastFileError() || "读不到文件内容", true); return }
-        let doc = null
-        try { doc = JSON.parse(text) } catch (e) { doc = null }
-        if (!doc || !doc.ClassPlans || !doc.TimeLayouts) {
+        // 2026-10-29：档案校验收归 C++（ClassAdmin::isClassIslandArchive），
+        // QML 不再 JSON.parse —— §10.9 QML 纯净封杀令。
+        if (!a.isClassIslandArchive(text)) {
             pane.toast("这不是 ClassIsland 档案（缺 ClassPlans / TimeLayouts）", true)
             return
         }
@@ -100,12 +100,13 @@ Item {
     Connections {
         target: pane.admin()
         ignoreUnknownSignals: true
-        function onTimetableLoaded(code, profileJson, updatedAt) {
+        function onTimetableLoaded(code, profile, updatedAt) {
             if (code !== pane.classCode) return
-            if (!profileJson) { pane.profile = null; return }
-            let p = null
-            try { p = JSON.parse(profileJson) } catch (e) { p = null }
+            // 2026-10-29：profile 已是 C++ 下发的 QVariantMap/QVariantList，
+            // QML 直接消费，不再 JSON.parse —— §10.9 QML 纯净封杀令。
+            const p = (profile === undefined || profile === null) ? null : profile
             pane.profile = p
+            if (!p) return                      // 还没排课：留空态，dayIdx 不动
             pane.dayIdx = pane.pickToday(p)
         }
         function onTimetableGroupsList(list) {

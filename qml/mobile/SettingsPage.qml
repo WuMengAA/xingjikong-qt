@@ -1,10 +1,17 @@
-// 星集控 · 手机端我的页（2026-10-13 · MD3 迁移批）
+// 星集控 · 手机端我的页 · QtShadcn 规范（2026-10-29 迁移）
 // 页 3：账户（OAuth 登录态）/ 身份 / 外观（深浅三档）/ 最近告警 / 录制回放 / 版本。
 // recSummary / recentEvents / recBusy 由 Main 传入（数据在 Main 汇总）。
-// MD3：分组卡片 + filter chip 选择 + filled/tonal 按钮 + 字阶。
+//
+// ── 迁移要点 ────────────────────────────────────────────────────────────
+// · `Md3Card` → `AppCard`（AppCard 自带 ColumnLayout + padding 16，子项改用 Layout）
+// · `Md3Chip` → `AppChip`（选中态改实底主色，不再靠描边）
+// · `Md3Btn filled/tonal` → `AppButton primary/secondary`
+// · 头像原用 `cPrimaryCont`（浅紫底）—— Theme 无 container 层级 ⇒ 用 primary 叠 15% 透明派生
+// · 字阶走规范 12/13/14/16
 import QtQuick
-import "../components/md3"
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import QtQuick.Layouts
+import "../components"           // AppCard / AppButton / AppChip
+import "../components/theme"    // Theme 令牌
 
 Item {
     id: page
@@ -12,133 +19,146 @@ Item {
     property var recentEvents: []
     property bool recBusy: false
 
+    /** 弱化标签色（分组小标题）。 */
+    readonly property color _labelColor: Theme.color.textSecondary
+
     Flickable {
         anchors.fill: parent
-        contentHeight: col.height + 24
+        contentHeight: col.implicitHeight + Theme.spacing.lg
         clip: true
-        Column {
+        ColumnLayout {
             id: col
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: 16
-            spacing: 12
+            anchors.margins: Theme.spacing.md
+            spacing: Theme.spacing.sm + 4
 
             // ── 账户（OAuth 登录态）──
-            Text { text: "账户"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
-            Md3Card {
-                variant: "filled"
-                width: parent.width
-                Row {
-                    width: parent.width
-                    spacing: 12
+            Text { text: "账户"; color: page._labelColor; font.pixelSize: 13 }
+            AppCard {
+                Layout.fillWidth: true
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.sm + 4
+
                     // 头像（首字母圆）
                     Rectangle {
                         width: 40; height: 40; radius: 20
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: Md3.cPrimaryCont
+                        Layout.alignment: Qt.AlignVCenter
+                        color: Qt.rgba(Theme.color.primary.r, Theme.color.primary.g,
+                                       Theme.color.primary.b, 0.15)
                         Text {
                             anchors.centerIn: parent
                             text: backend.accountName ? backend.accountName.charAt(0) : "?"
-                            font.pixelSize: Md3.titleM
+                            font.pixelSize: 16
                             font.weight: Font.Medium
-                            color: Md3.cOnPrimaryCont
+                            color: Theme.color.primary
                         }
                     }
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
                         spacing: 2
                         Text {
+                            Layout.fillWidth: true
                             text: backend.accountName ? backend.accountName : "未登录"
-                            color: Md3.cOnSurface
-                            font.pixelSize: Md3.titleM
+                            color: Theme.color.textPrimary
+                            font.pixelSize: 16
                             font.weight: Font.Medium
+                            elide: Text.ElideRight
                         }
                         Text {
+                            Layout.fillWidth: true
                             text: backend.accountBusy ? "登录中…" : (backend.role === "admin" ? "管理员" : "教师")
-                            color: Md3.cOnSurfaceVar
-                            font.pixelSize: Md3.bodyS
+                            color: Theme.color.textSecondary
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
                         }
                     }
-                    Item { width: Math.max(4, parent.width - 220); height: 1 }
                     // 登录按钮带 busy 态（OAuth 浏览器回呼等待时禁用）
-                    Md3Btn {
-                        anchors.verticalCenter: parent.verticalCenter
+                    AppButton {
                         text: backend.accountBusy ? "等待登录…" : "网站账号登录"
-                        variant: "filled"
+                        variant: "primary"
+                        size: "sm"
                         enabled: !backend.accountBusy
                         onClicked: backend.loginWithSite()
                     }
                 }
             }
 
-            // ── 身份（MD3 filter chip）──
-            Text { text: "身份"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
-            Row {
-                spacing: 8
-                Md3Chip {
+            // ── 身份 ──
+            Text { text: "身份"; color: page._labelColor; font.pixelSize: 13 }
+            RowLayout {
+                spacing: Theme.spacing.sm
+                AppChip {
                     text: "管理员"
                     selected: backend.role === "admin"
                     onClicked: backend.setRole("admin")
                 }
-                Md3Chip {
+                AppChip {
                     text: "教师"
                     selected: backend.role !== "admin"
                     onClicked: backend.setRole("teacher")
                 }
+                Item { Layout.fillWidth: true }
             }
 
-            // ── 外观（E4 三档 · MD3 filter chip）──
-            Text { text: "外观"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
-            Row {
-                spacing: 8
+            // ── 外观（E4 三档）──
+            Text { text: "外观"; color: page._labelColor; font.pixelSize: 13 }
+            RowLayout {
+                spacing: Theme.spacing.sm
                 Repeater {
                     model: [
                         { k: "浅色", m: 0 },
                         { k: "深色", m: 1 },
                         { k: "跟随系统", m: 2 }
                     ]
-                    delegate: Md3Chip {
+                    delegate: AppChip {
+                        required property var modelData
                         text: modelData.k
                         selected: backend.themeMode === modelData.m
                         onClicked: backend.themeMode = modelData.m
                     }
                 }
+                Item { Layout.fillWidth: true }
             }
 
             // ── 最近告警（/api/events 前 8 条）──
-            Text { text: "最近告警"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
-            Md3Card {
-                variant: "filled"
-                width: parent.width
-                Column {
-                    width: parent.width
-                    spacing: 10
+            Text { text: "最近告警"; color: page._labelColor; font.pixelSize: 13 }
+            AppCard {
+                Layout.fillWidth: true
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.sm
                     Repeater {
                         model: page.recentEvents.slice(0, 8)
-                        delegate: Row {
-                            width: parent.width
-                            spacing: 10
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.sm
                             Rectangle {
                                 width: 8; height: 8; radius: 4
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: (modelData.level === "error") ? Md3.cError : Md3.cOk
+                                Layout.alignment: Qt.AlignVCenter
+                                color: (modelData.level === "error") ? Theme.color.destructive
+                                                                     : Theme.color.success
                             }
-                            Column {
-                                width: parent.width - 18
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
                                 Text {
+                                    Layout.fillWidth: true
                                     text: modelData.msg
-                                    color: Md3.cOnSurface
-                                    font.pixelSize: Md3.bodyM
+                                    color: Theme.color.textPrimary
+                                    font.pixelSize: 14
                                     elide: Text.ElideRight
-                                    width: parent.width
                                 }
                                 Text {
+                                    Layout.fillWidth: true
                                     text: (modelData.uid ? modelData.uid + " · " : "") + modelData.time
-                                    color: Md3.cOutline
-                                    font.pixelSize: Md3.labelS
+                                    color: Theme.color.textSecondary
+                                    font.pixelSize: 12
                                     elide: Text.ElideRight
-                                    width: parent.width
                                 }
                             }
                         }
@@ -146,48 +166,65 @@ Item {
                     Text {
                         visible: page.recentEvents.length === 0
                         text: "暂无事件"
-                        color: Md3.cOutline
-                        font.pixelSize: Md3.bodyS
+                        color: Theme.color.textSecondary
+                        font.pixelSize: 13
                     }
                 }
             }
 
             // ── 监控摘要 · 录制回放 ──
-            Text { text: "监控摘要 · 录制回放"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
-            Md3Card {
-                variant: "filled"
-                width: parent.width
-                Column {
-                    width: parent.width
-                    spacing: 10
-                    Md3Btn {
+            Text { text: "监控摘要 · 录制回放"; color: page._labelColor; font.pixelSize: 13 }
+            AppCard {
+                Layout.fillWidth: true
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.sm
+                    AppButton {
                         text: page.recBusy ? "拉取中…" : "拉取录制列表"
-                        variant: "tonal"
+                        variant: "secondary"
                         enabled: !page.recBusy
                         onClicked: { page.recBusy = true; backend.fetchRecordings() }
                     }
                     Repeater {
                         model: page.recSummary
-                        delegate: Row {
-                            width: parent.width
-                            spacing: 8
-                            Text { text: modelData.uid; color: Md3.cOnSurface; font.pixelSize: Md3.bodyM; width: parent.width * 0.4; elide: Text.ElideRight }
-                            Text { text: modelData.count + " 个录制"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.bodyS }
-                            Text { text: modelData.last; color: Md3.cOutline; font.pixelSize: Md3.labelS }
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.sm
+                            Text {
+                                Layout.preferredWidth: 100
+                                text: modelData.uid
+                                color: Theme.color.textPrimary
+                                font.pixelSize: 14
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.count + " 个录制"
+                                color: Theme.color.textSecondary
+                                font.pixelSize: 13
+                            }
+                            Text {
+                                text: modelData.last
+                                color: Theme.color.textSecondary
+                                font.pixelSize: 12
+                            }
                         }
                     }
                     Text {
                         visible: page.recSummary.length === 0 && !page.recBusy
                         text: "暂无录制（或被控端未开录制）"
-                        color: Md3.cOutline
-                        font.pixelSize: Md3.bodyS
+                        color: Theme.color.textSecondary
+                        font.pixelSize: 13
                     }
                 }
             }
 
             // ── 版本 ──
-            Text { text: "版本"; color: Md3.cOnSurfaceVar; font.pixelSize: Md3.labelM }
-            Text { text: "v" + backend.version; color: Md3.cOnSurface; font.pixelSize: Md3.bodyM }
+            Text { text: "版本"; color: page._labelColor; font.pixelSize: 13 }
+            Text { text: "v" + backend.version; color: Theme.color.textPrimary; font.pixelSize: 14 }
+
+            Item { Layout.fillHeight: true }
         }
     }
 }

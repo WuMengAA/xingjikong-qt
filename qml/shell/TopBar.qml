@@ -1,24 +1,30 @@
-// MD3 顶部导航栏（TopBar）· 高 64px · V1.0 P1 骨架层
+// 顶部导航栏（TopBar）· 高 64px · QtShadcn 规范（2026-10-29 迁移）
 //
 // 规格（用户点单）：包含标题「设备监控」、班级切换下拉框、用户头像。
 //
 // ── 班级下拉为什么用原生 Menu ────────────────────────────────────────
-// 项目纪律是**不用 Qt 的 Button / TextField**（自有 Md3Btn / Md3TextField 顶上），
-// 但项目里**没有自带下拉框组件**；QtQuick.Controls 的 Menu / MenuItem 是
-// 原生自带控件，直接用它，不手写弹出层 —— 少一份要维护的浮层逻辑。
+// 项目纪律是不裸用 Qt 的 Button / TextField（自有 AppButton / AppInput 顶上），
+// 但项目里没有自带下拉框组件；QtQuick.Controls 的 Menu / MenuItem 是原生自带控件，
+// 直接用它，不手写弹出层 —— 少一份要维护的浮层逻辑。
 //
 // ── 属性注入 vs 直接读 backend ─────────────────────────────────────
-// classes / currentClass **两者都支持**：宿主注入优先，没注入就回落
-// backend.classes / backend.currentClass —— 真源始终只有一份（云端班级目录）。
-// ⚠️ 这里踩过一次：宿主传了 TopBar 上不存在的属性名 ⇒
-//    `Type Md3Shell unavailable`（时名，现名 MainWindow）⇒ 整个 Main.qml 加载失败、程序起不来，
-//    而 qmllint 报 0 Error —— 静态检查查不出这类问题，只能真跑。
+// classes / currentClass 两者都支持：宿主注入优先，没注入就回落 backend。
+// ⚠️ 这里踩过一次：宿主传了 TopBar 上不存在的属性名 ⇒ 整个 Main.qml 加载失败、
+//    程序起不来，而 qmllint 报 0 Error —— 静态检查查不出，只能真跑。
+//
+// ── 迁移要点 ────────────────────────────────────────────────────────────
+// · `Md3.*` → `Theme.*`；字号走规范 12/13/14/16
+// · `Md3Btn outlined/filled` → `AppButton secondary/primary`
+// · **不给 radius 覆写**（C 案：12px 例外只属 ActionBar / MonitorPage），回落全局 md
+// · **删掉底部 1px 发丝分隔线**：规范要求「区域划分完全靠背景色差」，
+//   发丝线虽是 Rectangle 不是 border.*，仍属靠线条分区，故按规范移除
+// · `Column` → `ColumnLayout`（规范只许 Layout 系列）
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../components/md3"
-import "../island"          // SvgIcon
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components"           // AppButton
+import "../island"              // SvgIcon
+import "../components/theme"    // Theme 令牌
 import "ClassSort.js" as ClassSort
 
 Item {
@@ -37,7 +43,7 @@ Item {
     readonly property var _classes: (root.classes && root.classes.length)
                                    ? root.classes
                                    : ((backend && backend.classes) ? backend.classes : [])
-    /** 下拉里的**显示顺序**：1班 < 2班 < … < 10班 < 12班（规则见 ClassSort.js）。 */
+    /** 下拉里的显示顺序：1班 < 2班 < … < 10班 < 12班（规则见 ClassSort.js）。 */
     readonly property var _classesSorted: ClassSort.byName(root._classes)
     /** 实际使用的当前班（注入优先）。 */
     readonly property string _cur: (root.currentClass !== "")
@@ -59,7 +65,6 @@ Item {
         var total = 0, on = 0
         for (var i = 0; i < ds.length; ++i) {
             if (!ds[i]) continue
-            // cc 为空 = 全部班级 ⇒ 不过滤
             if (cc !== "" && (ds[i].classCode || "") !== cc) continue
             total++
             if (ds[i].online !== false) on++
@@ -82,29 +87,28 @@ Item {
         anchors.fill: parent
         spacing: 12
 
-        Column {
+        ColumnLayout {
             spacing: 2
             Text {
                 text: root.title
-                font.pixelSize: Md3.titleM
+                font.pixelSize: 16
                 font.weight: Font.Medium
-                color: Md3.cOnSurface
+                color: Theme.color.textPrimary
             }
             Text {
                 text: root.headCount
-                font.pixelSize: Md3.bodyS
-                color: Md3.cOnSurfaceVar
+                font.pixelSize: 13
+                color: Theme.color.textSecondary
             }
         }
 
         Item { Layout.fillWidth: true }
 
         // ── 班级切换下拉框（原生 Menu）──────────────────────────────
-        Md3Btn {
+        AppButton {
             id: classBtn
             text: root.currentClassName + " 切换"
-            variant: "outlined"
-            radius: 12
+            variant: "secondary"
             onClicked: classMenu.open()
         }
         Menu {
@@ -120,30 +124,28 @@ Item {
             }
         }
 
-        // ── H8：未登录态暴露「登录」入口（骨架页没有旧壳那颗登录态头像下拉）──
-        Md3Btn {
+        // ── H8：未登录态暴露「登录」入口 ──────────────────────────────
+        AppButton {
             visible: !root.loggedIn
             text: "登录"
-            variant: "filled"
-            radius: 12
+            variant: "primary"
             onClicked: root.loginRequested()
         }
 
         // ── 用户头像（圆 32，仅登录后显示）────────────────────────────
-        // 无边框原则（AGENTS.md §9.4）：实心 secondaryContainer 圆已足够辨识，
-        // 2026-10-22 去掉原先 1.5px outline 描边。
+        // 实心 surfaceVariant 圆已足够辨识（无边框原则，2026-10-22 去描边）
         Rectangle {
             visible: root.loggedIn
             width: 32
             height: 32
-            radius: 16
-            color: Md3.cSecondaryCont
+            radius: 16            // 正圆（非卡片圆角令牌）
+            color: Theme.color.surfaceVariant
             Text {
                 anchors.centerIn: parent
                 text: root.avatarInitial
-                font.pixelSize: Md3.body13
+                font.pixelSize: 13
                 font.weight: Font.Medium
-                color: Md3.cOnSecondaryCont
+                color: Theme.color.textPrimary
             }
             MouseArea {
                 anchors.fill: parent
@@ -152,16 +154,6 @@ Item {
             }
         }
     }
-
-        // 底部发丝分隔线（顶栏与内容区之间，避免顶栏"贴"在内容上）
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 1
-            color: Md3.cOutlineVar
-            opacity: 0.5
-        }
 
     /** 头像首字：优先 backend 的账号显示名，没有就用占位符兜底。 */
     readonly property string avatarInitial: {

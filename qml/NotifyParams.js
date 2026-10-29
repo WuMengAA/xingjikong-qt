@@ -1,3 +1,14 @@
+.pragma library
+
+// ⚠️ 为什么 .pragma library 排在**注释之前**（2026-10-29 修，别再挪回去）：
+//   Qt 的 qt_add_qml_module 判定方式是
+//     file(STRINGS <file> pragma_library REGEX "^\.pragma library$" LIMIT_COUNT 1 LIMIT_INPUT 128)
+//   —— **只读前 128 字节**，且要求整行恰好等于 `.pragma library`。
+//   中文 UTF-8 每字 3 字节，几行注释就超 128 字节，所以 pragma 必须放在注释**前面**；
+//   放后面 CMake 读不到 ⇒ 刷告警「is not an ECMAScript module and also doesn't contain
+//   '.pragma library'」，且本 JS 会在每个隐式导入 Stelarith 的 QML 文档里被**重新求值**
+//   （既慢又有状态串味风险）。pragma 须为首个语句，注释放其后是合法的。
+//
 // notify 指令的参数拼装 —— **纯函数，不碰 UI、不碰网络**。
 //
 // 为什么单独一个文件：契约对不对，靠肉眼看 QML 是看不出来的。抽成纯函数之后，
@@ -20,7 +31,6 @@
 //
 // ⚠️ 不发 notice_id：那是站点侧对账用的（站点有 notice_kinds 表 + receiptsByNotice()），
 //    管理端没有这张表，带了也没人认。
-.pragma library
 
 // 与被控端 NotifyWindow 的 kTitleCap / kContentCap 一致。改这三个数要同步改那边。
 var CAP_TITLE = 24;
