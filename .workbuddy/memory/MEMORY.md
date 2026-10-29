@@ -26,7 +26,13 @@
 
 ## 3 仓库 / UI / 门禁
 - github `WuMengAA/xingjikong-qt`；根仓即 meta（gitlink，无 remote）。**shared-qml 是 meta 子目录非独立仓库，随 meta 提交**。
-- **UI 单一真源 = `shared-qml/ui/theme/Theme.qml` + `ui/App*.qml`（6 件）**。`ui/theme/Md3.qml` 是上一代令牌，存量页面仍在用，P4 退役。
+- **UI 单一真源 = `shared-qml/ui/theme/Theme.qml` + `ui/App*.qml`（2026-10-29 起 10 件）**。`ui/theme/Md3.qml` 是上一代令牌，存量页面仍在用，P4 退役。
+  - App 十件：Button / Card / Chip / Dialog / Input / ListItem / **SwitchRow / SegmentedButton / NavBar / Snackbar**（后 4 件 2026-10-29 新增，meta 提交 1e8afb8）。
+- ✅ **2026-10-29：viewer 端 Md3 组件层归零**（47 → 0；viewer 提交 f3cd100 / c23e402 / 0be111f / 699660b / d45a8a2）⇒ viewer 运行时**不再加载 `md3/` 组件库**。
+- ✅ **2026-10-30：被控端「全部换新」完成**（control `b47e8b2` + meta `8ddc05b`）——`ash/` 9 件整目录删除、md3 组件层归零、`tok.*`/`tk.*`/`st.*` 三套令牌归零 ⇒ 被控端 QML 只剩 `Theme` + `App*`。剩两档：① viewer 的令牌层 `Md3.*` → `Theme.*`；② 两端去边框后的余量核验。
+- **`Theme.neutralAccent`（2026-10-30）**：设 true 时 `accentStrong` 回落 `textPrimary`、`accentStrongForeground` 回落 `background` ⇒ **一处开关把全部选中态/主按钮/开关轨道变中性反白**。被控端「不要紫色」就靠它；**OOBE 是独立 QML 文档，必须在 `OobeWizard.qml` 里再设一遍**（AgentShell 那时没加载）。管理端不设即零影响。
+  - `Md3Card → AppCard` 有结构性差异：AppCard 内部是 ColumnLayout ⇒ 子项 anchors 必须改 Layout 附加属性（见今日日志「转换规则」）。
+  - 共享库仍缺的分段/开关等已补齐；新件访问 island 用 `../island`（`ui/md3/` 下旧件才写 `../../island`）。
   - ⚠️ **2026-10-29 用户裁决：两端全量采用 QtShadcn，原「被控端零 QtQuick.Controls」铁律废止**。vendor 在 `third_party/qtshadcn`（MIT v0.1.2，49 组件）。
   - **`QT_QUICK_CONTROLS_STYLE=Basic` 必做**（两端 main.cpp 在 app 构造前 qputenv）：QtShadcn 靠覆写 QQC 的 background/contentItem 实现，宿主风格非 Basic 会吃掉覆写 ⇒ "渲染了但样式全不对"的静默故障。
   - **QtShadcn 是 static QML 模块且插件目标未编译**（`optional plugin QtShadcnplugin`、无 .dll）⇒ 真 exe 正常；**裸 qml.exe / 未链接它的宿主会报 `plugin not found`**。故 `Theme.qml` **自带调色板、不 import QtShadcn**。
@@ -46,6 +52,9 @@
 - 人员三档：管理员 / 班主任·老师 / 广播室（**独立入口，不并进 viewer**）。
 
 ## 5 踩坑实证（还会再踩）
+- **QML 类型被"静默抢占"**：`import "../components"` 的**显式导入优先级高于同目录隐式导入** ⇒ 同名本地包装件永远不会被用到；若包装件又**与自身文件同名**则是自引用。两种都表现为**调用方**报 `Cannot assign to non-existent property "onXxx"`（错误行号不在真凶文件里）。2026-10-30 实证：`qml/oobe/AppDialog.qml` 让整个 OOBE 自 10-29 起加载失败。⇒ 包装件必须换名（已改 `OobeErrorDialog.qml`）+ 内层走别名 `Shared.AppDialog`。
+- **`x`/`y` 恒相对父坐标**：同级兄弟定位要写 `sibling.x + offset`，写 `sibling.width - 常量` 会漏掉兄弟自身的 x 偏移（2026-10-30 实证：设置页滚动条因此落在内容区正中，成一条"凭空竖线"，藏了 5 天）。**同理：底色映射看"父是谁"—— 页面(`background`)上的浮起件用 `surface`，面板(`surface`)上的件用 `surfaceVariant`；错用 `background` 会让卡片/输入框在页面上彻底消失。**
+- **逐屏截图核验能力（2026-10-30 建）**：`_agent_ui_probe` 会出 20 张（6 页 + 设置 7 分类 + 广播浮层 + 广播机 6 页）→ `build/_objs/_shots/`；`_oobe_wizard_probe` 加 `STE_OOBE_SHOT=1` 出六步图。**offscreen 平台没有字体（全 tofu），必须 `QT_QPA_FONTDIR=C:\Windows\Fonts`；且截图必须等动画落定**（抽屉 360ms，不等会截到"半截抽屉盖住页面"被误判成布局溢出）。
 - **布局红线**：班级工作台三栏最小 1220 逻辑宽，默认窗口 1180 ⇒ 必然溢出。多栏页先算「最小宽 vs 内容区宽」；纵向面板必须进 Flickable；页面根 `clip:true`。**「按钮按不动」= 按钮在可视区外**。
 - **QML 静态检查全不可信**：同一 Item 两个 `Component.onCompleted` = 致命（整页不加载）；两个同名函数 = 整页崩、进程退出。qmllint/门禁均 0 Error。⇒ 已做成门禁第 10 件；唯一可信出口仍是真 exe/探针运行时。
 - **`.pragma library` 必须在前 128 字节内**：Qt 用 `file(STRINGS ... LIMIT_INPUT 128)` 判定，中文注释几行就超 ⇒ pragma 从未被读到，该 JS 被每个 QML 文档重复求值。**放首行，注释在其后**。
