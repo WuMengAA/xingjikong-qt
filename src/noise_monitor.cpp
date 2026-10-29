@@ -7,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QByteArray>
 #include <QtMath>
+#include <algorithm>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -134,6 +135,8 @@ void NoiseMonitor::start(int sampleRate, int intervalMs)
     m_busy = false;
     m_captureOk = false;
     resetTriggerCounter();   // 新周期（建议=一节次）开始，计数归零
+    m_window.clear();        // 基线也重新学：换了一节课，安静底噪可能不同（开窗/空调）
+    m_baselineDb = std::numeric_limits<double>::quiet_NaN();
     m_timer.start(qMax(200, intervalMs));
     m_running = true;
 }
@@ -184,8 +187,27 @@ void NoiseMonitor::onCaptured(double rms, int seq)
 // 逻辑，等于没验。真机不调用 injectSample，但两者共用这里，计数语义才有保障。
 void NoiseMonitor::evaluate(double dbRaw, int seq)
 {
+    // ── 先算出本次该用的阈值（统一在 SPL 口径上比较，避免两个口径混着算）──
+    //   · 固定模式：阈值就是 thresholdDb（未校准时它是 dBFS，语义由调用方负责）
+    //   · 自适应模式：阈值 = 学到的安静基线 + delta（基线也换算到同一口径）
+    //   · 样本不足 20 个 ⇒ 回退固定阈值，避免开机头几秒拿几个样本就乱判
+    double thrSpl = m_thresholdDb;
+    if (m_adaptive) {
+        m_window.append(dbRaw);
+        if (m_window.size() > m_windowMax) m_window.removeFirst();
+        if (m_window.size() >= 20) {
+            QList<double> sorted = m_window;
+            std::sort(sorted.begin(), sorted.end());
+            // 10% 分位 = "这间教室安静时大概多少 dB"；用它比用均值更抗偶发尖峰
+            const int idx = qMin(sorted.size() - 1, qRound(sorted.size() * 0.10));
+            m_baselineDb = sorted[idx];
+            thrSpl = (m_baselineDb + m_splOffset) + m_adaptiveDelta;
+        }
+    }
+    m_effectiveThreshold = thrSpl - m_splOffset;   // 回写 dBFS 口径，供诊断/日志
+
     const double dbJudge = dbRaw + m_splOffset;   // 未校准时 offset=0 ⇒ 等价旧行为
-    const bool   active  = dbJudge > m_thresholdDb;
+    const bool   active  = dbJudge > thrSpl;
 
     m_lastDb     = dbRaw;
     m_lastActive = active;
@@ -205,6 +227,13 @@ void NoiseMonitor::resetTriggerCounter()
 {
     m_hits      = 0;
     m_triggered = false;
+}
+
+void NoiseMonitor::resetBaseline()
+{
+    m_window.clear();
+    m_baselineDb = std::numeric_limits<double>::quiet_NaN();
+    m_effectiveThreshold = m_thresholdDb - m_splOffset;
 }
 
 void NoiseMonitor::injectSample(double db)

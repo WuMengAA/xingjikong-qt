@@ -4463,6 +4463,30 @@ static void ensureNoise()
         sendEvent(QStringLiteral("warn"), QStringLiteral("noise_monitor_failed"),
                   QJsonObject{ { QStringLiteral("reason"), reason } });
     });
+
+    // ── P0-1 / P0-2（2026-10-30）：笔记 P0 噪音检测 ───────────────────────────
+    // ① 启用自适应基线：笔记要「80dB」，但 dBFS→dB SPL 的偏置随麦克风/驱动变化，
+    //    未校准时 80 是个**永远够不到的数**（探针已实锤触发 0 次）。
+    //    自适应改为「学本教室安静底噪 + 35dB」，换设备/开 AGC 都不影响判定。
+    //    这是**有意改变 active 的判定口径**：旧口径是固定 -45 dBFS（任意值，无物理意义），
+    //    新口径＝本教室基线 + 35dB。下游若依赖旧语义需知悉。
+    g_noise->setAdaptive(true);
+    g_noise->setAdaptiveDelta(35.0);
+
+    // ② 累计 3 次超阈 → 先发一条事件（存证与图片属 P0-2 后续批次，本批只打通链路）
+    QObject::connect(g_noise, &NoiseMonitor::thresholdReached, g_ws,
+                     [](int hits, double db) {
+        QJsonObject p;
+        p.insert(QStringLiteral("hits"), hits);
+        p.insert(QStringLiteral("db"), db);
+        p.insert(QStringLiteral("baseline"),
+                 g_noise ? g_noise->baselineDb() : 0.0);
+        p.insert(QStringLiteral("threshold"),
+                 g_noise ? g_noise->effectiveThresholdDb() : 0.0);
+        sendEvent(QStringLiteral("warn"), QStringLiteral("noise_threshold_reached"), p);
+        qInfo().noquote() << QStringLiteral("[agent-qt] 噪音累计 %1 次超阈（%2 dB）")
+                                 .arg(hits).arg(db, 0, 'f', 1);
+    });
 }
 
 static void studyOnSample(double db)
@@ -8770,6 +8794,18 @@ int main(int argc, char *argv[])
                            6000, false, QString(), IslandOverlay::Form::Capsule, false);
                 speakText(QStringLiteral("上课啦") + QStringLiteral("：") + txt);
                 qInfo().noquote() << "[agent-qt] 上课提醒已弹: " << name;
+
+                // ── P0-1（2026-10-30）：笔记「噪音检测只在上课时段、强制开启」──
+                // 上课即起采集：本来要等云端 noise_monitor_start 指令，现在由课表驱动。
+                // ⚠️ 仍然**只测不录**（noise_monitor 从不落音频样本），也别在这里加录音——
+                //    那是 P0-2 存证（1 帧截屏 + 1 帧摄像头）的事，且有 5 分钟保留约束。
+                ensureNoise();
+                if (g_noise) {
+                    g_noise->resetTriggerCounter();   // 新的一节课，重新计数
+                    g_noise->resetBaseline();         // 底噪可能变了（开窗/空调/换教室）
+                    if (!g_noise->running()) g_noise->start(16000, 2000);
+                    qInfo().noquote() << QStringLiteral("[agent-qt] 上课：噪音采集已开启（自适应基线）");
+                }
             });
         QObject::connect(clock, &ScheduleClock::periodEnded, &app,
             [](const QString& name, const QTime& at) {
@@ -8781,6 +8817,14 @@ int main(int argc, char *argv[])
                            6000, false, QString(), IslandOverlay::Form::Capsule, false);
                 speakText(QStringLiteral("下课啦") + QStringLiteral("：") + txt);
                 qInfo().noquote() << "[agent-qt] 下课提醒已弹: " << name;
+
+                // ── P0-1（2026-10-30）：下课即停并**释放麦克风**（笔记：只在上课时段）──
+                // 是 stop 不是静音：stop() 会停定时器、清 busy 标记，下一轮不再开设备。
+                // 这样课间麦克风完全不被占用（语音对讲/别的程序可正常用）。
+                if (g_noise && g_noise->running()) {
+                    g_noise->stop();
+                    qInfo().noquote() << QStringLiteral("[agent-qt] 下课：噪音采集已停止，麦克风释放");
+                }
             });
         clock->start();
         qInfo().noquote() << "[agent-qt] 课表时钟已启动，档案: " << profilePath;
