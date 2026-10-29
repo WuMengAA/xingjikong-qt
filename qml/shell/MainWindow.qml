@@ -273,18 +273,10 @@ Item {
     // ── H3 页级 Toast（骨架页自绘，不依赖灵动岛）─────────────────────
     // ⚠️ 灵动岛浮层在 page 6 被隐藏（Main.qml:1299），root.toast() 走 bridge.showNote
     //    → 灵动岛，这个页面上根本看不见。本地动作反馈必须自绘。
-    // 配色走令牌：常规 = inverseSurface/inverseOn（MD3 Snackbar 口径，2026-10-22 前是
-    // 硬编码 #322F35/#FFFFFF）；错误 = error 底 + 白字。
-    property bool toastErr: false
+    // 2026-10-29：Toast 视觉抽到 shell/ToastLayer.qml（Theme 令牌），
+    //    这里只保留函数入口 —— 语义不变：常规/错误两态配色在组件内。
     function toast(msg, isErr) {
-        if (!msg) return
-        toastText.text = msg
-        shell.toastErr = (isErr === true)
-        toastBox.color = shell.toastErr
-                         ? (shell.th ? shell.th.cError : "#B3261E")
-                         : (shell.th ? shell.th.cInverseSurf : "#313033")
-        toastLayer.visible = true
-        toastHide.restart()
+        toastLayer.show(msg, isErr)
     }
 
     // ── H4 状态条文案（现算：设备总数 / 在线数 + 当前班 + 正在查看设备）──
@@ -306,7 +298,8 @@ Item {
         return txt
     }
 
-    Rectangle { anchors.fill: parent; color: shell.th ? shell.th.cSurface : "#FFFBFE" }
+    // 2026-10-29：骨架全屏底迁 Theme.color.background（页面最底，内容面板用 surface 分层）
+    Rectangle { anchors.fill: parent; color: Theme.color.background }
 
     ColumnLayout {
         anchors.fill: parent
@@ -348,8 +341,8 @@ Item {
                     anchors.fill: parent
                     id: mainCol
                     // 内容区边缘内边距 = spacing.lg(24)（AGENTS.md §9.2）
-                    anchors.leftMargin: shell.th ? shell.th.spL : 24
-                    anchors.rightMargin: shell.th ? shell.th.spL : 24
+                    anchors.leftMargin: Theme.spacing.lg
+                    anchors.rightMargin: Theme.spacing.lg
                     spacing: 0
 
                     // ── 顶部导航栏（64px）──
@@ -378,7 +371,7 @@ Item {
                     // ── 操作区（距顶部 spacing.lg=24）──
                     ActionBar {
                         Layout.fillWidth: true
-                        Layout.topMargin: shell.th ? shell.th.spL : 24
+                        Layout.topMargin: Theme.spacing.lg
                         ctx: shell.ctx
                         portrait: shell.portrait     // 竖屏：多一个「返回经典界面」出口
                         onLockRequested: shell.runBulk("pick-lock")
@@ -395,8 +388,8 @@ Item {
                         id: mainStack
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        Layout.topMargin: shell.th ? shell.th.spM : 16
-                        Layout.bottomMargin: shell.th ? shell.th.spM : 16
+                        Layout.topMargin: Theme.spacing.md
+                        Layout.bottomMargin: Theme.spacing.md
                         currentIndex: shell.sectionIndex
 
 
@@ -486,23 +479,10 @@ Item {
         }
 
         // ── H4 状态条（全宽贴底）──────────────────────────────────
-        Rectangle {
+        StatusBar {
             Layout.fillWidth: true
-            Layout.preferredHeight: shell.statusBarH
-            color: shell.th ? shell.th.cSurfaceVar : "#E7E0EC"
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: shell.th ? shell.th.spM : 16
-                anchors.rightMargin: shell.th ? shell.th.spM : 16
-                spacing: shell.th ? shell.th.spM : 16
-                Text {
-                    Layout.fillWidth: true
-                    text: shell._statusText()
-                    font.pixelSize: shell.th ? shell.th.bodyS : 12
-                    color: shell.th ? shell.th.cOnSurfaceVar : "#49454F"
-                    elide: Text.ElideRight
-                }
-            }
+            barHeight: shell.statusBarH
+            text: shell._statusText()
         }
     }
 
@@ -519,118 +499,22 @@ Item {
         onClosed: shell.openUid = ""
     }
 
-    // ── H3 Toast 浮层（最上层，z 高于 SideSheet）────────────────────
-    Item {
+    // ── H3 Toast 浮层（最上层，z 高于 SideSheet；视觉在 shell/ToastLayer.qml）──
+    ToastLayer {
         id: toastLayer
-        anchors.fill: parent
-        z: 1000
-        visible: false
-        Rectangle {
-            id: toastBox
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
-            // 竖屏：抬到底部导航 + 状态条上方（否则糊在底栏上看不清）
-            anchors.bottomMargin: shell.portrait
-                                    ? (shell.navBarH + shell.statusBarH + 12)
-                                    : shell.toastBottomMargin
-            radius: shell.th ? shell.th.rS : 8
-            color: shell.th ? shell.th.cInverseSurf : "#313033"
-            Text {
-                id: toastText
-                anchors.centerIn: parent
-                text: ""
-                font.pixelSize: shell.th ? shell.th.body13 : 13
-                color: shell.toastErr ? "#FFFFFF"
-                                       : (shell.th ? shell.th.cInverseOn : "#F4EFF4")
-                padding: shell.th ? shell.th.spS + shell.th.spXS : 12
-            }
-        }
-        Timer {
-            id: toastHide
-            interval: 2600
-            onTriggered: toastLayer.visible = false
-        }
+        portrait: shell.portrait
+        navBarH: shell.navBarH
+        statusBarH: shell.statusBarH
+        bottomMargin: shell.toastBottomMargin
     }
 
     // ── 重认证弹窗（2026-10-24 安全门）──────────────────────────────────
     // 敏感操作被云端 REAUTH_REQUIRED 拦（长时间未验证密码）：连接**不断**，
     // 只提示"该再验一次密码了"→ 点「重新验证」走 backend.loginWithSite()
     // （OAuth 授权流程 = 站点验证密码）→ 新票据到位后一切自动恢复。
-    // 自绘遮罩（理由同 Toast：骨架页不依赖灵动岛/组件弹窗的挂载层级）。
-    Rectangle {
-        id: reauthLayer
-        anchors.fill: parent
-        visible: false
-        color: "#66000000"        // scrim 半透明黑（MD3 overlay 口径）
-
-        Rectangle {
-            id: reauthCard
-            width: Math.min(360, parent.width - 48)
-            anchors.centerIn: parent
-            radius: 12
-            color: shell.th ? shell.th.cSurface : "#FFFBFE"
-
-            Column {
-                width: parent.width - 32
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.top: parent.top
-                anchors.topMargin: 20
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 16
-                spacing: 12
-
-                Text {
-                    text: "需要重新验证密码"
-                    font.pixelSize: 14
-                    font.weight: Font.Medium
-                    color: shell.th ? shell.th.cOnSurface : "#1C1B1F"
-                }
-                Text {
-                    id: reauthMsg
-                    width: parent.width
-                    text: "长时间未验证，敏感操作被云端拦截。"
-                    font.pixelSize: 13
-                    color: shell.th ? shell.th.cOnSurfaceVar : "#49454F"
-                    wrapMode: Text.WordWrap
-                }
-                Text {
-                    width: parent.width
-                    text: "连接不会断开，重新验证一次即可恢复全部操作。"
-                    font.pixelSize: 12
-                    color: shell.th ? shell.th.cOutline : "#79747E"
-                    wrapMode: Text.WordWrap
-                }
-
-                Row {
-                    width: parent.width
-                    height: 40
-                    spacing: 12
-                    layoutDirection: Qt.RightToLeft
-
-                    Md3Btn {
-                        text: "重新验证"
-                        variant: "filled"
-                        onClicked: {
-                            reauthLayer.visible = false
-                            if (backend) backend.loginWithSite()
-                        }
-                    }
-                    Md3Btn {
-                        text: "稍后"
-                        variant: "text"
-                        onClicked: reauthLayer.visible = false
-                    }
-                }
-            }
-        }
-    }
-    Connections {
-        target: backend
-        function onReauthRequired(message) {
-            if (message) reauthMsg.text = message
-            reauthLayer.visible = true
-        }
-    }
+    // 2026-10-29：视觉抽到 shell/ReauthDialog.qml（Theme 令牌 + AppButton），
+    //    backend 信号在组件内部连，宿主无需再写 Connections。
+    ReauthDialog {}
 
     // 模块二（2026-10-28）：身份变了（站点登录换票 / 服务端下发锁定身份）⇒ 重新按身份落点。
     // 这里**允许重种**：登录是显著事件，「登录完直接看到本班」正是蓝图要的效果。
