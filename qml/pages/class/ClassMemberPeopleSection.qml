@@ -10,9 +10,9 @@
 // · `Md3.cSurfaceVar` → `Theme.color.surfaceVariant`；`Md3.cOk` → `Theme.color.success`
 import QtQuick
 import QtQuick.Layouts
-import "../../../components"          // AppCard / AppButton / AppChip / AppInput
-import "../../../components/theme"    // Theme 令牌
-import "../../../island"              // SvgIcon
+import "../../components"             // AppCard / AppButton / AppChip / AppInput
+import "../../components/theme"       // Theme 令牌
+import "../../island"                 // SvgIcon
 
 Item {
     id: sec

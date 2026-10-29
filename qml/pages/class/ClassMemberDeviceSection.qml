@@ -14,8 +14,8 @@
 // · 保留 `Flow` 做目标班按钮的自然换行（GridLayout 会变等宽格）
 import QtQuick
 import QtQuick.Layouts
-import "../../../components"          // AppButton
-import "../../../components/theme"    // Theme 令牌
+import "../../components"             // AppButton
+import "../../components/theme"       // Theme 令牌
 
 Item {
     id: sec
