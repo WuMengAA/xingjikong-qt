@@ -11,6 +11,24 @@
 
 （2026-10-05 就发生过一次：两个会话同时改 `Stelarith-control-qt\src\main.cpp`，靠 git merge 才收的场。）
 
+### 📛 main.cpp 禁令（2026-10-30 用户下，机制强制，非口头约定）
+
+`Stelarith-control-qt\src\main.cpp` 在 2026-10-30 已达 **9026 行 / 74 个全局 / 113 个 static 函数**，
+业务逻辑与装配混在一起，直接后果是**策略层无法单测**（用户原话：「你也没有真正前端后端分离」）。
+
+**禁令三条：**
+
+1. **main.cpp 只做装配**：全局状态定义、对象构造与信号接线、进程生命周期。
+   **业务判断一律进 `src/<domain>/`**（例：`src/noise/`、`src/tts/`）。
+2. **行数只许降不许升**：`node Stelarith-control-qt/scripts/check-main-size.mjs`
+   比台账 `scripts/fixtures/main-size-baseline.json`，多一行即 **exit 1**。
+   拆分后跑 `--update` 下调台账；**禁止上调台账**（想加装配代码？先拆等量代码出来）。
+3. **分层边界**：域（只算数）/ 域服务（只做策略）/ 应用服务（抓帧、序列化，依赖抽象接口）/
+   传输与装配（唯一知道 WS 的地方）。**域对象不许知道网络存在**——
+   `connect(域信号, ws, []{ sendEvent(...) })` 这种写法视为违规。
+
+> 依据与拆分计划：`docs\main拆分方案-2026-10-30.md`。方案里按分节标出了 12 个可抽簇及其依赖风险。
+
 ---
 
 ## 1. 分工表（谁管哪条线）
@@ -26,6 +44,15 @@
 > 「你做被控端得了」。转手依据：`D:\Stelarith\Stelarith-xingjikong-qt\.workbuddy\memory\2026-10-05.md`
 > （1042 行工作日志，最后段落 = 全屏通知三改 / 单实例守卫 / 静态区停重绘）。
 > WorkBuddy 最后一次提交：standalone 仓 `0f0b066`（0.6.0 版本收敛，2026-10-06 00:14）。
+
+> **2026-10-28 23:xx 双轨并行约定（用户裁决，修正"接管=WorkBuddy 退役"的理解）**：
+> WorkBuddy **不退役、可能继续使用**；双方**统一在 DeepSeek Harness（DSH）工作区与环境要求下并行工作**。
+> ① **工作区唯一** = `D:\Stelarith\Stelarith-xingjikong-qt`，双方都在此仓库工作；
+> ② **环境要求对双方一致**：受管 Python（生产动作）、禁 cmd/PowerShell 落地、门禁九件、提交路径限定（永不 `-A`）、加减归档全账、QML 纯净封杀令；
+> ③ **记忆/skill 已接入 DSH**：16 个星集控 skill 复制至 `C:\Users\Administrator\.dsh\skills\`（catalog 已生效），DSH 核心记忆已接管用户/环境/项目三节；WorkBuddy 源 `C:\Users\Administrator\.workbuddy\` **保留只读，未移动未删除**；
+> ④ **记忆真源仍为** 项目 `.workbuddy\memory\MEMORY.md` + 每日 daily log（双方共用，防双轨漂移）；
+> ⑤ **并行防撞车**：任何一方开工前按 §7 自检（`git status --short` + 近 15 分钟 mtime），发现对方在动 → 停手登记，不覆盖、不"改完再合并"。
+> 依据：用户原话「有可能还会使用 work Buddy 所以统一在 deepseek 工作区和环境要求下并行工作」。
 
 > 判断"这算不算我的线"：**看工程目录属不属于上表**。不确定 → 先问，别动手。
 
