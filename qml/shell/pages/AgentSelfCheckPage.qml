@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Layouts
 import "../../components"
 import "../../components/md3" as M
 
@@ -29,15 +30,16 @@ Item {
             anchors.topMargin: 16
             spacing: 14
 
-            M.Md3Card {
+            // 档② 换布局（2026-10-30）：AppCard 默认容器是 ColumnLayout ⇒ 卡内改用 Layout 附加属性。
+            // ⚠️ Repeater 的 delegate 直接成为 ColumnLayout 的子项 ⇒ delegate 上也要写
+            //    Layout.fillWidth / Layout.preferredHeight（anchors 会被 Layout 忽略）。
+            AppCard {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                variant: "filled"
+                variant: "muted"
 
-                Column {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
+                ColumnLayout {
+                    Layout.fillWidth: true
                     spacing: 2
 
                     Text {
@@ -46,7 +48,7 @@ Item {
                         color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
                     }
                     Text {
-                        width: parent.width
+                        Layout.fillWidth: true
                         text: "自动检查本机接入状态。红色项表示需要处理后才能被管理端正常管控。"
                         font.pixelSize: 12
                         color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
@@ -57,9 +59,8 @@ Item {
                         model: agentUi.selfCheckItems
                         delegate: Item {
                             required property var modelData
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            height: 34
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 34
                             Rectangle {
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
@@ -94,7 +95,7 @@ Item {
                 spacing: 10
                 AppButton {
                     text: "重新检测"
-                    variant: "primary"
+                    variant: "solid"
                     onClicked: agentUi.runSelfCheckCheck()
                 }
             }

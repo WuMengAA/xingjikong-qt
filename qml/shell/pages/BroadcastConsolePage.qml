@@ -10,6 +10,7 @@
 // 数据全部来自 C++ 快照（agentUi），本页不自己发请求：
 //   deviceRole / classCode（广播端里它是**站码**）/ connState / appVersion
 import QtQuick
+import QtQuick.Layouts
 import "../../components"
 import "../../components/md3" as M
 
@@ -45,15 +46,14 @@ Item {
             spacing: 16
 
             // ── 身份卡：这台机器是什么 ─────────────────────────────
-            M.Md3Card {
+            // 档② 换布局（2026-10-30）：AppCard 默认容器是 ColumnLayout ⇒ 卡内改用 Layout 附加属性。
+            AppCard {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                variant: "filled"
+                variant: "muted"
 
-                Column {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
+                ColumnLayout {
+                    Layout.fillWidth: true
                     spacing: 10
 
                     Text {
@@ -63,7 +63,7 @@ Item {
                         color: page.tok ? page.tok.cOnSurface : "#111827"
                     }
                     Text {
-                        width: parent.width
+                        Layout.fillWidth: true
                         text: station.length > 0
                               ? "归属广播站：" + station
                               : "还没绑定广播站 —— 打开「设置」里的配置，或重新走一遍首次配置"
@@ -72,7 +72,7 @@ Item {
                         wrapMode: Text.Wrap
                     }
                     Text {
-                        width: parent.width
+                        Layout.fillWidth: true
                         text: (typeof agentUi !== "undefined" ? agentUi.connState : "")
                         font.pixelSize: 12
                         color: (typeof agentUi !== "undefined" && agentUi.connState.indexOf("已连接") === 0)
