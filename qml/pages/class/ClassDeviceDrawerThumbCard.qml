@@ -12,8 +12,8 @@
 // · `Md3.jellyHover / jellyPress / durJelly` → `Theme.motion.hoverScale / pressScale / normal`
 import QtQuick
 import QtQuick.Layouts
-import "../../../components/theme"    // Theme 令牌
-import "../../../island"              // SvgIcon
+import "../../components/theme"       // Theme 令牌
+import "../../island"                 // SvgIcon
 
 Item {
     id: thumb

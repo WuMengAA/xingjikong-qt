@@ -11,8 +11,8 @@
 // · 保留 `Flow`（班级数不定，需自然换行）
 import QtQuick
 import QtQuick.Layouts
-import "../../../components"          // AppButton
-import "../../../components/theme"    // Theme 令牌
+import "../../components"             // AppButton
+import "../../components/theme"       // Theme 令牌
 
 Item {
     id: panel
