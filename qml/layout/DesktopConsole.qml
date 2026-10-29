@@ -4,9 +4,9 @@
 // 统计行 + 设备网格卡（实时画面占位 + 状态 + 快捷指令）。
 // 这是 LayoutLab 的布局演示件（假数据），供评价后按此迁移桌面 Main.qml。
 import QtQuick
+import QtQuick.Layouts
 import "../components"
 import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
-import "../components/md3"
 
 Item {
     id: root
@@ -174,12 +174,14 @@ Item {
                     { k: "告警",     v: "1 条",  icon: "⚠️" },
                     { k: "今日指令", v: "128",   icon: "📨" }
                 ]
-                delegate: Md3Card {
+                delegate: AppCard {
                     required property var modelData
-                    variant: "filled"
+                    shadow: false                  // 原 variant: "filled"（无阴影）
                     width: 252; height: 84
                     Row {
-                        anchors.verticalCenter: parent.verticalCenter
+                        // ⚠️ AppCard 内部已是 ColumnLayout：不能 anchors，改走 Layout 附加属性
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
                         spacing: 14
                         Rectangle {
                             width: 40; height: 40; radius: 20

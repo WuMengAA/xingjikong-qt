@@ -7,6 +7,7 @@
 // 空态一律写人话（"连上云端后自动统计"），不摆 0 假装有数据。
 import QtQuick
 import QtQuick.Layouts
+import "../../components"         // AppCard
 import "../../components/md3"     // Md3Card
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
@@ -39,13 +40,15 @@ GridLayout {
     }
 
     // ── S3 动作排行 · 近 7 天 ──
-    Md3Card {
+    AppCard {
         Layout.fillWidth: true
         Layout.preferredHeight: 208
-        variant: "elevated"
+        // 原 variant: "elevated" ⇒ AppCard 默认 shadow: true（极柔阴影）
 
         ColumnLayout {
-            anchors.fill: parent
+            // ⚠️ AppCard 内部已是 ColumnLayout：子项不能 anchors.fill，必须走 Layout
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             spacing: Md3.spS
 
             RowLayout {
@@ -122,13 +125,15 @@ GridLayout {
     }
 
     // ── S2 云端存储概况 + S4 最近回执 ──
-    Md3Card {
+    AppCard {
         Layout.fillWidth: true
         Layout.preferredHeight: 208
-        variant: "elevated"
+        // 原 variant: "elevated" ⇒ AppCard 默认 shadow: true（极柔阴影）
 
         ColumnLayout {
-            anchors.fill: parent
+            // ⚠️ AppCard 内部已是 ColumnLayout：子项不能 anchors.fill，必须走 Layout
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             spacing: Md3.spS
 
             Text {

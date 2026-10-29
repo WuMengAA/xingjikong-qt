@@ -8,8 +8,7 @@
 // 事件原样抛给宿主——不自己改 openUid、不自己写 backend（选择路径只有一条）。
 import QtQuick
 import QtQuick.Layouts
-import "../../components"         // AppChip
-import "../../components/md3"     // Md3Card（换 AppCard 需连带改子项布局，下批做）
+import "../../components"         // AppChip / AppCard
 import "../../shell"              // DeviceCard
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
@@ -58,14 +57,16 @@ ColumnLayout {
                 { k: "离线设备",   v: String(sec.stats.off),       sub: "需排查" }
             ]
 
-            delegate: Md3Card {
+            delegate: AppCard {
                 required property var modelData
                 Layout.fillWidth: true
                 Layout.preferredHeight: 96
-                variant: "elevated"
+                // 原 variant: "elevated" ⇒ AppCard 默认 shadow: true（极柔阴影）
 
                 ColumnLayout {
-                    anchors.fill: parent
+                    // ⚠️ AppCard 内部已是 ColumnLayout：子项不能 anchors.fill，必须走 Layout
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
                     spacing: Md3.spXS
 
                     Text {
