@@ -510,14 +510,22 @@ inline QVariantList AgentUi::settingsSections() const
         m.insert(QStringLiteral("icon"), icon);
         m.insert(QStringLiteral("active"), on);
         // 选中态样式也由 C++ 定 —— QML 里不能写 `active ? A : B`（那是三元配色判断）。
-        // 色值与 Md3 令牌同源：cSecondaryCont(#E8DEF8/#4A4458)、
-        // cOnSecondaryCont(#1D192B/#E8DEF8)、cOnSurfaceVar(#49454F/#CAC4D0)。
+        // 2026-10-30 用户点单「不要紫色」：原值取自 MD3 的 cSecondaryCont
+        // (#E8DEF8/#4A4458 —— 淡紫/紫灰)，现改为 shadcn 锌灰中性色：
+        //   rowBg 选中  = #E4E4E7 / #3F3F46（zinc-200 / zinc-700）
+        //   fg    选中  = #09090B / #FAFAFA（= Theme.color.textPrimary）
+        //   fg    未选  = #71717A / #A1A1AA（= Theme.color.textSecondary）
+        // ⚠️ 为什么 rowBg 不用 Theme.color.surfaceVariant(#F4F4F5/#27272A)：
+        //    侧栏自身底色就是 ash.muted(#27272A，深色) ⇒ 选中行会与底色**撞成一片**，
+        //    选中态肉眼消失（2026-10-30 截图实证）。故往亮处再提一档。
+        // ⚠️ 这几组 Hex 是共享库调色板的镜像，改 Theme/ash 色板时要同步（C++ 取不到 QML 单例）。
+        // ⚠️ 不要改回紫色：被控端主色一律中性，品牌紫只属于管理端。
         m.insert(QStringLiteral("rowBg"),
-                 on ? (m_lightMode ? QStringLiteral("#E8DEF8") : QStringLiteral("#4A4458"))
+                 on ? (m_lightMode ? QStringLiteral("#E4E4E7") : QStringLiteral("#3F3F46"))
                     : QStringLiteral("transparent"));
         m.insert(QStringLiteral("fg"),
-                 on ? (m_lightMode ? QStringLiteral("#1D192B") : QStringLiteral("#E8DEF8"))
-                    : (m_lightMode ? QStringLiteral("#49454F") : QStringLiteral("#CAC4D0")));
+                 on ? (m_lightMode ? QStringLiteral("#09090B") : QStringLiteral("#FAFAFA"))
+                    : (m_lightMode ? QStringLiteral("#71717A") : QStringLiteral("#A1A1AA")));
         // QFont::Normal=50 / Medium=57，与 QML 的 Font.Normal/Font.Medium 同值
         m.insert(QStringLiteral("weight"), on ? int(QFont::Medium) : int(QFont::Normal));
         out.append(m);

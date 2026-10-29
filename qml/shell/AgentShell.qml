@@ -1,5 +1,4 @@
 import QtQuick
-import QtShadcn                   // 2026-10-29 UI 全量替换 P0：shadcn 组件 + 主题入口
 import "../components"            // UiRegistry / UiPageHost 等共享 ui（构建期拷到 qml/components/）
 import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 import "../components/md3" as M   // MD3 组件（Md3NavBar 等）
@@ -20,17 +19,19 @@ Rectangle {
     id: shellRoot
     color: tok.cSurface
 
-    // QtShadcn 主题实例（2026-10-29 P0）：库要求窗口内先放一个 QtShadcnTheme，
-    // 组件从它取语义 token；没有它组件取不到色值。
-    // ⚠️ id 用 shadcnTheme 不用 `theme` —— 子件里 theme 另有含义（命名纪律）。
-    // 铁律变更：被控端原「零 QtQuick.Controls」已废止（用户裁决），本文件因而可引 QQC 系组件。
-    QtShadcnTheme { id: shadcnTheme }
-
-    // ── P1 Token 对齐（2026-10-29）───────────────────────────────────────
-    // 与管理端同款：把品牌主色与明暗同步给 QtShadcn 的 ThemeManager。
-    // ThemeManager 只开放 `primary` 一个覆写口（其余只读）⇒ 只对齐主色 + 明暗。
-    Binding { target: ThemeManager; property: "mode"; value: Md3.dark ? "dark" : "light" }
-    Binding { target: ThemeManager; property: "primary"; value: Md3.dark ? "#D0BCFF" : "#6750A4" }
+    // ── 2026-10-30：移除 QtShadcn 依赖（原 2026-10-29 P0 引入的三处，均为坏件）──────
+    // ① `import QtShadcn`：**运行时解析不了**。该模块的 qmldir 写
+    //    `optional plugin QtShadcnplugin`，但插件目标从未编译出 .dll
+    //    （build/_qtshadcn/src/QtShadcn/ 只有 qmldir + qml/ + qmltypes，无插件），
+    //    产品 exe 也不依赖 QtShadcn.dll（dumpbin /dependents 实测为空）⇒ 整壳加载失败：
+    //    `module "QtShadcn" plugin "QtShadcnplugin" not found`。
+    // ② `QtShadcnTheme { id: shadcnTheme }`：id 全文件零引用。App* 组件读的是
+    //    本工程自带的 `Theme` 单例（见 ui/theme/Theme.qml 文件头「为什么不 import QtShadcn」），
+    //    并不从 QtShadcnTheme 取 token ⇒ 这条实例是纯负债。
+    // ③ 两条 `Binding { target: ThemeManager ... }`：**死绑定**。`Theme.qml` 自带调色板、
+    //    完全不读 ThemeManager（同见其文件头），所以把 primary 设成 #6750A4 对渲染毫无影响。
+    // ⇒ 三处一起删，视觉零变化，但壳从「加载不出来」恢复为可加载。
+    //    （若将来真要接入 QtShadcn 的 C++ 单例，前提是先把 QtShadcnplugin 编出 DLL。）
 
     property bool sheetOpen: false   // 广播站排期中心是否展开（2026-10-22）
 
@@ -38,6 +39,12 @@ Rectangle {
     // 被控端主外壳是全局 dark 的唯一写入口；子页/组件只读，不再自建实例。
     readonly property var tok: Md3
     Binding { target: Md3; property: "dark"; value: !agentUi.lightMode }
+
+    // Theme = 新一代令牌单例（pragma Singleton，共享库 ui/theme/Theme.qml）。
+    // ⚠️ 2026-10-30 实测坑：`Theme.dark` 与 `Md3.dark` 是**两个独立布尔**，
+    //    Theme 默认 false（浅色）。迁到 Theme 的组件若不跟着绑，会在深色外壳里
+    //    渲染成浅色块 —— 静默错、不报错。故两个单例必须同时写，直到 Md3 退役。
+    Binding { target: Theme; property: "dark"; value: !agentUi.lightMode }
 
     UiRegistry {
         id: reg

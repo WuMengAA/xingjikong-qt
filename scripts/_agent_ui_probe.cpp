@@ -91,15 +91,30 @@ bool hasShownText(QObject *root, const QString &s)
 void collectTexts(QObject *root, QStringList &texts, QStringList &btnTexts,
                   QSet<QObject *> &seen, int depth = 0)
 {
-    if (!root || depth > 24 || seen.contains(root)) return;
+    // 2026-10-30：深度上限 24 → 64。原值太贴边：卡片里的按钮比卡片标题正好深一层
+    // （Column → Row → Md3Btn → Text），任何一侧多包一层就把按钮整批"看不见"，
+    // 表现是「同页文本全 PASS、只有按钮断言 FAIL」——极易被误判成按钮没渲染。
+    // 上限只为防环，`seen` 已去重，放宽没有代价。
+    if (!root || depth > 64 || seen.contains(root)) return;
     seen.insert(root);
     const QVariant t = root->property("text");
     if (t.isValid() && t.typeId() == QMetaType::QString) {
         const QString s = t.toString();
         if (!s.isEmpty()) {
             texts << s;
-            const QString cls = QString::fromLatin1(root->metaObject()->className());
-            if (cls.contains(QStringLiteral("Btn"))) btnTexts << s;
+            // 2026-10-30：按钮判定改为**按信号**，不再按类名。
+            // 原判据 `className().contains("Btn")` 对 QML 复合类型不可靠 ——
+            // Md3Btn/AppButton 都是 .qml 文件定义的合成类型，C++ 侧元对象类名是
+            // QQuickItem，`contains("Btn")` 恒 false ⇒ btnTexts 恒为空，
+            // 而 texts 里其实有按钮文字（实测 texts 含「刷新」但 btnTexts=0）。
+            // 后果是「按钮没渲染」与「判据没命中」分不开，且会随组件改名静默失效。
+            // 现在：声明了 `clicked()` 信号的就是按钮（Md3Btn / AppButton / AshButton 都有）；
+            // 类名含 Btn 的仍然收，兜住非 QML 定义的按钮。
+            const QMetaObject *mo = root->metaObject();
+            const bool looksLikeButton =
+                mo->indexOfSignal("clicked()") >= 0
+                || QString::fromLatin1(mo->className()).contains(QStringLiteral("Btn"));
+            if (looksLikeButton) btnTexts << s;
         }
     }
     for (QObject *c : root->children())
@@ -367,6 +382,11 @@ QtObject {
         collectTexts(root, texts, btnTexts, seen);
         const auto hasText = [&](const QString &s) { return texts.contains(s); };
         const auto hasBtn  = [&](const QString &s) { return btnTexts.contains(s); };
+
+        // 计数留档：btnTexts 归零是判据失效的早期信号（见 collectTexts 里 2026-10-30 注释）
+        out << QStringLiteral("      [debug] 可点文本 %1 条 / 文本 %2 条\n")
+                   .arg(btnTexts.size()).arg(texts.size());
+        out.flush();
 
         // ── 一、导航（5 页）──
         for (const QString &nav : { QStringLiteral("设置"), QStringLiteral("自检"),
