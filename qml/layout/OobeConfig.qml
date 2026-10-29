@@ -4,7 +4,7 @@
 // （不要 URL / token 两个字段）」——URL/token 收进「高级」折叠区，默认只露接入码。
 import QtQuick
 import "../components"
-import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
@@ -19,13 +19,13 @@ Item {
     property bool advanced: false
 
     // 背板（模拟桌面，凸显窗口）
-    Rectangle { anchors.fill: parent; color: Md3.cContLowest }
+    Rectangle { anchors.fill: parent; color: Theme.color.background }
     // 窗口卡（MD3 28 圆角）
     Rectangle {
         anchors.fill: parent
         anchors.margins: 16
-        radius: Md3.rXL
-        color: Md3.cContLow
+        radius: Theme.radius.xl
+        color: Theme.color.background
         Column {
             anchors.left: parent.left; anchors.right: parent.right
             anchors.top: parent.top; anchors.margins: 32
@@ -36,14 +36,14 @@ Item {
                 spacing: 14
                 Rectangle {
                     width: 44; height: 44; radius: 22
-                    color: Md3.cPrimaryCont
+                    color: Theme.color.primary
                     Text { anchors.centerIn: parent; text: "🐋"; font.pixelSize: 22 }
                 }
                 Column {
                     spacing: 2
                     anchors.verticalCenter: parent.verticalCenter
-                    Text { text: "配置教室"; font.pixelSize: Md3.headlineS; font.weight: Font.Medium; color: Md3.cOnSurface }
-                    Text { text: "输入管理员发放的接入码，自动连接云端"; font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar }
+                    Text { text: "配置教室"; font.pixelSize: 16; font.weight: Font.Medium; color: Theme.color.textPrimary }
+                    Text { text: "输入管理员发放的接入码，自动连接云端"; font.pixelSize: 12; color: Theme.color.textSecondary }
                 }
             }
 
@@ -59,16 +59,16 @@ Item {
                 width: parent.width
                 text: "形如 XJK-XXXX-XXX，由管理员发放；填错可改"
                 wrapMode: Text.WordWrap
-                font.pixelSize: Md3.bodyS
-                color: Md3.cOnSurfaceVar
+                font.pixelSize: 12
+                color: Theme.color.textSecondary
             }
 
             // 状态行
             Rectangle {
                 width: parent.width; height: 44
-                radius: Md3.rS
-                color: root.status === "error" ? Md3.cErrorCont
-                     : (root.status === "ok" ? root.okContIfAny() : Md3.cContHigh)
+                radius: Theme.radius.sm
+                color: root.status === "error" ? Theme.color.destructive
+                     : (root.status === "ok" ? root.okContIfAny() : Theme.color.surface)
                 visible: root.status !== "idle"
                 Text {
                     anchors.left: parent.left; anchors.leftMargin: 14
@@ -76,8 +76,8 @@ Item {
                     text: root.status === "connecting" ? "正在连接云端…"
                         : root.status === "ok" ? "✓ 已连接，正在进入教室"
                         : "✗ 接入码无效或云端不可达（错误码 E-OTA-02）"
-                    font.pixelSize: Md3.bodyM
-                    color: root.status === "error" ? Md3.cOnErrorCont : Md3.cOnSurface
+                    font.pixelSize: 14
+                    color: root.status === "error" ? Theme.color.destructiveForeground : Theme.color.textPrimary
                 }
             }
 
@@ -99,7 +99,7 @@ Item {
                     Text { text: "⚙️"; font.pixelSize: 14 }
                     Text {
                         text: root.advanced ? "收起高级选项" : "展开高级选项"
-                        font.pixelSize: Md3.labelL; font.weight: Font.Medium; color: Md3.cPrimary
+                        font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.primary
                     }
                     MouseArea { anchors.fill: parent; onClicked: root.advanced = !root.advanced }
                 }
@@ -117,10 +117,10 @@ Item {
                 width: parent.width
                 text: "被控端只认接入码：URL 与令牌由接入码在云端兑换，本机不手填。"
                 wrapMode: Text.Wrap
-                font.pixelSize: Md3.bodyS; color: Md3.cOutline
+                font.pixelSize: 12; color: Theme.color.textSecondary
             }
         }
     }
     // ok 容器兜底（Md3 令牌没有 ok container，用 outline 组合表达）
-    function okContIfAny() { return Md3.cContHigh }
+    function okContIfAny() { return Theme.color.surface }
 }

@@ -6,7 +6,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../components"
-import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
@@ -35,12 +35,12 @@ Item {
         { name: "备课室",     uid: "PC-PREP-05", version: "0.6.31", online: false, live: false }
     ]
 
-    Rectangle { anchors.fill: parent; color: Md3.cSurface }
+    Rectangle { anchors.fill: parent; color: Theme.color.surface }
 
     // ── 左侧导航轨（MD3 navigation rail：220 宽，激活项全宽 pill）──
     Rectangle {
         width: 220; height: parent.height
-        color: Md3.cContLow
+        color: Theme.color.background
         Column {
             anchors.fill: parent
             anchors.margins: 12
@@ -53,10 +53,10 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
                     Text { text: "🐋"; font.pixelSize: 22; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: "星集控"; font.pixelSize: Md3.titleM; font.weight: Font.Medium; color: Md3.cOnSurface; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: "星集控"; font.pixelSize: 16; font.weight: Font.Medium; color: Theme.color.textPrimary; anchors.verticalCenter: parent.verticalCenter }
                 }
             }
-            Rectangle { width: parent.width; height: 1; color: Md3.cOutlineVar }
+            Rectangle { width: parent.width; height: 1; color: Theme.color.textSecondary }
             Item { width: parent.width; height: 8 }
             // 导航项
             Repeater {
@@ -67,13 +67,13 @@ Item {
                     width: 196; height: 56
                     Rectangle {
                         anchors.fill: parent
-                        radius: Md3.rFull
-                        color: root.page === index ? Md3.cSecondaryCont : "transparent"
-                        Behavior on color { ColorAnimation { duration: Md3.durShort } }
+                        radius: Theme.radius.full
+                        color: root.page === index ? Theme.color.primary : "transparent"
+                        Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
                         Rectangle {
                             anchors.fill: parent; radius: parent.radius
-                            color: Md3.cOnSurface
-                            opacity: navMa.pressed ? Md3.stPress : (navMa.containsMouse ? Md3.stHover : 0)
+                            color: Theme.color.textPrimary
+                            opacity: navMa.pressed ? 0.10 : (navMa.containsMouse ? 0.08 : 0)
                             Behavior on opacity { NumberAnimation { duration: 120 } }
                         }
                     }
@@ -84,8 +84,8 @@ Item {
                         Text { text: modelData.icon; font.pixelSize: 18 }
                         Text {
                             text: modelData.label
-                            font.pixelSize: Md3.labelL; font.weight: Font.Medium
-                            color: root.page === index ? Md3.cOnSecondaryCont : Md3.cOnSurfaceVar
+                            font.pixelSize: 14; font.weight: Font.Medium
+                            color: root.page === index ? Theme.color.primaryForeground : Theme.color.textSecondary
                         }
                     }
                     MouseArea { id: navMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.page = index }
@@ -97,7 +97,7 @@ Item {
                 height: Math.max(0, root.height - 12 - 56 - 1 - 8 - root.navItems.length * 56 - 16 - 116)
             }
             // 底部：主题切换 + 账户
-            Rectangle { width: parent.width; height: 1; color: Md3.cOutlineVar }
+            Rectangle { width: parent.width; height: 1; color: Theme.color.textSecondary }
             Item {
                 width: parent.width; height: 64
                 Row {
@@ -106,13 +106,13 @@ Item {
                     spacing: 12
                     Rectangle {
                         width: 36; height: 36; radius: 18
-                        color: Md3.cContHigh
+                        color: Theme.color.surface
                         Text { anchors.centerIn: parent; text: "🌗"; font.pixelSize: 16 }
                     }
                     Column {
                         spacing: 1
-                        Text { text: "张老师"; font.pixelSize: Md3.labelL; color: Md3.cOnSurface }
-                        Text { text: "教师 · 高一1班"; font.pixelSize: Md3.labelS; color: Md3.cOnSurfaceVar }
+                        Text { text: "张老师"; font.pixelSize: 14; color: Theme.color.textPrimary }
+                        Text { text: "教师 · 高一1班"; font.pixelSize: 11; color: Theme.color.textSecondary }
                     }
                 }
             }
@@ -123,13 +123,13 @@ Item {
     Rectangle {
         x: 220
         width: parent.width - 220; height: 64
-        color: Md3.cSurface
-        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Md3.cOutlineVar }
+        color: Theme.color.surface
+        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.color.textSecondary }
         Text {
             anchors.left: parent.left; anchors.leftMargin: 24
             anchors.verticalCenter: parent.verticalCenter
             text: root.navItems[root.page].label + " · 教室总览"
-            font.pixelSize: Md3.titleL; color: Md3.cOnSurface
+            font.pixelSize: 20; color: Theme.color.textPrimary
         }
         Row {
             anchors.right: parent.right; anchors.rightMargin: 20
@@ -138,21 +138,21 @@ Item {
             // 作用域切换器（多校设计：顶栏 chip，点击展开学校/班级树）
             Rectangle {
                 width: 132; height: 36; radius: 18
-                color: Md3.cContHigh
-                border.color: Md3.cOutlineVar; border.width: 1
-                Text { anchors.centerIn: parent; text: "高一1班 ▾"; font.pixelSize: Md3.labelL; color: Md3.cOnSurface }
+                color: Theme.color.surface
+                border.color: Theme.color.textSecondary; border.width: 1
+                Text { anchors.centerIn: parent; text: "高一1班 ▾"; font.pixelSize: 14; color: Theme.color.textPrimary }
             }
             // 搜索（filled 字段样式）
             Rectangle {
-                width: 240; height: 40; radius: Md3.rXS
-                color: Md3.cSurfaceVar
-                Text { anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; text: "🔍  搜索设备 / UID"; font.pixelSize: Md3.bodyM; color: Md3.cOnSurfaceVar }
+                width: 240; height: 40; radius: Theme.radius.sm
+                color: Theme.color.surfaceVariant
+                Text { anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; text: "🔍  搜索设备 / UID"; font.pixelSize: 14; color: Theme.color.textSecondary }
             }
             // 账户头像
             Rectangle {
                 width: 36; height: 36; radius: 18
-                color: Md3.cPrimaryCont
-                Text { anchors.centerIn: parent; text: "张"; font.pixelSize: Md3.labelL; font.weight: Font.Medium; color: Md3.cOnPrimaryCont }
+                color: Theme.color.primary
+                Text { anchors.centerIn: parent; text: "张"; font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.primaryForeground }
             }
         }
     }
@@ -185,13 +185,13 @@ Item {
                         spacing: 14
                         Rectangle {
                             width: 40; height: 40; radius: 20
-                            color: Md3.cSecondaryCont
+                            color: Theme.color.primary
                             Text { anchors.centerIn: parent; text: modelData.icon; font.pixelSize: 18 }
                         }
                         Column {
                             spacing: 2
-                            Text { text: modelData.k; font.pixelSize: Md3.labelM; color: Md3.cOnSurfaceVar }
-                            Text { text: modelData.v; font.pixelSize: Md3.titleL; font.weight: Font.Medium; color: Md3.cOnSurface }
+                            Text { text: modelData.k; font.pixelSize: 14; color: Theme.color.textSecondary }
+                            Text { text: modelData.v; font.pixelSize: 20; font.weight: Font.Medium; color: Theme.color.textPrimary }
                         }
                     }
                 }
@@ -212,21 +212,21 @@ Item {
                 width: 328; height: 236
                 Rectangle {
                     anchors.fill: parent
-                    radius: Md3.rM
-                    color: Md3.cContHigh
+                    radius: Theme.radius.md
+                    color: Theme.color.surface
                     Column {
                     anchors.fill: parent
                     spacing: 10
                     // 画面区（占位）
                     Rectangle {
                         width: parent.width; height: 148
-                        radius: Md3.rS
-                        color: modelData.live ? Md3.cContHighest : Md3.cContLow
+                        radius: Theme.radius.sm
+                        color: modelData.live ? Theme.color.surfaceVariant : Theme.color.background
                         Text {
                             anchors.centerIn: parent
                             text: modelData.live ? "📹  实时画面" : (modelData.online ? "🖥  待唤醒画面" : "📴  离线")
-                            font.pixelSize: Md3.bodyM
-                            color: modelData.online ? Md3.cOnSurfaceVar : Md3.cOutline
+                            font.pixelSize: 14
+                            color: modelData.online ? Theme.color.textSecondary : Theme.color.textSecondary
                         }
                     }
                     // 信息行
@@ -239,12 +239,12 @@ Item {
                         Rectangle {
                             width: 10; height: 10; radius: 5
                             anchors.verticalCenter: parent.verticalCenter
-                            color: modelData.online ? Md3.cOk : Md3.cError
+                            color: modelData.online ? Theme.color.success : Theme.color.destructive
                         }
                         Column {
                             width: parent.width - 150
-                            Text { text: modelData.name; font.pixelSize: Md3.bodyL; color: Md3.cOnSurface; elide: Text.ElideRight; width: parent.width }
-                            Text { text: "v" + modelData.version + " · " + modelData.uid; font.pixelSize: Md3.bodyS; color: Md3.cOnSurfaceVar; elide: Text.ElideRight; width: parent.width }
+                            Text { text: modelData.name; font.pixelSize: 14; color: Theme.color.textPrimary; elide: Text.ElideRight; width: parent.width }
+                            Text { text: "v" + modelData.version + " · " + modelData.uid; font.pixelSize: 12; color: Theme.color.textSecondary; elide: Text.ElideRight; width: parent.width }
                         }
                         // 快捷指令（MD3 text 按钮）
                         Row {
@@ -252,14 +252,14 @@ Item {
                             spacing: 4
                             Rectangle {
                                 width: 48; height: 32; radius: 16
-                                color: pingMa.pressed ? Md3.cContHighest : "transparent"
-                                Text { anchors.centerIn: parent; text: "ping"; font.pixelSize: Md3.labelM; font.weight: Font.Medium; color: Md3.cPrimary }
+                                color: pingMa.pressed ? Theme.color.surfaceVariant : "transparent"
+                                Text { anchors.centerIn: parent; text: "ping"; font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.primary }
                                 MouseArea { id: pingMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.currentUid = modelData.uid }
                             }
                             Rectangle {
                                 width: 48; height: 32; radius: 16
-                                color: sdMa.pressed ? Md3.cErrorCont : "transparent"
-                                Text { anchors.centerIn: parent; text: "关机"; font.pixelSize: Md3.labelM; font.weight: Font.Medium; color: Md3.cError }
+                                color: sdMa.pressed ? Theme.color.destructive : "transparent"
+                                Text { anchors.centerIn: parent; text: "关机"; font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.destructive }
                                 MouseArea { id: sdMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.currentUid = modelData.uid }
                             }
                         }

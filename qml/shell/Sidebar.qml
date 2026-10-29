@@ -13,7 +13,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../island"          // SvgIcon
-import "../components/theme"   // Md3 令牌（pragma Singleton）
+import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
 Item {
     id: root
@@ -49,7 +49,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Md3.cSurfaceVar
+        color: Theme.color.surfaceVariant
     }
 
     // 右缘发丝分隔线（与主内容区分界，避免侧栏"贴"在主区上）
@@ -58,7 +58,7 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 1
-        color: Md3.cOutlineVar
+        color: Theme.color.textSecondary
         opacity: 0.5
     }
 
@@ -73,19 +73,19 @@ Item {
             Layout.preferredHeight: root.brandRowH
             Row {
                 anchors.left: parent.left
-                anchors.leftMargin: Md3.spXS
+                anchors.leftMargin: Theme.spacing.xs
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: Md3.spS
+                spacing: Theme.spacing.sm
 
                 Rectangle {
                     width: 28; height: 28
-                    radius: Md3.rS
-                    color: Md3.cOk            // 蓝图 bg-green-500 ⇒ 本项目成功绿令牌
+                    radius: Theme.radius.sm
+                    color: Theme.color.success            // 蓝图 bg-green-500 ⇒ 本项目成功绿令牌
                     anchors.verticalCenter: parent.verticalCenter
                     Text {
                         anchors.centerIn: parent
                         text: "星"
-                        color: Md3.cOnPrimary
+                        color: Theme.color.primaryForeground
                         font.pixelSize: 13
                         font.bold: true
                     }
@@ -93,9 +93,9 @@ Item {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "星集控"
-                    font.pixelSize: Md3.titleM
+                    font.pixelSize: 16
                     font.weight: Font.ExtraBold
-                    color: Md3.cOnSurface
+                    color: Theme.color.textPrimary
                 }
             }
         }
@@ -106,10 +106,10 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 56
-            Layout.leftMargin: Md3.spXS
-            Layout.rightMargin: Md3.spXS
-            radius: Md3.rM
-            color: Md3.cCont
+            Layout.leftMargin: Theme.spacing.xs
+            Layout.rightMargin: Theme.spacing.xs
+            radius: Theme.radius.md
+            color: Theme.color.surfaceVariant
             visible: root.accountTitle.length > 0
 
             Row {
@@ -119,12 +119,12 @@ Item {
                 Rectangle {
                     width: 36; height: 36
                     radius: 18
-                    color: Md3.cContHighest
+                    color: Theme.color.surfaceVariant
                     anchors.verticalCenter: parent.verticalCenter
                     Text {
                         anchors.centerIn: parent
                         text: root.avatarText
-                        color: Md3.cOnSurface
+                        color: Theme.color.textPrimary
                         font.pixelSize: 14
                         font.bold: true
                     }
@@ -134,7 +134,7 @@ Item {
                     spacing: 2
                     Text {
                         text: root.accountTitle
-                        color: Md3.cOnSurface
+                        color: Theme.color.textPrimary
                         font.pixelSize: 13
                         font.bold: true
                         elide: Text.ElideRight
@@ -142,7 +142,7 @@ Item {
                     }
                     Text {
                         text: root.accountSub
-                        color: Md3.cOnSurfaceVar
+                        color: Theme.color.textSecondary
                         font.pixelSize: 11
                         elide: Text.ElideRight
                         width: parent.parent.width - 54
@@ -158,11 +158,11 @@ Item {
                 required property var modelData
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.navItemH
-                radius: Md3.rFull
+                radius: Theme.radius.full
                 color: (root.current === modelData.key)
-                       ? Md3.cSecondaryCont
-                       : (navMa.containsMouse ? Md3.cContHigh : "transparent")
-                Behavior on color { ColorAnimation { duration: Md3.durShort } }
+                       ? Theme.color.primary
+                       : (navMa.containsMouse ? Theme.color.surface : "transparent")
+                Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
 
                 // 终末地工业青 · 选中项左侧细规（"当前终端"冷调点缀）
                 // 2026-10-22：硬编码 #2FB8C6 → 令牌 cAccent（零硬编码纪律）
@@ -176,26 +176,26 @@ Item {
                     anchors.bottom: parent.bottom
                     anchors.topMargin: 18
                     anchors.bottomMargin: 18
-                    color: Md3.cAccent
+                    color: Theme.color.accent
                 }
 
                 Row {
                     anchors.left: parent.left
-                    anchors.leftMargin: Md3.spM
+                    anchors.leftMargin: Theme.spacing.md
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 12
 
                     SvgIcon {
                         name: modelData.icon
-                        tint: (root.current === modelData.key) ? Md3.cOnSecondaryCont : Md3.cOnSurfaceVar
+                        tint: (root.current === modelData.key) ? Theme.color.primaryForeground : Theme.color.textSecondary
                         px: root.iconPx
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: modelData.label
-                        font.pixelSize: Md3.bodyM
+                        font.pixelSize: 14
                         font.weight: (root.current === modelData.key) ? Font.Medium : Font.Normal
-                        color: (root.current === modelData.key) ? Md3.cOnSecondaryCont : Md3.cOnSurfaceVar
+                        color: (root.current === modelData.key) ? Theme.color.primaryForeground : Theme.color.textSecondary
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
@@ -218,19 +218,19 @@ Item {
             Layout.preferredHeight: root.backRowH
             Row {
                 anchors.left: parent.left
-                anchors.leftMargin: Md3.spM
+                anchors.leftMargin: Theme.spacing.md
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 12
                 SvgIcon {
                     name: "arrow-left"
-                    tint: Md3.cOnSurfaceVar
+                    tint: Theme.color.textSecondary
                     px: root.iconPx
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: "返回经典界面"
-                    font.pixelSize: Md3.bodyM
-                    color: Md3.cOnSurfaceVar
+                    font.pixelSize: 14
+                    color: Theme.color.textSecondary
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
