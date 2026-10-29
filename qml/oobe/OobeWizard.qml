@@ -6,7 +6,7 @@
 //   · 单向：只能往前走 + 从「选方式」退回欢迎；不能跳到后面的步骤。
 //   · 状态真源在 C++（`oobe` = OobeWizard）：bindingState 变了这里才动页面，
 //     QML 自己不猜绑定结果（扫码页/输码页共用同一处跳转判断）。
-//   · 失败一律弹 AppDialog（友好文案来自 C++），**绝不白屏/不动死**。
+//   · 失败一律弹 OobeErrorDialog（薄包装共享 AppDialog，友好文案来自 C++），**绝不白屏/不动死**。
 //
 // ⚠️ 命名纪律：令牌实例 id 用 `tok`（`md3` 与子组件属性同名会自引用，项目已踩过）。
 // ⚠️ 依赖：QtQuick.Controls 的 StackView。被控端自 0.6.46 起由 windeployqt 部署
@@ -14,19 +14,26 @@
 import QtQuick
 import QtQuick.Controls
 import "../components"
-import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
+import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 import "steps"
 
 Rectangle {
     id: wizardRoot
-    color: tok.cSurface
+    color: Theme.color.surface
 
-    // Md3 = pragma Singleton（2026-10-25）。OOBE 向导固定浅色（首启视觉基线）：
+    // OOBE 向导固定浅色（首启视觉基线）：2026-10-30 起只对 `Theme` 生效。
     // 用 Binding + RestoreBindingOrValue 临时覆盖全局 dark，向导销毁时自动恢复原值，
     // 不破坏主外壳 AgentShell 的 dark 绑定。
-    readonly property var tok: Md3
     Binding {
-        target: Md3; property: "dark"; value: false
+        target: Theme; property: "dark"; value: false
+        restoreMode: Binding.RestoreBindingOrValue
+    }
+
+    // 同样要「不要品牌紫」（2026-10-30 用户点单）。这条**不能只写在 AgentShell 里**：
+    // OOBE 是独立窗口/独立 QML 文档，AgentShell 那时还没加载 —— 漏了这里，
+    // 向导的步骤点、选中卡、主按钮全是品牌紫（截图实证：底部进度点就是紫的）。
+    Binding {
+        target: Theme; property: "neutralAccent"; value: true
         restoreMode: Binding.RestoreBindingOrValue
     }
 
@@ -50,7 +57,7 @@ Rectangle {
                  : n === 4 ? codeComp
                  : doneComp;
         step = n;
-        stack.replace(null, comp, { tk: tok, wizard: wizardRoot });
+        stack.replace(null, comp, { wizard: wizardRoot });
     }
     function chooseQr()   { gotoStep(3); oobe.startScan(); }
     function chooseCode() { gotoStep(4); }
@@ -65,17 +72,17 @@ Rectangle {
         initialItem: Item { }
 
         pushEnter: Transition {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: tok.durMedium; easing.bezierCurve: tok.easeEmph }
-            NumberAnimation { property: "x"; from: 24; to: 0; duration: tok.durMedium; easing.bezierCurve: tok.easeEmph }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motion.normal; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "x"; from: 24; to: 0; duration: Theme.motion.normal; easing.type: Easing.OutCubic }
         }
         pushExit: Transition {
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: tok.durShort }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.motion.fast }
         }
         popEnter: Transition {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: tok.durMedium }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motion.normal }
         }
         popExit: Transition {
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: tok.durShort }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.motion.fast }
         }
     }
 
@@ -93,8 +100,8 @@ Rectangle {
                 width: index === wizardRoot.step ? 20 : 8
                 height: 8
                 radius: 4
-                color: index <= wizardRoot.step ? tok.cPrimary : tok.cOutlineVar
-                Behavior on width { NumberAnimation { duration: tok.durShort } }
+                color: index <= wizardRoot.step ? Theme.accentStrong : Theme.color.surfaceVariant
+                Behavior on width { NumberAnimation { duration: Theme.motion.fast } }
             }
         }
     }
@@ -117,11 +124,11 @@ Rectangle {
         }
     }
 
-    AppDialog {
+    // 名字必须与共享库的 AppDialog 区分开：本件只是「一句话 + 一个按钮」的薄包装
+    OobeErrorDialog {
         id: errDlg
         objectName: "oobeErrorDialog"   // 探针按名字找它（验证失败时对话框真的弹出来）
         anchors.fill: parent
-        tk: tok
         text: oobe.errorText
         onDismissed: oobe.dismissError()
     }

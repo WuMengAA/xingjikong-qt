@@ -7,66 +7,64 @@
 // 「通用」拆成三件的原因：单件 337 行超 QML 红线 200（file-size 门禁判红），
 // 按语义切为 设备与启动 / 服务与时间 / 存储·高级·目录，三段在主文件里按原顺序排列。
 //
+// 2026-10-30 用户点单「全部换新」：ash/ → 共享库 App* 体系，令牌走 Theme 单例。
+//   · 动作结果条的 `#211F26` / `#E6E1E5` 两个 Hex → `Theme.color.surfaceVariant` / `textPrimary`；
+//   · 说明文字统一 12 号次文字色（原为 11 号 + 兜底 Hex #CAC4D0）；
+//   · 原 `Row { topPadding: 10 }` 无效（Row 无 padding）→ RowLayout + Layout.topMargin。
+//
 // ⚠️ QML 零逻辑（用户铁律）：本件不含 Math / 三元 / function / console.log / 通信，
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
+import QtQuick.Layouts
 
-import "../../../ash"
+import "../../../components"
+import "../../../components/theme"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    property var ash
     signal resetRequested()
 
     width: parent ? parent.width : 0
     spacing: 14
 
     // ── 蓝图「通用设置」第 5 项：存储与备份 ──────────────────────
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 2
-            AshCardTitle { text2: "存储与备份" }
+            AppCardTitle { text: "存储与备份" }
             Text {
-                anchors.left: parent.left
-                anchors.right: parent.right
+                Layout.fillWidth: true
                 text: agentUi.storageHintText
-                font.pixelSize: 11
-                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary
                 wrapMode: Text.WordWrap
-                bottomPadding: 6
             }
-            AshInfoRow { label: "配置"; value: agentUi.storageConfigText }
-            AshInfoRow { label: "数据"; value: agentUi.storageDataText }
-            AshInfoRow { label: "日志"; value: agentUi.storageLogText }
-            AshInfoRow { label: "合计"; value: agentUi.storageTotalText }
-            Row {
-                topPadding: 10
+            AppInfoRow { label: "配置"; value: agentUi.storageConfigText }
+            AppInfoRow { label: "数据"; value: agentUi.storageDataText }
+            AppInfoRow { label: "日志"; value: agentUi.storageLogText }
+            AppInfoRow { label: "合计"; value: agentUi.storageTotalText }
+            RowLayout {
+                Layout.topMargin: 10
                 spacing: 8
-                AshButton {
-                    th: root.ash
+                AppButton {
                     text: "统计用量"
-                    variant: "filled"
+                    variant: "solid"
                     onClicked: agentUi.refreshStorage()
                 }
-                AshButton {
-                    th: root.ash
+                AppButton {
                     text: "备份配置"
-                    variant: "tonal"
+                    variant: "secondary"
                     onClicked: agentUi.backupConfigNow()
                 }
-                AshButton {
-                    th: root.ash
+                AppButton {
                     text: "清理旧日志"
-                    variant: "text"
+                    variant: "ghost"
                     onClicked: agentUi.clearOldLogsNow()
                 }
             }
@@ -74,28 +72,23 @@ Column {
     }
 
     // ── 蓝图「通用设置」第 6 项：高级选项 ────────────────────────
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 10
-            AshCardTitle { text2: "高级选项" }
+            AppCardTitle { text: "高级选项" }
             Text {
-                anchors.left: parent.left
-                anchors.right: parent.right
+                Layout.fillWidth: true
                 text: agentUi.resetScopeText
-                font.pixelSize: 11
-                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary
                 wrapMode: Text.WordWrap
             }
-            AshButton {
-                th: root.ash
+            AppButton {
                 text: "重置全部设置…"
-                variant: "tonal"
+                variant: "secondary"
                 onClicked: root.resetRequested()
             }
         }
@@ -109,8 +102,8 @@ Column {
         anchors.right: parent.right
         visible: agentUi.actionResultVisible
         height: resultText.implicitHeight + 20
-        radius: 12
-        color: root.ash ? root.ash.card : "#211F26"
+        radius: Theme.radius.md
+        color: Theme.color.surfaceVariant
         Text {
             id: resultText
             anchors.left: parent.left
@@ -119,51 +112,44 @@ Column {
             anchors.margins: 12
             text: agentUi.actionResultText
             font.pixelSize: 12
-            color: root.ash ? root.ash.foreground : "#E6E1E5"
+            color: Theme.color.textPrimary
             wrapMode: Text.WordWrap
         }
     }
 
     // 托盘右键的三条目录入口（2026-10-28 移植）
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 10
-            AshCardTitle { text2: "本地目录" }
+            AppCardTitle { text: "本地目录" }
             Text {
-                anchors.left: parent.left
-                anchors.right: parent.right
+                Layout.fillWidth: true
                 text: "配置文件、运行数据与日志分三个位置存放。托盘右键里原本也有这三项，" +
                       "现在设置页同样能到 —— 现场排障不用再去摸托盘。"
-                font.pixelSize: 11
-                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary
                 wrapMode: Text.WordWrap
             }
-            AshInfoRow { label: "数据目录"; value: agentUi.dataDir }
-            AshInfoRow { label: "日志文件"; value: agentUi.logPath }
-            Row {
+            AppInfoRow { label: "数据目录"; value: agentUi.dataDir }
+            AppInfoRow { label: "日志文件"; value: agentUi.logPath }
+            RowLayout {
                 spacing: 10
-                AshButton {
-                    th: root.ash
+                AppButton {
                     text: "打开配置目录"
-                    variant: "tonal"
+                    variant: "secondary"
                     onClicked: agentUi.openConfigDir()
                 }
-                AshButton {
-                    th: root.ash
+                AppButton {
                     text: "打开数据目录"
-                    variant: "tonal"
+                    variant: "secondary"
                     onClicked: agentUi.openDataDir()
                 }
-                AshButton {
-                    th: root.ash
+                AppButton {
                     text: "打开日志目录"
-                    variant: "tonal"
+                    variant: "secondary"
                     onClicked: agentUi.openLogDir()
                 }
             }

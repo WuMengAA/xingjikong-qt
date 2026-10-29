@@ -2,10 +2,10 @@
 // 「扫码绑定 / 输入绑定码」两个巨卡：一整块可点，图标 + 主标题 + 副标题，MD3 卡片圆角。
 // 触屏友好：整卡点击区（不是只有文字可点），最小高度 132。
 import QtQuick
+import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 
 Rectangle {
     id: root
-    property var tk: ({})
     property string glyph: ""        // 汉字/符号字形（教室机 emoji 有 tofu 风险 ⇒ 用汉字）
     property string title: ""
     property string subtitle: ""
@@ -14,10 +14,8 @@ Rectangle {
 
     implicitHeight: 132
     implicitWidth: 320
-    radius: tk.rM
-    color: tk.cContLow
-    border.width: 1
-    border.color: mouse.containsMouse ? tk.cPrimary : tk.cOutlineVar
+    radius: Theme.radius.md
+    color: Theme.color.surfaceVariant
 
     // 底部微弱阴影（用户要求「纯白/主色卡片 + 底部微阴影」）
     Rectangle {
@@ -42,12 +40,12 @@ Rectangle {
             height: 48
             radius: 24
             anchors.verticalCenter: parent.verticalCenter
-            color: tk.cPrimaryCont
+            color: Theme.color.surfaceVariant
             Text {
                 anchors.centerIn: parent
                 text: root.glyph
                 font.pixelSize: 20
-                color: tk.cOnPrimaryCont
+                color: Theme.color.textPrimary
             }
         }
         Column {
@@ -60,19 +58,19 @@ Rectangle {
                     text: root.title
                     font.pixelSize: 16
                     font.weight: Font.Medium
-                    color: tk.cOnSurface
+                    color: Theme.color.textPrimary
                 }
                 Rectangle {
                     visible: root.recommended
                     width: 44
                     height: 20
                     radius: 10
-                    color: tk.cTertiaryCont
+                    color: Theme.color.surfaceVariant
                     Text {
                         anchors.centerIn: parent
                         text: "推荐"
                         font.pixelSize: 11
-                        color: tk.cOnTertiaryCont
+                        color: Theme.color.textPrimary
                     }
                 }
             }
@@ -80,7 +78,7 @@ Rectangle {
                 width: parent.width
                 text: root.subtitle
                 font.pixelSize: 12
-                color: tk.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 wrapMode: Text.Wrap
             }
         }

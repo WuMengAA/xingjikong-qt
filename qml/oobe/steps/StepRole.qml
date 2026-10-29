@@ -8,11 +8,11 @@
 //
 // 交互：两张巨卡整卡可点，选完直接进下一步（不需要再点「下一步」）。
 import QtQuick
+import "../../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 import ".."
 
 Item {
     id: page
-    property var tk: ({})
     property var wizard: null
 
     Column {
@@ -25,7 +25,7 @@ Item {
             text: "这台设备用来做什么？"
             font.pixelSize: 24
             font.weight: Font.Bold
-            color: tk.cOnSurface
+            color: Theme.color.textPrimary
         }
 
         Item { width: 1; height: 8 }
@@ -34,14 +34,13 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "用途决定这台设备开哪套界面；以后可在管理端修改。"
             font.pixelSize: 13
-            color: tk.cOnSurfaceVar
+            color: Theme.color.textSecondary
         }
 
         Item { width: 1; height: 32 }
 
         OobeCardButton {
             width: parent.width
-            tk: page.tk
             glyph: "教"
             title: "教室端"
             subtitle: "接在教室大屏上：收通知与黑板卡、上报画面、参与班级管理"
@@ -56,7 +55,6 @@ Item {
 
         OobeCardButton {
             width: parent.width
-            tk: page.tk
             glyph: "广"
             title: "广播端"
             subtitle: "学校广播室专用：播放排期与校园广播，不参与班级画面"
@@ -72,7 +70,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "返回"
             font.pixelSize: 13
-            color: tk.cOnSurfaceVar
+            color: Theme.color.textSecondary
             opacity: backArea.containsMouse ? 1.0 : 0.75
             MouseArea {
                 id: backArea

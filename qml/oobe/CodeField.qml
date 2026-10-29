@@ -5,10 +5,10 @@
 // ⇒ 上限 6 位；格式合法性由 C++ 的 isCodeFormatValid 单点判定。
 // ⚠️ 不用 Qt TextField（项目纪律）；TextInput 是 QtQuick 核心项，Md3TextField 内部也用它。
 import QtQuick
+import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 
 Item {
     id: root
-    property var tk: ({})
     property string text: input.text
     property bool errorMode: false
     signal accepted()
@@ -24,11 +24,10 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: tk.rM
-        color: tk.cContLow
-        border.width: input.activeFocus || root.errorMode ? 2 : 1
-        border.color: root.errorMode ? tk.cError
-                                     : (input.activeFocus ? tk.cPrimary : tk.cOutlineVar)
+        radius: Theme.radius.md
+        // 2026-10-30 去边框：原「聚焦/错误靠 2px 描边」改为底色差 + 文字色 ——
+        // 聚焦把底提亮一档（surfaceVariant → surface），错误把码文字变红。
+        color: input.activeFocus ? Theme.color.surface : Theme.color.surfaceVariant
 
         TextInput {
             id: input
@@ -40,9 +39,9 @@ Item {
             // 6 位接入码：固定大字号居中
             font.pixelSize: 32
             font.letterSpacing: 8
-            color: tk.cOnSurface
-            selectionColor: tk.cPrimaryCont
-            selectedTextColor: tk.cOnSurface
+            color: root.errorMode ? Theme.color.destructive : Theme.color.textPrimary
+            selectionColor: Theme.color.surfaceVariant
+            selectedTextColor: Theme.color.textPrimary
             maximumLength: 6
             // 手机/触屏：只弹大写字母数字键盘
             inputMethodHints: Qt.ImhUppercaseOnly | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
@@ -57,7 +56,7 @@ Item {
                 visible: input.text.length === 0
                 text: "请输入绑定码"
                 font.pixelSize: 20
-                color: tk.cOutline
+                color: Theme.color.textSecondary
             }
         }
     }

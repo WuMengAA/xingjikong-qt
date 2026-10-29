@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../../components"
-import "../../components/md3" as M
+import "../../components/theme"
 
 // 被控端 · 播放时段页（openPlayScheduleDialog 的真实迁移 · U5-A3 第二批）
 // 开关走 switchChanged("playScheduleEnabled") 落 QSettings；
@@ -15,7 +15,6 @@ Item {
     anchors.fill: parent
 
     property var ctx
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
 
     Flickable {
         anchors.fill: parent
@@ -29,6 +28,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.margins: 20
+            anchors.top: parent.top
             anchors.topMargin: 16
             spacing: 14
 
@@ -57,15 +57,14 @@ Item {
                         text: "允许的时段（每行一个，格式 HH:MM-HH:MM；可跨午夜如 22:00-07:00）："
                         font.pixelSize: 12
                         topPadding: 6
-                        color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
+                        color: Theme.color.textSecondary
                     }
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 120
-                        radius: page.tok ? page.tok.rM : 12
-                        color: page.tok ? page.tok.cSurface : "#1C1B1F"
-                        border.width: 1
-                        border.color: page.tok ? page.tok.cOutline : "#938F99"
+                        radius: Theme.radius.md
+                        color: Theme.color.surface
+                        // 2026-10-30 去边框：靠 surface 底与 muted 卡底的色差分界（原 border.width/border.color 删除）
 
                         Flickable {
                             id: winScroll
@@ -82,7 +81,7 @@ Item {
                                 text: agentUi.playWindowsText
                                 font.pixelSize: 13
                                 font.family: "Consolas"
-                                color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                                color: Theme.color.textPrimary
                                 selectByMouse: true
                                 wrapMode: TextEdit.Wrap
                                 // 编辑期间不回写 ctx（避免 fill 把正在输入的文本顶掉）；
@@ -97,7 +96,7 @@ Item {
                                 text: "08:00-11:30\n14:00-17:00"
                                 font.pixelSize: 13
                                 font.family: "Consolas"
-                                color: page.tok ? page.tok.cOutline : "#938F99"
+                                color: Theme.color.textSecondary
                             }
                         }
                     }
@@ -106,14 +105,14 @@ Item {
                         text: agentUi.playStateText
                         font.pixelSize: 12
                         topPadding: 4
-                        color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
+                        color: Theme.color.textSecondary
                     }
                     RowLayout {
                         Layout.topMargin: 6
                         spacing: 10
                         AppButton {
                             text: "保存"
-                            variant: "primary"
+                            variant: "solid"
                             onClicked: {
                                 agentUi.playWindowsText = winEdit.text
                                 agentUi.savePlaySchedule()

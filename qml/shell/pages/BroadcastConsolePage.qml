@@ -9,17 +9,23 @@
 //
 // 数据全部来自 C++ 快照（agentUi），本页不自己发请求：
 //   deviceRole / classCode（广播端里它是**站码**）/ connState / appVersion
+//
+// 2026-10-30 用户点单「全部换新」：
+//   · `tok`（ctx.theme / Md3）→ 共享库 `Theme`；`import md3 as M` 本件无引用，删除；
+//   · 两个入口按钮原来是品牌蓝 `#2F6BFF` / `#1F57E8` 硬编码 + 浅色 Hex 兜底 ——
+//     全页按规范改为中性：主入口 `Theme.accentStrong`（被控端已置中性反白），
+//     次入口 `Theme.color.surface`，hover 用一层低透明度覆盖（不再写死第二个蓝）；
+//   · 次入口的 `border.width/border.color` 删除（去边框规范，靠底色差分界）。
 import QtQuick
 import QtQuick.Layouts
 import "../../components"
-import "../../components/md3" as M
+import "../../components/theme"
 
 Item {
     id: page
     anchors.fill: parent
 
     property var ctx
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
     readonly property var win: ctx ? ctx.window : null
     readonly property string station: (typeof agentUi !== "undefined" && agentUi.classCode) ? agentUi.classCode : ""
 
@@ -60,7 +66,7 @@ Item {
                         text: "广播端"
                         font.pixelSize: 22
                         font.weight: Font.Bold
-                        color: page.tok ? page.tok.cOnSurface : "#111827"
+                        color: Theme.color.textPrimary
                     }
                     Text {
                         Layout.fillWidth: true
@@ -68,7 +74,7 @@ Item {
                               ? "归属广播站：" + station
                               : "还没绑定广播站 —— 打开「设置」里的配置，或重新走一遍首次配置"
                         font.pixelSize: 13
-                        color: page.tok ? page.tok.cOnSurfaceVar : "#6B7280"
+                        color: Theme.color.textSecondary
                         wrapMode: Text.Wrap
                     }
                     Text {
@@ -76,8 +82,8 @@ Item {
                         text: (typeof agentUi !== "undefined" ? agentUi.connState : "")
                         font.pixelSize: 12
                         color: (typeof agentUi !== "undefined" && agentUi.connState.indexOf("已连接") === 0)
-                               ? (page.tok ? page.tok.cOk : "#15803D")
-                               : (page.tok ? page.tok.cWarn : "#B45309")
+                               ? Theme.color.success
+                               : Theme.color.warning
                         wrapMode: Text.Wrap
                     }
                 }
@@ -89,17 +95,28 @@ Item {
                 anchors.right: parent.right
                 spacing: 12
 
+                // 主入口：中性反白底（被控端禁用品牌色）
                 Rectangle {
+                    id: primaryEntry
                     width: (parent.width - 12) / 2
                     height: 56
-                    radius: page.tok ? page.tok.rM : 12
-                    color: ma1.containsMouse ? "#1F57E8" : "#2F6BFF"
+                    radius: Theme.radius.md
+                    color: Theme.accentStrong
+
+                    // hover 反馈：独立覆盖层改透明度（不新增第二个色值）
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: parent.radius
+                        color: Theme.accentStrongForeground
+                        opacity: ma1.containsMouse ? 0.08 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
+                    }
                     Text {
                         anchors.centerIn: parent
                         text: "打开广播社"
                         font.pixelSize: 14
                         font.weight: Font.Medium
-                        color: "#FFFFFF"
+                        color: Theme.accentStrongForeground
                     }
                     MouseArea {
                         id: ma1
@@ -110,21 +127,26 @@ Item {
                     }
                 }
 
+                // 次入口：卡片底 + 无边框（靠色差与主入口区分）
                 Rectangle {
                     width: (parent.width - 12) / 2
                     height: 56
-                    radius: page.tok ? page.tok.rM : 12
-                    color: ma2.containsMouse
-                           ? (page.tok ? page.tok.cContLow : "#F1F5F9")
-                           : (page.tok ? page.tok.cCont : "#F8FAFC")
-                    border.width: 1
-                    border.color: page.tok ? page.tok.cOutlineVar : "#E5E7EB"
+                    radius: Theme.radius.md
+                    color: Theme.color.surface
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: parent.radius
+                        color: Theme.color.textPrimary
+                        opacity: ma2.containsMouse ? 0.06 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
+                    }
                     Text {
                         anchors.centerIn: parent
                         text: "播放时段"
                         font.pixelSize: 14
                         font.weight: Font.Medium
-                        color: page.tok ? page.tok.cOnSurface : "#111827"
+                        color: Theme.color.textPrimary
                     }
                     MouseArea {
                         id: ma2
@@ -143,7 +165,7 @@ Item {
                       + "要改成教室端，由管理员在设备列表里改用途，本机重连后自动切换。"
                 font.pixelSize: 12
                 lineHeight: 1.5
-                color: page.tok ? page.tok.cOnSurfaceVar : "#6B7280"
+                color: Theme.color.textSecondary
                 wrapMode: Text.Wrap
             }
 
@@ -151,7 +173,7 @@ Item {
                 visible: typeof agentUi !== "undefined" && agentUi.appVersion.length > 0
                 text: "版本 " + (typeof agentUi !== "undefined" ? agentUi.appVersion : "")
                 font.pixelSize: 12
-                color: page.tok ? page.tok.cOnSurfaceVar : "#6B7280"
+                color: Theme.color.textSecondary
             }
         }
     }

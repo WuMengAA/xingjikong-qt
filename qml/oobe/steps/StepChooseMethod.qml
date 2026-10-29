@@ -2,11 +2,11 @@
 // 只让用户做一件事：二选一。两张巨卡，整卡可点。
 // 单向流程：这里可以退回欢迎页（不算跳跃），但不能直接飞到后面步骤。
 import QtQuick
+import "../../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 import ".."
 
 Item {
     id: page
-    property var tk: ({})
     property var wizard: null
 
     Column {
@@ -19,7 +19,7 @@ Item {
             text: page.wizard.isBroadcast ? "如何绑定这台广播机？" : "你要如何绑定这台设备？"
             font.pixelSize: 24
             font.weight: Font.Bold
-            color: tk.cOnSurface
+            color: Theme.color.textPrimary
         }
 
         Item { width: 1; height: 8 }
@@ -30,14 +30,13 @@ Item {
                   ? "绑定的是广播站码（与班级码同一套码），绑好后可以在设置里改。"
                   : "两种方式任选一种，绑好后可以在设置里改。"
             font.pixelSize: 13
-            color: tk.cOnSurfaceVar
+            color: Theme.color.textSecondary
         }
 
         Item { width: 1; height: 32 }
 
         OobeCardButton {
             width: parent.width
-            tk: page.tk
             glyph: "扫"
             title: "扫码绑定"
             subtitle: page.wizard.isBroadcast
@@ -51,7 +50,6 @@ Item {
 
         OobeCardButton {
             width: parent.width
-            tk: page.tk
             glyph: "码"
             title: "输入绑定码"
             subtitle: page.wizard.isBroadcast
@@ -66,7 +64,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "返回"
             font.pixelSize: 13
-            color: tk.cOnSurfaceVar
+            color: Theme.color.textSecondary
             opacity: backArea.containsMouse ? 1.0 : 0.75
             MouseArea {
                 id: backArea

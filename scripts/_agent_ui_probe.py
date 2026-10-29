@@ -27,7 +27,9 @@ PROBE_SRC = os.path.join(ROOT, "scripts", "_agent_ui_probe.cpp")
 AGENT_UI_H = os.path.join(SRC, "agent_ui.h")
 MOC_OUT = os.path.join(OUT_DIR, "_agent_ui_moc.cpp")
 REPORT = os.path.join(OUT_DIR, "_agent_ui_probe_report.txt")
-SHOT = os.path.join(OUT_DIR, "_agent_ui_probe.png")
+# 2026-10-30：单张截图升级为逐屏截图（页 ×6 + 设置 7 分类 + 广播浮层 + 广播机 7 页），
+# 落 OUT_DIR/_shots/NN_<id>.png。为什么不覆盖旧图：换新核验要能左右比较。
+SHOTS = os.path.join(OUT_DIR, "_shots")
 
 MSVC = r"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.51.36231"
 SDK = r"C:\Program Files (x86)\Windows Kits\10"
@@ -144,9 +146,13 @@ def main():
         return 2
 
     # 4) 跑（cwd=_objs：平台插件按 exe 目录/cwd 找，且报告/截图落这里）
-    for f in (REPORT, SHOT):
-        if os.path.exists(f):
-            os.remove(f)
+    if os.path.exists(REPORT):
+        os.remove(REPORT)
+    # 截图目录整目录清空（只清自己产出的 _*.png，别的探针图不动）
+    if os.path.isdir(SHOTS):
+        for fn in os.listdir(SHOTS):
+            if fn.endswith(".png"):
+                os.remove(os.path.join(SHOTS, fn))
     p = subprocess.run([exe], env=env(), cwd=OUT_DIR,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     print("探针退出码:", p.returncode, "（10=全过 20=有失败 30=壳没起来）")
@@ -156,8 +162,11 @@ def main():
     else:
         print("（没生成报告，子进程输出如下）")
         print(p.stdout.decode("utf-8", "replace")[:4000])
-    if os.path.exists(SHOT):
-        print("截图:", SHOT)
+    if os.path.isdir(SHOTS):
+        pngs = sorted(fn for fn in os.listdir(SHOTS) if fn.endswith(".png"))
+        print("截图 %d 张 → %s" % (len(pngs), SHOTS))
+        for fn in pngs:
+            print("   ", fn)
     return 0 if p.returncode == 10 else 1
 
 

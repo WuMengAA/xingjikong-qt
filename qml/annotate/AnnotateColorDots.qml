@@ -4,6 +4,11 @@
 //   讲台上一只手拿翻页笔、另一只手要立刻点到目标色。色盘要点准、滑块拖不准，
 //   圆点是唯一"盲按也不会错"的形态；六个常用色也足够覆盖批注场景
 //   （白笔是留给黑板/绿板用的，透明批注层上白笔看不见——但老师切到黑板上就会要它）。
+//
+// ⚠️ 本件的 hex **不是主题色**，是**画笔色板本身**（功能数据，会写进 canvas.colorHex
+//    由设备侧判定），因此不受「页面禁硬编码 Hex」约束 —— 换成 Theme 令牌等于把画笔颜色
+//    绑死在主题上，切深色模式笔就变色，是功能错误。2026-10-30「全部换新」只清了这里的
+//    边框（选中环改用嵌套图形，不再写 border.*），色板原样保留。
 import QtQuick
 
 Row {
@@ -32,9 +37,15 @@ Row {
             width: dots.dotSize
             height: dots.dotSize
             radius: width / 2
-            color: modelData.hex
-            border.width: dots.cur === modelData.hex ? 2 : 0
-            border.color: "#FFFFFF"
+            // 选中环：原 border 2px → 外层白圈 + 内层色块（去边框规范：不写 border.*）
+            color: dots.cur === modelData.hex ? "#FFFFFF" : "transparent"
+            Rectangle {
+                anchors.centerIn: parent
+                width: parent.width - (dots.cur === modelData.hex ? 4 : 0)
+                height: width
+                radius: width / 2
+                color: modelData.hex
+            }
             scale: ma.containsMouse ? 1.12 : 1.0
             Behavior on scale { NumberAnimation { duration: 90 } }
 

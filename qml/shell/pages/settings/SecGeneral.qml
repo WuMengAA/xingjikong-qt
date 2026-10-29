@@ -4,59 +4,53 @@
 // 拆法照 viewer 侧 pages/settings/Sec*.qml 的同构做法 —— 主文件只留
 // 分类菜单 + 滚动容器 + 九个可见性绑定 + 重置确认 + 滚动条。
 //
-// 2026-10-28 第二批（用户裁决「MD3 只用于管理端」）：
-//   本件从 Md3Card/Md3SwitchRow 换成 ash/ 的 shadcn 组件（AshCard/AshSwitchRow）。
-//   这是**样板件** —— 其余八个分类等这件的视觉确认后再铺。
-//   令牌由页面根的 AshTheme 实例经 `ash` 属性注入（QML 侧不 new、不判断主题）。
+// 2026-10-30 用户点单「全部换新」：本件从 ash/ 私有体系迁到共享库 App* 体系 ——
+//   AshCard → AppCard、AshCardTitle → AppCardTitle、AshInfoRow → AppInfoRow、
+//   AshSwitchRow → AppSwitchRow；令牌改读共享库 `Theme` 单例，
+//   **不再需要页面注入 `ash`**（AgentSettingsPage 里的 AshTheme 实例已一并删除）。
 //
 // ⚠️ QML 零逻辑（用户铁律）：本件不含 Math / 三元 / function / console.log / 通信，
 //    所有值都来自 agentUi（C++）的结果属性。
 import QtQuick
+import QtQuick.Layouts
 
-import "../../../ash"
+import "../../../components"
+import "../../../components/theme"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    /** shadcn 令牌（AshTheme 实例，页面根注入） */
-    property var ash
 
     width: parent ? parent.width : 0
     spacing: 12   // shadcn gap-3
 
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
 
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 0
 
-            AshCardTitle { th: root.ash; text2: "这台设备" }
-            AshInfoRow { th: root.ash; label: "当前版本"; value: agentUi.versionText }
-            AshInfoRow {
-                th: root.ash
+            AppCardTitle { text: "这台设备" }
+            AppInfoRow { label: "当前版本"; value: agentUi.versionText }
+            AppInfoRow {
                 label: "升级状态"
                 value: agentUi.latestText
-                vColor: agentUi.latestColor
+                valueColor: agentUi.latestColor
             }
-            AshInfoRow { th: root.ash; label: "设备代号"; value: agentUi.uidText }
-            AshInfoRow { th: root.ash; label: "用途";     value: agentUi.deviceRoleText }
-            AshInfoRow { th: root.ash; label: "归属码";   value: agentUi.classCodeText }
-            AshInfoRow { th: root.ash; label: "云端地址"; value: agentUi.cloudUrl }
-            AshInfoRow {
-                th: root.ash
+            AppInfoRow { label: "设备代号"; value: agentUi.uidText }
+            AppInfoRow { label: "用途";     value: agentUi.deviceRoleText }
+            AppInfoRow { label: "归属码";   value: agentUi.classCodeText }
+            AppInfoRow { label: "云端地址"; value: agentUi.cloudUrl }
+            AppInfoRow {
                 label: "连接状态"
                 value: agentUi.connState
-                vColor: agentUi.connStateColor
+                valueColor: agentUi.connStateColor
             }
-            AshInfoRow {
-                th: root.ash
+            AppInfoRow {
                 visible: agentUi.updateNotes !== ""
                 label: "版本说明"
                 value: agentUi.updateNotes
@@ -64,32 +58,23 @@ Column {
         }
     }
 
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
 
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 8
 
-            AshCardTitle { th: root.ash; text2: "启动" }
+            AppCardTitle { text: "启动" }
             // 提权类（UAC 失败时 C++ 复查回弹，界面不会假勾上）
-            AshSwitchRow {
-                th: root.ash
-                anchors.left: parent.left
-                anchors.right: parent.right
+            AppSwitchRow {
                 text: "开机自动启动（登录时拉起）"
                 supporting: "改动需管理员权限（弹 UAC）"
                 checked: agentUi.autostart
                 onToggled: function (v) { agentUi.autostart = v }
             }
-            AshSwitchRow {
-                th: root.ash
-                anchors.left: parent.left
-                anchors.right: parent.right
+            AppSwitchRow {
                 text: "在公共桌面放快捷方式"
                 supporting: "所有登录用户可见；改动需管理员权限"
                 checked: agentUi.desktopShortcut

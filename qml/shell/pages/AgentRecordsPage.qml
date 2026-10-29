@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../../components"
-import "../../components/md3" as M
+import "../../components/theme"
 
 // 被控端 · 记录页（openNoiseLogDialog + openStudyLogDialog 的真实迁移 · U5-A3 第二批）
 // 文本由 C++ buildNoiseLogText/buildStudyLogText 生成（口径与 Widgets 版一字不差），
@@ -11,7 +11,6 @@ Item {
     anchors.fill: parent
 
     property var ctx
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
 
     Flickable {
         anchors.fill: parent
@@ -25,6 +24,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.margins: 20
+            anchors.top: parent.top
             anchors.topMargin: 16
             spacing: 14
 
@@ -48,7 +48,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "噪音记录"
                             font.pixelSize: 14; font.weight: Font.Medium
-                            color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                            color: Theme.color.textPrimary
                         }
                         AppButton {
                             anchors.right: parent.right
@@ -65,7 +65,7 @@ Item {
                         font.pixelSize: 12
                         font.family: "Consolas"
                         wrapMode: Text.Wrap
-                        color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                        color: Theme.color.textPrimary
                     }
                 }
             }
@@ -87,7 +87,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "自习记录"
                             font.pixelSize: 14; font.weight: Font.Medium
-                            color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                            color: Theme.color.textPrimary
                         }
                         AppButton {
                             anchors.right: parent.right
@@ -104,7 +104,7 @@ Item {
                         font.pixelSize: 12
                         font.family: "Consolas"
                         wrapMode: Text.Wrap
-                        color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
+                        color: Theme.color.textPrimary
                     }
                 }
             }

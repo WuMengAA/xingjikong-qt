@@ -1,7 +1,6 @@
 import QtQuick
 import "../components"            // UiRegistry / UiPageHost 等共享 ui（构建期拷到 qml/components/）
-import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
-import "../components/md3" as M   // MD3 组件（Md3NavBar 等）
+import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一真源）
 import "AgentPages.js" as AgentPages
 
 // 星集控被控端 · QML 控制面板（U5「两端同 shell」A-3 · 2026-10-16）
@@ -17,7 +16,7 @@ import "AgentPages.js" as AgentPages
 //    写 `md3: md3` 会得到自引用绑定环（`theme: theme` 同款坑，U3 实证）。
 Rectangle {
     id: shellRoot
-    color: tok.cSurface
+    color: Theme.color.background
 
     // ── 2026-10-30：移除 QtShadcn 依赖（原 2026-10-29 P0 引入的三处，均为坏件）──────
     // ① `import QtShadcn`：**运行时解析不了**。该模块的 qmldir 写
@@ -35,16 +34,19 @@ Rectangle {
 
     property bool sheetOpen: false   // 广播站排期中心是否展开（2026-10-22）
 
-    // Md3 = pragma Singleton（真源 shared-qml/ui/theme/，2026-10-25）。
-    // 被控端主外壳是全局 dark 的唯一写入口；子页/组件只读，不再自建实例。
-    readonly property var tok: Md3
-    Binding { target: Md3; property: "dark"; value: !agentUi.lightMode }
+    // 2026-10-30「全部换新」收口：`tok`（Md3 令牌别名）与 `Binding { target: Md3 … }` 一并删除。
+    // 被控端 QML 至此**不再引用 Md3 令牌，也不再引用 md3 组件库**（末尾 3 处 Md3Card/Md3Dialog 已换）。
 
     // Theme = 新一代令牌单例（pragma Singleton，共享库 ui/theme/Theme.qml）。
     // ⚠️ 2026-10-30 实测坑：`Theme.dark` 与 `Md3.dark` 是**两个独立布尔**，
     //    Theme 默认 false（浅色）。迁到 Theme 的组件若不跟着绑，会在深色外壳里
     //    渲染成浅色块 —— 静默错、不报错。故两个单例必须同时写，直到 Md3 退役。
     Binding { target: Theme; property: "dark"; value: !agentUi.lightMode }
+
+    // 被控端「不要品牌紫」（2026-10-30 用户点单）：开关轨道 / 选中段 / 当前导航 / primary 按钮
+    // 一律走中性反白，品牌紫只留给管理端。开关本身在共享库 Theme 里（`neutralAccent`），
+    // 这里只负责把它打开 —— 关掉管理端不受影响。
+    Binding { target: Theme; property: "neutralAccent"; value: true }
 
     UiRegistry {
         id: reg
@@ -65,15 +67,9 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         height: 52
-        color: tok.cSurface
+        color: Theme.color.surface
 
-        Rectangle {
-            anchors.bottom: parent.bottom
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: 1
-            color: tok.cOutlineVar
-        }
+        // 2026-10-30 去边框：顶栏下方 1px 发丝线删除（靠 surface / background 的色差分界）
         Text {
             anchors.left: parent.left
             anchors.leftMargin: 20
@@ -82,7 +78,7 @@ Rectangle {
             text: agentUi.deviceRole === "broadcast" ? "星集控 · 广播端" : "星集控 · 被控端"
             font.pixelSize: 16
             font.weight: Font.Medium
-            color: tok.cOnSurface
+            color: Theme.color.textPrimary
         }
         Row {
             anchors.right: parent.right
@@ -94,12 +90,20 @@ Rectangle {
             Item {
                 height: 28; width: 72
                 Rectangle {
-                    anchors.fill: parent; radius: 14
-                    color: bcMa.pressed ? "#1F57E8" : (bcMa.containsMouse ? "#5B8BFF" : "#2F6BFF")
+                    anchors.fill: parent; radius: Theme.radius.full
+                    color: Theme.accentStrong
+                }
+                // hover / press 反馈：一层覆盖色改透明度（2026-10-30 去品牌蓝，不再写死三个 Hex）
+                Rectangle {
+                    anchors.fill: parent; radius: Theme.radius.full
+                    color: Theme.accentStrongForeground
+                    opacity: bcMa.pressed ? 0.16 : (bcMa.containsMouse ? 0.08 : 0)
+                    Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
                 }
                 Text {
                     anchors.centerIn: parent; text: "广播站"
-                    font.pixelSize: 12; font.weight: Font.Medium; color: "#FFFFFF"
+                    font.pixelSize: 12; font.weight: Font.Medium
+                    color: Theme.accentStrongForeground
                 }
                 MouseArea {
                     id: bcMa; anchors.fill: parent; hoverEnabled: true
@@ -110,7 +114,7 @@ Rectangle {
                 // 打开面板那一刻的状态（agentUi.refresh() 在 openPanel 里先行调用）
                 text: agentUi.connState
                 font.pixelSize: 12
-                color: agentUi.connState.indexOf("已连接") === 0 ? tok.cOk : tok.cWarn
+                color: agentUi.connState.indexOf("已连接") === 0 ? Theme.color.success : Theme.color.warning
             }
         }
     }
@@ -123,7 +127,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.bottom: nav.top
         registry: reg
-        theme: tok
+        theme: Theme
         scope: "agent"
         window: shellRoot
         entryBase: Qt.resolvedUrl(".")

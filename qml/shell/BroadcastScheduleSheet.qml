@@ -1,10 +1,13 @@
 import QtQuick 2.15
+import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 
-// 广播站 · 排期中心（右侧滑出 SideSheet · MD3 蓝白风 · 2026-10-22）
+// 广播站 · 排期中心（右侧滑出 SideSheet · 2026-10-22）
 //
 // 设计约定：
-//   · 走 MD3 规范骨架（形状 / 间距 / 字阶 / 状态层 / 动效），但配色换成
-//     「现代蓝色浅色」flavor（primary #2F6BFF / 浅蓝白 surface），贴合 VoiceHub 观感。
+//   · 2026-10-30 用户点单「全部换新」：原来本件自带一套「现代蓝白」调色板（本地 `st` 对象，
+//     品牌蓝 primary、浅蓝白 surface），与被控端其余页面**是两套视觉语言**。
+//     现改为共享库 `Theme` 单一真源：品牌蓝取消（改用 `Theme.accentStrong`，被控端置中性反白），
+//     边框全部删除（去边框规范，靠底色差分界），本地 `st` 对象已删。
 //   · 纯 QtQuick 原语实现 —— 被控端部署**不含 QtQuick.Controls 运行库**
 //     （AgentPlaySchedulePage 已踩过：引 Controls 会整页解析失败），故不复用 Controls。
 //   · 数据来自上下文属性 `voicehub`（AgentShell 已注入）：
@@ -35,58 +38,6 @@ Item {
     // 打开时拉一次最新排期
     onOpenedChanged: if (opened) { syncSchedule(); if (voicehub) voicehub.refreshSchedule() }
 
-    // ── 主题：现代蓝白（MD3 flavor）─────────────────────────────────
-    QtObject {
-        id: st
-        property color primary: "#2F6BFF"
-        property color fgPrimary: "#FFFFFF"
-        property color primaryContainer: "#E4ECFF"
-        property color fgPrimaryContainer: "#0A3ABB"
-        property color surface: "#F5F8FE"
-        property color fgSurface: "#131A2E"
-        property color surfaceVariant: "#E7EDF8"
-        property color fgSurfaceVariant: "#5A6478"
-        property color outline: "#C5D0E6"
-        property color outlineVariant: "#DCE4F2"
-        property color containerLowest: "#FFFFFF"
-        property color containerLow: "#EEF3FC"
-        property color container: "#E6EDFA"
-        property color containerHigh: "#DCE6F6"
-        property color containerHighest: "#D3DFF2"
-        property color inverseSurface: "#2A3147"
-        property color inverseOn: "#EEF3FC"
-        property color ok: "#1B7A43"
-        property color warn: "#A87C0A"
-        property color error: "#B3261E"
-
-        property int rXS: 4
-        property int rS: 8
-        property int rM: 12
-        property int rL: 16
-        property int rXL: 28
-        property int rFull: 999
-
-        property int spXS: 4
-        property int spS: 8
-        property int spM: 16
-        property int spL: 24
-
-        property int durShort: 200
-        property int durMedium: 360
-        property int durLong: 500
-        property real stHover: 0.06
-        property real stPress: 0.10
-
-        property int headlineS: 24
-        property int titleL: 22
-        property int titleM: 16
-        property int titleS: 14
-        property int bodyL: 16
-        property int bodyM: 14
-        property int bodyS: 12
-        property int labelM: 12
-        property int labelS: 11
-    }
 
     // 抽屉宽度：宽屏 600，窄屏取 96% 宽（避免出界）
     readonly property real drawerW: Math.min(600, root.width * 0.96)
@@ -177,9 +128,9 @@ Item {
     }
 
     function statusOf(it) {
-        if (it.playing) return { text: "在播", bg: st.primaryContainer, fg: st.fgPrimaryContainer }
-        if (it.played)  return { text: "已播", bg: st.container,       fg: st.fgSurfaceVariant }
-        return { text: "未播", bg: st.containerLow, fg: st.fgSurfaceVariant }
+        if (it.playing) return { text: "在播", bg: Theme.color.surfaceVariant, fg: Theme.color.textPrimary }
+        if (it.played)  return { text: "已播", bg: Theme.color.surfaceVariant,       fg: Theme.color.textSecondary }
+        return { text: "未播", bg: Theme.color.surfaceVariant, fg: Theme.color.textSecondary }
     }
     function platformName(p) {
         if (p === "netease") return "网易云"
@@ -205,10 +156,10 @@ Item {
     // ════════════════════════════════════════════════════════════════
     Rectangle {
         anchors.fill: parent
-        color: "#000000"
-        opacity: root.opened ? 0.5 : 0
+        color: Theme.color.scrim
+        opacity: root.opened ? 1 : 0
         visible: root.opened || scrimFade.running
-        Behavior on opacity { NumberAnimation { id: scrimFade; duration: st.durMedium; easing.type: Easing.Bezier; easing.bezierCurve: [0.2,0,0,1] } }
+        Behavior on opacity { NumberAnimation { id: scrimFade; duration: Theme.motion.normal; easing.type: Easing.Bezier; easing.bezierCurve: [0.2,0,0,1] } }
         MouseArea {
             anchors.fill: parent
             enabled: root.opened
@@ -225,19 +176,18 @@ Item {
         height: parent.height
         x: root.opened ? (parent.width - width) : parent.width
         visible: root.opened || drawerSlide.running
-        Behavior on x { NumberAnimation { id: drawerSlide; duration: st.durMedium; easing.type: Easing.Bezier; easing.bezierCurve: [0.05,0.7,0.1,1.0] } }
+        Behavior on x { NumberAnimation { id: drawerSlide; duration: Theme.motion.normal; easing.type: Easing.Bezier; easing.bezierCurve: [0.05,0.7,0.1,1.0] } }
 
         // 左侧软阴影（无外部依赖的近似）
         Rectangle {
             anchors.fill: parent
             anchors.leftMargin: -10
-            color: "#000000"
-            opacity: 0.10
+            color: Theme.shadow.soft
         }
 
         Rectangle {
             anchors.fill: parent
-            color: st.surface
+            color: Theme.color.surface
         }
 
         // ── 抽屉内容 ──
@@ -251,22 +201,22 @@ Item {
                 height: 64
                 Rectangle {
                     anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
-                    height: 1; color: st.outlineVariant
+                    height: 1; color: Theme.color.surfaceVariant
                 }
                 // 标题 + 状态
                 Column {
-                    anchors.left: parent.left; anchors.leftMargin: st.spL
+                    anchors.left: parent.left; anchors.leftMargin: Theme.spacing.lg
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 2
                     Text {
                         text: "广播站 · 排期中心"
-                        font.pixelSize: st.titleL; font.weight: Font.Medium
-                        color: st.fgSurface
+                        font.pixelSize: 22; font.weight: Font.Medium
+                        color: Theme.color.textPrimary
                     }
                     Text {
                         id: connHint
-                        font.pixelSize: st.labelM
-                        color: st.fgSurfaceVariant
+                        font.pixelSize: 12
+                        color: Theme.color.textSecondary
                         text: {
                             if (!voicehub) return "未连接"
                             if (voicehub.baseUrl === "") return "未配置服务地址"
@@ -279,13 +229,13 @@ Item {
                 Item {
                     id: closeBtn
                     width: 40; height: 40
-                    anchors.right: parent.right; anchors.rightMargin: st.spM
+                    anchors.right: parent.right; anchors.rightMargin: Theme.spacing.md
                     anchors.verticalCenter: parent.verticalCenter
                     Rectangle {
-                        anchors.fill: parent; radius: st.rFull
-                        color: closeMa.pressed ? Qt.rgba(0,0,0,st.stPress) : (closeMa.containsMouse ? Qt.rgba(0,0,0,st.stHover) : "transparent")
+                        anchors.fill: parent; radius: Theme.radius.full
+                        color: closeMa.pressed ? Qt.rgba(0,0,0,0.10) : (closeMa.containsMouse ? Qt.rgba(0,0,0,0.06) : "transparent")
                     }
-                    Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 18; color: st.fgSurfaceVariant }
+                    Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 18; color: Theme.color.textSecondary }
                     MouseArea {
                         id: closeMa; anchors.fill: parent; hoverEnabled: true
                         onClicked: root.closed()
@@ -298,21 +248,21 @@ Item {
                 width: parent.width; height: (voicehub && voicehub.baseUrl === "") ? 40 : 0
                 visible: height > 0
                 Text {
-                    anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: st.spL
+                    anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: Theme.spacing.lg
                     text: "⚠ 未配置 VoiceHub 服务地址，排期为空。请在设置页填写。"
-                    font.pixelSize: st.labelM; color: st.warn
+                    font.pixelSize: 12; color: Theme.color.warning
                 }
             }
 
             // Segmented 控制（三 Tab）
             Item {
                 anchors.left: parent.left; anchors.right: parent.right
-                anchors.leftMargin: st.spL; anchors.rightMargin: st.spL
+                anchors.leftMargin: Theme.spacing.lg; anchors.rightMargin: Theme.spacing.lg
                 height: 52
                 Rectangle {
-                    anchors.fill: parent; anchors.margins: st.spM
-                    radius: st.rFull
-                    color: st.primaryContainer
+                    anchors.fill: parent; anchors.margins: Theme.spacing.md
+                    radius: Theme.radius.full
+                    color: Theme.color.surfaceVariant
                     Row {
                         anchors.fill: parent
                         spacing: 0
@@ -322,14 +272,14 @@ Item {
                                 width: parent.width / 3; height: parent.height
                                 property int idx: index
                                 Rectangle {
-                                    anchors.fill: parent; radius: st.rFull
-                                    color: root.tabIndex === idx ? st.primary : "transparent"
+                                    anchors.fill: parent; radius: Theme.radius.full
+                                    color: root.tabIndex === idx ? Theme.accentStrong : "transparent"
                                 }
                                 Text {
                                     anchors.centerIn: parent
                                     text: modelData
-                                    font.pixelSize: st.bodyM; font.weight: root.tabIndex === idx ? Font.Medium : Font.Normal
-                                    color: root.tabIndex === idx ? st.fgPrimary : st.fgPrimaryContainer
+                                    font.pixelSize: 14; font.weight: root.tabIndex === idx ? Font.Medium : Font.Normal
+                                    color: root.tabIndex === idx ? Theme.accentStrongForeground : Theme.color.textPrimary
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -359,26 +309,26 @@ Item {
                     Column {
                         id: schedCol
                         anchors.left: parent.left; anchors.right: parent.right
-                        anchors.margins: st.spL
-                        spacing: st.spM
+                        anchors.margins: Theme.spacing.lg
+                        spacing: Theme.spacing.md
 
                         // 正在播放迷你条
                         Rectangle {
                             anchors.left: parent.left; anchors.right: parent.right
                             height: voicehub && voicehub.playing ? 56 : 0
                             visible: height > 0
-                            radius: st.rM
-                            color: st.primaryContainer
+                            radius: Theme.radius.md
+                            color: Theme.color.surfaceVariant
                             Row {
-                                anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM
-                                spacing: st.spM
+                                anchors.fill: parent; anchors.leftMargin: Theme.spacing.md; anchors.rightMargin: Theme.spacing.md
+                                spacing: Theme.spacing.md
                                 // 小等号动画
                                 Item { width: 18; height: 18; anchors.verticalCenter: parent.verticalCenter
                                     Repeater {
                                         model: 3
                                         delegate: Rectangle {
                                             width: 3; height: 6 + (index*4)
-                                            radius: 2; color: st.primary
+                                            radius: 2; color: Theme.accentStrong
                                             x: index * 6
                                             anchors.verticalCenter: parent.verticalCenter
                                             SequentialAnimation on height {
@@ -390,8 +340,8 @@ Item {
                                     }
                                 }
                                 Column { anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                                    Text { text: "正在播放：" + (voicehub ? voicehub.title : ""); font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgPrimaryContainer; elide: Text.ElideRight; width: schedFlick.width - 140 }
-                                    Text { text: voicehub ? voicehub.artist : ""; font.pixelSize: st.labelM; color: st.fgPrimaryContainer; opacity: 0.8; elide: Text.ElideRight; width: schedFlick.width - 140 }
+                                    Text { text: "正在播放：" + (voicehub ? voicehub.title : ""); font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.textPrimary; elide: Text.ElideRight; width: schedFlick.width - 140 }
+                                    Text { text: voicehub ? voicehub.artist : ""; font.pixelSize: 12; color: Theme.color.textPrimary; opacity: 0.8; elide: Text.ElideRight; width: schedFlick.width - 140 }
                                 }
                             }
                         }
@@ -407,7 +357,7 @@ Item {
                             boundsBehavior: Flickable.StopAtBounds
                             Row {
                                 id: chipRow
-                                spacing: st.spXS
+                                spacing: Theme.spacing.xs
                                 Repeater {
                                     model: root.dateChips
                                     delegate: Item {
@@ -415,15 +365,13 @@ Item {
                                         property bool sel: modelData === root.selectedDate
                                         property bool tdy: isTodayStr(modelData)
                                         Rectangle {
-                                            anchors.fill: parent; radius: st.rFull
-                                            color: sel ? st.primary : st.containerLow
-                                            border.color: sel ? st.primary : (tdy ? st.primary : st.outlineVariant)
-                                            border.width: (tdy && !sel) ? 1.5 : 1
+                                            anchors.fill: parent; radius: Theme.radius.full
+                                            color: sel ? Theme.accentStrong : Theme.color.surfaceVariant
                                         }
                                         Column {
                                             anchors.centerIn: parent; spacing: 1
-                                            Text { text: fmtChip(modelData); font.pixelSize: st.labelM; font.weight: sel ? Font.Medium : Font.Normal; color: sel ? st.fgPrimary : st.fgSurface }
-                                            Text { text: tdy ? "今天" : " "; font.pixelSize: st.labelS; color: sel ? st.fgPrimary : st.fgSurfaceVariant }
+                                            Text { text: fmtChip(modelData); font.pixelSize: 12; font.weight: sel ? Font.Medium : Font.Normal; color: sel ? Theme.accentStrongForeground : Theme.color.textPrimary }
+                                            Text { text: tdy ? "今天" : " "; font.pixelSize: 11; color: sel ? Theme.accentStrongForeground : Theme.color.textSecondary }
                                         }
                                         MouseArea { anchors.fill: parent; onClicked: { root.selectedDate = modelData; rebuildDayModel() } }
                                     }
@@ -438,7 +386,7 @@ Item {
                                   + (isTodayStr(root.selectedDate) ? "（今天）" : "")
                                   + "（" + dayModel.count + "）"
                                   + (root.saving ? " · 保存中…" : "")
-                            font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgSurfaceVariant
+                            font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.textSecondary
                         }
 
                         // 排期列表（可拖拽排序 · 仅当日，按日隔离）
@@ -447,7 +395,7 @@ Item {
                             anchors.left: parent.left; anchors.right: parent.right
                             height: Math.max(120, dayModel.count * 84 + 8)
                             model: dayModel
-                            spacing: st.spS
+                            spacing: Theme.spacing.sm
                             clip: true
                             displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
                             delegate: Component {
@@ -457,10 +405,11 @@ Item {
                                     property int myIndex: index
                                     width: ListView.view.width
                                     height: 76
-                                    radius: st.rM
-                                    color: st.containerLowest
-                                    border.color: st.outlineVariant
-                                    border.width: 1
+                                    radius: Theme.radius.md
+                                    // 卡片浮在抽屉面板(surface)之上 ⇒ surfaceVariant。
+                                    // ⚠️ 不用 background：那是**页面**底，在面板上会变成一块凹陷的黑井，
+                                    //    浅色主题下还会与面板撞色（2026-10-30 截图实证）。
+                                    color: Theme.color.surfaceVariant
                                     opacity: held ? 0.72 : 1
                                     Behavior on opacity { NumberAnimation { duration: 120 } }
                                     property bool held: ma.drag.active
@@ -468,10 +417,10 @@ Item {
                                     // 封面或占位
                                     Rectangle {
                                         id: cover
-                                        anchors.left: parent.left; anchors.leftMargin: st.spS
+                                        anchors.left: parent.left; anchors.leftMargin: Theme.spacing.sm
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: 52; height: 52; radius: st.rS
-                                        color: st.primaryContainer
+                                        width: 52; height: 52; radius: Theme.radius.sm
+                                        color: Theme.color.surfaceVariant
                                         Image {
                                             anchors.fill: parent; source: model.cover; fillMode: Image.PreserveAspectCrop
                                             visible: model.cover !== ""
@@ -481,45 +430,45 @@ Item {
                                             anchors.centerIn: parent
                                             text: (model.title && model.title.length) ? model.title.charAt(0) : "♪"
                                             font.pixelSize: 22; font.weight: Font.Medium
-                                            color: st.fgPrimaryContainer
+                                            color: Theme.color.textPrimary
                                             visible: model.cover === ""
                                         }
                                     }
 
                                     // 标题 / 歌手
                                     Column {
-                                        anchors.left: cover.right; anchors.leftMargin: st.spM
-                                        anchors.right: statusChip.left; anchors.rightMargin: st.spS
+                                        anchors.left: cover.right; anchors.leftMargin: Theme.spacing.md
+                                        anchors.right: statusChip.left; anchors.rightMargin: Theme.spacing.sm
                                         anchors.verticalCenter: parent.verticalCenter
                                         spacing: 3
-                                        Text { text: model.title; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgSurface; elide: Text.ElideRight; width: parent.width }
-                                        Text { text: model.artist + (model.artist ? " · " : "") + platformName(model.platform) + " · " + fmtDur(model.dur); font.pixelSize: st.labelM; color: st.fgSurfaceVariant; elide: Text.ElideRight; width: parent.width }
+                                        Text { text: model.title; font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.textPrimary; elide: Text.ElideRight; width: parent.width }
+                                        Text { text: model.artist + (model.artist ? " · " : "") + platformName(model.platform) + " · " + fmtDur(model.dur); font.pixelSize: 12; color: Theme.color.textSecondary; elide: Text.ElideRight; width: parent.width }
                                     }
 
                                     // 状态 Chip
                                     Rectangle {
                                         id: statusChip
-                                        anchors.right: parent.right; anchors.rightMargin: st.spM
+                                        anchors.right: parent.right; anchors.rightMargin: Theme.spacing.md
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: 44; height: 24; radius: st.rFull
+                                        width: 44; height: 24; radius: Theme.radius.full
                                         color: statusOf(model).bg
-                                        Text { anchors.centerIn: parent; text: statusOf(model).text; font.pixelSize: st.labelS; color: statusOf(model).fg }
+                                        Text { anchors.centerIn: parent; text: statusOf(model).text; font.pixelSize: 11; color: statusOf(model).fg }
                                     }
 
                                     // 拖拽手柄提示
                                     Text {
-                                        anchors.right: parent.right; anchors.rightMargin: st.spM
+                                        anchors.right: parent.right; anchors.rightMargin: Theme.spacing.md
                                         anchors.bottom: parent.bottom; anchors.bottomMargin: 4
                                         text: "⇕"
-                                        font.pixelSize: st.labelS; color: st.outline
+                                        font.pixelSize: 11; color: Theme.color.textSecondary
                                         visible: false // 占位，拖动即触发
                                     }
 
                                     // 状态层
                                     Rectangle {
-                                        anchors.fill: parent; radius: st.rM
-                                        color: "#000000"
-                                        opacity: ma.pressed ? st.stPress : (ma.containsMouse ? st.stHover : 0)
+                                        anchors.fill: parent; radius: Theme.radius.md
+                                        color: Theme.color.textPrimary
+                                        opacity: ma.pressed ? 0.10 : (ma.containsMouse ? 0.06 : 0)
                                     }
 
                                     MouseArea {
@@ -578,14 +527,14 @@ Item {
                                 anchors.fill: parent; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                                 visible: dayModel.count === 0
                                 text: "该日暂无排期"
-                                font.pixelSize: st.bodyM; color: st.fgSurfaceVariant
+                                font.pixelSize: 14; color: Theme.color.textSecondary
                             }
                         }
 
                         Text {
                             anchors.left: parent.left
                             text: "提示：拖动曲目即可调整顺序，松手保存到 VoiceHub（仅对当日生效，需 API Key 具备 schedules:write 权限）"
-                            font.pixelSize: st.labelS; color: st.fgSurfaceVariant
+                            font.pixelSize: 11; color: Theme.color.textSecondary
                             wrapMode: Text.Wrap; width: parent.width
                         }
                     }
@@ -602,49 +551,48 @@ Item {
                     Column {
                         id: subCol
                         anchors.left: parent.left; anchors.right: parent.right
-                        anchors.margins: st.spL
-                        spacing: st.spM
+                        anchors.margins: Theme.spacing.lg
+                        spacing: Theme.spacing.md
 
                         Rectangle {
                             anchors.left: parent.left; anchors.right: parent.right
-                            radius: st.rL
-                            color: st.containerLowest
-                            border.color: st.outlineVariant; border.width: 1
+                            radius: Theme.radius.lg
+                            color: Theme.color.surfaceVariant
                             Column {
                                 anchors.fill: parent
-                                anchors.margins: st.spL
-                                spacing: st.spM
+                                anchors.margins: Theme.spacing.lg
+                                spacing: Theme.spacing.md
 
-                                Text { text: "点歌投稿"; font.pixelSize: st.titleM; font.weight: Font.Medium; color: st.fgSurface }
+                                Text { text: "点歌投稿"; font.pixelSize: 16; font.weight: Font.Medium; color: Theme.color.textPrimary }
 
                                 // 歌名
                                 Column { spacing: 4; anchors.left: parent.left; anchors.right: parent.right
-                                    Text { text: "歌名 *"; font.pixelSize: st.labelM; color: st.fgSurfaceVariant }
-                                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: st.rS; color: st.surface; border.color: st.outline; border.width: 1
-                                        TextInput { id: tiTitle; anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.fgSurface; clip: true }
-                                        Text { anchors.left: parent.left; anchors.leftMargin: st.spM; anchors.verticalCenter: parent.verticalCenter; text: "输入歌名"; font.pixelSize: st.bodyM; color: st.outline; visible: tiTitle.text === "" }
+                                    Text { text: "歌名 *"; font.pixelSize: 12; color: Theme.color.textSecondary }
+                                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: Theme.radius.sm; color: Theme.color.surface
+                                        TextInput { id: tiTitle; anchors.fill: parent; anchors.leftMargin: Theme.spacing.md; anchors.rightMargin: Theme.spacing.md; verticalAlignment: Text.AlignVCenter; font.pixelSize: 14; color: Theme.color.textPrimary; clip: true }
+                                        Text { anchors.left: parent.left; anchors.leftMargin: Theme.spacing.md; anchors.verticalCenter: parent.verticalCenter; text: "输入歌名"; font.pixelSize: 14; color: Theme.color.textSecondary; visible: tiTitle.text === "" }
                                     }
                                 }
                                 // 歌手
                                 Column { spacing: 4; anchors.left: parent.left; anchors.right: parent.right
-                                    Text { text: "歌手"; font.pixelSize: st.labelM; color: st.fgSurfaceVariant }
-                                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: st.rS; color: st.surface; border.color: st.outline; border.width: 1
-                                        TextInput { id: tiArtist; anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.fgSurface; clip: true }
-                                        Text { anchors.left: parent.left; anchors.leftMargin: st.spM; anchors.verticalCenter: parent.verticalCenter; text: "选填"; font.pixelSize: st.bodyM; color: st.outline; visible: tiArtist.text === "" }
+                                    Text { text: "歌手"; font.pixelSize: 12; color: Theme.color.textSecondary }
+                                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: Theme.radius.sm; color: Theme.color.surface
+                                        TextInput { id: tiArtist; anchors.fill: parent; anchors.leftMargin: Theme.spacing.md; anchors.rightMargin: Theme.spacing.md; verticalAlignment: Text.AlignVCenter; font.pixelSize: 14; color: Theme.color.textPrimary; clip: true }
+                                        Text { anchors.left: parent.left; anchors.leftMargin: Theme.spacing.md; anchors.verticalCenter: parent.verticalCenter; text: "选填"; font.pixelSize: 14; color: Theme.color.textSecondary; visible: tiArtist.text === "" }
                                     }
                                 }
                                 // 平台选择
                                 Column { spacing: 4; anchors.left: parent.left; anchors.right: parent.right
-                                    Text { text: "来源平台"; font.pixelSize: st.labelM; color: st.fgSurfaceVariant }
-                                    Row { spacing: st.spS; anchors.left: parent.left; anchors.right: parent.right
+                                    Text { text: "来源平台"; font.pixelSize: 12; color: Theme.color.textSecondary }
+                                    Row { spacing: Theme.spacing.sm; anchors.left: parent.left; anchors.right: parent.right
                                         Repeater {
                                             id: platRep
                                             model: [ {k:"netease",n:"网易云"}, {k:"qq",n:"QQ音乐"}, {k:"kugou",n:"酷狗"}, {k:"local",n:"本地"} ]
                                             delegate: Item {
                                                 width: 72; height: 32
                                                 property string pk: modelData.k
-                                                Rectangle { anchors.fill: parent; radius: st.rFull; color: reqPlatform === pk ? st.primary : st.containerLow; border.color: reqPlatform === pk ? st.primary : st.outlineVariant; border.width: 1 }
-                                                Text { anchors.centerIn: parent; text: modelData.n; font.pixelSize: st.labelM; color: reqPlatform === pk ? st.fgPrimary : st.fgSurfaceVariant }
+                                                Rectangle { anchors.fill: parent; radius: Theme.radius.full; color: reqPlatform === pk ? Theme.accentStrong : Theme.color.surfaceVariant}
+                                                Text { anchors.centerIn: parent; text: modelData.n; font.pixelSize: 12; color: reqPlatform === pk ? Theme.accentStrongForeground : Theme.color.textSecondary }
                                                 MouseArea { anchors.fill: parent; onClicked: reqPlatform = pk }
                                             }
                                         }
@@ -653,9 +601,9 @@ Item {
 
                                 // 提交按钮
                                 Rectangle {
-                                    anchors.left: parent.left; anchors.right: parent.right; height: 44; radius: st.rFull
-                                    color: (voicehub && voicehub.canRequest && tiTitle.text.trim() !== "") ? st.primary : st.containerHigh
-                                    Text { anchors.centerIn: parent; text: "提交点歌"; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: (voicehub && voicehub.canRequest && tiTitle.text.trim() !== "") ? st.fgPrimary : st.fgSurfaceVariant }
+                                    anchors.left: parent.left; anchors.right: parent.right; height: 44; radius: Theme.radius.full
+                                    color: (voicehub && voicehub.canRequest && tiTitle.text.trim() !== "") ? Theme.accentStrong : Theme.color.surfaceVariant
+                                    Text { anchors.centerIn: parent; text: "提交点歌"; font.pixelSize: 14; font.weight: Font.Medium; color: (voicehub && voicehub.canRequest && tiTitle.text.trim() !== "") ? Theme.accentStrongForeground : Theme.color.textSecondary }
                                     MouseArea {
                                         anchors.fill: parent
                                         onClicked: {
@@ -670,19 +618,19 @@ Item {
                                 Text {
                                     anchors.left: parent.left; anchors.right: parent.right
                                     text: "投稿会提交到 VoiceHub 后台排队；批准后在排期 Tab 可见。"
-                                    font.pixelSize: st.labelS; color: st.fgSurfaceVariant; wrapMode: Text.Wrap
+                                    font.pixelSize: 11; color: Theme.color.textSecondary; wrapMode: Text.Wrap
                                 }
                             }
                         }
 
                         Rectangle {
                             anchors.left: parent.left; anchors.right: parent.right
-                            radius: st.rM; color: st.containerLow
+                            radius: Theme.radius.md; color: Theme.color.surfaceVariant
                             height: 64
                             Text {
-                                anchors.fill: parent; anchors.margins: st.spM
+                                anchors.fill: parent; anchors.margins: Theme.spacing.md
                                 text: "班级投稿列表：待 VoiceHub 开放「投稿查询」接口后接入。当前可先通过点歌表单投稿。"
-                                font.pixelSize: st.labelM; color: st.fgSurfaceVariant; wrapMode: Text.Wrap
+                                font.pixelSize: 12; color: Theme.color.textSecondary; wrapMode: Text.Wrap
                                 verticalAlignment: Text.AlignVCenter
                             }
                         }
@@ -700,26 +648,26 @@ Item {
                     Column {
                         id: searchCol
                         anchors.left: parent.left; anchors.right: parent.right
-                        anchors.margins: st.spL
-                        spacing: st.spM
+                        anchors.margins: Theme.spacing.lg
+                        spacing: Theme.spacing.md
 
                         Rectangle {
-                            anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: st.rFull
-                            color: st.containerLowest; border.color: st.outline; border.width: 1
-                            TextInput { id: searchInput; anchors.fill: parent; anchors.leftMargin: st.spM + 24; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.fgSurface; clip: true }
-                            Text { anchors.left: parent.left; anchors.leftMargin: st.spM; anchors.verticalCenter: parent.verticalCenter; text: "🔍"; font.pixelSize: st.bodyM; color: st.outline }
-                            Text { anchors.left: parent.left; anchors.leftMargin: st.spM + 24; anchors.verticalCenter: parent.verticalCenter; text: "搜索已加载的排期"; font.pixelSize: st.bodyM; color: st.outline; visible: searchInput.text === "" }
+                            anchors.left: parent.left; anchors.right: parent.right; height: 40; radius: Theme.radius.full
+                            color: Theme.color.surfaceVariant
+                            TextInput { id: searchInput; anchors.fill: parent; anchors.leftMargin: Theme.spacing.md + 24; anchors.rightMargin: Theme.spacing.md; verticalAlignment: Text.AlignVCenter; font.pixelSize: 14; color: Theme.color.textPrimary; clip: true }
+                            Text { anchors.left: parent.left; anchors.leftMargin: Theme.spacing.md; anchors.verticalCenter: parent.verticalCenter; text: "🔍"; font.pixelSize: 14; color: Theme.color.textSecondary }
+                            Text { anchors.left: parent.left; anchors.leftMargin: Theme.spacing.md + 24; anchors.verticalCenter: parent.verticalCenter; text: "搜索已加载的排期"; font.pixelSize: 14; color: Theme.color.textSecondary; visible: searchInput.text === "" }
                         }
 
                         Text {
                             anchors.left: parent.left
                             text: "（本地过滤当前已加载排期；全曲库搜索接口待 VoiceHub 开放）"
-                            font.pixelSize: st.labelS; color: st.fgSurfaceVariant; wrapMode: Text.Wrap; width: parent.width
+                            font.pixelSize: 11; color: Theme.color.textSecondary; wrapMode: Text.Wrap; width: parent.width
                         }
 
                         Column {
                             anchors.left: parent.left; anchors.right: parent.right
-                            spacing: st.spS
+                            spacing: Theme.spacing.sm
                             Repeater {
                                 model: {
                                     var q = searchInput.text.trim().toLowerCase()
@@ -733,13 +681,12 @@ Item {
                                 }
                                 delegate: Rectangle {
                                     anchors.left: parent.left; anchors.right: parent.right
-                                    height: 48; radius: st.rM; color: st.containerLowest
-                                    border.color: st.outlineVariant; border.width: 1
+                                    height: 48; radius: Theme.radius.md; color: Theme.color.surfaceVariant
                                     Row {
-                                        anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; spacing: st.spM
+                                        anchors.fill: parent; anchors.leftMargin: Theme.spacing.md; anchors.rightMargin: Theme.spacing.md; spacing: Theme.spacing.md
                                         // 纯 Row 无 Layouts 依赖：标题按「行宽 - 歌手宽 - 间距」约束，启用省略号
-                                        Text { id: sTitle; text: modelData.title; font.pixelSize: st.bodyM; color: st.fgSurface; elide: Text.ElideRight; width: parent.width - sArtist.width - st.spM }
-                                        Text { id: sArtist; text: modelData.artist; font.pixelSize: st.labelM; color: st.fgSurfaceVariant; elide: Text.ElideRight }
+                                        Text { id: sTitle; text: modelData.title; font.pixelSize: 14; color: Theme.color.textPrimary; elide: Text.ElideRight; width: parent.width - sArtist.width - Theme.spacing.md }
+                                        Text { id: sArtist; text: modelData.artist; font.pixelSize: 12; color: Theme.color.textSecondary; elide: Text.ElideRight }
                                     }
                                 }
                             }
@@ -747,7 +694,7 @@ Item {
                                 anchors.left: parent.left
                                 visible: scheduleModel.count === 0
                                 text: "暂无可搜索的排期数据"
-                                font.pixelSize: st.bodyM; color: st.fgSurfaceVariant
+                                font.pixelSize: 14; color: Theme.color.textSecondary
                             }
                         }
                     }
@@ -765,13 +712,13 @@ Item {
         id: snackBar
         visible: false
         opacity: visible ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: st.durShort } }
+        Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom; anchors.bottomMargin: st.spL
-        width: Math.min(360, parent.width - 2*st.spL); height: 44
-        radius: st.rM
-        color: st.inverseSurface
-        Text { id: snackMsg; anchors.fill: parent; anchors.margins: st.spM; verticalAlignment: Text.AlignVCenter; text: ""; font.pixelSize: st.bodyM; color: st.inverseOn; elide: Text.ElideRight }
+        anchors.bottom: parent.bottom; anchors.bottomMargin: Theme.spacing.lg
+        width: Math.min(360, parent.width - 2*Theme.spacing.lg); height: 44
+        radius: Theme.radius.md
+        color: Theme.color.textPrimary
+        Text { id: snackMsg; anchors.fill: parent; anchors.margins: Theme.spacing.md; verticalAlignment: Text.AlignVCenter; text: ""; font.pixelSize: 14; color: Theme.color.background; elide: Text.ElideRight }
     }
 
     // 点歌结果 → Snackbar

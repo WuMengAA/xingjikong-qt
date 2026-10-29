@@ -6,27 +6,21 @@
 // 行为与抽出前逐字一致：分类模型、选中态三件（底 / 字色 / 字重）全由
 // C++ 的 settingsSections 给结果值，本件不做 key 比较、不写三元配色。
 // 定位（贴左、上下贴边）由调用方给 anchors —— 组件不自己决定挂在哪儿。
+//
+// 2026-10-30 用户点单「全部换新」：
+//   · 去掉 `property var ash` 注入，底色改读共享库 `Theme.color.surfaceVariant`；
+//   · 删掉右缘 1px 发丝线 —— 2026-10-29 规范「去边框，分区只靠背景色差」，
+//     侧栏本就比页面底深/浅一档，靠色差即可分界，不需要描边。
 import QtQuick
 
+import "../../../components/theme"
 import "../../../island"   // SvgIcon（lucide 图标名）
 
 Rectangle {
     id: root
 
-    /** shadcn 令牌（AshTheme 实例，页面根注入） */
-    property var ash
     width: 200
-    color: root.ash ? root.ash.muted : "#f5f5f5"
-
-    // 右缘发丝线（与内容区分界，避免侧栏"贴"在内容上）
-    Rectangle {
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: 1
-        color: root.ash ? root.ash.border : "#e4e4e7"
-        opacity: 0.6
-    }
+    color: Theme.color.surfaceVariant
 
     Column {
         anchors.left: parent.left
@@ -39,7 +33,7 @@ Rectangle {
             text: "设置"
             font.pixelSize: 18
             font.weight: Font.Medium
-            color: root.ash ? root.ash.foreground : "#09090b"
+            color: Theme.color.textPrimary
             bottomPadding: 8
             leftPadding: 8
         }

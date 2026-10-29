@@ -1,10 +1,12 @@
 import QtQuick 2.15
+import "../../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 
 // 广播社成员 · 独立界面（整页 · 2026-10-23 #广播站移交管理端）
 //
 // 设计约定：
-//   · 沿用 BroadcastScheduleSheet 的纯 QML + 现代蓝白 MD3 flavor（被控端部署不含
-//     QtQuick.Controls 运行库，不复用 Controls；令牌走 st 对象，不写散字面量）。
+//   · 纯 QML 实现（被控端部署不含 QtQuick.Controls 运行库，不复用 Controls）。
+//     2026-10-30 用户点单「全部换新」：原「现代蓝白 MD3 flavor」与本地 `st` 令牌对象已删除，
+//     改为共享库 `Theme` 单一真源（品牌蓝取消、边框删除、状态层用前景色叠透明度）。
 //   · 数据来自上下文属性 `broadcastClub`（AgentShell::setBroadcastClub 注入）：
 //       broadcastClub.loggedIn / station / token
 //       broadcastClub.schedule（QVariantList，每条 = 一首排期曲，字段同 voicehub.schedule）
@@ -26,62 +28,10 @@ Item {
 
     // 页入口契约（与 AgentSettingsPage 同口径）
     property var ctx
-    readonly property var tok: (ctx && ctx.theme) ? ctx.theme : null
     // broadcastingClub 上下文属性守卫（模块未注册时避免 ReferenceError）
     readonly property var club: (typeof broadcastClub !== "undefined" && broadcastClub !== null)
         ? broadcastClub : null
 
-    // ── 主题：现代蓝白（MD3 flavor，与 BroadcastScheduleSheet 同源）──────────
-    QtObject {
-        id: st
-        property color primary: "#2F6BFF"
-        property color fgPrimary: "#FFFFFF"
-        property color primaryContainer: "#E4ECFF"
-        property color fgPrimaryContainer: "#0A3ABB"
-        property color surface: "#F5F8FE"
-        property color fgSurface: "#131A2E"
-        property color surfaceVariant: "#E7EDF8"
-        property color fgSurfaceVariant: "#5A6478"
-        property color outline: "#C5D0E6"
-        property color outlineVariant: "#DCE4F2"
-        property color containerLowest: "#FFFFFF"
-        property color containerLow: "#EEF3FC"
-        property color container: "#E6EDFA"
-        property color containerHigh: "#DCE6F6"
-        property color inverseSurface: "#2A3147"
-        property color inverseOn: "#EEF3FC"
-        property color ok: "#1B7A43"
-        property color warn: "#A87C0A"
-        property color error: "#B3261E"
-
-        property int rXS: 4
-        property int rS: 8
-        property int rM: 12
-        property int rL: 16
-        property int rXL: 28
-        property int rFull: 999
-
-        property int spXS: 4
-        property int spS: 8
-        property int spM: 16
-        property int spL: 24
-
-        property int durShort: 200
-        property int durMedium: 360
-        property int durLong: 500
-        property real stHover: 0.06
-        property real stPress: 0.10
-
-        property int headlineS: 24
-        property int titleL: 22
-        property int titleM: 16
-        property int titleS: 14
-        property int bodyL: 16
-        property int bodyM: 14
-        property int bodyS: 12
-        property int labelM: 12
-        property int labelS: 11
-    }
 
     // ── 登录表单状态 ──
     property string uiUser: ""
@@ -161,9 +111,9 @@ Item {
     }
 
     function statusOf(it) {
-        if (it.playing) return { text: "在播", bg: st.primaryContainer, fg: st.fgPrimaryContainer }
-        if (it.played)  return { text: "已播", bg: st.container,       fg: st.fgSurfaceVariant }
-        return { text: "未播", bg: st.containerLow, fg: st.fgSurfaceVariant }
+        if (it.playing) return { text: "在播", bg: Theme.color.surfaceVariant, fg: Theme.color.textPrimary }
+        if (it.played)  return { text: "已播", bg: Theme.color.surfaceVariant,       fg: Theme.color.textSecondary }
+        return { text: "未播", bg: Theme.color.surfaceVariant, fg: Theme.color.textSecondary }
     }
     function platformName(p) {
         if (p === "netease") return "网易云"
@@ -214,21 +164,21 @@ Item {
             height: 64
             Rectangle {
                 anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
-                height: 1; color: st.outlineVariant
+                height: 1; color: Theme.color.surfaceVariant
             }
             Column {
-                anchors.left: parent.left; anchors.leftMargin: st.spL
+                anchors.left: parent.left; anchors.leftMargin: Theme.spacing.lg
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 2
                 Text {
                     text: "广播社 · 排期中心"
-                    font.pixelSize: st.titleL; font.weight: Font.Medium
-                    color: st.fgSurface
+                    font.pixelSize: 22; font.weight: Font.Medium
+                    color: Theme.color.textPrimary
                 }
                 Text {
                     id: subHint
-                    font.pixelSize: st.labelM
-                    color: st.fgSurfaceVariant
+                    font.pixelSize: 12
+                    color: Theme.color.textSecondary
                     text: {
                         if (!club) return "模块未就绪"
                         if (!club.loggedIn) return "请使用广播社成员账号登录"
@@ -240,14 +190,14 @@ Item {
             Item {
                 id: logoutBtn
                 width: 40; height: 40
-                anchors.right: parent.right; anchors.rightMargin: st.spM
+                anchors.right: parent.right; anchors.rightMargin: Theme.spacing.md
                 anchors.verticalCenter: parent.verticalCenter
                 visible: club && club.loggedIn
                 Rectangle {
-                    anchors.fill: parent; radius: st.rFull
-                    color: loMa.pressed ? Qt.rgba(0,0,0,st.stPress) : (loMa.containsMouse ? Qt.rgba(0,0,0,st.stHover) : "transparent")
+                    anchors.fill: parent; radius: Theme.radius.full
+                    color: loMa.pressed ? Qt.rgba(0,0,0,0.10) : (loMa.containsMouse ? Qt.rgba(0,0,0,0.06) : "transparent")
                 }
-                Text { anchors.centerIn: parent; text: "⏻"; font.pixelSize: 18; color: st.fgSurfaceVariant }
+                Text { anchors.centerIn: parent; text: "⏻"; font.pixelSize: 18; color: Theme.color.textSecondary }
                 MouseArea {
                     id: loMa; anchors.fill: parent; hoverEnabled: true
                     onClicked: { if (club) club.logout() }
@@ -267,39 +217,39 @@ Item {
                 visible: !club || !club.loggedIn
                 Column {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top; anchors.topMargin: st.spL * 2
-                    width: Math.min(360, parent.width - 2 * st.spL)
-                    spacing: st.spM
+                    anchors.top: parent.top; anchors.topMargin: Theme.spacing.lg * 2
+                    width: Math.min(360, parent.width - 2 * Theme.spacing.lg)
+                    spacing: Theme.spacing.md
 
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: "广播社成员登录"
-                        font.pixelSize: st.titleM; font.weight: Font.Medium; color: st.fgSurface
+                        font.pixelSize: 16; font.weight: Font.Medium; color: Theme.color.textPrimary
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: "登录后可管理本社团广播站排期"
-                        font.pixelSize: st.labelM; color: st.fgSurfaceVariant
+                        font.pixelSize: 12; color: Theme.color.textSecondary
                         horizontalAlignment: Text.AlignHCenter
                     }
 
                     // 用户名
                     Column { spacing: 4; anchors.left: parent.left; anchors.right: parent.right
-                        Text { text: "用户名"; font.pixelSize: st.labelM; color: st.fgSurfaceVariant }
-                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 44; radius: st.rS; color: st.containerLowest; border.color: st.outline; border.width: 1
-                            TextInput { id: tiUser; anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.fgSurface; clip: true; text: root.uiUser
+                        Text { text: "用户名"; font.pixelSize: 12; color: Theme.color.textSecondary }
+                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 44; radius: Theme.radius.sm; color: Theme.color.surface
+                            TextInput { id: tiUser; anchors.fill: parent; anchors.leftMargin: Theme.spacing.md; anchors.rightMargin: Theme.spacing.md; verticalAlignment: Text.AlignVCenter; font.pixelSize: 14; color: Theme.color.textPrimary; clip: true; text: root.uiUser
                                 onTextChanged: root.uiUser = text }
-                            Text { anchors.left: parent.left; anchors.leftMargin: st.spM; anchors.verticalCenter: parent.verticalCenter; text: "输入用户名"; font.pixelSize: st.bodyM; color: st.outline; visible: tiUser.text === "" }
+                            Text { anchors.left: parent.left; anchors.leftMargin: Theme.spacing.md; anchors.verticalCenter: parent.verticalCenter; text: "输入用户名"; font.pixelSize: 14; color: Theme.color.textSecondary; visible: tiUser.text === "" }
                         }
                     }
                     // 密码
                     Column { spacing: 4; anchors.left: parent.left; anchors.right: parent.right
-                        Text { text: "密码"; font.pixelSize: st.labelM; color: st.fgSurfaceVariant }
-                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 44; radius: st.rS; color: st.containerLowest; border.color: st.outline; border.width: 1
-                            TextInput { id: tiPass; anchors.fill: parent; anchors.leftMargin: st.spM; anchors.rightMargin: st.spM; verticalAlignment: Text.AlignVCenter; font.pixelSize: st.bodyM; color: st.fgSurface; clip: true; echoMode: TextInput.Password; text: root.uiPass
+                        Text { text: "密码"; font.pixelSize: 12; color: Theme.color.textSecondary }
+                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; height: 44; radius: Theme.radius.sm; color: Theme.color.surface
+                            TextInput { id: tiPass; anchors.fill: parent; anchors.leftMargin: Theme.spacing.md; anchors.rightMargin: Theme.spacing.md; verticalAlignment: Text.AlignVCenter; font.pixelSize: 14; color: Theme.color.textPrimary; clip: true; echoMode: TextInput.Password; text: root.uiPass
                                 onTextChanged: root.uiPass = text
                                 onAccepted: doLogin() }
-                            Text { anchors.left: parent.left; anchors.leftMargin: st.spM; anchors.verticalCenter: parent.verticalCenter; text: "输入密码"; font.pixelSize: st.bodyM; color: st.outline; visible: tiPass.text === "" }
+                            Text { anchors.left: parent.left; anchors.leftMargin: Theme.spacing.md; anchors.verticalCenter: parent.verticalCenter; text: "输入密码"; font.pixelSize: 14; color: Theme.color.textSecondary; visible: tiPass.text === "" }
                         }
                     }
 
@@ -308,16 +258,16 @@ Item {
                         id: loginErr
                         anchors.left: parent.left; anchors.right: parent.right
                         text: ""
-                        font.pixelSize: st.labelM; color: st.error
+                        font.pixelSize: 12; color: Theme.color.destructive
                         wrapMode: Text.Wrap
                         visible: text !== ""
                     }
 
                     // 登录按钮
                     Rectangle {
-                        anchors.left: parent.left; anchors.right: parent.right; height: 46; radius: st.rFull
-                        color: canLogin ? st.primary : st.containerHigh
-                        Text { anchors.centerIn: parent; text: root.loggingIn ? "登录中…" : "登录"; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: canLogin ? st.fgPrimary : st.fgSurfaceVariant }
+                        anchors.left: parent.left; anchors.right: parent.right; height: 46; radius: Theme.radius.full
+                        color: canLogin ? Theme.accentStrong : Theme.color.surfaceVariant
+                        Text { anchors.centerIn: parent; text: root.loggingIn ? "登录中…" : "登录"; font.pixelSize: 14; font.weight: Font.Medium; color: canLogin ? Theme.accentStrongForeground : Theme.color.textSecondary }
                         MouseArea {
                             anchors.fill: parent
                             onClicked: doLogin()
@@ -338,8 +288,8 @@ Item {
                 Column {
                     id: schedCol
                     anchors.left: parent.left; anchors.right: parent.right
-                    anchors.margins: st.spL
-                    spacing: st.spM
+                    anchors.margins: Theme.spacing.lg
+                    spacing: Theme.spacing.md
 
                     // 日期切换条
                     Flickable {
@@ -351,7 +301,7 @@ Item {
                         boundsBehavior: Flickable.StopAtBounds
                         Row {
                             id: chipRow
-                            spacing: st.spXS
+                            spacing: Theme.spacing.xs
                             Repeater {
                                 model: root.dateChips
                                 delegate: Item {
@@ -359,15 +309,13 @@ Item {
                                     property bool sel: modelData === root.selectedDate
                                     property bool tdy: isTodayStr(modelData)
                                     Rectangle {
-                                        anchors.fill: parent; radius: st.rFull
-                                        color: sel ? st.primary : st.containerLow
-                                        border.color: sel ? st.primary : (tdy ? st.primary : st.outlineVariant)
-                                        border.width: (tdy && !sel) ? 1.5 : 1
+                                        anchors.fill: parent; radius: Theme.radius.full
+                                        color: sel ? Theme.accentStrong : Theme.color.surfaceVariant
                                     }
                                     Column {
                                         anchors.centerIn: parent; spacing: 1
-                                        Text { text: fmtChip(modelData); font.pixelSize: st.labelM; font.weight: sel ? Font.Medium : Font.Normal; color: sel ? st.fgPrimary : st.fgSurface }
-                                        Text { text: tdy ? "今天" : " "; font.pixelSize: st.labelS; color: sel ? st.fgPrimary : st.fgSurfaceVariant }
+                                        Text { text: fmtChip(modelData); font.pixelSize: 12; font.weight: sel ? Font.Medium : Font.Normal; color: sel ? Theme.accentStrongForeground : Theme.color.textPrimary }
+                                        Text { text: tdy ? "今天" : " "; font.pixelSize: 11; color: sel ? Theme.accentStrongForeground : Theme.color.textSecondary }
                                     }
                                     MouseArea { anchors.fill: parent; onClicked: { root.selectedDate = modelData; rebuildDayModel() } }
                                 }
@@ -382,7 +330,7 @@ Item {
                               + (isTodayStr(root.selectedDate) ? "（今天）" : "")
                               + "（" + dayModel.count + "）"
                               + (root.saving ? " · 保存中…" : "")
-                        font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgSurfaceVariant
+                        font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.textSecondary
                     }
 
                     // 排期列表（可拖拽，仅当日）
@@ -391,7 +339,7 @@ Item {
                         anchors.left: parent.left; anchors.right: parent.right
                         height: Math.max(120, dayModel.count * 84 + 8)
                         model: dayModel
-                        spacing: st.spS
+                        spacing: Theme.spacing.sm
                         clip: true
                         displaced: Transition { NumberAnimation { properties: "y"; duration: 180; easing.type: Easing.OutCubic } }
                         delegate: Component {
@@ -401,20 +349,20 @@ Item {
                                 property int myIndex: index
                                 width: ListView.view.width
                                 height: 76
-                                radius: st.rM
-                                color: st.containerLowest
-                                border.color: st.outlineVariant
-                                border.width: 1
+                                radius: Theme.radius.md
+                                // 底：卡片浮在页面(background)之上 ⇒ 用 surface。
+                                // ⚠️ 不能写 background（与页面同色 ⇒ 卡片整个消失，2026-10-30 截图实证）。
+                                color: Theme.color.surface
                                 opacity: held ? 0.72 : 1
                                 Behavior on opacity { NumberAnimation { duration: 120 } }
                                 property bool held: ma.drag.active
 
                                 Rectangle {
                                     id: cover
-                                    anchors.left: parent.left; anchors.leftMargin: st.spS
+                                    anchors.left: parent.left; anchors.leftMargin: Theme.spacing.sm
                                     anchors.verticalCenter: parent.verticalCenter
-                                    width: 52; height: 52; radius: st.rS
-                                    color: st.primaryContainer
+                                    width: 52; height: 52; radius: Theme.radius.sm
+                                    color: Theme.color.surfaceVariant
                                     Image {
                                         anchors.fill: parent; source: model.cover; fillMode: Image.PreserveAspectCrop
                                         visible: model.cover !== ""
@@ -424,33 +372,33 @@ Item {
                                         anchors.centerIn: parent
                                         text: (model.title && model.title.length) ? model.title.charAt(0) : "♪"
                                         font.pixelSize: 22; font.weight: Font.Medium
-                                        color: st.fgPrimaryContainer
+                                        color: Theme.color.textPrimary
                                         visible: model.cover === ""
                                     }
                                 }
 
                                 Column {
-                                    anchors.left: cover.right; anchors.leftMargin: st.spM
-                                    anchors.right: statusChip.left; anchors.rightMargin: st.spS
+                                    anchors.left: cover.right; anchors.leftMargin: Theme.spacing.md
+                                    anchors.right: statusChip.left; anchors.rightMargin: Theme.spacing.sm
                                     anchors.verticalCenter: parent.verticalCenter
                                     spacing: 3
-                                    Text { text: model.title; font.pixelSize: st.bodyM; font.weight: Font.Medium; color: st.fgSurface; elide: Text.ElideRight; width: parent.width }
-                                    Text { text: model.artist + (model.artist ? " · " : "") + platformName(model.platform) + " · " + fmtDur(model.dur); font.pixelSize: st.labelM; color: st.fgSurfaceVariant; elide: Text.ElideRight; width: parent.width }
+                                    Text { text: model.title; font.pixelSize: 14; font.weight: Font.Medium; color: Theme.color.textPrimary; elide: Text.ElideRight; width: parent.width }
+                                    Text { text: model.artist + (model.artist ? " · " : "") + platformName(model.platform) + " · " + fmtDur(model.dur); font.pixelSize: 12; color: Theme.color.textSecondary; elide: Text.ElideRight; width: parent.width }
                                 }
 
                                 Rectangle {
                                     id: statusChip
-                                    anchors.right: parent.right; anchors.rightMargin: st.spM
+                                    anchors.right: parent.right; anchors.rightMargin: Theme.spacing.md
                                     anchors.verticalCenter: parent.verticalCenter
-                                    width: 44; height: 24; radius: st.rFull
+                                    width: 44; height: 24; radius: Theme.radius.full
                                     color: statusOf(model).bg
-                                    Text { anchors.centerIn: parent; text: statusOf(model).text; font.pixelSize: st.labelS; color: statusOf(model).fg }
+                                    Text { anchors.centerIn: parent; text: statusOf(model).text; font.pixelSize: 11; color: statusOf(model).fg }
                                 }
 
                                 Rectangle {
-                                    anchors.fill: parent; radius: st.rM
-                                    color: "#000000"
-                                    opacity: ma.pressed ? st.stPress : (ma.containsMouse ? st.stHover : 0)
+                                    anchors.fill: parent; radius: Theme.radius.md
+                                    color: Theme.color.textPrimary
+                                    opacity: ma.pressed ? 0.10 : (ma.containsMouse ? 0.06 : 0)
                                 }
 
                                 MouseArea {
@@ -496,14 +444,14 @@ Item {
                             anchors.fill: parent; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                             visible: dayModel.count === 0
                             text: "该日暂无排期"
-                            font.pixelSize: st.bodyM; color: st.fgSurfaceVariant
+                            font.pixelSize: 14; color: Theme.color.textSecondary
                         }
                     }
 
                     Text {
                         anchors.left: parent.left
                         text: "提示：拖动曲目即可调整顺序，松手保存到云端（仅对当日生效）。"
-                        font.pixelSize: st.labelS; color: st.fgSurfaceVariant
+                        font.pixelSize: 11; color: Theme.color.textSecondary
                         wrapMode: Text.Wrap; width: parent.width
                     }
                 }
@@ -530,12 +478,12 @@ Item {
         id: snackBar
         visible: false
         opacity: visible ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: st.durShort } }
+        Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom; anchors.bottomMargin: st.spL
-        width: Math.min(360, parent.width - 2*st.spL); height: 44
-        radius: st.rM
-        color: st.inverseSurface
-        Text { id: snackMsg; anchors.fill: parent; anchors.margins: st.spM; verticalAlignment: Text.AlignVCenter; text: ""; font.pixelSize: st.bodyM; color: st.inverseOn; elide: Text.ElideRight }
+        anchors.bottom: parent.bottom; anchors.bottomMargin: Theme.spacing.lg
+        width: Math.min(360, parent.width - 2*Theme.spacing.lg); height: 44
+        radius: Theme.radius.md
+        color: Theme.color.textPrimary
+        Text { id: snackMsg; anchors.fill: parent; anchors.margins: Theme.spacing.md; verticalAlignment: Text.AlignVCenter; text: ""; font.pixelSize: 14; color: Theme.color.background; elide: Text.ElideRight }
     }
 }

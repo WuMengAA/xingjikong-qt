@@ -3,10 +3,10 @@
 // 且本向导的主按钮是「整行通栏」——Md3Btn 是药丸自适宽，撑不出通栏效果。
 // 自绘一个（不用 Qt Button，遵项目纪律），尺寸/状态层按 MD3 取。
 import QtQuick
+import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 
 Rectangle {
     id: root
-    property var tk: ({})
     property string text: ""
     property bool primary: true
     property bool active: true          // ⚠️ 不能叫 enabled：会盖掉 Item.enabled（项目已踩过的坑）
@@ -14,11 +14,9 @@ Rectangle {
 
     implicitHeight: 52                    // ≥48：教室机触摸友好
     implicitWidth: 200
-    radius: tk.rFull
-    color: primary ? (active ? tk.cPrimary : tk.cContHighest)
-                   : (active ? tk.cContHigh : tk.cCont)
-    border.width: primary ? 0 : 1
-    border.color: tk.cOutlineVar
+    radius: Theme.radius.full
+    color: primary ? (active ? Theme.accentStrong : Theme.color.surface)
+                   : (active ? Theme.color.surface : Theme.color.surfaceVariant)
     opacity: active ? 1 : 0.6
 
     Text {
@@ -26,15 +24,15 @@ Rectangle {
         text: root.text
         font.pixelSize: 16
         font.weight: Font.Medium
-        color: root.primary ? tk.cOnPrimary : tk.cOnSurface
+        color: root.primary ? Theme.accentStrongForeground : Theme.color.textPrimary
     }
 
     // MD3 状态层：hover 8% / press 10%
     Rectangle {
         anchors.fill: parent
         radius: parent.radius
-        color: tk.cOnSurface
-        opacity: mouse.pressed ? tk.stPress : (mouse.containsMouse ? tk.stHover : 0)
+        color: Theme.color.textPrimary
+        opacity: mouse.pressed ? 0.10 : (mouse.containsMouse ? 0.06 : 0)
         visible: opacity > 0
     }
     MouseArea {

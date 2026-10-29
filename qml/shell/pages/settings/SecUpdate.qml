@@ -7,18 +7,25 @@
 // 「通用」拆成三件的原因：单件 337 行超 QML 红线 200（file-size 门禁判红），
 // 按语义切为 设备与启动 / 服务与时间 / 存储·高级·目录，三段在主文件里按原顺序排列。
 //
+// 2026-10-30 用户点单「全部换新」：ash/ → 共享库 App* 体系，令牌走 Theme 单例。
+//   · 渠道按钮的选中态仍由 C++ 定（`channelOptionList` 的 variant 字段），
+//     但词汇由 ash 的 "filled/tonal" 改为 AppButton 的 "solid/secondary"（同步改 C++）。
+//   · 「临时」角标的两个 Hex（#F59E0B / #3B2600）→ `Theme.color.warning` / `Theme.color.background`。
+//   · 原 `Row { topPadding: 10 }` 无效（Row 无 padding）→ RowLayout + Layout.topMargin。
+//
 // ⚠️ QML 零逻辑（用户铁律）：本件不含 Math / 三元 / function / console.log / 通信，
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
+import QtQuick.Layouts
 
-import "../../../ash"
+import "../../../components"
+import "../../../components/theme"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    property var ash
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -26,51 +33,43 @@ Column {
 // ─────────────────────────────────────────────────────
 // ⑤ 更新：自动升级台账 + 渠道（含临时切换）
 // ─────────────────────────────────────────────────────
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 2
-            AshCardTitle { text2: "自动升级" }
-            AshInfoRow {
-                th: root.ash
+            AppCardTitle { text: "自动升级" }
+            AppInfoRow {
                 label: "升级方式"
                 value: agentUi.otaModeText
-                vColor: agentUi.otaModeColor
+                valueColor: agentUi.otaModeColor
             }
-            AshInfoRow {
-                th: root.ash
+            AppInfoRow {
                 label: "自动升级"
                 value: agentUi.otaAutoText
-                vColor: agentUi.otaAutoColor
+                valueColor: agentUi.otaAutoColor
             }
-            AshInfoRow { label: "上次自动升级"; value: agentUi.otaLastText }
-            AshInfoRow { label: "下次自动升级"; value: agentUi.otaNextText }
-            Row {
-                topPadding: 10
+            AppInfoRow { label: "上次自动升级"; value: agentUi.otaLastText }
+            AppInfoRow { label: "下次自动升级"; value: agentUi.otaNextText }
+            RowLayout {
+                Layout.topMargin: 10
                 spacing: 10
-                AshButton {
-                    th: root.ash
+                AppButton {
                     text: "立即升级"
-                    variant: "filled"
+                    variant: "solid"
                     enabled: agentUi.canUpgrade
                     onClicked: agentUi.upgradeNow()
                 }
-                AshButton {
-                    th: root.ash
+                AppButton {
                     // 文案随状态变，值由 C++ 给（pauseBtnText）
                     text: agentUi.pauseBtnText
-                    variant: "tonal"
+                    variant: "secondary"
                     onClicked: agentUi.toggleOtaPause()
                 }
-                AshButton {
-                    th: root.ash
+                AppButton {
                     text: "重新检查"
-                    variant: "text"
+                    variant: "ghost"
                     onClicked: agentUi.refresh()
                 }
             }
@@ -80,45 +79,42 @@ Column {
     // 更新渠道（临时测试开关 · 2026-10-28 B4）
     // 用户点单原文：「被控端设置界面添加临时的测试更新渠道切换按钮」+「切换逻辑在 C++」。
     // 生效面：g_channel（register 上报 + OTA 查询）+ channel.txt（重启/升级后仍生效）。
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 8
-            Row {
+            RowLayout {
                 spacing: 8
                 Text {
                     text: "更新渠道"
                     font.pixelSize: 14
                     font.weight: Font.Medium
-                    color: root.ash ? root.ash.foreground : "#E6E1E5"
+                    color: Theme.color.textPrimary
                 }
                 // 「临时」角标：让现场一眼看出这不是长期能力（服务端灰度上线后撤）
                 Rectangle {
-                    width: 42
-                    height: 19
+                    Layout.preferredWidth: 42
+                    Layout.preferredHeight: 19
                     radius: 9.5
-                    color: "#F59E0B"
+                    color: Theme.color.warning
                     Text {
                         anchors.centerIn: parent
                         text: "临时"
                         font.pixelSize: 11
                         font.weight: Font.Medium
-                        color: "#3B2600"
+                        color: Theme.color.background
                     }
                 }
+                Item { Layout.fillWidth: true }
             }
-            AshInfoRow { label: "当前渠道"; value: agentUi.updateChannel }
-            Row {
+            AppInfoRow { label: "当前渠道"; value: agentUi.updateChannel }
+            RowLayout {
                 spacing: 8
                 Repeater {
                     model: agentUi.channelOptions
-                    AshButton {
-                        th: root.ash
+                    AppButton {
                         text: modelData.label
                         variant: modelData.variant
                         onClicked: agentUi.updateChannel = modelData.key
@@ -126,11 +122,10 @@ Column {
                 }
             }
             Text {
-                anchors.left: parent.left
-                anchors.right: parent.right
+                Layout.fillWidth: true
                 text: agentUi.channelNoteText
-                font.pixelSize: 11
-                color: root.ash ? root.ash.mutedFg : "#CAC4D0"
+                font.pixelSize: 12
+                color: Theme.color.textSecondary
                 wrapMode: Text.WordWrap
             }
         }

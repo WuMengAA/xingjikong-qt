@@ -2,11 +2,11 @@
 // 只做一件事：告诉用户这是什么，并给一个明确的主操作。
 // 底部另有一个**不显眼**的文字链接做兜底（稍后配置）——取消路径必须有，否则断网就卡死。
 import QtQuick
+import "../../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 import ".."          // 同向导目录的自绘组件（OobeBigButton 等）
 
 Item {
     id: page
-    property var tk: ({})
     property var wizard: null
 
     Column {
@@ -20,13 +20,13 @@ Item {
             width: 96
             height: 96
             radius: 28
-            color: tk.cPrimaryCont
+            color: Theme.color.surfaceVariant
             Text {
                 anchors.centerIn: parent
                 text: "星"
                 font.pixelSize: 45
                 font.weight: Font.Medium
-                color: tk.cOnPrimaryCont
+                color: Theme.color.textPrimary
             }
         }
 
@@ -37,7 +37,7 @@ Item {
             text: "星集控"
             font.pixelSize: 32
             font.weight: Font.Bold
-            color: tk.cOnSurface
+            color: Theme.color.textPrimary
         }
 
         Item { width: 1; height: 8 }
@@ -46,7 +46,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "让教室管理更简单"
             font.pixelSize: 16
-            color: tk.cOnSurfaceVar
+            color: Theme.color.textSecondary
         }
 
         Item { width: 1; height: 56 }
@@ -54,7 +54,6 @@ Item {
         // 主操作：通栏 ≥48 高
         OobeBigButton {
             width: parent.width
-            tk: page.tk
             text: "开始绑定"
             onClicked: page.wizard.gotoStep(1)
         }
@@ -66,7 +65,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "暂时跳过，稍后配置"
             font.pixelSize: 13
-            color: tk.cOnSurfaceVar
+            color: Theme.color.textSecondary
             opacity: area.containsMouse ? 1.0 : 0.75
             MouseArea {
                 id: area

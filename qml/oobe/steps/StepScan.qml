@@ -2,11 +2,11 @@
 // 二维码由后端给矩阵、本页只画；每 2 秒问一次「绑上没有」（轮询在 C++ 侧，本页只读 bindingState）。
 // 绑定成功的自动跳转在**根向导**里统一处理（一处判断，扫码页/输入页都吃同一份状态）。
 import QtQuick
+import "../../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 import ".."
 
 Item {
     id: page
-    property var tk: ({})
     property var wizard: null
 
     Column {
@@ -19,7 +19,7 @@ Item {
             text: "用手机扫这个二维码"
             font.pixelSize: 24
             font.weight: Font.Bold
-            color: tk.cOnSurface
+            color: Theme.color.textPrimary
         }
 
         Item { width: 1; height: 8 }
@@ -28,7 +28,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "扫码后在手机上确认，这台设备会自动完成绑定。"
             font.pixelSize: 13
-            color: tk.cOnSurfaceVar
+            color: Theme.color.textSecondary
         }
 
         Item { width: 1; height: 24 }
@@ -38,16 +38,13 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             width: 280
             height: 280
-            radius: tk.rM
-            color: "#FFFFFF"
-            border.width: 1
-            border.color: tk.cOutlineVar
+            radius: Theme.radius.md
+            color: Theme.color.surface
 
             QrCanvas {
                 id: qr
                 anchors.fill: parent
                 anchors.margins: 8
-                tk: page.tk
                 matrix: oobe.qrMatrix
                 visible: oobe.qrMatrix.length > 0
             }
@@ -60,13 +57,13 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: oobe.qrBusy ? "正在生成二维码…" : "二维码还没出来"
                     font.pixelSize: 14
-                    color: "#49454F"
+                    color: Theme.color.textSecondary
                 }
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: oobe.qrBusy ? "" : "点下面的「换一张」试试"
                     font.pixelSize: 12
-                    color: "#79747E"
+                    color: Theme.color.textSecondary
                 }
             }
         }
@@ -80,12 +77,12 @@ Item {
             Rectangle {
                 width: 8; height: 8; radius: 4
                 anchors.verticalCenter: parent.verticalCenter
-                color: oobe.bindingState === page.wizard.stWaiting ? tk.cPrimary : tk.cOutline
+                color: oobe.bindingState === page.wizard.stWaiting ? Theme.accentStrong : Theme.color.textSecondary
             }
             Text {
                 text: oobe.bindingState === page.wizard.stWaiting ? "等待手机扫码…" : "准备好了就点「换一张」"
                 font.pixelSize: 13
-                color: tk.cOnSurfaceVar
+                color: Theme.color.textSecondary
             }
         }
 
@@ -93,7 +90,6 @@ Item {
 
         OobeBigButton {
             width: parent.width
-            tk: page.tk
             text: oobe.qrBusy ? "正在生成…" : "换一张"
             primary: false
             active: !oobe.qrBusy
@@ -108,7 +104,7 @@ Item {
             Text {
                 text: "改用输入绑定码"
                 font.pixelSize: 13
-                color: tk.cPrimary
+                color: Theme.accentStrong
                 opacity: altArea.containsMouse ? 1.0 : 0.85
                 MouseArea {
                     id: altArea
@@ -122,7 +118,7 @@ Item {
             Text {
                 text: "稍后再绑定"
                 font.pixelSize: 13
-                color: tk.cOnSurfaceVar
+                color: Theme.color.textSecondary
                 opacity: skipArea.containsMouse ? 1.0 : 0.75
                 MouseArea {
                     id: skipArea

@@ -48,9 +48,10 @@ Rectangle {
     implicitWidth: bar.collapsed ? 78 : (row.implicitWidth + 34)
     implicitHeight: bar.collapsed ? 14 : 52
     radius: bar.collapsed ? 7 : 26
+    // ⚠️ 恒深色半透明浮层：批注条**叠在第三方画面/黑板上**，必须与"被批注的内容"保持对比，
+    //    不能跟随 app 明暗主题（浅色模式下变白会让白笔批注直接看不见）。
+    //    故这里保留专用色（带 alpha），不受「页面禁 Hex」约束；2026-10-30 只删了描边。
     color: bar.collapsed ? "#B3151418" : "#E6151418"
-    border.width: 1
-    border.color: bar.collapsed ? "#22FFFFFF" : "#33FFFFFF"
 
     Behavior on implicitWidth  { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
     Behavior on implicitHeight { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }

@@ -7,18 +7,21 @@
 // 「通用」拆成三件的原因：单件 337 行超 QML 红线 200（file-size 门禁判红），
 // 按语义切为 设备与启动 / 服务与时间 / 存储·高级·目录，三段在主文件里按原顺序排列。
 //
+// 2026-10-30 用户点单「全部换新」：ash/ → 共享库 App* 体系，令牌走 Theme 单例。
+//
 // ⚠️ QML 零逻辑（用户铁律）：本件不含 Math / 三元 / function / console.log / 通信，
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
+import QtQuick.Layouts
 
-import "../../../ash"
+import "../../../components"
+import "../../../components/theme"
 
 Column {
     id: root
 
     property var ctx
     property var vh
-    property var ash
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -26,20 +29,14 @@ Column {
 // ─────────────────────────────────────────────────────
 // ② 主界面：主题 / 灵动岛形态 / 插件推岛
 // ─────────────────────────────────────────────────────
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 0
-            AshCardTitle { text2: "外观" }
-            AshSwitchRow {
-                th: root.ash
-                anchors.left: parent.left
-                anchors.right: parent.right
+            AppCardTitle { text: "外观" }
+            AppSwitchRow {
                 text: "浅色主题"
                 supporting: "即时生效；灵动岛与面板同时切换"
                 checked: agentUi.lightMode
@@ -48,20 +45,14 @@ Column {
         }
     }
 
-    AshCard {
-        th: root.ash
+    AppCard {
         anchors.left: parent.left
         anchors.right: parent.right
-        Column {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: 0
-            AshCardTitle { text2: "灵动岛" }
-            AshSwitchRow {
-                th: root.ash
-                anchors.left: parent.left
-                anchors.right: parent.right
+            AppCardTitle { text: "灵动岛" }
+            AppSwitchRow {
                 text: "空闲时常驻"
                 supporting: "关掉后岛只在与老师交互时出现"
                 checked: agentUi.islandIdle
@@ -71,10 +62,7 @@ Column {
             // 插件经本地 WS 调 island_show / notify 时先问这个开关；
             // 关掉 = 插件推的提示一律静默丢弃（插件侧收到 dropped）。
             // ⚠️ 只管**插件**；管理端通知、本机课表/对讲/文件提示不受影响。
-            AshSwitchRow {
-                th: root.ash
-                anchors.left: parent.left
-                anchors.right: parent.right
+            AppSwitchRow {
                 text: "允许第三方推送灵动岛"
                 supporting: "插件推的通知带 [插件名] 前缀；限 5 条/秒、标题 120 字"
                 checked: agentUi.pluginIslandPush

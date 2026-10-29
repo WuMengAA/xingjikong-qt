@@ -21,6 +21,8 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QMetaObject>
 #include <QMetaProperty>
@@ -133,13 +135,19 @@ void collectTexts(QObject *root, QStringList &texts, QStringList &btnTexts,
 // 探针不链 main.cpp（被控端本体不能起生产进程），于是**在自己 TU 里定义同签名
 // 实现** —— 与产品同一个填充入口，不再维护 FakeAgentUi 那份"两套签名各自漂移"
 // 的伪件（fakeui 缺 20+ 个模块三新属性，加载设置页必然满屏 ReferenceError）。
+// 2026-10-30：`deviceRole` 是**只读**属性（产品里由 OOBE 落盘、main.cpp 填快照后才定）。
+// 探针要验"广播机那套页"（广播台首屏）只能走产品同一条路径：agentUiFill（friend）
+// 重填快照 → emit infoChanged() → 壳里 `manifest: AgentPages.manifestFor(...)` 重算。
+// 顺手也就把「切用途后页清单会不会跟着变」这件事验了。
+QString g_probeRole = QStringLiteral("classroom");
+
 void agentUiFill(AgentUi *ui)
 {
     ui->m_appVersion = QStringLiteral("0.6.50-probe");
     ui->m_uid = QStringLiteral("probe-uid");
     ui->m_cloudUrl = QStringLiteral("wss://example.invalid/ws/agent");
     ui->m_connState = QStringLiteral("已连接（云端已确认）");
-    ui->m_deviceRole = QStringLiteral("classroom");
+    ui->m_deviceRole = g_probeRole;
     ui->m_classCode = QStringLiteral("260901");
     ui->m_dataDir = QStringLiteral("C:/tmp/xingjikong");
     ui->m_logPath = QStringLiteral("C:/tmp/xingjikong/agent-qt.log");
@@ -534,9 +542,145 @@ QtObject {
               QStringLiteral("无未知 QML 运行期报错（%1 条）").arg(realErrors.size()));
         for (const QString &e : realErrors) out << QStringLiteral("      · %1\n").arg(e);
 
-        // 截图留证（含内置模块区）
-        const QString shot = QStringLiteral("_agent_ui_probe.png");
-        if (view.grab().save(shot)) out << QStringLiteral("INFO  截图 → %1\n").arg(shot);
+        // ── 七、逐屏实物截图（2026-10-30「全部换新」视觉核验）────────────────
+        // 为什么必须单列一段：本轮把 ash/ 私有组件（9 件 699 行）、md3 组件库、
+        // 四套井存令牌（tok / tk / st / Md3）、硬编码 Hex、border.* 全部清零，
+        // 面上覆盖 6 页 + 设置页 7 分类 + 广播站浮层 + 广播机整套 + OOBE 12 件。
+        // 72 条文本断言只证明"字还在屏幕上"，证明不了"色/圆角/间距/去边框没坏" ——
+        // 这种面级改动不出实物图，'全过' 就是自欺。
+        // 落盘位置：cwd 由 _agent_ui_probe.py 设为 build/_objs
+        //           ⇒ build/_objs/_shots/NN_<页id>.png
+        const QString shotsDir = QStringLiteral("_shots");
+        QDir().mkpath(shotsDir);
+        int shotN = 0;
+        // 统一等待：截图与"等动画收尾再继续"共用一份，避免两处各写一个 QEventLoop
+        const auto waitMs = [](int ms) {
+            QEventLoop l;
+            QTimer::singleShot(ms, &l, &QEventLoop::quit);
+            l.exec();
+        };
+        const auto snap = [&](const QString &name, int settle = 260) {
+            // settle 收尾：Behavior / NumberAnimation（果冻动效 300ms）走完再抓，
+            // 抓的是稳态而不是动画中间帧 —— 否则每张图都在"半透明/hover 中途"。
+            // ⚠️ 抽展类（BroadcastScheduleSheet 的抽屉滑入 360ms）要传更长值：
+            //    2026-10-30 首轮只等 260ms，截出来的抽屉还差 88px 没滑到位，
+            //    内容被窗口右缘切掉 —— 差点被误判成"浮层溢出"的布局 bug。
+            waitMs(settle);
+            ++shotN;
+            const QString fn = QStringLiteral("%1/%2_%3.png")
+                                   .arg(shotsDir)
+                                   .arg(shotN, 2, 10, QChar('0'))
+                                   .arg(name);
+            if (view.grab().save(fn)) out << QStringLiteral("SHOT  %1\n").arg(fn);
+            else                      out << QStringLiteral("SHOT  失败 %1\n").arg(fn);
+            out.flush();
+        };
+
+        // 页宿主 = 唯一同时有 `count` 属性与 `goTo()` 方法的对象。
+        // 刻意不用 objectName：那要么改产品代码加探针专用字段，要么依赖 id ——
+        // QML 的 id 不进元对象，抓不到。按"能力"找才不绑死实现细节。
+        QObject *pageHost = nullptr;
+        {
+            QList<QObject *> stack;
+            stack << root;
+            while (!stack.isEmpty()) {
+                QObject *o = stack.takeFirst();
+                if (o->metaObject()->indexOfMethod("goTo(QVariant)") >= 0
+                    && o->property("count").isValid()) {
+                    pageHost = o;
+                    break;
+                }
+                for (QObject *c : o->children()) stack << c;
+                if (auto *it = qobject_cast<QQuickItem *>(o))
+                    for (QQuickItem *c : it->childItems()) stack << c;
+            }
+        }
+        check(pageHost != nullptr, QStringLiteral("找到页宿主（goTo + count 齐备）"));
+
+        int settingsIdx = -1;
+        if (pageHost) {
+            const int pageCount = pageHost->property("count").toInt();
+            out << QStringLiteral("      [debug] 页宿主 count=%1\n").arg(pageCount);
+            check(pageCount == 6,
+                  QStringLiteral("教室机页清单 = 6 页（实得 %1）").arg(pageCount));
+
+            QStringList ids;
+            for (int i = 0; i < pageCount; ++i) {
+                QMetaObject::invokeMethod(pageHost, "goTo", Q_ARG(QVariant, i));
+                QCoreApplication::processEvents();
+                const QString id = pageHost->property("currentId").toString();
+                ids << id;
+                if (id == QStringLiteral("settings")) settingsIdx = i;
+                snap(QStringLiteral("page_%1_%2").arg(i, 2, 10, QChar('0')).arg(id));
+                out << QStringLiteral("      · 第 %1 页 = %2\n").arg(i).arg(id);
+            }
+            check(!ids.contains(QString()), QStringLiteral("逐页 goTo 全部落到实页（无空 id）"));
+            check(settingsIdx >= 0, QStringLiteral("页清单含 settings（设置页截图入口）"));
+
+            // 设置页七分类：分类切换决定右侧区块，是本轮改动最密集的一块
+            // （11 件 Sec* + 侧栏选中态去紫 + AppDialog 替换）。
+            if (settingsIdx >= 0) {
+                QMetaObject::invokeMethod(pageHost, "goTo", Q_ARG(QVariant, settingsIdx));
+                QCoreApplication::processEvents();
+                for (const QString &key : { QStringLiteral("general"), QStringLiteral("interface"),
+                                            QStringLiteral("notify"), QStringLiteral("automation"),
+                                            QStringLiteral("update"), QStringLiteral("plugin"),
+                                            QStringLiteral("about") }) {
+                    ui.setSettingsTab(key);
+                    QCoreApplication::processEvents();
+                    snap(QStringLiteral("settings_%1").arg(key));
+                }
+                ui.setSettingsTab(QStringLiteral("general"));
+                QCoreApplication::processEvents();
+            }
+
+            // 广播站排期中心（795 行整页换新：st 蓝白调色板 288 处 → Theme）
+            root->setProperty("sheetOpen", true);
+            snap(QStringLiteral("sheet_broadcast"), 800);   // 抽屉滑入 360ms + 余量
+            root->setProperty("sheetOpen", false);
+            // ⚠️ 关抽屉也是 360ms 的动画，且 `visible: opened || drawerSlide.running`
+            //    ⇒ 不等它滑出去，下一张图右侧会挂着半截抽屉（2026-10-30 实测：
+            //    广播台页看起来"内容被切掉"，其实是抽屉残影盖在上面）。
+            waitMs(700);
+
+            // 用途切到广播机：页清单多一页「广播台」（首屏），这是本轮壳绑定链的验证点
+            const int errBefore = g_qmlErrors.size();
+            g_probeRole = QStringLiteral("broadcast");
+            agentUiFill(&ui);
+            emit ui.infoChanged();
+            QCoreApplication::processEvents();
+            const int bcCount = pageHost->property("count").toInt();
+            // ⚠️ 页数**不变**（=6）是正确结果，别按"+1"判：广播机是「+广播台 **−记录**」
+            //    （records 只有教室机有，见 AgentPages.js 的 roles）。判据必须是**内容**：
+            //    首屏变 broadcastconsole、records 消失。
+            // ⚠️ 也别在 goTo 之前读 currentId：manifest 变了但 currentIndex 还停在 5，
+            //    读出来是 broadcastclub —— 那是"没切页"，不是"没换清单"。
+            QCoreApplication::processEvents();
+            check(bcCount == pageCount,
+                  QStringLiteral("广播机页清单仍 %1 页（+广播台 −记录）").arg(bcCount));
+            QStringList bcIds;
+            for (int i = 0; i < bcCount; ++i) {
+                QMetaObject::invokeMethod(pageHost, "goTo", Q_ARG(QVariant, i));
+                QCoreApplication::processEvents();
+                const QString id = pageHost->property("currentId").toString();
+                bcIds << id;
+                snap(QStringLiteral("bc_%1_%2").arg(i, 2, 10, QChar('0')).arg(id));
+            }
+            check(bcIds.value(0) == QStringLiteral("broadcastconsole"),
+                  QStringLiteral("广播机首屏 = broadcastconsole（实得 %1）").arg(bcIds.value(0)));
+            check(!bcIds.contains(QStringLiteral("records")),
+                  QStringLiteral("广播机清单不含 records（教室机专有页已过滤）"));
+            const QStringList newErrs = g_qmlErrors.mid(errBefore);
+            check(newErrs.isEmpty(),
+                  QStringLiteral("切用途无新增 QML 报错（%1 条）").arg(newErrs.size()));
+            for (const QString &e : newErrs) out << QStringLiteral("      · %1\n").arg(e.left(160));
+
+            // 还原成教室机，免得后面若加断言拿到广播机清单
+            g_probeRole = QStringLiteral("classroom");
+            agentUiFill(&ui);
+            emit ui.infoChanged();
+            QCoreApplication::processEvents();
+        }
 
         out << QStringLiteral("== 汇总：PASS %1 / FAIL %2 ==\n").arg(g_pass).arg(g_fail);
         out.flush();
@@ -544,7 +688,8 @@ QtObject {
     });
 
     // 兜底超时
-    QTimer::singleShot(15000, &app, [&] {
+    // 2026-10-30：加逐屏截图（21 屏 × 260~800ms 等待）后 15s 贴边，放宽到 40s
+    QTimer::singleShot(40000, &app, [&] {
         out << QStringLiteral("== 汇总：PASS %1 / FAIL %2（兜底超时）==\n").arg(g_pass).arg(g_fail + 1);
         out.flush();
         app.exit(30);

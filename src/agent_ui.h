@@ -245,7 +245,8 @@ public:
     }
 
     // 渠道选项：常量表，唯一真源在 C++（QML 里不许出现数组字面量）
-    /** 生成选项清单；current 命中哪一项，那一项的 variant = "filled"，其余 "tonal"。 */
+    /** 生成选项清单；current 命中哪一项，那一项的 variant = "solid"，其余 "secondary"
+     *  （AppButton 词汇；2026-10-30 由 ash 的 filled/tonal 改来）。 */
     static QVariantList channelOptionList(const QString &current);
     QVariantList channelOptions() const { return m_channelOptions; }
 
@@ -483,9 +484,13 @@ inline QVariantList AgentUi::channelOptionList(const QString &current)
         m.insert(QStringLiteral("key"), key);
         m.insert(QStringLiteral("label"), label);
         m.insert(QStringLiteral("note"), note);
-        // 选中态样式也由 C++ 定：QML 侧不多写一个三元
+        // 选中态样式也由 C++ 定：QML 侧不多写一个三元。
+        // 2026-10-30 用户点单「全部换新」：词汇从 ash 的 "filled/tonal" 换成 AppButton 的
+        // "solid/secondary"（AppButton 的合法 variant 只有 primary/solid/secondary/
+        // destructive/ghost；继续发 "filled" 会静默落进 else 分支 = 恒 primary = 恒紫，
+        // 与「不要紫色」直接冲突）。
         m.insert(QStringLiteral("variant"),
-                 key == current ? QStringLiteral("filled") : QStringLiteral("tonal"));
+                 key == current ? QStringLiteral("solid") : QStringLiteral("secondary"));
         out.append(m);
     };
     add(QStringLiteral("stable"), QStringLiteral("稳定"), QStringLiteral("对外正式版"));
