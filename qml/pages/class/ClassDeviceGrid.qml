@@ -11,7 +11,6 @@
 // 点谁 —— 选中与执行为解耦两份：这里永远只画"看起来选中了"。
 import QtQuick
 import QtQuick.Controls          // ScrollBar
-import "../../components/md3"       // （Md3Card 不直接用，网格裸铺；预留令牌件）
 import "../../island"               // SvgIcon
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 

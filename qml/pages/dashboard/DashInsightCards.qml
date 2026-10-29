@@ -8,7 +8,6 @@
 import QtQuick
 import QtQuick.Layouts
 import "../../components"         // AppCard
-import "../../components/md3"     // Md3Card
 import "../../components/theme"   // Md3 令牌（pragma Singleton）
 
 GridLayout {

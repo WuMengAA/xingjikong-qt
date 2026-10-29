@@ -3,7 +3,6 @@
 // 固定三项（仪表盘 / 运行监控 / 系统设置），与 Sidebar 的菜单项视觉一致：
 // 高 56、全圆选中底、图标走 SvgIcon（不用 emoji，本机会渲染成方块）。
 import QtQuick
-import "../components/md3"
 import "../island"          // SvgIcon
 import "../components/theme"   // Md3 令牌（pragma Singleton）
 

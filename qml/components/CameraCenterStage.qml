@@ -7,7 +7,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../island"
-import "md3"
 
 Rectangle {
     id: liveCard

@@ -4,7 +4,6 @@
 // 班名 + 在线/总数 + 选中态（工业青左规 + secondaryContainer 底）。
 // 计数由调用方算好传入（countOf 在 ClassNav，那里才有 devices）。
 import QtQuick
-import "../components/md3"
 import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Rectangle {

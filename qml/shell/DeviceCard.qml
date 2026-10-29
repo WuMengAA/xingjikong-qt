@@ -8,7 +8,6 @@
 //   ⑤ 版本号等宽字（技术读数）。
 //   真帧订阅与在线/离线文案逻辑**完全不变**（纪律：不退回点阵占位）。
 import QtQuick
-import "../components/md3"
 import "../island"          // SvgIcon
 import "../components/theme"   // Md3 令牌（pragma Singleton）
 

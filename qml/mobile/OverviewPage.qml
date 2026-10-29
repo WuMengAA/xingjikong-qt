@@ -4,7 +4,6 @@
 import QtQuick
 import QtQuick.Layouts
 import "../components"         // AppCard
-import "../components/md3"
 import "../components/theme"   // Md3 令牌（pragma Singleton）
 
 Item {

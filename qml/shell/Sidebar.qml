@@ -12,7 +12,6 @@
 // 由宿主经 ctx.window.th 注入（见 shell/MainWindow.qml）。
 import QtQuick
 import QtQuick.Layouts
-import "../components/md3"
 import "../island"          // SvgIcon
 import "../components/theme"   // Md3 令牌（pragma Singleton）
 

@@ -43,7 +43,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../components/md3"     // Md3Card / Md3Chip / Md3Btn（全局组件库，AGENTS.md §9.3）
 import "../shell"              // Sidebar / TopBar / ActionBar / DeviceCard / SideSheet（同目录骨架件）
 import "../pages/dashboard"     // DashPage（仪表盘三件）
 // 2026-10-28 用户裁决「取代」：不再 import "../pages/class" ——
