@@ -76,13 +76,13 @@ Item {
                                 font.pixelSize: 13
                                 color: page.tok ? page.tok.cOnSurface : "#E6E1E5"
                             }
-                            M.Md3Btn {
+                            AppButton {
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.fix
-                                variant: "tonal"
+                                variant: "secondary"
+                                size: "sm"
                                 visible: !modelData.ok
-                                height: 30
                                 onClicked: agentUi.selfCheckFix()
                             }
                         }
@@ -92,9 +92,9 @@ Item {
 
             Row {
                 spacing: 10
-                M.Md3Btn {
+                AppButton {
                     text: "重新检测"
-                    variant: "filled"
+                    variant: "primary"
                     onClicked: agentUi.runSelfCheckCheck()
                 }
             }
