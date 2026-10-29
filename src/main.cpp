@@ -7906,6 +7906,16 @@ QString makeEnvelope(const QString &type, const QJsonObject &payload, const QStr
 
 int main(int argc, char *argv[])
 {
+    // ── 控件风格＝Basic（2026-10-29 新增）──────────────────────────────
+    // 用户裁决：UI 全量替换为 **QtShadcn**，被控端原「零 QtQuick.Controls 依赖、
+    //   手写 ash 组件库」铁律同步废止（详见 CMakeLists 里的铁律变更记录）。
+    // QtShadcn 组件是靠覆写 QQC 的 background/contentItem 实现的 ⇒ 宿主风格
+    // **必须**是 Basic，否则覆写被宿主风格吃掉，表现为「组件渲染出来了但样式
+    // 完全不对」的静默故障。
+    // 写进程环境而非 QQuickStyle::setStyle：风格插件加载时读，必须早于 app 构造
+    // （与管理端同款写法；2026-10-21 的教训：风格插件可能在 app 构造期间就被加载）。
+    qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
+
     QApplication app(argc, argv);   // 要托盘 → QApplication（托盘在 QtWidgets 里）
 
     // 2026-10-12 修（跨端对齐报告 #2）：以前**没设**应用名/组织名 → QSettings 和

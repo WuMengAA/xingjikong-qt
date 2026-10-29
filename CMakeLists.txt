@@ -27,7 +27,15 @@ option(STE_USE_LIBVNCSERVER "启用被控端 in-agent VNC Server（需 third_par
 #   远程桌面改走 in-agent VNC Server（libvncserver，见 src/vnc_server.*），不引入任何浏览器引擎。
 # 2026-10-13 审计 #25：与 viewer-qt 对齐 Qt ≥ 6.12（项目两端共用一个 Qt 6.12 安装，
 # 声明一致避免"配置阶段两端行为不同"——此前 viewer 声明 6.5、control 无版本声明）。
-find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg Qml Quick QuickWidgets)
+find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Widgets WebSockets Network Svg Qml Quick QuickControls2 QuickWidgets)
+
+# ── QtShadcn（2026-10-29 · UI 全量替换 P0 接入）────────────────────────────
+# ⚠️ 铁律变更（用户 2026-10-29 裁决）：被控端原「零 QtQuick.Controls 依赖、
+#    手写 ash 组件库」铁律**废止**，改为两端全量采用 QtShadcn。
+#    故上面 find_package 新增 QuickControls2 组件、下面链接 Qt6::QuickControls2。
+#    代价：被控端引入 QQC 依赖（体积上升），收益：两端设计体系与组件实现统一。
+# 作为子项目引入 ⇒ examples/tests 默认关闭。
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/qtshadcn ${CMAKE_BINARY_DIR}/_qtshadcn)
 
 # ── libopus（P1 语音对讲，静态链接）2026-10-21 ────────────────────────────
 # 源码 vendoring 在仓库根 third_party/opus（BSD）。关 shared/tests/programs，
@@ -284,7 +292,7 @@ if(WIN32)
   set_source_files_properties(src/smtc_monitor.cpp PROPERTIES COMPILE_OPTIONS "/std:c++20")
 endif()
 # 2026-10-11：灵动岛 QML（QQuickWidget 承载 qml/island/IslandRoot.qml）
-target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Qml Qt6::Quick Qt6::QuickWidgets)
+target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::QuickWidgets QtShadcn)
 
 # GUI 子系统：常驻托盘程序不该挂着控制台黑窗（日志已落盘到 agent-qt.log，不靠 stdout）
 set_target_properties(stelarith-agent-qt PROPERTIES WIN32_EXECUTABLE ON)

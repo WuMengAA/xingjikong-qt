@@ -1,4 +1,5 @@
 import QtQuick
+import QtShadcn                   // 2026-10-29 UI 全量替换 P0：shadcn 组件 + 主题入口
 import "../components"            // UiRegistry / UiPageHost 等共享 ui（构建期拷到 qml/components/）
 import "../components/theme"   // Md3 令牌（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 import "../components/md3" as M   // MD3 组件（Md3NavBar 等）
@@ -18,6 +19,19 @@ import "AgentPages.js" as AgentPages
 Rectangle {
     id: shellRoot
     color: tok.cSurface
+
+    // QtShadcn 主题实例（2026-10-29 P0）：库要求窗口内先放一个 QtShadcnTheme，
+    // 组件从它取语义 token；没有它组件取不到色值。
+    // ⚠️ id 用 shadcnTheme 不用 `theme` —— 子件里 theme 另有含义（命名纪律）。
+    // 铁律变更：被控端原「零 QtQuick.Controls」已废止（用户裁决），本文件因而可引 QQC 系组件。
+    QtShadcnTheme { id: shadcnTheme }
+
+    // ── P1 Token 对齐（2026-10-29）───────────────────────────────────────
+    // 与管理端同款：把品牌主色与明暗同步给 QtShadcn 的 ThemeManager。
+    // ThemeManager 只开放 `primary` 一个覆写口（其余只读）⇒ 只对齐主色 + 明暗。
+    Binding { target: ThemeManager; property: "mode"; value: Md3.dark ? "dark" : "light" }
+    Binding { target: ThemeManager; property: "primary"; value: Md3.dark ? "#D0BCFF" : "#6750A4" }
+
     property bool sheetOpen: false   // 广播站排期中心是否展开（2026-10-22）
 
     // Md3 = pragma Singleton（真源 shared-qml/ui/theme/，2026-10-25）。
