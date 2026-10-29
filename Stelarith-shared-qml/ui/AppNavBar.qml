@@ -63,14 +63,14 @@ Item {
                     width: 64
                     height: 32
                     radius: height / 2
-                    color: parent.on ? Theme.color.primary : "transparent"
+                    color: parent.on ? Theme.accentStrong : "transparent"
                     Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
 
                     SvgIcon {
                         anchors.centerIn: parent
                         name: modelData.icon || ""
                         px: 18
-                        tint: parent.on ? Theme.color.primaryForeground
+                        tint: parent.on ? Theme.accentStrongForeground
                                         : Theme.color.textSecondary
                     }
 

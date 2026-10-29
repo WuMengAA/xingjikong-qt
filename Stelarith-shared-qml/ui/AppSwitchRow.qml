@@ -20,6 +20,7 @@
 //                  checked: backend.autoStart; onToggled: function (on) { backend.setAutoStart(on) } }
 
 import QtQuick
+import QtQuick.Layouts
 import "theme"
 
 Item {
@@ -34,6 +35,11 @@ Item {
 
     implicitWidth: 320
     implicitHeight: root.supporting === "" ? 56 : 72
+
+    // 布局附加属性写在根上：开关行语义就是"占满一行（标签左、开关右）"。
+    // 放进 ColumnLayout 时调用方无需再写 Layout.fillWidth；
+    // 父级不是 Layout（viewer 侧用 `Column { width: parent.width }` + `width: parent.width`）时被忽略。
+    Layout.fillWidth: true
 
     // 主标签：单行垂直居中；两行居上（y:12），说明在下（y:38）。
     // ⚠️ 不要写成 verticalCenter + 说明 anchors.top —— 两行态会重叠（旧件踩过）。
@@ -71,7 +77,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: height / 2
-            color: root.checked ? Theme.color.primary : Theme.color.surfaceVariant
+            color: root.checked ? Theme.accentStrong : Theme.color.surfaceVariant
             Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
         }
 
@@ -82,7 +88,7 @@ Item {
             width: root.checked ? 24 : 16
             height: width
             radius: width / 2
-            color: root.checked ? Theme.color.primaryForeground : Theme.color.textSecondary
+            color: root.checked ? Theme.accentStrongForeground : Theme.color.textSecondary
             Behavior on x {
                 NumberAnimation {
                     duration: Theme.motion.normal

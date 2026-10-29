@@ -31,6 +31,10 @@ ColumnLayout {
 
     spacing: Theme.spacing.xs
 
+    // 标题行语义上就是"占满一行"：把布局附加属性写在根上，
+    // 调用方直接 `AppCardTitle { text: "…" }` 即可，不必再写 Layout.fillWidth。
+    Layout.fillWidth: true
+
     Text {
         Layout.fillWidth: true
         text: root.text

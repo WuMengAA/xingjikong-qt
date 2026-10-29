@@ -58,12 +58,12 @@ Item {
                                : variant === "secondary"   ? Theme.color.surfaceVariant
                                : variant === "ghost"       ? "transparent"
                                : variant === "solid"       ? Theme.color.textPrimary
-                                                           : Theme.color.primary
+                                                           : Theme.accentStrong
     readonly property color _fg: variant === "destructive" ? Theme.color.destructiveForeground
                                : variant === "ghost"       ? Theme.color.textPrimary
                                : variant === "secondary"   ? Theme.color.textPrimary
                                : variant === "solid"       ? Theme.color.background
-                                                           : Theme.color.primaryForeground
+                                                           : Theme.accentStrongForeground
 
     opacity: enabled ? 1.0 : 0.45
     scale: ma.pressed ? Theme.motion.pressScale

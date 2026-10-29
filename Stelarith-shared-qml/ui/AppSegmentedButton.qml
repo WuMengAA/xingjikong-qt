@@ -67,7 +67,7 @@ Item {
                 radius: Theme.radius.md
                 // 文字段宽 = 图标16 + 间距6 + 文字 + 左右各 12 内边距；纯图标段定宽 44
                 width: seg.pure ? 44 : (16 + 6 + segTx.implicitWidth + 24)
-                color: seg.on ? Theme.color.primary
+                color: seg.on ? Theme.accentStrong
                               : (segMa.containsMouse ? Theme.color.accent : "transparent")
                 Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
 
@@ -77,7 +77,7 @@ Item {
                     SvgIcon {
                         name: seg.modelData.icon || ""
                         px: 16
-                        tint: seg.on ? Theme.color.primaryForeground : Theme.color.textSecondary
+                        tint: seg.on ? Theme.accentStrongForeground : Theme.color.textSecondary
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
@@ -86,7 +86,7 @@ Item {
                         text: seg.pure ? "" : seg.modelData.label
                         font.pixelSize: 13
                         font.weight: seg.on ? Font.Medium : Font.Normal
-                        color: seg.on ? Theme.color.primaryForeground : Theme.color.textSecondary
+                        color: seg.on ? Theme.accentStrongForeground : Theme.color.textSecondary
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }

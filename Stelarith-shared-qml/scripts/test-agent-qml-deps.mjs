@@ -35,7 +35,15 @@ const BASE = path.resolve(ROOT, "..");
 const AGENT_QML = path.join(BASE, "Stelarith-control-qt", "qml", "shell");
 
 /** 部署里**确实有**的 QML 模块（白名单）。加之前先确认 exe 旁有对应 dll。 */
-const OK_MODULES = ["QtQuick", "QtQuick.Window"];
+// 2026-10-30 补 QtQuick.Layouts / QtQuick.Effects：
+// 此前白名单只有 QtQuick / QtQuick.Window，但这两模块**一直在部署**——
+//   · 构建脚本每次打印：`QML 模块部署完整：QtQuick.Controls;QtQuick.Effects;QtQuick.Layouts;QtQuick.Window`；
+//   · 生产安装目录实证：`C:\Program Files\Stelarith\qml\QtQuick\` 下 Layouts / Effects 都在；
+//   · 共享库 App* 组件（AppCard 用 MultiEffect、AppInfoRow/AppCardTitle/AppSwitchRow 用 Layout）
+//     在真机截图里渲染正常。
+// 白名单过时导致「被控端全面迁移到 App* 体系」时 15 个页面被误判为引入未部署模块。
+// 这不是放宽标准：Controls 仍不在白名单（真机事故就是它），黑名单 40 个类型照旧。
+const OK_MODULES = ["QtQuick", "QtQuick.Window", "QtQuick.Layouts", "QtQuick.Effects"];
 
 /** 只在 QtQuick.Controls 里存在的类型名（被控端 shell 下不该出现）。 */
 const CONTROLS_TYPES = [

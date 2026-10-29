@@ -38,7 +38,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: Theme.radius.full
-        color: root.selected ? Theme.color.primary : Theme.color.surfaceVariant
+        color: root.selected ? Theme.accentStrong : Theme.color.surfaceVariant
         Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
 
         // hover 叠色（未选中才需要；选中的主色底已足够醒目）
@@ -57,7 +57,7 @@ Item {
         text: root.text
         font.pixelSize: 13
         font.weight: root.selected ? Font.Medium : Font.Normal
-        color: root.selected ? Theme.color.primaryForeground : Theme.color.textPrimary
+        color: root.selected ? Theme.accentStrongForeground : Theme.color.textPrimary
     }
 
     MouseArea {

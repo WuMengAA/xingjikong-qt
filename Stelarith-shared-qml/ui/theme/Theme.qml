@@ -32,6 +32,26 @@ QtObject {
     /** 明暗模式。主外壳唯一切换入口：`Theme.dark = darkMode`（全端绑定自动随动）。 */
     property bool dark: false
 
+    /**
+     * 「不要品牌紫」开关（2026-10-30 用户点单：被控端一律中性色，品牌紫只属于管理端）。
+     *
+     * 为什么不逐个组件传参：开关/分段/药丸/导航的选中色散落在 5 个件里、被控端有 14+ 处
+     * 实例，逐处传一个 `accent` 属性既啰嗦又必然漏改。改在令牌层设一个策略位，
+     * 被控端外壳设 `Theme.neutralAccent = true` 一次生效；管理端不设（默认 false）
+     * ⇒ 读到的仍是品牌紫，**对既有页面零影响**。
+     *
+     * 设 true 后 `accentStrong` 回落为中性反白（深色模式白底黑字 / 浅色模式黑底白字），
+     * 这正是 shadcn 默认按钮与开关的观感。
+     */
+    property bool neutralAccent: false
+
+    /** 强调色：开关轨道 / 选中段 / 当前导航 / primary 按钮底。 */
+    readonly property color accentStrong: neutralAccent ? root.color.textPrimary
+                                                       : root.color.primary
+    /** 强调色上的文字/滑块色。 */
+    readonly property color accentStrongForeground: neutralAccent ? root.color.background
+                                                                 : root.color.primaryForeground
+
     // ═══ 颜色 ═══
     readonly property QtObject color: QtObject {
         /** 页面底色：浅＝极浅灰 ／ 深＝近黑。 */

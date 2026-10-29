@@ -30,14 +30,26 @@ RowLayout {
     property string label: ""
     /** 右侧值。 */
     property string value: ""
+    /**
+     * 值的文字色。默认主文字色；连接状态 / 升级状态这类由 C++ 算好结果色的地方
+     * 用它传进来（对应 ash/AshInfoRow 的 `vColor`，行为一致）。
+     */
+    property color valueColor: Theme.color.textPrimary
     /** 值是否换行（默认单行 + 省略号，避免长 ws 地址把布局撑破）。 */
     property bool wrapValue: false
 
     spacing: Theme.spacing.md
 
+    // 布局附加属性写在组件根上：调用方把它放进 ColumnLayout 时无需再逐处写
+    // `Layout.fillWidth`（本件语义就是"占满一行"）。父级不是 Layout 时这些属性被忽略。
+    Layout.fillWidth: true
+    // 行高下限 32：与既有设置页的节奏一致（ash/AshInfoRow 的 implicitHeight）。
+    // 用 minimum 而非固定高，`wrapValue` 多行时仍能自己长高。
+    Layout.minimumHeight: 32
+
     Text {
         text: root.label
-        font.pixelSize: 13
+        font.pixelSize: 14
         color: Theme.color.textSecondary
         Layout.alignment: Qt.AlignVCenter
     }
@@ -45,8 +57,8 @@ RowLayout {
     // 吃掉剩余宽度：这是「右值贴右」的实现方式（不是弹簧 Item，也不是宽度反算）
     Text {
         text: root.value
-        font.pixelSize: 13
-        color: Theme.color.textPrimary
+        font.pixelSize: 14
+        color: root.valueColor
         horizontalAlignment: Text.AlignRight
         wrapMode: root.wrapValue ? Text.Wrap : Text.NoWrap
         elide: root.wrapValue ? Text.ElideNone : Text.ElideRight
