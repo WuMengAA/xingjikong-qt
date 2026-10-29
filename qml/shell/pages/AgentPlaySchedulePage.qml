@@ -42,7 +42,7 @@ Item {
                     anchors.top: parent.top
                     spacing: 4
 
-                    M.Md3SwitchRow {
+                    AppSwitchRow {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         text: "启用播放时段限制"
@@ -110,17 +110,17 @@ Item {
                     Row {
                         topPadding: 6
                         spacing: 10
-                        M.Md3Btn {
+                        AppButton {
                             text: "保存"
-                            variant: "filled"
+                            variant: "primary"
                             onClicked: {
                                 agentUi.playWindowsText = winEdit.text
                                 agentUi.savePlaySchedule()
                             }
                         }
-                        M.Md3Btn {
+                        AppButton {
                             text: "打开数据目录"
-                            variant: "text"
+                            variant: "ghost"
                             onClicked: agentUi.openDataDir()
                         }
                     }

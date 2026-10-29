@@ -349,6 +349,11 @@ QtObject {
         QObject *root = view.rootObject();
         check(root != nullptr, QStringLiteral("AgentShell.qml 加载出根对象"));
         if (!root) {
+            // 2026-10-30：壳起不来必须**带上 QML 错误原文**。原来只报一行 FAIL，
+            // 于是「探针失败」和「探针自己坏了」分不出来（本轮就是这么被卡住的）。
+            out << QStringLiteral("-- view.status = %1\n").arg(int(view.status()));
+            for (const QQmlError &e : view.errors())
+                out << QStringLiteral("   [QML] %1\n").arg(e.toString());
             out << QStringLiteral("== 汇总：PASS %1 / FAIL %2 ==\n").arg(g_pass).arg(g_fail + 1);
             g_fail++;
             out.flush();
