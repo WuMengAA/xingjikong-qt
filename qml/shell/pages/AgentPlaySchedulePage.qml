@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Layouts
 import "../../components"
 import "../../components/md3" as M
 
@@ -31,36 +32,36 @@ Item {
             anchors.topMargin: 16
             spacing: 14
 
-            M.Md3Card {
+            // 档② 换布局（2026-10-30）：Md3Card 的默认容器是普通 Item（子项用 anchors 定位），
+            // 而 AppCard 的默认容器是 ColumnLayout ⇒ 卡内一律改用 Layout 附加属性、
+            // 且 height 必须写成 Layout.preferredHeight（Layout 会忽略 height）。
+            // variant: filled → muted（AppCard.muted = surfaceVariant 底、不叠阴影）。
+            AppCard {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                variant: "filled"
+                variant: "muted"
 
-                Column {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
+                ColumnLayout {
+                    Layout.fillWidth: true
                     spacing: 4
 
                     AppSwitchRow {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
+                        Layout.fillWidth: true
                         text: "启用播放时段限制"
                         supporting: "只在这些时段内允许广播/播放"
                         checked: agentUi.playScheduleEnabled
                         onToggled: function (v) { agentUi.playScheduleEnabled = v }
                     }
                     Text {
-                        width: parent.width
+                        Layout.fillWidth: true
                         text: "允许的时段（每行一个，格式 HH:MM-HH:MM；可跨午夜如 22:00-07:00）："
                         font.pixelSize: 12
                         topPadding: 6
                         color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
                     }
                     Rectangle {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        height: 120
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 120
                         radius: page.tok ? page.tok.rM : 12
                         color: page.tok ? page.tok.cSurface : "#1C1B1F"
                         border.width: 1
@@ -101,14 +102,14 @@ Item {
                         }
                     }
                     Text {
-                        width: parent.width
+                        Layout.fillWidth: true
                         text: agentUi.playStateText
                         font.pixelSize: 12
                         topPadding: 4
                         color: page.tok ? page.tok.cOnSurfaceVar : "#CAC4D0"
                     }
-                    Row {
-                        topPadding: 6
+                    RowLayout {
+                        Layout.topMargin: 6
                         spacing: 10
                         AppButton {
                             text: "保存"
