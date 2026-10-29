@@ -145,6 +145,15 @@ QtObject {
     // 果冻缩放刻度（原型 .jelly-effect:hover / :active）
     property real jellyHover: 1.05
     property real jellyPress: 0.90
+    // 曲线本体（2026-10-29 P1 · 用户点单「保留果冻动效」）：
+    //   原先这三条 cubic-bezier **只写在上面的注释里**，没有可用令牌 ——
+    //   换组件体系（MD3 → QtShadcn）时注释不会跟着走，动效必丢。
+    //   这里提成真令牌，任何实现都能直接取。
+    //   用法：PropertyAnimation { easing.type: Easing.Bezier; easing.bezierCurve: Md3.easeJelly }
+    //   只想要"近似果冻回弹"时用 easing.type: Easing.OutBack（Qt 内置，等价手感）。
+    property var easeJelly:  [0.34, 1.7, 0.64, 1]   // 果冻（带 overshoot）
+    property var easeDrawer: [0.2, 0.8, 0.2, 1]     // 抽屉滑入滑出
+    property var easeModal:  [0.0, 0.0, 0.0, 1]     // 模态淡入淡出（≈ ease）
     // emphasized decelerate（进入）/ standard（通用）
     property var easeEmph: [0.05, 0.7, 0.1, 1.0]
     property var easeStd:  [0.2, 0.0, 0.0, 1.0]

@@ -1,0 +1,142 @@
+// src/qml/Components/ShadcnTable.qml
+import QtQuick
+import QtQuick.Controls as QQC
+import QtShadcn
+
+// shadcn/ui 风格表格（M5）：原生 TableView 滚动 + 表头水平联动
+// 规范(对齐 shadcn DOM)：容器 overflow-x-auto；表头 h-10 px-2 font-medium text-foreground；
+//       单元格 p-2 align-middle；行 border-b；hover bg-muted/50；选中 bg-muted
+// 用法:
+//   ShadcnTable {
+//       model: myTableModel   // ShadcnTableModel
+//       onRowClicked: row => { ... }
+//   }
+Item {
+    id: root
+
+    property ShadcnTableModel model: null
+    property int rowHeight: 40
+    property int headerHeight: 40
+    property int currentRow: -1
+
+    signal rowClicked(int row)
+
+    QtShadcnTheme { id: theme }
+
+    // 列总宽（横向滚动用）
+    readonly property int totalWidth: {
+        var w = 0
+        if (root.model) for (var c = 0; c < root.model.columnCount(); ++c)
+            w += root.model.columnMeta(c).width || 120
+        return Math.max(w, root.width)
+    }
+
+    // ── 容器：rounded-md border（对齐 shadcn data-table 外层容器） ──
+    Rectangle {
+        anchors.fill: parent
+        color: "transparent"
+        border.color: theme.border
+        radius: theme.radius
+        clip: true
+
+        // ── 表头（顶部固定，水平联动 body.contentX） ──
+        Item {
+            id: headerClip
+            width: parent.width
+            height: root.headerHeight
+            clip: true
+            z: 2
+            x: -body.contentX
+
+            Row {
+                id: header
+                width: root.totalWidth
+                height: root.headerHeight
+                Repeater {
+                    model: root.model ? root.model.columnCount() : 0
+                    delegate: Rectangle {
+                        required property int index
+                        width: root.model.columnMeta(index).width || 120
+                        height: root.headerHeight
+                        color: "transparent"
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            text: root.model.columnMeta(index).title || ""
+                            color: theme.foreground
+                            font.pixelSize: 14
+                            font.weight: Font.Medium
+                            horizontalAlignment: root.model.columnMeta(index).align === "center"
+                                ? Text.AlignHCenter : root.model.columnMeta(index).align === "right"
+                                    ? Text.AlignRight : Text.AlignLeft
+                            anchors.right: root.model.columnMeta(index).align === "right" ? parent.right : undefined
+                            anchors.rightMargin: root.model.columnMeta(index).align === "right" ? 8 : 0
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: root.model.sortBy(index, !(root._sortCol === index && root._asc))
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 表体（TableView 原生滚动，不再套 Flickable） ──
+        TableView {
+            id: body
+            y: root.headerHeight
+            width: parent.width
+            height: parent.height - root.headerHeight
+            contentWidth: root.totalWidth
+            clip: true
+            model: root.model
+            rowHeightProvider: function() { return root.rowHeight }
+            columnWidthProvider: function(c) { return root.model ? (root.model.columnMeta(c).width || 120) : 120 }
+            delegate: Rectangle {
+                required property int row
+                required property int column
+                height: root.rowHeight
+                color: root.currentRow === row ? theme.muted
+                      : rowHover.containsMouse ? Qt.alpha(theme.muted, 0.5) : "transparent"
+                // 行底分隔线
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 1
+                    color: theme.border
+                }
+                Text {
+                    id: cellText
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    text: root.model ? root.model.cellData(row, column) : ""
+                    color: theme.foreground
+                    font.pixelSize: 14
+                    elide: Text.ElideRight
+                    horizontalAlignment: root.model && root.model.columnMeta(column).align === "center"
+                        ? Text.AlignHCenter : root.model && root.model.columnMeta(column).align === "right"
+                            ? Text.AlignRight : Text.AlignLeft
+                    anchors.right: root.model && root.model.columnMeta(column).align === "right" ? parent.right : undefined
+                    anchors.rightMargin: root.model && root.model.columnMeta(column).align === "right" ? 8 : 0
+                }
+                MouseArea {
+                    id: rowHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: {
+                        root.currentRow = row
+                        root.rowClicked(row)
+                    }
+                }
+            }
+        }
+    }
+
+    // 排序状态
+    property int _sortCol: -1
+    property bool _asc: true
+    onModelChanged: { root._sortCol = -1; root._asc = true }
+}

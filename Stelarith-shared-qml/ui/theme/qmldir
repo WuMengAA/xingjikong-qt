@@ -1,1 +1,2 @@
 singleton Md3 1.0 Md3.qml
+singleton Theme 1.0 Theme.qml

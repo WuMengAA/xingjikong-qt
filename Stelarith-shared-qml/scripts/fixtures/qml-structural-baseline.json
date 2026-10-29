@@ -1,0 +1,11 @@
+{
+  "_comment": "QML 结构性致命错误门禁的已知债务基线（test-qml-structural.mjs）。",
+  "_why": "两类错误 qmllint 报 0 Error 但运行时整页不加载/进程退出：同对象两个 Component.onCompleted、同作用域同名 function。",
+  "_rule": "新增违例直接失败；确属合法（跨嵌套作用域）的先在这里登记 file + kind + name + count，并经点单。",
+  "_kind": {
+    "DUP_onCompleted": "同一对象块内多个 Component.onCompleted",
+    "DUP_function": "同一 block 内同名 function"
+  },
+  "_verified": "2026-10-29 首次全仓扫描：223 个 .qml，0 命中（此基线为空是真实结果，不是占位）。",
+  "known": []
+}
