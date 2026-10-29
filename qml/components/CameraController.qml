@@ -1,7 +1,7 @@
 // 星集控 · 监控中心控制器（2026-10-29 拆分）
 //
-// 从 CameraCenter.qml 抽出的「状态 + 逻辑」控制器：持有全部状态属性、Md3 令牌便捷取值
-// （t* 别名）、以及 ~35 个逻辑函数。视觉块（四档 Tab 页面 + 状态行 + 底栏）由
+// 从 CameraCenter.qml 抽出的「状态 + 逻辑」控制器：持有全部状态属性、设计令牌便捷取值
+// （t* 别名，统一走 Theme 单例）、以及 ~35 个逻辑函数。视觉块（四档 Tab 页面 + 状态行 + 底栏）由
 // CameraCenter.qml 及其子组件渲染，统一通过 `cc` 引用本控制器。
 //
 // 行为零差异：属性名 / 函数名 / 取值逻辑全部原样保留。唯一调整：
@@ -9,10 +9,12 @@
 //   · camSync() 依赖 camPane 可见性，下沉到 CameraCenterStage 本地持有。
 import QtQuick
 import QtCore
+import "./theme"   // Theme 设计令牌单例（收口：t* 别名统一走 Theme，弃 Md3）
 
 Item {
     id: ctrl
 
+    // ⚠️ 仅作 StTabBar 等共享 Md3 组件的 theme 透传；CameraCenter 自身视觉已全走 Theme。
     property var theme: ({})
     property var backend
     property var panelCtx: null
@@ -54,30 +56,33 @@ Item {
     property string lastAction: ""      // 「重试」要点名重发的动作
     property var    camerasInfo: []     // 摄像头明细（含 virtual 标记）；为空时回落到 ctrl.cameras
 
-    // ── MD3 令牌便捷取值 ──
-    // theme 即 Md3 实例（深浅两套随 darkMode 切）；缺键时退回 MD3 暗色基线，绝不崩。
-    readonly property color tSurface:    (theme && theme.cSurface !== undefined) ? theme.cSurface : "#1C1B1F"
-    readonly property color tCard:       (theme && theme.cContLow !== undefined) ? theme.cContLow : "#1D1B20"
-    readonly property color tCardHi:     (theme && theme.cContHigh !== undefined) ? theme.cContHigh : "#2B2930"
-    readonly property color tCardHighest:(theme && theme.cContHighest !== undefined) ? theme.cContHighest : "#36343B"
-    readonly property color tStage:      (theme && theme.cContLowest !== undefined) ? theme.cContLowest : "#0F0D13"
-    readonly property color tFg:         (theme && theme.cOnSurface !== undefined) ? theme.cOnSurface : "#E6E1E5"
-    readonly property color tFg3:        (theme && theme.cOnSurfaceVar !== undefined) ? theme.cOnSurfaceVar : "#CAC4D0"
-    readonly property color tFg4:        (theme && theme.cOutline !== undefined) ? theme.cOutline : "#938F99"
-    readonly property color tAcc:        (theme && theme.cPrimary !== undefined) ? theme.cPrimary : "#D0BCFF"
-    readonly property color tErr:        (theme && theme.cError !== undefined) ? theme.cError : "#F2B8B5"
-    readonly property color tSegBg:      (theme && theme.cSecondaryCont !== undefined) ? theme.cSecondaryCont : "#4A4458"
-    readonly property color tSegFg:      (theme && theme.cOnSecondaryCont !== undefined) ? theme.cOnSecondaryCont : "#EADDFF"
-    readonly property color tOutlineVar: (theme && theme.cOutlineVar !== undefined) ? theme.cOutlineVar : "#49454F"
-    readonly property int  tRM:    (theme && theme.rM !== undefined) ? theme.rM : 12
-    readonly property int  tSpXS:  (theme && theme.spXS !== undefined) ? theme.spXS : 4
-    readonly property int  tSpS:   (theme && theme.spS !== undefined) ? theme.spS : 8
-    readonly property int  tSpM:   (theme && theme.spM !== undefined) ? theme.spM : 16
-    readonly property int  tTitleM:(theme && theme.titleM !== undefined) ? theme.titleM : 16
-    readonly property int  tTitleS:(theme && theme.titleS !== undefined) ? theme.titleS : 14
-    readonly property int  tLabelL:(theme && theme.labelL !== undefined) ? theme.labelL : 14
-    readonly property int  tLabelM:(theme && theme.labelM !== undefined) ? theme.labelM : 12
-    readonly property int  tLabelS:(theme && theme.labelS !== undefined) ? theme.labelS : 11
+    // ── 设计令牌便捷取值（收口：t* 别名统一走 Theme 单例，弃用 Md3 `theme` 令牌）──
+    // 这是 CameraCenter 唯一与主题耦合处；面板只通过 `cc.t*` 引用，故换令牌只动这一处。
+    // 语义映射：Md3 的 cContLow/cContHigh/cContHighest/cContLowest 容器阶
+    //           → Theme.surface / surfaceVariant / background（shadcn 仅 3 级，高阶合并到 surfaceVariant）。
+    readonly property color tSurface:     Theme.color.background
+    readonly property color tCard:        Theme.color.surface
+    readonly property color tCardHi:      Theme.color.surfaceVariant
+    readonly property color tCardHighest: Theme.color.surfaceVariant
+    readonly property color tStage:       Theme.color.background
+    readonly property color tFg:          Theme.color.textPrimary
+    readonly property color tFg3:         Theme.color.textSecondary
+    readonly property color tFg4:         Theme.color.disabled
+    readonly property color tAcc:         Theme.color.primary
+    readonly property color tErr:         Theme.color.destructive
+    readonly property color tSegBg:       Theme.color.surfaceVariant
+    readonly property color tSegFg:       Theme.color.primary
+    readonly property color tOutlineVar:  Theme.color.surfaceVariant
+    readonly property int  tRM:    Theme.radius.lg
+    readonly property int  tSpXS:  Theme.spacing.xs
+    readonly property int  tSpS:   Theme.spacing.sm
+    readonly property int  tSpM:   Theme.spacing.md
+    // 字号目前无令牌（项目现状：字体硬编码 12/13/16px），保持字面量。
+    readonly property int  tTitleM: 16
+    readonly property int  tTitleS: 14
+    readonly property int  tLabelL: 14
+    readonly property int  tLabelM: 12
+    readonly property int  tLabelS: 11
 
     // ── 逻辑 ──
     /** 可选设备（在线清单里的 uid）。喂给自绘下拉。 */

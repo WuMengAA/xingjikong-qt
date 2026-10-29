@@ -20,6 +20,7 @@ import QtQuick.Layouts
 import QtCore
 import "../island"   // SvgIcon 唯一真源在共享岛目录（构建期拷到 qml/island/）
 import "md3"         // MD3 组件库（构建期由 Stelarith-shared-qml/ui/md3/ 拷入 components/md3/）
+import "./theme"     // Theme 设计令牌单例（IconBtn 收口走 Theme，弃 Md3 th 令牌）
 
 Item {
     // ⚠️ 见 CameraController：这些属性由宿主（CameraCenterDialog）注入，转发给内部控制器。
@@ -38,19 +39,18 @@ Item {
     // ── 无边框图标按钮（IconButton）：顶栏/刷新用，状态层 8%/10%，无底无边 ──
     component IconBtn: Rectangle {
         id: iconBtn
-        property var th: ({})
         property string icon: ""
         property string tip: ""
         signal clicked()
         width: 40
         height: 40
-        radius: (th && th.rM !== undefined) ? th.rM : 12
+        radius: Theme.radius.lg
         color: "transparent"
         opacity: iconBtn.enabled ? 1 : 0.38
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
-            color: (th && th.cPrimary !== undefined) ? th.cPrimary : "#D0BCFF"
+            color: Theme.color.primary
             opacity: ma.pressed ? 0.10 : (ma.containsMouse ? 0.08 : 0)
             Behavior on opacity { NumberAnimation { duration: 120 } }
         }
@@ -58,7 +58,7 @@ Item {
             anchors.centerIn: parent
             name: iconBtn.icon
             px: 20
-            tint: (iconBtn.th && iconBtn.th.cOnSurface !== undefined) ? iconBtn.th.cOnSurface : "#E6E1E5"
+            tint: Theme.color.textPrimary
         }
         MouseArea {
             id: ma
@@ -101,21 +101,18 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: ctrl.tSpXS
                 IconBtn {
-                    th: ctrl.theme
                     icon: "circle-check"
                     tip: "摄像头自检：发一条测试指令，看能不能出帧"
                     enabled: ctrl.selUid !== ""
                     onClicked: ctrl.testCam()
                 }
                 IconBtn {
-                    th: ctrl.theme
                     icon: "video"
                     tip: "抓拍一帧（camera_snapshot）"
                     enabled: ctrl.selUid !== ""
                     onClicked: ctrl.snapshot()
                 }
                 IconBtn {
-                    th: ctrl.theme
                     icon: "x"
                     tip: "关闭监控中心"
                     onClicked: ctrl.closePanel()
