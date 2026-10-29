@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Layouts
 import "../../components"
 import "../../components/md3" as M
 
@@ -27,21 +28,21 @@ Item {
             anchors.topMargin: 16
             spacing: 14
 
-            M.Md3Card {
+            // 档② 换布局（2026-10-30）：AppCard 默认容器是 ColumnLayout ⇒ 卡内改用 Layout 附加属性。
+            // 标题行那个 Item 保留 anchors：Item 不是 Layout 容器，内部 anchors 合法，
+            // 只需给它 Layout.fillWidth + Layout.preferredHeight（Layout 会忽略 height）。
+            AppCard {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                variant: "filled"
+                variant: "muted"
 
-                Column {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
+                ColumnLayout {
+                    Layout.fillWidth: true
                     spacing: 6
 
                     Item {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        height: 24
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 24
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
@@ -59,7 +60,7 @@ Item {
                         }
                     }
                     Text {
-                        width: parent.width
+                        Layout.fillWidth: true
                         text: agentUi.noiseLogText
                         font.pixelSize: 12
                         font.family: "Consolas"
@@ -69,21 +70,18 @@ Item {
                 }
             }
 
-            M.Md3Card {
+            AppCard {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                variant: "filled"
+                variant: "muted"
 
-                Column {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
+                ColumnLayout {
+                    Layout.fillWidth: true
                     spacing: 6
 
                     Item {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        height: 24
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 24
                         Text {
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
@@ -101,7 +99,7 @@ Item {
                         }
                     }
                     Text {
-                        width: parent.width
+                        Layout.fillWidth: true
                         text: agentUi.studyLogText
                         font.pixelSize: 12
                         font.family: "Consolas"
