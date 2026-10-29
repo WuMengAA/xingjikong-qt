@@ -211,6 +211,10 @@ add_executable(stelarith-agent-qt
   src/loop_reminder.h
   src/noise_monitor.cpp
   src/noise_monitor.h
+  # P0-2 分层（2026-10-30）：噪音事件策略与「采集」解耦，纯逻辑可单测
+  src/noise/noise_incident.h
+  src/noise/noise_incident_service.cpp
+  src/noise/noise_incident_service.h
   src/notification_gate.cpp
   src/notification_gate.h
   src/edge_tts.cpp
