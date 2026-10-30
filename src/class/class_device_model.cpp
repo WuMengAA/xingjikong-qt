@@ -24,6 +24,7 @@ QVariant ClassDeviceModel::data(const QModelIndex &index, int role) const
     case LastSeenRole:  return d.lastSeenAgoSec;
     case HasThumbRole:  return d.hasThumb;
     case ThumbRevRole:  return d.thumbRev;
+    case DevRoleRole:   return d.devRole;
     }
     return QVariant();
 }
@@ -38,6 +39,7 @@ QHash<int, QByteArray> ClassDeviceModel::roleNames() const
     roles[LastSeenRole] = "lastSeen";
     roles[HasThumbRole] = "hasThumb";
     roles[ThumbRevRole] = "thumbRev";
+    roles[DevRoleRole]  = "devRole";
     return roles;
 }
 
@@ -55,6 +57,9 @@ void ClassDeviceModel::resetFromArray(const QJsonArray &devices)
         d.online  = o.value(QStringLiteral("online")).toBool(true);
         d.version = o.value(QStringLiteral("version")).toString();
         d.lastSeenAgoSec = o.value(QStringLiteral("lastSeenAgoSec")).toInt(-1);
+        // 设备用途（系统总图挂账①）：云端 knownDevices.role 已随 devices 下发（maskDevice 只删
+        // ip/mac，保留 role），此前 viewer 未消费 ⇒ 管理端看不出这台是教室端还是广播端。
+        d.devRole = o.value(QStringLiteral("role")).toString();
         m_devices.append(d);
     }
     endResetModel();
@@ -73,6 +78,7 @@ int ClassDeviceModel::upsert(const QJsonObject &dev)
         d.online = dev.value(QStringLiteral("online")).toBool(true);
         const QString name = dev.value(QStringLiteral("name")).toString();
         if (!name.isEmpty()) d.name = name;
+        d.devRole = dev.value(QStringLiteral("role")).toString();
         const int at = m_devices.size();
         beginInsertRows(QModelIndex(), at, at);
         m_devices.append(d);
@@ -90,6 +96,8 @@ int ClassDeviceModel::upsert(const QJsonObject &dev)
         d.version = dev.value(QStringLiteral("version")).toString();
     if (dev.contains(QStringLiteral("lastSeenAgoSec")))
         d.lastSeenAgoSec = dev.value(QStringLiteral("lastSeenAgoSec")).toInt(-1);
+    if (dev.contains(QStringLiteral("role")))
+        d.devRole = dev.value(QStringLiteral("role")).toString();
     const QModelIndex mi = index(row, 0);
     emit dataChanged(mi, mi);
     return row;

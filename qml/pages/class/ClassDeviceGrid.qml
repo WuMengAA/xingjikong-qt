@@ -46,6 +46,7 @@ Item {
             lastSeenAgoSec: model.lastSeen
             hasThumb: model.hasThumb
             thumbRev: model.thumbRev
+            devRole: model.devRole
             selected: model.uid === pane.selectedUid
             onClicked: pane.deviceClicked(model.uid)
         }

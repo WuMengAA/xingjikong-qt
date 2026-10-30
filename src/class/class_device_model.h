@@ -29,6 +29,7 @@ public:
         LastSeenRole,
         HasThumbRole,
         ThumbRevRole,
+        DevRoleRole,        // 设备用途（classroom 教室端 / broadcast 广播端）—— 云端 knownDevices.role
     };
 
     explicit ClassDeviceModel(QObject *parent = nullptr);
@@ -68,6 +69,7 @@ private:
         int lastSeenAgoSec = -1;    // 秒；-1 = 未知
         bool hasThumb = false;
         int thumbRev = 0;
+        QString devRole;            // 设备用途：classroom / broadcast；空 = 云端未给（老设备兼容）
     };
     QList<Device> m_devices;
 };

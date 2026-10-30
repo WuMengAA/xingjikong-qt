@@ -24,6 +24,7 @@ Item {
     property int lastSeenAgoSec: -1     // 秒；-1 = 云端没给
     property bool hasThumb: false
     property int thumbRev: 0
+    property string devRole: ""         // 设备用途：classroom / broadcast（云端 knownDevices.role；空=未给）
     property bool selected: false
 
     signal clicked()
@@ -168,14 +169,20 @@ Item {
                 elide: Text.ElideRight
             }
 
-            // 状态行：在线给版本号（等宽技术字），离线给「多久没见」
+            // 状态行：在线给版本号（等宽技术字），离线给「多久没见」。
+            // 末尾追加**用途**（系统总图挂账①）：此前云端已下发 role、viewer 未消费，
+            // 管理端分不清这台是教室端还是广播端。云端没给就不追加（老设备兼容）。
             Text {
                 width: parent.width
                 text: {
-                    if (root.online) return root.version !== "" ? root.version : "在线"
-                    if (root.lastSeenAgoSec < 0) return "离线"
-                    return root.lastSeenAgoSec < 60 ? "刚断线"
-                           : Math.floor(root.lastSeenAgoSec / 60) + " 分前"
+                    var s
+                    if (root.online) s = root.version !== "" ? root.version : "在线"
+                    else if (root.lastSeenAgoSec < 0) s = "离线"
+                    else s = root.lastSeenAgoSec < 60 ? "刚断线"
+                              : Math.floor(root.lastSeenAgoSec / 60) + " 分前"
+                    if (root.devRole === "broadcast") s += " · 广播端"
+                    else if (root.devRole === "classroom") s += " · 教室端"
+                    return s
                 }
                 font.pixelSize: 12
                 font.family: (root.online && root.version !== "") ? "monospace" : ""
