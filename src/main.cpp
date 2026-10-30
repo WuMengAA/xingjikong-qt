@@ -85,6 +85,8 @@
 #include "edge_tts.h"          // §6.4 Edge 语音 TTS（管理端可选）
 #include "tts/tts_speaker.h"   // 2026-10-30 main 拆分第一刀：TTS 统一播报（含 SAPI 兜底/音量序列）
 #include "noise_monitor.h"     // §6.5 噪音检测
+#include "noise/noise_assembly.h"   // P0-2 分层装配工厂（main 只调 createNoisePipeline）
+#include "cloud_event_bridge.h"     // P0-2：噪音存证事件经 WS 桥发出（实体在本文件）
 #include "microphone.h"        // 语音通话：mic 会话内采集
 #include <QHostInfo>
 #include <QJsonDocument>
@@ -266,6 +268,30 @@ static QString windowIconBase64(HWND hwnd)
 QString g_mediaDir;                // 媒体库目录（media_list/media_session 默认扫这里）
 QString g_shotDir;                 // 截图/存图目录（screenshot 动作与抓屏都用它）
 
+// 2026-10-30：g_ws 与噪音存证桥 sendNoiseIncident 需要**外部链接**（被 noise_cloud_transport.cpp
+// 跨 TU 调用），故移出匿名 namespace。g_ws 原先藏在匿名域内→内部链接，跨 TU 取不到；
+// sendNoiseIncident 同理，且本体必须留在 main.cpp（只有这里持有 g_ws 与信封格式）。
+QWebSocket *g_ws = nullptr;        // 全局 WS（管理端长连）；sendNoiseSample/sendNoiseAlert/sendNoiseIncident 共用
+
+// P0-2（2026-10-30）：噪音存证事件（含两张图 base64）。类型 "noise_incident"，
+// 由云端 noise-evidence.js 接收并存储（图片保留 5 分钟）。未连则静默丢弃（与遥测同口径）。
+// ⚠️ 本函数**仅**被 noise_cloud_transport.cpp（另一 TU）跨 TU 调用，本 TU 不调用；
+// 故必须文件作用域 + 外部链接。Release /Gy+/OPT:REF 会把未引用 COMDAT 丢弃 → LNK2019，
+// 用 pragma + 外部链接锚双重兜底（符号名与 LNK 报错一致 ?sendNoiseIncident@@YAXAEBVQJsonObject@@@Z）。
+#pragma comment(linker, "/include:?sendNoiseIncident@@YAXAEBVQJsonObject@@@Z")
+void sendNoiseIncident(const QJsonObject &p)
+{
+    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
+    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("noise_incident"), p));
+}
+
+// 编译期引用锚（默认外部链接的非 const 全局）：迫使编译器在本 TU 产出 sendNoiseIncident 的定义。
+// 仅对函数取地址不够——static const 锚会被 /Gy 整段丢弃（本 TU 不调用该函数，锚本身又无读取者），
+// 连带 sendNoiseIncident 的定义也被一起丢掉 → 跨 TU 调用方 LNK2019。改为外部链接的全局，
+// 编译器必须为它产出定义，从而连带产出 sendNoiseIncident。链接侧 sendNoiseIncident 由
+// noise_cloud_transport.cpp 的真实调用保活，锚本身是否存活无关紧要。
+void (*kSendNoiseIncidentAnchor)(const QJsonObject &) = &sendNoiseIncident;
+
 namespace {
 
 constexpr int kFrameIntervalMs = 2000;   // 兜底默认（现由 previewIntervalMs() 读取，可 env 覆盖）
@@ -329,7 +355,6 @@ constexpr const char *kAppVersion = "0.6.51-rc.1";
 static QString g_channel = QStringLiteral("stable");   // 供 register 上报；main 启动即解析覆盖
 QString resolvedChannel();                               // 前向声明（定义在 agentEnvPath 之后）
 
-QWebSocket *g_ws = nullptr;
 int g_backoffMs = kFirstBackoffMs;
 // 2026-10-08：本机归属的班级码（OOBE 绑定后持久化，register 时带给云端 → 管理端按班分组）。
 QString g_classCode;
@@ -398,6 +423,9 @@ int g_frameDiffMs = -1;            // 上一帧耗时（毫秒），动态帧率
 // A6（2026-10-11）：噪音检测采集器。懒加载单例 —— 没收到 noise_monitor_start 前不 new，
 // 不占麦克风（教室机麦克风可能同时被语音对讲用，见 noise_monitor.cpp 顶部注释）。
 NoiseMonitor *g_noise = nullptr;
+
+// P0-2 分层（2026-10-30）：噪音存证链路协调器。懒加载单例，由课表块构造。
+NoiseIncidentPipeline *g_noisePipeline = nullptr;
 
 // file_push 接收会话状态：一个文件一段会话（file_push 初始化 → 多次 file_chunk 追加 → file_done 收尾）
 QString g_fileRecvTarget;          // 目标文件绝对路径（file_push 时定下）
@@ -4293,6 +4321,7 @@ static void sendNoiseSample(const QJsonObject &p)
     if (g_pluginHost) g_pluginHost->forwardEvent(QStringLiteral("noise_sample"), p);   // P2：转发给订阅插件
     ModuleHost::instance()->forwardEvent(QStringLiteral("noise_sample"), p);           // 内置模块：同事件同口径
 }
+
 static void sendNoiseAlert(const QJsonObject &p)
 {
     if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
@@ -4335,19 +4364,15 @@ static void ensureNoise()
     g_noise->setAdaptive(true);
     g_noise->setAdaptiveDelta(35.0);
 
-    // ② 累计 3 次超阈 → 先发一条事件（存证与图片属 P0-2 后续批次，本批只打通链路）
-    QObject::connect(g_noise, &NoiseMonitor::thresholdReached, g_ws,
-                     [](int hits, double db) {
-        QJsonObject p;
-        p.insert(QStringLiteral("hits"), hits);
-        p.insert(QStringLiteral("db"), db);
-        p.insert(QStringLiteral("baseline"),
-                 g_noise ? g_noise->baselineDb() : 0.0);
-        p.insert(QStringLiteral("threshold"),
-                 g_noise ? g_noise->effectiveThresholdDb() : 0.0);
-        sendEvent(QStringLiteral("warn"), QStringLiteral("noise_threshold_reached"), p);
-        qInfo().noquote() << QStringLiteral("[agent-qt] 噪音累计 %1 次超阈（%2 dB）")
-                                 .arg(hits).arg(db, 0, 'f', 1);
+    // P0-2 分层（2026-10-30）：噪音样本 → 存证链路协调器。判定/计数/抓帧/上报全在
+    // src/noise/ 里，这里只做「把样本喂给协调器」的接线（纯数据搬运，无业务判断）。
+    // 旧版把「累计 3 次→发 warn 事件」直接写进 main 的 lambda 已删除 —— 计数改由
+    // NoiseIncidentService 负责、上报存证由 NoiseReporter 负责，main 不再写业务。
+    QObject::connect(g_noise, &NoiseMonitor::noiseSample, g_noisePipeline,
+                     [pipe = g_noisePipeline, mon = g_noise](double db, bool active, int seq) {
+        Q_UNUSED(seq);
+        if (pipe)
+            pipe->onSample(db, active, mon->baselineDb(), mon->effectiveThresholdDb());
     });
 }
 
@@ -8638,6 +8663,19 @@ int main(int argc, char *argv[])
         // 都会经 TimesyncDomain 的回调重设（见上方 init 块）。
         s_schedClock = clock;
         clock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
+
+        // ── P0-2 分层装配（2026-10-30）：噪音存证链路 ────────────────────────
+        // 具体类型的 new/接线收在 createNoisePipeline（src/noise/noise_assembly.cpp），
+        // 这里只持有协调器，并把「课表节次」翻译成周期 key（换节次 ⇒ 重置统计周期）。
+        g_noisePipeline = createNoisePipeline(&app);
+        QObject::connect(clock, &ScheduleClock::periodStarted, g_noisePipeline,
+            [pipe = g_noisePipeline](const QString& name, const QTime&) {
+                // 周期 key = 日期#节次名（如 2026-10-30#第一节 · 语文）；换节次即换统计周期。
+                pipe->setPeriodKey(
+                    QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")) + QStringLiteral("#") + name);
+            });
+        QObject::connect(clock, &ScheduleClock::periodEnded, g_noisePipeline,
+            [pipe = g_noisePipeline]() { pipe->setPeriodKey(QString()); });
         // 2026-10-27（G5）：把课表源交给面板域 —— 日期/课表/倒计时三面里，
         // 课表与"默认倒计时"都要读"今天上什么"。注入而不是让面板域自己 new 一个：
         // 课表必须与上下课提醒**同一份判定数据**，两份会分叉（档案换了只刷新一边）。

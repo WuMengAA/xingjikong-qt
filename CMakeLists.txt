@@ -223,6 +223,19 @@ add_executable(stelarith-agent-qt
   # P0-2 分层第 3 层：存证编排（依赖注入，可在无摄像头/无桌面环境单测）
   src/noise/noise_evidence_capture.cpp
   src/noise/noise_evidence_capture.h
+  # P0-2 分层第 3/4 层：可注入抓帧实现（摄像头）+ 上报 + 传输接口 + 协调器 + 装配工厂
+  src/noise/noise_camera_snapshot.cpp
+  src/noise/noise_camera_snapshot.h
+  src/noise/noise_transport.h
+  src/noise/noise_cloud_transport.cpp
+  src/noise/noise_cloud_transport.h
+  src/noise/noise_reporter.cpp
+  src/noise/noise_reporter.h
+  src/noise/noise_incident_pipeline.cpp
+  src/noise/noise_incident_pipeline.h
+  src/noise/noise_assembly.cpp
+  src/noise/noise_assembly.h
+  src/cloud_event_bridge.h
   src/notification_gate.cpp
   src/notification_gate.h
   src/edge_tts.cpp
@@ -280,7 +293,7 @@ add_executable(stelarith-agent-qt
 target_sources(stelarith-agent-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio/opus_codec.cpp")
 target_include_directories(stelarith-agent-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio")
 
-target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Svg opus)
+target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Concurrent Qt6::Svg opus)
 # 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
 target_link_libraries(stelarith-agent-qt PRIVATE winmm)
 # 2026-10-18：in-agent VNC Server 底层（screen_capture 用 GDI BitBlt/CreateDIBSection；input_inject 用 SendInput）
