@@ -324,6 +324,11 @@ add_executable(stelarith-agent-qt
   #   纯 Win32 只读快照、零 main 全局依赖；execute_action.cpp 经 g_actionDeps 函数指针访问（无需改动）。
   src/core/proc_inspect.cpp
   src/core/proc_inspect.h
+  # ── 调度/软控/进程策略引擎（2026-10-31 main 拆分 #14）：saveSchedules…protectedCategory + PolicyDeps 注入 ──
+  #   本域安全关键（定时关机/重启、黑名单守护、去网）；enableShutdownPriv 经 PolicyDeps 注入；
+  #   execute_action.cpp 经 g_actionDeps 函数指针访问（零改动）；snapshotProcessNames 直接 include proc_inspect。
+  src/policy/policy_engine.cpp
+  src/policy/policy_engine.h
   # ── 发布中心卡片 → 通知参数（2026-10-24 · P1）：纯映射逻辑，渲染复用 notifyFromParams ──
   src/core/BlackboardCard.cpp
   src/core/BlackboardCard.h

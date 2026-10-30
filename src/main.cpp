@@ -48,6 +48,7 @@
 #include "action/execute_action.h" // 2026-10-30 main 拆分 #10：播放时段管理/调度/软控/文件接收（ActionDeps/g_actionDeps/executeAction）
 #include "wire/frame_builder.h" // 2026-10-31 main 拆分 #12：协议 v1 信封三打包函数（makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes）
 #include "core/proc_inspect.h" // 2026-10-31 main 拆分 #13：进程/窗口只读检查（snapshotProcessNames/enumWindowsCb/visibleWindowsCached/windowTitleOf/memMbOf）
+#include "policy/policy_engine.h" // 2026-10-31 main 拆分 #14：调度/软控/进程策略（ActionDeps 共享类型 + PolicyDeps 注入）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -303,6 +304,14 @@ void sendNoiseIncident(const QJsonObject &p)
 // noise_cloud_transport.cpp 的真实调用保活，锚本身是否存活无关紧要。
 void (*kSendNoiseIncidentAnchor)(const QJsonObject &) = &sendNoiseIncident;
 QString g_uid;                 // 本机设备码（register 时定下来，心跳复用，避免每次重算）；文件作用域外部链接，供 upload 模块跨 TU 引用
+
+// ── 调度/软控策略全局：定义已迁至 src/policy/policy_engine.cpp（main 拆分 #14）──
+// main.cpp 只 extern 引用（供下方 ActionDeps 填充取地址 &g_schedFile 等；execute_action.cpp 经指针访问）。
+extern QHash<QString, QTimer *> g_schedTimerById;
+extern QString g_schedFile;
+extern SoftPolicy g_soft;
+extern QString g_softPolicyFile;
+extern QSet<quint32> g_frozenPids;
 QString agentEnvPath();                               // 前向声明（外部链接；定义见本文件末尾 namespace 之后，供 OTA 渠道持久化模块跨 TU 引用）
 // ── 自习状态全局：文件作用域（namespace 外），供 study_mode 模块 extern 复用（同 g_uid / agentEnvPath 模式）──
 static bool    g_studyOn = false;
@@ -471,10 +480,8 @@ QTimer *g_hbTimer = nullptr;   // 心跳定时器（registered 拿到参数后�
 bool enableShutdownPriv();
 
 // ══ 批次 2（全量补齐）新增的全局状态 ══
-QVector<QTimer *> g_schedTimers;   // 定时关机：每个任务一个单次定时器（触发即执行 ExitWindowsEx）
-QHash<QString, QTimer *> g_schedTimerById;   // 任务 id → 定时器（取消时必须停掉，否则到点仍会执行）
-QString g_schedFile;               // 调度持久化文件（崩溃恢复后重挂未到期任务）
-QString g_schedDir;                // 调度文件所在目录（写文件要 mkpath）
+// g_schedTimers / g_schedTimerById / g_schedFile / g_schedDir 已迁至 src/policy/policy_engine.cpp（main 拆分 #14）。
+// g_schedTimerById / g_schedFile 为外部链接：main.cpp 文件作用域 extern 声明供 ActionDeps 填充取地址。
 QString g_recvDir;                 // file_push 落盘目录
 // g_remoteControl 已迁至文件作用域（namespace 上方），供 src/notify/notify_entry 模块 extern 复用。
 // g_currentFps / g_vncSessionStartMs / g_lastVncDownMs / g_vncMegaDone 已迁至文件作用域
@@ -857,302 +864,15 @@ static bool pathInside(const QString &root, const QString &target)
 // SchedTask 已迁至 action/execute_action.h（main 拆分 #10，executeAction 迁移）。
 
 // 持久化：写失败必须报出来（否则崩溃恢复等于没做）。
-static void saveSchedules(const QVector<SchedTask> &tasks)
-{
-    if (g_schedDir.isEmpty()) return;
-    QDir().mkpath(g_schedDir);
-    QJsonArray arr;
-    for (const auto &t : tasks) {
-        QJsonObject o;
-        o.insert(QStringLiteral("id"), t.id);
-        o.insert(QStringLiteral("what"), t.what);
-        o.insert(QStringLiteral("at"), QJsonValue(t.at));
-        o.insert(QStringLiteral("createdMs"), QJsonValue(t.createdMs));
-        arr.append(o);
-    }
-    QFile f(g_schedFile);
-    if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        f.write(QJsonDocument(arr).toJson(QJsonDocument::Compact));
-        f.close();
-    } else {
-        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 调度任务持久化失败（写 %1 打不开）—— 本机重启后这批定时任务会丢").arg(g_schedFile);
-    }
-}
-
-static QVector<SchedTask> loadSchedules()
-{
-    QVector<SchedTask> out;
-    QFile f(g_schedFile);
-    if (!f.open(QIODevice::ReadOnly)) return out;   // 没文件＝还没有任何计划，正常
-    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
-    f.close();
-    if (!doc.isArray()) {
-        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 调度文件不是合法 JSON 数组：%1（已忽略，不当成功）").arg(g_schedFile);
-        return out;
-    }
-    for (const auto &v : doc.array()) {
-        const QJsonObject o = v.toObject();
-        SchedTask t;
-        t.id = o.value(QStringLiteral("id")).toString();
-        t.what = o.value(QStringLiteral("what")).toString();
-        t.at = o.value(QStringLiteral("at")).toVariant().toLongLong();
-        t.createdMs = o.value(QStringLiteral("createdMs")).toVariant().toLongLong();
-        if (!t.id.isEmpty() && !t.what.isEmpty() && t.at > 0) out.append(t);
-    }
-    return out;
-}
-
-// 到期是否**真的**关机/重启。
-//
-// 默认**不真执行**（fail-safe，不是 fail-open）：到点只记日志、任务记录保留。
-// 只有装机脚本显式把 STE_QT_ALLOW_SCHED_FIRE 设成 1 才真关机 ——
-// 本机验证环境 / 开发机上跑定时，绝不能"一测就重启自己"。
-// 这条与项目红线一致：破坏性动作只许在 TEST1 那台真触发。
-// 代价：忘了设变量的机器上"设了定时但实际没关"。所以**回执里必须把 fireAllowed 报出来**，
-// 让管理端一眼看见"这条定时当前不会真执行"，而不是静默假装成功。
-static bool schedFireAllowed()
-{
-    return qEnvironmentVariableIntValue("STE_QT_ALLOW_SCHED_FIRE") == 1;
-}
-
-// 到点回调：删掉对应任务记录 → 执行关机/重启。
-// 顺序不能反：先删记录再关机，否则下次启动又把它挂回来，变成"永远关不掉"。
-static void fireScheduledTask(const QString &taskId, const QString &what)
-{
-    qInfo("[agent-qt] ⏰ 定时任务到期 id=%s action=%s", qPrintable(taskId), qPrintable(what));
-
-    // 不允许真执行：保留任务记录（下次到期继续提醒，不静默丢弃），如实说清楚为什么没执行。
-    if (!schedFireAllowed()) {
-        qWarning("[agent-qt] ⏰ 定时任务 id=%s 已到期，但 STE_QT_ALLOW_SCHED_FIRE≠1，"
-                 "**未真执行** %s（默认保护）。装机时把该变量设为 1 才会真正关机/重启。",
-                 qPrintable(taskId), qPrintable(what));
-        return;
-    }
-
-    {
-        QVector<SchedTask> cur = loadSchedules();
-        for (int i = 0; i < cur.size(); ++i)
-            if (cur.at(i).id == taskId) { cur.removeAt(i); break; }
-        saveSchedules(cur);
-    }
-    // 单次定时器触发后不会再自己消失，手动摘掉映射（对象由 Qt 事件循环后续回收）
-    g_schedTimerById.remove(taskId);
-    enableShutdownPriv();
-    const DWORD flags = (what == QStringLiteral("reboot") ? EWX_REBOOT : EWX_SHUTDOWN) | EWX_FORCE;
-    const BOOL ok = ExitWindowsEx(flags, SHTDN_REASON_FLAG_PLANNED);
-    if (!ok)
-        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 定时 %1 的 ExitWindowsEx 失败，错误码 %2").arg(what).arg((int)GetLastError());
-    // 进程即将被系统杀掉；等一小会儿让日志刷出去
-    QCoreApplication::processEvents();
-    if (ok) QCoreApplication::exit(0);
-}
-
-// 把某个任务挂成单次定时器。timeout 传剩余毫秒。
-static void armScheduleTimer(const SchedTask &t, int delayMs)
-{
-    QTimer *tm = new QTimer();
-    tm->setParent(qApp);
-    tm->setSingleShot(true);
-    tm->start(delayMs);
-    const QString id = t.id;
-    const QString what = t.what;
-    QObject::connect(tm, &QTimer::timeout, [id, what] { fireScheduledTask(id, what); });
-    g_schedTimers.append(tm);
-    g_schedTimerById.insert(id, tm);   // 登记映射：cancel_schedule 要能精确停掉对应定时器
-}
-
-// 启动时从 %LOCALAPPDATA%\xingjikong\schedules.json 把未到期任务重新挂上。
-// 任务不能只活在内存里 —— 进程崩溃/重启后必须能自己接上，否则"定时关机"就是个摆设。
-static void reschedulePersisted()
-{
-    const QVector<SchedTask> tasks = loadSchedules();
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    int dropped = 0;
-    QVector<SchedTask> kept;
-    for (const auto &t : tasks) {
-        if (t.at <= now) { ++dropped; continue; }   // 过期未执行（当时不在线），不再补做——如实丢弃
-        kept.append(t);
-        int delay = (int)qMin<qint64>(t.at - now, 2147483647LL);   // QTimer 上限 INT_MAX
-        armScheduleTimer(t, delay);
-    }
-    saveSchedules(kept);   // 过期项清掉，文件保持干净
-    if (!tasks.isEmpty())
-        qInfo("[agent-qt] 调度恢复：载入 %d 条，重挂 %d 条，丢弃过期 %d 条",
-              (int)tasks.size(), (int)kept.size(), dropped);
-}
-
-
-/* ══════════ 软件管理（2026-10-26 · 产品笔记 P3）══════════════════════════ */
-// 黑白名单持久化 + 进程冻结/解冻 + 去网/恢复 + 黑名单禁止运行守护。
-// 口径照抄笔记③：
-//   · 白名单 = 永不禁用，且**不显示在列表**（保护系统稳定，也免得老师误关）；
-//   · 黑名单 = 标红 + 守护开启时禁止运行（终止进程）；
-//   · 系统关键 / 安全软件 / 集控自身一律不可操作（复用 kProtected* 三张硬名单）。
-// 下方「批次 1」段定义的两个护栏函数；本域要先用，前置声明（签名须与定义逐字一致）
-QString protectedCategory(const QString &exeName);
-// snapshotProcessNames 已迁至 src/core/proc_inspect.h（main 拆分 #13，见该头声明）。
-
-// SoftPolicy 已迁至 action/execute_action.h（main 拆分 #10，executeAction 迁移）。
-static QString g_softPolicyFile;                 // %LOCALAPPDATA%\xingjikong\soft-manage.json
-static SoftPolicy g_soft;
-static QTimer *g_softGuard = nullptr;
-static QSet<quint32> g_frozenPids;              // 已冻结的 pid（避免重复冻结/误解冻）
-
-/** 归一化：去掉 .exe、小写 —— 与保护名单判定、exam_mode 的口径一致。 */
-static QString softNorm(const QString &raw)
-{
-    QString s = raw.trimmed().toLower();
-    if (s.endsWith(QStringLiteral(".exe"))) s.chop(4);
-    return s;
-}
-static bool softHit(const QStringList &list, const QString &exeName)
-{
-    const QString n = softNorm(exeName);
-    if (n.isEmpty()) return false;
-    for (const QString &raw : list)
-        if (softNorm(raw) == n) return true;
-    return false;
-}
-
-static void saveSoftPolicy()
-{
-    if (g_softPolicyFile.isEmpty()) return;
-    QJsonObject o;
-    QJsonArray bl, wl;
-    for (const QString &s : g_soft.blacklist) bl.append(s);
-    for (const QString &s : g_soft.whitelist) wl.append(s);
-    o.insert(QStringLiteral("blacklist"), bl);
-    o.insert(QStringLiteral("whitelist"), wl);
-    o.insert(QStringLiteral("denyRun"), g_soft.denyRun);
-    QFile f(g_softPolicyFile);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qWarning().noquote() << QStringLiteral("[agent-qt] FAIL: 软件策略持久化失败（写 soft-manage.json 打不开）");
-        return;
-    }
-    f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
-}
-
-static void loadSoftPolicy()
-{
-    if (g_softPolicyFile.isEmpty()) return;
-    QFile f(g_softPolicyFile);
-    if (!f.open(QIODevice::ReadOnly)) return;
-    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
-    const auto fill = [](const QJsonArray &a) {
-        QStringList out;
-        for (const auto &v : a) { const QString s = v.toString().trimmed(); if (!s.isEmpty()) out.append(s); }
-        return out;
-    };
-    g_soft.blacklist = fill(o.value(QStringLiteral("blacklist")).toArray());
-    g_soft.whitelist = fill(o.value(QStringLiteral("whitelist")).toArray());
-    g_soft.denyRun = o.value(QStringLiteral("denyRun")).toBool(false);
-}
-
-/** pid → 可执行文件路径（去网要按 program 路径加防火墙规则）。 */
-static QString processPathOf(quint32 pid)
-{
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
-    if (!h) return QString();
-    WCHAR buf[MAX_PATH * 2] = {0};
-    DWORD sz = sizeof(buf) / sizeof(WCHAR);
-    const BOOL ok = QueryFullProcessImageNameW(h, 0, buf, &sz);
-    CloseHandle(h);
-    return ok ? QString::fromWCharArray(buf) : QString();
-}
-
-// 冻结/解冻：ntdll 的 NtSuspendProcess / NtResumeProcess（未文档化但长期稳定；
-// 取不到或权限不足就如实失败，不做"假装成功"）。
-typedef LONG (NTAPI *NtSuspResPtr)(HANDLE);
-static bool setProcessFrozen(quint32 pid, bool frozen)
-{
-    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    if (!ntdll) return false;
-    const char *sym = frozen ? "NtSuspendProcess" : "NtResumeProcess";
-    FARPROC fn = GetProcAddress(ntdll, sym);
-    if (!fn) return false;
-    HANDLE h = OpenProcess(PROCESS_SUSPEND_RESUME, FALSE, (DWORD)pid);
-    if (!h) return false;
-    const LONG st = reinterpret_cast<NtSuspResPtr>(fn)(h);
-    CloseHandle(h);
-    return st >= 0;
-}
-
-// 去网 / 恢复：Windows 防火墙**出站**规则（netsh advfirewall）。
-// ⚠️ 需管理员权限 —— 权限不足时 netsh 非零退出，如实回 failed，不静默装成功。
-static bool setNetBlocked(const QString &exePath, bool block)
-{
-    if (exePath.isEmpty()) return false;
-    const QString rule = QStringLiteral("StelarithDenyNet_") + QFileInfo(exePath).completeBaseName();
-    QStringList args;
-    if (block) {
-        args << QStringLiteral("advfirewall") << QStringLiteral("firewall") << QStringLiteral("add")
-             << QStringLiteral("rule") << (QStringLiteral("name=") + rule)
-             << QStringLiteral("dir=out") << QStringLiteral("action=block")
-             << (QStringLiteral("program=") + exePath);
-    } else {
-        args << QStringLiteral("advfirewall") << QStringLiteral("firewall") << QStringLiteral("delete")
-             << QStringLiteral("rule") << (QStringLiteral("name=") + rule);
-    }
-    QProcess p;
-    p.start(QStringLiteral("netsh"), args);
-    if (!p.waitForFinished(8000)) return false;
-    return p.exitCode() == 0;
-}
-
-/** 黑名单守护：轮询终止命中黑名单的进程（保护名单优先，绝不动系统/安全/自身）。 */
-static void softGuardTick()
-{
-    if (!g_soft.denyRun || g_soft.blacklist.isEmpty()) return;
-    const QHash<quint32, QString> names = snapshotProcessNames();
-    for (auto it = names.constBegin(); it != names.constEnd(); ++it) {
-        const QString exe = it.value();
-        if (exe.isEmpty()) continue;
-        if (!protectedCategory(exe).isEmpty()) continue;      // 护栏：受保护一律跳过
-        if (!softHit(g_soft.blacklist, exe)) continue;
-        HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)it.key());
-        if (!h) continue;
-        TerminateProcess(h, 1);
-        CloseHandle(h);
-        qInfo("[agent-qt] 软件管控：已终止黑名单进程 %s (pid=%u)", qPrintable(exe), (unsigned)it.key());
-    }
-}
-
-/* ══════════ 批次 1：教室刚需动作（口径照抄 Rust process.rs / engine.rs，别重新发明） ══════════ */
-
-// 三张**硬禁止名单**：写死在代码里，不可配置、不可被下发指令绕过（Rust 版原话）。
-// 判定口径（照抄 Rust `is_protected`）：
-//   集控自身 —— 去掉 .exe 后 **等于或以它开头**
-//   系统关键 —— 去掉 .exe 后 **精确等于**
-//   安全软件 —— 去掉 .exe 后 **包含**即命中（360/火绒/卡巴的变体太多）
-const char *const kProtectedSelf[] = { "classisland", "xingjikong", "stelarith-agent", "stelarith", nullptr };
-const char *const kProtectedSystem[] = {
-    "system", "idle", "csrss", "wininit", "winlogon", "lsass", "smss", "services", "svchost",
-    "explorer", "dwm", "fontdrvhost", "ctfmon", "runtimebroker", "taskhostw", "searchindexer",
-    "spoolsv", "audiodg", "conhost", "wudfhost", "sihost", "shellhost", "startmenuexperiencehost",
-    "searchhost", "textinputhost", "applicationframehost", "systemsettings", "lockapp", nullptr
-};
-const char *const kProtectedSecurity[] = {
-    "360", "qhsafe", "360safe", "360tray", "360sd", "huorong", "hrsword", "usysdiag", "hipstray",
-    "msmpeng", "nissrv", "mssense", "securityhealth", "defender", "smartscreen", "avp", "avguard",
-    "kxfed", "kxetray", "kxe", "qqpcrtp", "qqpctray", "baidusd", "bdagent", "ksafe", "kxescore",
-    "kws", "avast", "avg", "avira", "norton", "mcafee", "kaspersky", "eset", "ekrn", "bdservice",
-    "safemon", "rsmain", "rsnetsvr", "wrar", "trojan", "hips", nullptr
-};
-
-/** 受保护就返回人话类别（写进回执 error），可安全关闭返回空串。 */
-QString protectedCategory(const QString &exeName)
-{
-    QString base = exeName.toLower();
-    if (base.endsWith(QStringLiteral(".exe"))) base.chop(4);
-    for (const char *const *p = kProtectedSelf; *p; ++p)
-        if (base == QLatin1String(*p) || base.startsWith(QLatin1String(*p)))
-            return QStringLiteral("集控自身的组成程序");
-    for (const char *const *p = kProtectedSystem; *p; ++p)
-        if (base == QLatin1String(*p)) return QStringLiteral("系统关键进程");
-    for (const char *const *p = kProtectedSecurity; *p; ++p)
-        if (base.contains(QLatin1String(*p))) return QStringLiteral("安全软件");
-    return QString();
-}
+/* ---------- 调度 / 软控 / 进程策略 ----------
+ * 调度（定时关机/重启）：saveSchedules/loadSchedules/schedFireAllowed/fireScheduledTask/
+ *   armScheduleTimer/reschedulePersisted + g_schedFile/g_schedDir/g_schedTimerById/g_schedTimers；
+ * 软控（黑白名单/冻结/去网/守护）：softNorm/softHit/saveSoftPolicy/loadSoftPolicy/
+ *   setProcessFrozen/setNetBlocked/softGuardTick + g_softPolicyFile/g_soft/g_softGuard/g_frozenPids；
+ * 保护名单：kProtectedSelf/System/Security + protectedCategory。
+ * 已迁至 src/policy/policy_engine.{h,cpp}（main 拆分 #14）。enableShutdownPriv 经 PolicyDeps 注入；
+ * snapshotProcessNames 见 src/core/proc_inspect.h（#13）。
+ */
 
 /** 枚举所有进程 pid → exe 名。只读快照，不打开任何进程句柄。 */
 /* ---------- 进程/窗口只读检查 ----------
@@ -4395,6 +4115,9 @@ int main(int argc, char *argv[])
         &enumWindowsCb,
     };
     g_actionDeps = &s_actionDeps;
+    // 调度/软控策略域注入（main 拆分 #14）：enableShutdownPriv 定义仍在匿名域（内部链接），
+    // main() 同 TU 取地址注入 PolicyDeps（execute_action.cpp 经 g_actionDeps 函数指针访问，零改动）。
+    policyInit(PolicyDeps{ &enableShutdownPriv });
     if (!g_shotDir.isEmpty()) QDir().mkpath(g_shotDir);
     g_logPath = qEnvironmentVariable("STE_QT_LOG", dataDir + QStringLiteral("/agent-qt.log"));
 
@@ -4561,14 +4284,14 @@ int main(int argc, char *argv[])
     //   · g_schedFile 为空 → loadSchedules() 必然读空 → 重启后定时全丢；
     //   · g_mediaDir 为空 → media_list 默认目录是空串 → 恒 failed，media_delete 的越界校验也形同虚设。
     // 这就是"假成功"：动作报了 done，机器却什么都没记住。这里一次性把真路径定死。
-    g_schedDir = envOr("STE_QT_SCHED_DIR", dataDir + QStringLiteral("/sched"));
-    QDir().mkpath(g_schedDir);
-    g_schedFile = g_schedDir + QStringLiteral("/schedules.json");
-    AlarmDomain::init(g_schedDir + QStringLiteral("/alarms.json"), speakText);   // 闹钟与开关机同目录（2026-10-26 P1）
+    const QString schedDir = envOr("STE_QT_SCHED_DIR", dataDir + QStringLiteral("/sched"));
+    QDir().mkpath(schedDir);
+    policySetSchedDir(schedDir);
+    AlarmDomain::init(schedDir + QStringLiteral("/alarms.json"), speakText);   // 闹钟与开关机同目录（2026-10-26 P1）
     AlarmDomain::rescheduleAlarms();                                          // 崩溃/重启后重挂闹钟
     // 2026-10-27 第六刀：定时通知域 —— 注入触发回调（转 islandShow，带渠道标签）。
     // 不做成域内直接调通知渲染：底层域不反向依赖主文件（与 speakText 注入同款）。
-    NotifyDomain::init(g_schedDir + QStringLiteral("/notifies.json"),
+    NotifyDomain::init(schedDir + QStringLiteral("/notifies.json"),
                        [](const NotifyDomain::NotifyTask &t) {
         if (!t.channel.isEmpty())
             IslandOverlay::instance()->setChannelForNext(t.channel);
@@ -4614,16 +4337,7 @@ int main(int argc, char *argv[])
     });
 
     // ── 软件管理策略（2026-10-26 P3）：黑白名单 + 黑名单守护 ──
-    g_softPolicyFile = dataDir + QStringLiteral("/soft-manage.json");
-    loadSoftPolicy();
-    g_softGuard = new QTimer(&app);
-    g_softGuard->setInterval(3000);                              // 3 秒一轮，命中黑名单即终止
-    QObject::connect(g_softGuard, &QTimer::timeout, [] { softGuardTick(); });
-    g_softGuard->start();
-    if (!g_soft.blacklist.isEmpty() || !g_soft.whitelist.isEmpty())
-        qInfo("[agent-qt] 软件策略已载入：黑 %d / 白 %d / 守护=%s",
-              (int)g_soft.blacklist.size(), (int)g_soft.whitelist.size(),
-              g_soft.denyRun ? "开" : "关");
+    policyStart(dataDir + QStringLiteral("/soft-manage.json"), &app);
     g_mediaDir = envOr("STE_QT_MEDIA_DIR", dataDir + QStringLiteral("/media"));
     QDir().mkpath(g_mediaDir);
 
