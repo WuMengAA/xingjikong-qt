@@ -291,6 +291,12 @@ add_executable(stelarith-agent-qt
   #   buildStudyLogText；dataRoot() 复用 p3_log（#6a），openFolder 与 main 侧共用。
   src/p3log/p3_reader.cpp
   src/p3log/p3_reader.h
+  # ── 远控会话收口 + 泄漏看门狗（2026-10-30 main 拆分：#8 迁出）──
+  #   stopRemoteControlSession/reapRemoteControlIfStale/saveVncAccessLocally(+vncAccessPath)；
+  #   远控会话状态全局（g_currentFps/g_vncSessionStartMs/g_lastVncDownMs/g_vncMegaDone）
+  #   提升文件作用域外部链接供本模块 extern 复用（同 g_uid/agentEnvPath 模式）。
+  src/remote/remote_control.cpp
+  src/remote/remote_control.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──

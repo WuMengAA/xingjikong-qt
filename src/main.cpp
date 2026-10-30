@@ -43,6 +43,7 @@
 #include "core/BlackboardCard.h" // 2026-10-24 P1：发布中心卡片 → 通知参数（纯映射，可单测）
 #include "ota/channel_persistence.h" // 2026-10-30 main 拆分：OTA 灰度渠道持久化迁出
 #include "ota/ota_state.h"  // 2026-10-30 OTA 状态机/健康快照迁出
+#include "remote/remote_control.h" // 2026-10-30 远控会话收口 + 泄漏看门狗迁出
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -317,6 +318,11 @@ LoopReminder g_loopReminder;                 // 循环提醒（无 UI，纯逻�
 NotificationGate g_notifGate;                // 通知门控（考试模式禁通知）
 bool g_remoteControl = false;      // remote_control_start/stop 的真实会话状态
 QSystemTrayIcon *g_tray = nullptr;
+// ── 远控会话状态：文件作用域（namespace 外），供 src/remote/remote_control 模块 extern 复用 ──
+int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
+qint64 g_vncSessionStartMs = 0;    // 本次远控会话起服时刻（首帧宽限 + 看门狗起步宽限都用它）
+qint64 g_lastVncDownMs = 0;        // 最近一次收到管理端 vnc-data down 字节（键鼠/请求/5s 保活）
+bool g_vncMegaDone = false;        // 本会话是否已豁免过一个 ≥200KB 整屏帧（一次性）
 // sendActionReceipt：文件作用域前向声明（定义见本文件 namespace 之后），供 notify_entry 模块 extern 复用。
 void sendActionReceipt(const QString &id, const QString &action, const QString &result,
                        const QString &error = QString(), const QJsonObject &data = QJsonObject());
@@ -450,11 +456,8 @@ QString g_schedFile;               // 调度持久化文件（崩溃恢复后重
 QString g_schedDir;                // 调度文件所在目录（写文件要 mkpath）
 QString g_recvDir;                 // file_push 落盘目录
 // g_remoteControl 已迁至文件作用域（namespace 上方），供 src/notify/notify_entry 模块 extern 复用。
-int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
-// ── 远控上行治理配套旗标（2026-10-19 修复①③，见下方背压闸与看门狗）──────────
-qint64 g_vncSessionStartMs = 0;    // 本次远控会话起服时刻（首帧宽限 + 看门狗起步宽限都用它）
-qint64 g_lastVncDownMs = 0;        // 最近一次收到管理端 vnc-data down 字节（键鼠/请求/5s 保活）
-bool g_vncMegaDone = false;        // 本会话是否已豁免过一个 ≥200KB 整屏帧（一次性）
+// g_currentFps / g_vncSessionStartMs / g_lastVncDownMs / g_vncMegaDone 已迁至文件作用域
+//（namespace 上方），供 src/remote/remote_control 模块 extern 复用。
 int g_frameDiffMs = -1;            // 上一帧耗时（毫秒），动态帧率控制器用它判断画面是否稳定
 
 // A6（2026-10-11）：噪音检测采集器。懒加载单例 —— 没收到 noise_monitor_start 前不 new，
@@ -1644,33 +1647,7 @@ static void loadDeviceRole()
     qInfo("[agent-qt] 已载入设备用途：广播机");
 }
 
-// 2026-10-26：被控端访问密码本地持久化（云端统一设置/修改，明文经已鉴权设备 WS 下发到本机）。
-// 真正的访问闸门在云端中继处；本机落盘仅为"被控端持有自己的访问密码"与未来本地加强。
-static QString vncAccessPath()
-{
-    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/vnc_access.txt");
-}
-/** 落盘访问密码。enabled=false → 清空文件（等于关闭）；enabled=true → 写明文（agent 本机即被控端本体，
- *  且云端已在校验通过后下发，这里不再二次散列，避免与云端 verifier 口径耦合）。 */
-static void saveVncAccessLocally(bool enabled, const QString &password)
-{
-    QFile f(vncAccessPath());
-    if (!enabled) {
-        if (f.exists() && !f.remove())
-            qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法清除访问密码文件：%1").arg(f.errorString());
-        else
-            qInfo("[agent-qt] 已清除本地访问密码");
-        return;
-    }
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法保存访问密码：%1").arg(f.errorString());
-        return;
-    }
-    f.write(QStringLiteral("enabled=1\npassword=%1\n").arg(password).toUtf8());
-    f.close();
-    qInfo("[agent-qt] 已保存本地访问密码（enabled=1）");
-}
-
+// saveVncAccessLocally / vncAccessPath 已迁至 src/remote/remote_control（main 拆分 #8）。
 /* ══════════ 班级绑定（2026-10-04：OOBE 里消费绑定码，把本机绑到班级） ══════════
  * 背景：管理员在管理面板生成一次性、绑班级的接入码（云端 6 位票）；教室端在配置向导里
  * 填进去，保存时调云端 `POST /api/device/activate?code=…&uid=…` 消费，
@@ -3767,10 +3744,8 @@ static void ensureNoise()
 // ⚠️ 2026-10-23（§10 第四刀地基）：remainingMsInWindow 已下沉到 src/media/MediaSession。
 
 
-// 修复③（2026-10-19）：定义在 6082 起，被 executeAction 的 remote_control_stop
-// 分支先用到 ⇒ 此处前向声明（同 TU 静态函数，声明后可后定义）。
-static void stopRemoteControlSession(const QString &reason);
-static void reapRemoteControlIfStale();
+// stopRemoteControlSession / reapRemoteControlIfStale 已迁至 src/remote/remote_control
+//（main 拆分 #8），经 remote_control.h 声明可见。
 
 ExecOut executeAction(const QString &action, const QJsonObject &params)
 {
@@ -5788,53 +5763,8 @@ static void openTerminal(const QString &id, const QJsonObject &params)
                       QStringLiteral("本机已允许，终端会话已开"));
 }
 
-// ── 远控会话收口（2026-10-19 修复③）────────────────────────────────────────
-// remote_control_stop 动作与泄漏看门狗共用同一段清理：置位、解冻灵动岛、
-// 停桥、停服、恢复帧率。抽成函数是因为以前"停会话"只此一条路径（管理端
-// 自觉发 stop），而管理端直接离开（关窗/切页/进程崩/网络分区）时没有任何
-// 人调它 ⇒ g_remoteControl 永真、灵动岛长期冻结、VNC server 空转烧 CPU
-// （2026-10-19 实证：泄漏近 30 分钟，只能重启 agent 收口）。
-// 幂等：无会话时早退（stop 动作据此仍要返回 failed，见调用方）。
-static void stopRemoteControlSession(const QString &reason)
-{
-    if (!g_remoteControl) return;
-    const int was = g_currentFps;
-    g_remoteControl = false;
-    // 2026-10-21（审查 #5）：setSuppressed(false) 只清标志不恢复岛 —— 远控开始时
-    //   hide() 掉了岛，结束不补 ensureIdle() 的话顶部空闲半胶囊就丢了（要等下一次
-    //   通知才回来）。ensureIdle 内部受 m_idleEnabled 约束 + isVisible 判据（岛上
-    //   正显示内容时不会把内容顶成空闲）。
-    IslandOverlay::setSuppressed(false);   // 2026-10-19：解除岛冻结（远控结束）
-    IslandOverlay::instance()->ensureIdle();
-#ifdef STE_USE_LIBVNCSERVER
-    // 统一方案 A：停整条桥再销毁 in-agent VNC Server（RFB 源）。
-    VncBridge::instance().stop();
-    VncServer::instance().stop();
-#endif
-    g_currentFps = 5;   // 恢复默认
-    qInfo("[agent-qt] 🟢 远控会话关闭（%s），抓屏帧率恢复 5 fps（原 %d）",
-          qPrintable(reason), was);
-}
-
-// ── 远控会话泄漏看门狗（2026-10-19 修复③）──────────────────────────────────
-// 判据：管理端 VncClient 每 5s 经 RFB 发一个 1x1 增量 FramebufferUpdateRequest
-//   （无害探活），字节经 vnc-data down 到达本端即刷新 g_lastVncDownMs；
-//   老师纯观看不碰键鼠时也有这个流量，所以"在看"与"已离开"可区分。
-// 口径：会话起步 30s 内不判（留给 DXGI 首帧 2s 黑帧预算 + RFB 握手 +
-//   首个保活）；之后超过 25s（保活周期 5s 的 5 倍）没收过任何 down 字节
-//   ⇒ 判管理端已离开，自动收口。
-// 误杀代价可控（老师重新选中设备即重建会话）；漏杀代价是灵动岛永久冻结
-//   + VNC server 空转，不可接受。搭心跳车执行，零新定时器。
-static void reapRemoteControlIfStale()
-{
-    if (!g_remoteControl) return;
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (g_vncSessionStartMs > 0 && now - g_vncSessionStartMs < 30000) return;   // 起步宽限
-    if (g_lastVncDownMs > 0 && now - g_lastVncDownMs <= 25000) return;          // 保活正常
-    qWarning("[agent-qt] [vnc] ⚠️ 远控会话管理端保活超时（down %s）—— 判定已离开，自动收口",
-             g_lastVncDownMs > 0 ? "超过 25s 未到" : "从未收到（会话起步 30s 后仍无）");
-    stopRemoteControlSession(QStringLiteral("泄漏看门狗"));
-}
+// stopRemoteControlSession / reapRemoteControlIfStale 已迁至 src/remote/remote_control
+//（main 拆分 #8），经 remote_control.h 声明可见。
 
 void handleControlText(const QString &text)
 {
