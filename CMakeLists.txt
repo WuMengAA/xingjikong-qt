@@ -215,6 +215,11 @@ add_executable(stelarith-agent-qt
   src/noise/noise_incident.h
   src/noise/noise_incident_service.cpp
   src/noise/noise_incident_service.h
+  # P0-2 分层第 2/3 层：值对象契约 + 可注入抓帧接口 + 桌面实现
+  src/noise/noise_sample.h
+  src/noise/noise_capture_sources.h
+  src/noise/noise_desktop_snapshot.cpp
+  src/noise/noise_desktop_snapshot.h
   src/notification_gate.cpp
   src/notification_gate.h
   src/edge_tts.cpp
