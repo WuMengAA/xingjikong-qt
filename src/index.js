@@ -179,14 +179,16 @@ function snd(ws, type, payload, id = '') {
   }
 }
 
-/** 发一条协议错误；code 里标了要关连接的，发完就关（并写明原因，不许静默断）。 */
-function sndErr(ws, code, detail) {
+/** 发一条协议错误；code 里标了要关连接的，发完就关（并写明原因，不许静默断）。
+ * 2026-10-30 专修#1：新增可选 extra（如 {ip}），让握手失败打点带溯源信息。
+ */
+function sndErr(ws, code, detail, extra = {}) {
   const p = errorPayload(code, detail);       // 数字码 ecode + 语义码 code（设计文档第七部分）
   snd(ws, 'error', p);                        // v1：统一走 error 通道
   if (ws.__v1 !== true) snd(ws, p.code, p);   // 旧客户端：额外补一条它认得的类型，避免它看不懂 error
   const e = ERR[code];
   if (e?.close) { try { ws.close(e.close, code); } catch { /* 已断就算了 */ } }
-  pushEvent('warn', `协议错误 ${p.ecode || code}`, { detail: detail || p.message || '' });
+  pushEvent('warn', `协议错误 ${p.ecode || code}`, { ...extra, detail: detail || p.message || '' });
 }
 import {
   pushEvent, markConnected, markDisconnected, addFrame, setRecentFrame,
@@ -2669,12 +2671,16 @@ setInterval(() => {
 // CIMS 课表周期同步（2026-10-17）：CIMS_ENABLED=true 且 CIMS_PULL_INTERVAL_SEC>0 才启。
 startCimsScheduler();
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   let registered = false;
   let uid = null;
+  // 2026-10-30 专修#1：握手失败打点带源 IP —— 归档日志 19h 内 BAD_TOKEN 21423 +
+  // BAD_JSON 16605、频率稳定约每 2.6s 一次，此前事件不带 IP，无法定位是谁在打。
+  // upgrade 事件已绑定 req（见 2077 行 emit('connection', ws, req)），这里取 remoteAddress。
+  const rip = clientIp(req);
   const deadline = setTimeout(() => {
     if (!registered) {
-      pushEvent('error', '握手超时：连上后没发 register，已踢掉', { uid: uid || '(未知)' });
+      pushEvent('error', '握手超时：连上后没发 register，已踢掉', { uid: uid || '(未知)', ip: rip });
       ws.close(4002, 'handshake timeout');
     }
   }, HANDSHAKE_TIMEOUT_MS);
@@ -2683,13 +2689,23 @@ wss.on('connection', (ws) => {
 
   ws.on('message', (data, isBinary) => {
     if (!registered) {
+      // 握手风暴限流（2026-10-30 专修#1）：未注册连接没有 uid 可锚定，按源 IP 限流，
+      // 复用 bind-qr 的 hitRate（60 次/60s —— 正常设备注册 1-2 条即转 registered，
+      // 永不触线；只有反复失败的坏客户端/扫描器会累计）。防的是「瞬时洪水」，
+      // 慢速匀速探测（23/min）由下方带 IP 打点 + registry.hardClose 兜底，不残留。
+      if (!hitRate(`wshs:${rip}`, 60, 60_000)) {
+        finish();
+        pushEvent('warn', '握手风暴限流：同 IP 未注册消息过密，已强制断开', { ip: rip });
+        try { ws.terminate(); } catch { /* 已经断了，不必再报 */ }
+        return;
+      }
       // 握手：只认 register（v1 信封或旧扁平格式都行），不是就明确拒绝，不重置超时
       const p = parseIncoming(data.toString('utf8'));
-      if (!p.ok) { finish(); sndErr(ws, p.code, p.detail); return; }
+      if (!p.ok) { finish(); sndErr(ws, p.code, p.detail, { ip: rip }); return; }
       if (!p.legacy) ws.__v1 = true;
       if (p.type !== 'register') {
         finish();
-        sndErr(ws, 'AUTH_REQUIRED', `握手期只认 register，收到的是 ${p.type}`);
+        sndErr(ws, 'AUTH_REQUIRED', `握手期只认 register，收到的是 ${p.type}`, { ip: rip });
         return;
       }
       const { uid: ruid, token, version } = p.payload;
@@ -2713,8 +2729,8 @@ wss.on('connection', (ws) => {
       if (!authedBy) {
         if (!safeEqual(token, DEV_TOKEN)) {
           finish();
-          pushEvent('error', '设备令牌校验失败，连接已拒绝', { uid: String(ruid ?? '') });
-          sndErr(ws, 'BAD_TOKEN', token ? '票据与静态令牌均校验失败' : '未提供令牌或设备票');
+          pushEvent('error', '设备令牌校验失败，连接已拒绝', { uid: String(ruid ?? ''), ip: rip });
+          sndErr(ws, 'BAD_TOKEN', token ? '票据与静态令牌均校验失败' : '未提供令牌或设备票', { ip: rip });
           return;
         }
         authedBy = 'static';

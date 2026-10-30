@@ -306,6 +306,24 @@ export function normalizeDeviceRole(v) {
 }
 
 /**
+ * 踢人专用：优雅 close 失败不挂半开残留（2026-10-30 Win7 专修#1 实证）。
+ * 背景：sweepStale / markConnected 只用 ws.close()（发送 close 帧、等对端回），
+ * 但对**不回应关闭帧**的对端（Win7 老系统/网络被掐），close 永远停在握手阶段，
+ * 底层 TCP 仍活着 ⇒ 消息继续进来，而 devices 条目已删 ⇒ 「收到帧但设备不在表里」
+ * 持续刷屏（归档日志 556 次）+ 重连时旧连接残留（57 次「同 uid 重连踢旧」）。
+ * 修复：close() 后 30s 未真正关闭就 terminate()（立刻断 TCP，不留僵尸）。
+ */
+function hardClose(ws, code, reason) {
+  try { ws.close(code, reason); } catch { /* 已经断了，不必再报 */ }
+  const t = setTimeout(() => {
+    try {
+      if (ws.readyState !== ws.CLOSED) ws.terminate();
+    } catch { /* 已经断了，不必再报 */ }
+  }, 30_000);
+  if (typeof t === 'object' && t.unref) t.unref();   // 不阻止进程退出
+}
+
+/**
  * @param caps 被控端 register 里的能力对象（含 actions 指令全集），可空（老版本被控端不带）。
  * @param meta 设备展示元数据 { name?, classCode?, className? }，来自 register 的辅助字段；
  *             不传则沿用已知设备表里存的旧值（重连不改名）。
@@ -314,7 +332,7 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
   const old = devices.get(uid);
   if (old && old.ws && old.ws !== ws) {
     pushEvent('warn', '同 uid 重连，踢掉旧连接', { uid, reason: 'duplicate' });
-    try { old.ws.close(4001, 'superseded'); } catch { /* 已断就算了，别静默吞掉别的 */ }
+    hardClose(old.ws, 4001, 'superseded');
   }
   const now = Date.now();
   const isNewUid = !knownDevices.has(uid);   // 只有新 uid 才需要过上限检查（重连不必）
@@ -459,7 +477,7 @@ export function sweepStale() {
       frames: d.framesIn,
       heartbeats: d.heartbeatsIn,
     });
-    try { if (d.ws) d.ws.close(4000, 'heartbeat timeout'); } catch { /* 已经断了，不必再报 */ }
+    try { if (d.ws) hardClose(d.ws, 4000, 'heartbeat timeout'); } catch { /* 已经断了，不必再报 */ }
     // 离线表保留（根因修复）：只从在线表移除，knownDevices 的 lastSeen 已是最新。
     devices.delete(uid);
   }
