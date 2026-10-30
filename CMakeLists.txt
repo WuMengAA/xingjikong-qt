@@ -220,6 +220,9 @@ add_executable(stelarith-agent-qt
   src/noise/noise_capture_sources.h
   src/noise/noise_desktop_snapshot.cpp
   src/noise/noise_desktop_snapshot.h
+  # P0-2 分层第 3 层：存证编排（依赖注入，可在无摄像头/无桌面环境单测）
+  src/noise/noise_evidence_capture.cpp
+  src/noise/noise_evidence_capture.h
   src/notification_gate.cpp
   src/notification_gate.h
   src/edge_tts.cpp
