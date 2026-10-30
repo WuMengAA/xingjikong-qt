@@ -50,9 +50,9 @@ Popup {
     closePolicy: Popup.CloseOnEscape
 
     background: Rectangle {
-        color: Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.cream : "#141414")
-        radius: Md3 ? Theme.radius.lg : (dlg.theme ? dlg.theme.rCard : 12)
-        border.color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.stroke : "#242424")
+        color: Theme.color.surface
+        radius: Theme.radius.lg
+        border.color: Theme.color.surfaceVariant
         border.width: 1
     }
 
@@ -64,18 +64,18 @@ Popup {
         signal tapped()
         width: 88
         height: 28
-        radius: Md3 ? Theme.radius.md : (dlg.theme ? dlg.theme.rCtrl : 8)
+        radius: Theme.radius.md
         color: seg.active
-               ? (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.inv : "#F0F0F0"))
-               : (segHover.containsMouse ? (Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.hover : "#1E1E1E")) : "transparent")
-        border.color: seg.active ? "transparent" : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.stroke : "#242424"))
+               ? (Theme.color.primary)
+               : (segHover.containsMouse ? (Theme.color.surface) : "transparent")
+        border.color: seg.active ? "transparent" : (Theme.color.textSecondary)
         border.width: 1
         Text {
             anchors.centerIn: parent
             text: seg.label
             color: seg.active
-                   ? (Md3 ? Theme.color.primaryForeground : (dlg.theme ? dlg.theme.win : "#0A0A0A"))
-                   : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.op : "#C8C8C8"))
+                   ? (Theme.color.primaryForeground)
+                   : (Theme.color.textSecondary)
             font.pixelSize: 12
             font.weight: seg.active ? Font.Medium : Font.Normal
         }
@@ -92,15 +92,15 @@ Popup {
         id: tick
         property bool checked: false
         width: 16; height: 16; radius: 4
-        color: tick.checked ? (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.inv : "#F0F0F0")) : "transparent"
-        border.color: tick.checked ? (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.inv : "#F0F0F0"))
-                                   : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.stroke : "#242424"))
+        color: tick.checked ? (Theme.color.primary) : "transparent"
+        border.color: tick.checked ? (Theme.color.primary)
+                                   : (Theme.color.textSecondary)
         border.width: 1
         SvgIcon {
             anchors.centerIn: parent
             visible: tick.checked
             name: "check"
-            tint: Md3 ? Theme.color.primaryForeground : (dlg.theme ? dlg.theme.win : "#0A0A0A")
+            tint: Theme.color.primaryForeground
             width: 11; height: 11
         }
     }
@@ -119,14 +119,14 @@ Popup {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: row.label
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.op : "#C8C8C8")
+                color: Theme.color.textSecondary
                 font.pixelSize: 12
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: row.help !== ""
                 text: row.help
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
         }
@@ -147,7 +147,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "闹钟"
-                color: Md3 ? Theme.color.textPrimary : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                color: Theme.color.textPrimary
                 font.pixelSize: 14
                 font.weight: Font.Medium
             }
@@ -155,7 +155,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 62
                 text: "定时响铃 · 设备本地，重启不丢"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             SvgIcon {
@@ -163,7 +163,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 name: "x"
-                tint: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                tint: Theme.color.textSecondary
                 width: 14; height: 14
                 MouseArea {
                     anchors.fill: parent
@@ -175,7 +175,7 @@ Popup {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: 1
-                color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.line : "#161616")
+                color: Theme.color.surfaceVariant
             }
         }
 
@@ -187,7 +187,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "时间"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             InputField {
@@ -204,7 +204,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 136
                 text: ":"
-                color: Md3 ? Theme.color.textPrimary : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                color: Theme.color.textPrimary
                 font.pixelSize: 14
             }
             InputField {
@@ -221,7 +221,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 214
                 text: "24 小时制；已过今天 → 明天同刻响"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
         }
@@ -234,7 +234,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "重复"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             Row {
@@ -291,7 +291,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 150
                 text: dlg.timeOk ? "" : "先填时间（时 0-23 · 分 0-59）"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             Text {
@@ -299,7 +299,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 text: "已达 " + dlg.alarms.length + " 个"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
         }
@@ -312,14 +312,14 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "本机已设闹钟"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             Rectangle {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: 1
-                color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.line : "#161616")
+                color: Theme.color.surfaceVariant
             }
         }
 
@@ -334,8 +334,8 @@ Popup {
                 width: ListView.width - 24
                 height: 34
                 x: 12
-                radius: Md3 ? Theme.radius.md : (dlg.theme ? dlg.theme.rCtrl : 9)
-                color: rowHover.containsMouse ? (Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.hover : "#1E1E1E")) : "transparent"
+                radius: Theme.radius.md
+                color: rowHover.containsMouse ? (Theme.color.surface) : "transparent"
 
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
@@ -349,7 +349,7 @@ Popup {
                                    : "星期" + d.join("/")
                         return "⏰ " + modelData.time + " · " + rep
                     }
-                    color: Md3 ? Theme.color.textPrimary : (dlg.theme ? dlg.theme.op : "#C8C8C8")
+                    color: Theme.color.textPrimary
                     font.pixelSize: 12
                 }
                 Text {
@@ -358,7 +358,7 @@ Popup {
                     width: parent.width - 330
                     elide: Text.ElideMiddle
                     text: modelData.text ? ("播报：" + modelData.text) : ""
-                    color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                    color: Theme.color.textSecondary
                     font.pixelSize: 11
                 }
                 Text {
@@ -366,7 +366,7 @@ Popup {
                     anchors.right: parent.right
                     anchors.rightMargin: 56
                     text: modelData.nextAt ? ("下次 " + String(modelData.nextAt).replace("T", " ").slice(5, 16)) : "已到"
-                    color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                    color: Theme.color.textSecondary
                     font.pixelSize: 11
                 }
                 Rectangle {
@@ -375,12 +375,12 @@ Popup {
                     anchors.right: parent.right
                     anchors.rightMargin: 10
                     width: 40; height: 24
-                    radius: Md3 ? Theme.radius.md : 6
-                    color: delHover.containsMouse ? (Md3 ? Theme.color.destructive : "transparent") : "transparent"
+                    radius: Theme.radius.md
+                    color: delHover.containsMouse ? (Theme.color.destructive) : "transparent"
                     Text {
                         anchors.centerIn: parent
                         text: "删"
-                        color: Md3 ? Theme.color.destructive : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                        color: Theme.color.destructive
                         font.pixelSize: 11
                     }
                     MouseArea {
@@ -407,7 +407,7 @@ Popup {
                 Text {
                     anchors.centerIn: parent
                     text: "还没挂闹钟 —— 上面填个时间点「挂闹钟」"
-                    color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                    color: Theme.color.textSecondary
                     font.pixelSize: 11
                 }
             }
@@ -421,7 +421,7 @@ Popup {
                 anchors.top: parent.top
                 width: parent.width
                 height: 1
-                color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.line : "#161616")
+                color: Theme.color.surfaceVariant
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -429,7 +429,7 @@ Popup {
                 width: parent.width - 36
                 wrapMode: Text.WordWrap
                 lineHeight: 1.35
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
                 text: "闹钟存在设备本地（\"%LOCALAPPDATA%\\xingjikong\\alarms.json\"），进程重启不丢；"
                       + "到点系统蜂鸣三声，勾了播报就 TTS 读文字，勾了锁屏就锁住屏幕。"

@@ -78,9 +78,9 @@ Popup {
     closePolicy: Popup.CloseOnEscape
 
     background: Rectangle {
-        color: Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.cream : "#141414")
-        radius: Md3 ? Theme.radius.lg : (dlg.theme ? dlg.theme.rCard : 12)
-        border.color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.stroke : "#242424")
+        color: Theme.color.surface
+        radius: Theme.radius.lg
+        border.color: Theme.color.surfaceVariant
         border.width: 1
     }
 
@@ -92,16 +92,16 @@ Popup {
         width: 16
         height: 16
         radius: 4
-        color: tick.checked ? (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.inv : "#F0F0F0")) : "transparent"
+        color: tick.checked ? (Theme.color.primary) : "transparent"
         border.color: tick.checked
-                      ? (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.inv : "#F0F0F0"))
-                      : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.stroke : "#242424"))
+                      ? (Theme.color.primary)
+                      : (Theme.color.textSecondary)
         border.width: 1
         SvgIcon {
             anchors.centerIn: parent
             visible: tick.checked
             name: "check"
-            tint: Md3 ? Theme.color.primaryForeground : (dlg.theme ? dlg.theme.win : "#0A0A0A")
+            tint: Theme.color.primaryForeground
             width: 11
             height: 11
         }
@@ -115,18 +115,18 @@ Popup {
         signal tapped()
         width: 78
         height: 28
-        radius: Md3 ? Theme.radius.md : (dlg.theme ? dlg.theme.rCtrl : 8)
+        radius: Theme.radius.md
         color: seg.active
-               ? (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.inv : "#F0F0F0"))
-               : (segHover.containsMouse ? (Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.hover : "#1E1E1E")) : "transparent")
-        border.color: seg.active ? "transparent" : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.stroke : "#242424"))
+               ? (Theme.color.primary)
+               : (segHover.containsMouse ? (Theme.color.surface) : "transparent")
+        border.color: seg.active ? "transparent" : (Theme.color.textSecondary)
         border.width: 1
         Text {
             anchors.centerIn: parent
             text: seg.label
             color: seg.active
-                   ? (Md3 ? Theme.color.primaryForeground : (dlg.theme ? dlg.theme.win : "#0A0A0A"))
-                   : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.op : "#C8C8C8"))
+                   ? (Theme.color.primaryForeground)
+                   : (Theme.color.textSecondary)
             font.pixelSize: 12
             font.weight: seg.active ? Font.Medium : Font.Normal
         }
@@ -155,7 +155,7 @@ Popup {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: row.label
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.op : "#C8C8C8")
+                color: Theme.color.textSecondary
                 font.pixelSize: 12
             }
         }
@@ -176,7 +176,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "发送通知"
-                color: Md3 ? Theme.color.textPrimary : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                color: Theme.color.textPrimary
                 font.pixelSize: 14
                 font.weight: Font.Medium
             }
@@ -184,7 +184,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 84
                 text: backend.currentUid === "" ? "（先选一台设备）" : ("发给 " + backend.currentUid)
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             SvgIcon {
@@ -192,7 +192,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 name: "x"
-                tint: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                tint: Theme.color.textSecondary
                 width: 14
                 height: 14
                 MouseArea {
@@ -205,7 +205,7 @@ Popup {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: 1
-                color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.line : "#161616")
+                color: Theme.color.surfaceVariant
             }
         }
 
@@ -217,7 +217,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "形态"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             Row {
@@ -238,7 +238,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "标题"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             // ⚠️ 这里以前是「自画一个 Rectangle + 裸 TextInput」：只给了 color，没给 background。
@@ -261,7 +261,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 text: titleInput.text.length + "/" + dlg.capTitle
-                color: dlg.titleOver ? (Md3 ? Theme.color.warning : "#BA7517") : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A"))
+                color: dlg.titleOver ? (Theme.color.warning) : (Theme.color.textSecondary)
                 font.pixelSize: 11
             }
         }
@@ -274,7 +274,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "正文"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             InputField {
@@ -292,7 +292,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 text: bodyInput.text.length + "/" + dlg.capContent
-                color: dlg.contentOver ? (Md3 ? Theme.color.warning : "#BA7517") : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A"))
+                color: dlg.contentOver ? (Theme.color.warning) : (Theme.color.textSecondary)
                 font.pixelSize: 11
             }
         }
@@ -305,7 +305,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "显示时长"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             InputField {
@@ -322,7 +322,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 176
                 text: "秒 · 0 = 按字数自适应（约 5 秒起）"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
         }
@@ -336,7 +336,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "配色"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             Row {
@@ -379,16 +379,16 @@ Popup {
                 anchors.rightMargin: 18
                 width: 130
                 height: 32
-                radius: Md3 ? Theme.radius.md : (dlg.theme ? dlg.theme.rCtrl : 8)
+                radius: Theme.radius.md
                 color: dlg.canSend
-                       ? (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.inv : "#F0F0F0"))
-                       : (Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.hover2 : "#111111"))
+                       ? (Theme.color.primary)
+                       : (Theme.color.surface)
                 Text {
                     anchors.centerIn: parent
                     text: "发送"
                     color: dlg.canSend
-                           ? (Md3 ? Theme.color.primaryForeground : (dlg.theme ? dlg.theme.win : "#0A0A0A"))
-                           : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A"))
+                           ? (Theme.color.primaryForeground)
+                           : (Theme.color.textSecondary)
                     font.pixelSize: 12
                     font.weight: Font.Medium
                 }
@@ -403,7 +403,7 @@ Popup {
                 text: dlg.error !== "" ? dlg.error
                       : (backend.currentUid === "" ? "没选设备，发不出去"
                          : (titleInput.text.trim() === "" ? "标题必填 —— 被控端会拒收" : ""))
-                color: dlg.error !== "" ? (Md3 ? Theme.color.destructive : "#E24B4A") : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A"))
+                color: dlg.error !== "" ? (Theme.color.destructive) : (Theme.color.textSecondary)
                 font.pixelSize: 11
             }
         }
@@ -416,7 +416,7 @@ Popup {
                 anchors.top: parent.top
                 width: parent.width
                 height: 1
-                color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.line : "#161616")
+                color: Theme.color.surfaceVariant
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -424,7 +424,7 @@ Popup {
                 width: parent.width - 36
                 wrapMode: Text.WordWrap
                 lineHeight: 1.35
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
                 text: "标题超 " + dlg.capTitle + " 字、正文超 " + dlg.capContent
                       + " 字会被截断。紧急通知不自动消失，需学生点「确认」。"

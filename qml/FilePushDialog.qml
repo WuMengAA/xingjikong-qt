@@ -51,9 +51,9 @@ Popup {
     }
 
     background: Rectangle {
-        color: Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.cream : "#141414")
-        radius: Md3 ? Theme.radius.lg : (dlg.theme ? dlg.theme.rCard : 12)
-        border.color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.stroke : "#242424")
+        color: Theme.color.surface
+        radius: Theme.radius.lg
+        border.color: Theme.color.surfaceVariant
         border.width: 1
     }
 
@@ -69,7 +69,7 @@ Popup {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 18
                 text: "文件控制"
-                color: Md3 ? Theme.color.textPrimary : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                color: Theme.color.textPrimary
                 font.pixelSize: 14
                 font.weight: Font.Medium
             }
@@ -78,7 +78,7 @@ Popup {
                 anchors.left: parent.left
                 anchors.leftMargin: 72
                 text: "把本机文件分发到设备收件目录"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
             SvgIcon {
@@ -86,7 +86,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 name: "x"
-                tint: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                tint: Theme.color.textSecondary
                 width: 14
                 height: 14
                 MouseArea {
@@ -99,7 +99,7 @@ Popup {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: 1
-                color: Md3 ? Theme.color.surfaceVariant : (dlg.theme ? dlg.theme.line : "#161616")
+                color: Theme.color.surfaceVariant
             }
         }
 
@@ -113,16 +113,16 @@ Popup {
                 id: pickBtn
                 x: 18; y: 16
                 width: 92; height: 32
-                radius: Md3 ? Theme.radius.md : (dlg.theme ? dlg.theme.rCtrl : 9)
+                radius: Theme.radius.md
                 color: pickArea.containsMouse
-                       ? (Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.hover : "#1E1E1E"))
-                       : (Md3 ? Theme.color.background : "transparent")
-                border.color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.stroke : "#242424")
+                       ? (Theme.color.surface)
+                       : (Theme.color.background)
+                border.color: Theme.color.textSecondary
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
                     text: "选文件"
-                    color: Md3 ? Theme.color.textPrimary : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                    color: Theme.color.textPrimary
                     font.pixelSize: 12
                 }
                 // 选文件走 backend.pickFile()（C++ 原生 QFileDialog）。
@@ -138,8 +138,8 @@ Popup {
                 width: parent.width - 142
                 text: dlg.pendingUrl ? ("已选：" + dlg.pendingName) : "（还没选文件）"
                 color: dlg.pendingUrl
-                       ? (Md3 ? Theme.color.textPrimary : (dlg.theme ? dlg.theme.op : "#C8C8C8"))
-                       : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A"))
+                       ? (Theme.color.textPrimary)
+                       : (Theme.color.textSecondary)
                 font.pixelSize: 12
                 elide: Text.ElideMiddle
             }
@@ -154,13 +154,13 @@ Popup {
                 width: parent.width - 108
                 height: 6
                 radius: 3
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.line : "#161616")
+                color: Theme.color.textSecondary
                 Rectangle {
                     // 子项里 parent 就是这条底槽，直接按它的宽度算，别往上摸两层（折叠一次就断）
                     width: parent.width * (backend.filePercent / 100)
                     height: 6
                     radius: 3
-                    color: Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.fg : "#FAFAFA")
+                    color: Theme.color.primary
                 }
             }
             Text {
@@ -168,7 +168,7 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 text: backend.filePercent + "%"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
         }
@@ -197,8 +197,8 @@ Popup {
                 // 失败态不用红色：黑白稿集里"强调"只有反白+描边一种手段，
                 // 这里改成反白字加粗、前缀 ✕，深色下是白字压深底，浅色下是黑字压白底。
                 color: (backend.fileState === "failed")
-                       ? (Md3 ? Theme.color.destructive : (dlg.theme ? dlg.theme.fg : "#FAFAFA"))
-                       : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A"))
+                       ? (Theme.color.destructive)
+                       : (Theme.color.textSecondary)
                 font.pixelSize: 12
                 font.bold: backend.fileState === "failed"
                 elide: Text.ElideMiddle
@@ -210,16 +210,16 @@ Popup {
                 anchors.right: goBtn.left
                 anchors.rightMargin: 8
                 width: 56; height: 30
-                radius: Md3 ? Theme.radius.md : (dlg.theme ? dlg.theme.rCtrl : 9)
+                radius: Theme.radius.md
                 color: cancelArea.containsMouse
-                       ? (Md3 ? Theme.color.surface : (dlg.theme ? dlg.theme.hover : "#1E1E1E"))
-                       : (Md3 ? Theme.color.background : "transparent")
-                border.color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.stroke : "#242424")
+                       ? (Theme.color.surface)
+                       : (Theme.color.background)
+                border.color: Theme.color.textSecondary
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
                     text: "取消"
-                    color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A")
+                    color: Theme.color.textSecondary
                     font.pixelSize: 12
                 }
                 MouseArea {
@@ -235,18 +235,18 @@ Popup {
                 anchors.right: parent.right
                 anchors.rightMargin: 18
                 width: 88; height: 30
-                radius: Md3 ? Theme.radius.md : (dlg.theme ? dlg.theme.rCtrl : 9)
+                radius: Theme.radius.md
                 color: (goArea.enabled && goArea.containsMouse)
-                       ? (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.hover : "#1E1E1E"))
-                       : (Md3 ? Theme.color.primary : (dlg.theme ? dlg.theme.fg : "#FAFAFA"))
-                border.color: Md3 ? Theme.color.primary : "transparent"
+                       ? (Theme.color.primary)
+                       : (Theme.color.primary)
+                border.color: Theme.color.primary
                 border.width: 1
                 Text {
                     anchors.centerIn: parent
                     text: "开始推送"
                     color: (goArea.enabled)
-                           ? (Md3 ? Theme.color.primaryForeground : (dlg.theme ? dlg.theme.fg : "#FAFAFA"))
-                           : (Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg3 : "#5A5A5A"))
+                           ? (Theme.color.primaryForeground)
+                           : (Theme.color.textSecondary)
                     font.pixelSize: 12
                 }
                 MouseArea {
@@ -266,7 +266,7 @@ Popup {
                 anchors.right: cancelBtn.left
                 anchors.rightMargin: 10
                 text: "推完即保存到设备收件目录"
-                color: Md3 ? Theme.color.textSecondary : (dlg.theme ? dlg.theme.fg4 : "#3A3A3A")
+                color: Theme.color.textSecondary
                 font.pixelSize: 11
             }
         }
