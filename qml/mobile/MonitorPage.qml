@@ -159,53 +159,18 @@ Item {
         }
     }
 
-    // ── ③ 操作栏（2×2 网格，窄屏友好）────────────────────────────────
-    GridLayout {
+    // ── ③ 操作栏（2×2 网格，窄屏友好；已拆出为 MonitorActionsBar）────────
+    MonitorActionsBar {
         id: actions
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 12
-        columns: 2
-        rowSpacing: 10
-        columnSpacing: 10
-
-        AppButton {
-            Layout.fillWidth: true
-            text: "截图"
-            variant: "secondary"
-            onClicked: {
-                if (backend.currentUid !== "") { backend.sendAction("screenshot", {}); page.toastMsg("已请求截图") }
-                else page.toastMsg("先选一台设备")
-            }
-        }
-        AppButton {
-            Layout.fillWidth: true
-            text: "远程控制"
-            variant: "primary"
-            onClicked: {
-                if (backend.currentUid !== "") { backend.sendAction("remote_control_start", {}); page.toastMsg("正在接管 " + backend.currentUid) }
-                else page.toastMsg("先选一台设备")
-            }
-        }
-        AppButton {
-            Layout.fillWidth: true
-            text: "推文件"
-            variant: "secondary"
-            onClicked: {
-                if (backend.currentUid !== "") page.filePushRequested(backend.currentUid)
-                else page.toastMsg("先选一台设备")
-            }
-        }
-        // 停止/退出：真正清流（本地 watching 标志），在 VNC 模式顺手收掉远控
-        AppButton {
-            Layout.fillWidth: true
-            text: "停止"
-            variant: "destructive"
-            onClicked: {
-                if (backend.frameSource === "vnc") { backend.sendAction("remote_control_stop", {}); page.toastMsg("已停止远控") }
-                else { page.watching = false; backend.setScreenActive(false); page.toastMsg("已停止监控") }
-            }
+        onFilePushRequested: (uid) => page.filePushRequested(uid)
+        onToastMsg: (s) => page.toastMsg(s)
+        onStopRequested: {
+            if (backend.frameSource === "vnc") { backend.sendAction("remote_control_stop", {}); page.toastMsg("已停止远控") }
+            else { page.watching = false; backend.setScreenActive(false); page.toastMsg("已停止监控") }
         }
     }
 }
