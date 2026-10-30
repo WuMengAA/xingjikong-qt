@@ -123,80 +123,10 @@ GridLayout {
         }
     }
 
-    // ── S2 云端存储概况 + S4 最近回执 ──
-    AppCard {
+    // ── S2 云端存储概况 + S4 最近回执（已拆出为 DashStorageCard）──
+    DashStorageCard {
         Layout.fillWidth: true
         Layout.preferredHeight: 208
-        // 原 variant: "elevated" ⇒ AppCard 默认 shadow: true（极柔阴影）
-
-        ColumnLayout {
-            // ⚠️ AppCard 内部已是 ColumnLayout：子项不能 anchors.fill，必须走 Layout
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: Theme.spacing.sm
-
-            Text {
-                text: "云端存储概况"
-                font.pixelSize: 16
-                font.weight: Font.Medium
-                color: Theme.color.textPrimary
-            }
-            Text {
-                Layout.fillWidth: true
-                text: "已知设备 " + (backend.storage.knownDevices !== undefined ? backend.storage.knownDevices : "—")
-                      + " · 班级 " + (backend.storage.classes !== undefined ? backend.storage.classes : "—")
-                      + " · 事件文件 " + (backend.storage.eventsFiles !== undefined ? backend.storage.eventsFiles : "—")
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
-                color: Theme.color.textSecondary
-            }
-            Text {
-                Layout.fillWidth: true
-                text: "最近回执"
-                font.pixelSize: 12
-                font.weight: Font.Medium
-                color: Theme.color.textPrimary
-                topPadding: Theme.spacing.xs
-            }
-
-            Repeater {
-                model: cards.recentResults().slice(0, 4)
-                delegate: RowLayout {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing.sm
-
-                    Text {
-                        text: modelData.t || ""
-                        font.pixelSize: 11
-                        color: Theme.color.textSecondary
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        elide: Text.ElideRight
-                        text: cards.actionLabel(modelData.action) + " · " + (modelData.uid || "")
-                        font.pixelSize: 11
-                        color: Theme.color.textSecondary
-                    }
-                    Text {
-                        text: modelData.ok ? "成功" : "失败"
-                        font.pixelSize: 11
-                        color: modelData.ok
-                               ? (Theme.color.primary)
-                               : (Theme.color.destructive)
-                    }
-                }
-            }
-
-            Text {
-                Layout.fillWidth: true
-                visible: cards.recentResults().length === 0
-                text: "还没有回执（下发动作后这里会显示执行结果）"
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
-                color: Theme.color.textSecondary
-            }
-            Item { Layout.fillHeight: true }
-        }
+        host: cards.host
     }
 }
