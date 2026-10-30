@@ -70,6 +70,7 @@
 #include <QCheckBox>    // P3：播放时段配置对话框
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
 #include "study_mode/study_mode.h"  // 2026-10-30 自习模式（噪音异常自动录制）迁出
+#include "notify/notify_entry.h" // 2026-10-30 灵动岛统一入口迁出
 #include "vnc_bridge.h"       // 2026-10-18：远控桥（主 WS vnc-data ↔ 本地 VNC，纯字节）
 #ifdef STE_USE_LIBVNCSERVER
 #include "vnc_server.h"         // 2026-10-18：in-agent VNC Server（libvncserver 封装，方案 A）
@@ -308,6 +309,15 @@ static qint64   g_studyStartTs = 0;         // P3：本次自习开始时间（�
 // sendEvent：文件作用域前向声明（定义见本文件 namespace 下方），供 study_mode 模块 extern 复用。
 void sendEvent(const QString &level, const QString &msg, const QJsonObject &extra = QJsonObject());
 
+// ── 通知体系全局：文件作用域（namespace 外），供 src/notify/notify_entry 模块 extern 复用 ──
+LoopReminder g_loopReminder;                 // 循环提醒（无 UI，纯逻辑）
+NotificationGate g_notifGate;                // 通知门控（考试模式禁通知）
+bool g_remoteControl = false;      // remote_control_start/stop 的真实会话状态
+QSystemTrayIcon *g_tray = nullptr;
+// sendActionReceipt：文件作用域前向声明（定义见本文件 namespace 之后），供 notify_entry 模块 extern 复用。
+void sendActionReceipt(const QString &id, const QString &action, const QString &result,
+                       const QString &error = QString(), const QJsonObject &data = QJsonObject());
+
 namespace {
 
 constexpr int kFrameIntervalMs = 2000;   // 兜底默认（现由 previewIntervalMs() 读取，可 env 覆盖）
@@ -395,8 +405,7 @@ static OpusCodec g_opusDec;      // 老师下行解码
 // 弹幕（2026-10-15 组件5）：全局指针 g_danmaku 已删，改 danmaku.h 的单例访问器
 // danmakuWidget()/danmakuWidgetPeek() —— 通知路径（下方 kind=danmaku）与学生祝福
 // 路径（IslandOverlay::sendBlessing）共享同一个弹幕层，全局指针会指岔。
-LoopReminder g_loopReminder;                 // 循环提醒（无 UI，纯逻辑）
-NotificationGate g_notifGate;                // 通知门控（考试模式禁通知）
+// g_loopReminder / g_notifGate 已迁至文件作用域（namespace 上方），供 src/notify/notify_entry 模块 extern 复用。
 Microphone g_microphone;                     // 语音通话 mic 采集（会话内开关）
 // §6.3 语音频谱（2026-10-13）：不再有独立 SpectrumWidget 窗口 —— 频谱由灵动岛在
 // **展开态**画（IslandOverlay::feedSpectrum）。原 `g_spectrum`（无 parent 的顶层窗口）已删。
@@ -426,7 +435,7 @@ QHash<QString, QTimer *> g_schedTimerById;   // 任务 id → 定时器（取消
 QString g_schedFile;               // 调度持久化文件（崩溃恢复后重挂未到期任务）
 QString g_schedDir;                // 调度文件所在目录（写文件要 mkpath）
 QString g_recvDir;                 // file_push 落盘目录
-bool g_remoteControl = false;      // remote_control_start/stop 的真实会话状态
+// g_remoteControl 已迁至文件作用域（namespace 上方），供 src/notify/notify_entry 模块 extern 复用。
 int g_currentFps = 5;              // 动态帧率：当前抓屏频率（次/分钟）—— 远控开会时提高
 // ── 远控上行治理配套旗标（2026-10-19 修复①③，见下方背压闸与看门狗）──────────
 qint64 g_vncSessionStartMs = 0;    // 本次远控会话起服时刻（首帧宽限 + 看门狗起步宽限都用它）
@@ -1360,7 +1369,7 @@ int loadEnvFile(const QString &path)
  * 没有托盘就等于一个"看不见的进程"：不知道在不在，出问题只能靠猜。
  * 图标程序化画（不引外部图标文件）：已连＝实心，未连＝空心。
  */
-QSystemTrayIcon *g_tray = nullptr;
+// g_tray 已迁至文件作用域（namespace 上方），供 src/notify/notify_entry 模块 extern 复用。
 QAction *g_actStatus = nullptr;
 
 QIcon makeTrayIcon(TrayState st)
@@ -3538,274 +3547,10 @@ bool enableShutdownPriv()
 // 本文件只留调用点（speakText() 经 tts/tts_speaker.h 声明）；SAPI 兜底、音量序列、
 // token 去重、超时兜底全部封进新模块，main 只做装配。
 
-// ── 灵动岛统一入口（2026-10-07 · #98）──────────────────────────────────
-// 用户 2026-10-07 定下："被控端一切通知都经过灵动岛显示，弹窗则居中，全屏则放大全屏，
-// 要有过渡。"
-// 被控端所有"轻量提示"统一走 IslandOverlay（灵动岛）：
-//   · 顶部居中胶囊、Collapsed(56)↔Expanded(168) 弹性缓动、出现/消失都带动画；
-//   · 默认鼠标穿透（WA_TransparentForMouseEvents）—— 不挡后面的课件/白板；
-//   · 需要"用户点一下"的（如收到文件想看清楚 / 通知确认）走 showWithActions + setInteractive(true)。
-// form（#98）：Capsule=顶部胶囊（默认）；Centered=屏幕正中卡片；Fullscreen=铺满整屏。
-// 调用方按"这条内容要不要停下来看清"来选，别什么都往全屏上堆。
-// 注：2026-10-14 P1 起 NotifyWindow 已删除，灵动岛是被控端唯一展示入口。
-static void islandShow(const QString &title, const QString &desc = QString(),
-                       const QString &icon = QString(), int ms = 5000, bool interactive = false,
-                       const QString &openPath = QString(),
-                       IslandOverlay::Form form = IslandOverlay::Form::Capsule,
-                       bool fromAdmin = false)   // 2026-10-13：管理端下发（历史置顶用）
-{
-    // ── 2026-10-19 远控期崩溃规避（P0 生产事故）──────────────────────────
-    // 真机三份 WER 全内存 dump 实证：远程控制开始后约 4-26s，agent 进程 0xC0000005，
-    // 出错模块 Qt6Core.dll+0x38c0（QObject::d_func，rcx=0）。栈是纯 QML 路径：
-    //   QObject::d_func ← QQmlDelegateModelItem::destroyObjectLater
-    //   ← QQmlDelegateModelPrivate::destroyCacheItem ← QQmlDelegateModel::release
-    //   ← QQuickRepeater::clear ← QQuickRepeater::setModel ← QQmlBinding 重算
-    //   ← QQmlData::destroyed ← QObject::~QObject
-    // 即：某对象析构 → QML 绑定重算 → 某个 Repeater 的 model 被整表替换 →
-    //     Repeater 清空 delegate 时，缓存里已有"object 已销毁"的 delegate ⇒ 对 null 调
-    //     d_func。岛（island）是唯一每帧都在更新 model 的 QML 视图，showIsland 每次都会
-    //     upsertTask（任务表整表替换）+ 8s 后 dismiss→enterIdle→archiveToHistory，
-    //     正好是这条链的入口。GDI 时代的两份 dump（10-18 22:56 / 23:29）崩溃点完全相同
-    //     ⇒ 与 DXGI 抓屏无关，是岛 QML 的既有结构性缺陷，远控只是把它踩出来。
-    // 处置：远控会话期间岛一律不写（改走托盘气泡，学生知情边界不破），
-    //       待岛 QML 侧换成 ListModel 增量更新（Repeater → ListModel 单批改造）后再放开。
-    if (g_remoteControl) {
-        if (g_tray)
-            g_tray->showMessage(title, desc.isEmpty() ? title : desc,
-                                QSystemTrayIcon::Information, ms > 0 ? ms : 5000);
-        return;
-    }
-    IslandOverlay *isl = IslandOverlay::instance();
-    if (openPath.isEmpty()) isl->clearOpenPath();
-    else                    isl->setOpenPath(openPath);
-    // 交互态（可点）清掉旧的 openPath，免得下一条提示点一下去翻上一份文件。
-    isl->setInteractive(interactive);
-    isl->showIsland(title, desc, icon, ms, form, fromAdmin);
-}
-
-// 同上的「带发生时刻」版本（P0-0 · 2026-10-17 插件边界）：插件推的通知在它**调用那一刻**
-// 就该有 ts，而不是 agent 处理那一刻（忙时可能差几百毫秒，跨整分钟就会让历史显示错 1 分钟）。
-// ⚠️ 复用 IslandOverlay 的「下一条通知发生时刻」一次性注入位（m_noticeHintMs，setNoticeTimeForNext）：
-//    showIsland 会读它并清零——所以必须紧贴着每次 showIsland 设置，不能提前设。
-static void islandShowAt(const QString &title, const QString &desc, const QString &icon,
-                         int ms, IslandOverlay::Form form, bool fromAdmin, qint64 noticeAtMs)
-{
-    IslandOverlay::instance()->setNoticeTimeForNext(noticeAtMs);
-    islandShow(title, desc, icon, ms, false, QString(), form, fromAdmin);
-}
-
-// 托盘气泡兜底：灵动岛是贴桌面顶层的胶囊，被控端缩进托盘 / 教室投影投在别处 /
-// 用户正在全屏课件里，那一小条容易整个漏掉。像"文件落到本机了"这种结果型事件，
-// 再往 Windows 通知中心推一条才兜得住（tray 没起来就静默跳过，不报错）。
-static void trayNotify(const QString &title, const QString &body,
-                       QSystemTrayIcon::MessageIcon icon = QSystemTrayIcon::Information,
-                       int ms = 8000)
-{
-    if (!g_tray) return;
-    g_tray->showMessage(title, body.isEmpty() ? title : body, icon, ms);
-}
-
-
-// 前向声明（2026-10-07）：notify 确认/快捷回复回调要在定义前用（二次回执）
-static void sendActionReceipt(const QString &id, const QString &action, const QString &result,
-                              const QString &error, const QJsonObject &data);
-
-// 解析 params（kind/title/content/seconds/notice_id/flags）并弹窗。
-// 返回 "" = 成功；非空 = 错误（调用方转 failed 回执）。
-// id：本条指令的 instruction id（确认/快捷回复时发二次回执用，可为空）。
-static QString notifyFromParams(const QJsonObject &params, const QString &id = QString())
-{
-    const QString kind = params.value(QStringLiteral("kind")).toString().trimmed().toLower();
-    const QString title = params.value(QStringLiteral("title")).toString().trimmed();
-    if (title.isEmpty())
-        return QStringLiteral("notify 缺 title");
-    const QString content = params.value(QStringLiteral("content")).toString();
-    // ── 考试模式门控（2026-10-09 接线 · §6.2）：考试激活期间一切通知静默丢弃 ──
-    // 不弹、不响、不记 error —— 学生机在考试中收到任何通知都应像没收到一样。
-    // 2026-10-21（审查 #7）：返回 "skipped:" 前缀 = 门控静默丢弃。调用方识别该前缀
-    //   转 **skipped** 回执（云端已有该语义，重复下发保护就在用）—— 原来返回普通
-    //   错误串被当成 failed，管理端会看到一条失败并可能重试/报警，和"像没收到
-    //   一样"正好相反。
-    const bool gated = !g_notifGate.allow(
-        kind == QLatin1String("danmaku") ? NotificationGate::Danmaku
-        : kind == QLatin1String("loop") ? NotificationGate::LoopRemind
-        : NotificationGate::Island);
-    if (gated) return QStringLiteral("skipped:exam-active-gated");
-    // P0-1（2026-10-14）：本地「通知与弹窗」开关关了就整体静默（考试门控优先，已在上方处理）。
-    if (!AgentSettings::notifyEnabled()) return QStringLiteral("notify-disabled-by-local-setting");
-    // C 批（2026-10-27）：岛黑名单 —— 把"老弹烦人通知的来源"静默丢弃（不弹/不响/不入历史）。
-    // 来源键取自通知载荷 `from`（应用名/插件 id/通道名，由下发方给，空 = 不适用）。
-    // 与系统统一配置：黑名单落 QSettings（设备级），岛和管理端读到的是同一份。
-    {
-        const QString from = params.value(QStringLiteral("from")).toString().trimmed();
-        if (!from.isEmpty() && AgentSettings::notifyBlacklist().contains(from))
-            return QStringLiteral("skipped:blacklisted");
-    }
-    const int seconds = params.value(QStringLiteral("seconds")).toInt(0);
-    // flags.speech → TTS 朗读（缺省不读，避免每教室都响）
-    const QJsonObject flags = params.value(QStringLiteral("flags")).toObject();
-    const bool tts = flags.value(QStringLiteral("speech")).toBool(false)
-                     || flags.value(QStringLiteral("speech_enabled")).toBool(false);
-    // flags.severity → 全屏配色（2026-10-05 补）：站点已发对字段，被控端此前不读。
-    // 站点白名单已收敛为 remind/inform/urgent 三档；未知值一律回落 remind（不做任意串插进样式）。
-    const QString severity = flags.value(QStringLiteral("severity")).toString().trimmed().toLower();
-    // flags.emergency_confirm → 紧急锁定：不自动关 + 强制置顶（2026-10-05 补）
-    // 站点此前在 params 顶层也发过 emergency_confirm（broadcast.ts 的注入分支），此处一并兜底。
-    const bool emergency = flags.value(QStringLiteral("emergency_confirm")).toBool(false)
-                           || flags.value(QStringLiteral("topmost")).toBool(false)
-                           || params.value(QStringLiteral("emergency_confirm")).toBool(false);
-    // 确认 + 快捷回复（2026-10-07 · 通知被控端确认快捷回复）：
-    // flags.confirm → 需要学生点确认；flags.replies → 快捷回复话术列表（如 ["收到","好的"]）。
-    const bool needConfirm = flags.value(QStringLiteral("confirm")).toBool(false)
-                             || params.value(QStringLiteral("confirm")).toBool(false);
-    QStringList replies;
-    const QJsonArray repArr = flags.value(QStringLiteral("replies")).toArray();
-    if (!repArr.isEmpty()) {
-        for (const QJsonValue &v : repArr) replies.append(v.toString());
-    } else {
-        // 默认快捷回复（不传 replies 时给一组通用话术）
-        replies = { QStringLiteral("\u6536\u5230"), QStringLiteral("\u597d\u7684"),
-                    QStringLiteral("\u7a0d\u540e\u5904\u7406") };
-    }
-
-    // 形态分流（P1 · 2026-10-14）：kind 直接映射灵动岛形态，**不再经 NotifyWindow**
-    // （岛已覆盖全屏/居中/胶囊/确认/紧急，是被控端唯一展示入口）。
-    //   popup / 未知 → Centered（屏幕正中卡片，安全默认）
-    //   fullscreen → Fullscreen（铺满整屏）
-    //   banner → 顶部通栏（长文案单行横幅）｜ mini → 右下角角标（常驻轻状态，不挡课件）
-    //   2026-10-27（用户裁决）：**被控端的岛保留并扩充** —— 产品笔记里
-    //   「通知只保留 弹窗 / 岛上 / 跑马灯 / 全屏」这条为准，kind=island 是四形态之一，
-    //   恢复为顶部胶囊（Capsule）。此前 2026-10-26 P0 曾把它归一为弹窗，那是按
-    //   笔记另一处「灵动岛无用不如通知方便」做的 —— 那一处指的是**管理端**的岛
-    //   （已删，见 viewer 侧），被控端的岛是学生的信息出口，不跟着删。
-    // ⚠️ 未知 kind 必须继续落 Centered —— 管理端老版本发的 kind 不能被新枚举带偏。
-    IslandOverlay::Form f = IslandOverlay::Form::Centered;
-    if (kind == QLatin1String("island"))          f = IslandOverlay::Form::Capsule;
-    else if (kind == QLatin1String("fullscreen")) f = IslandOverlay::Form::Fullscreen;
-    else if (kind == QLatin1String("banner"))     f = IslandOverlay::Form::Banner;
-    else if (kind == QLatin1String("mini"))       f = IslandOverlay::Form::Mini;
-
-    // ── 弹幕（2026-10-09 接线 · §1.2/§6.1）：kind=danmaku → 字幕式横向滚动 ──
-    if (kind == QLatin1String("danmaku")) {
-        // 2026-10-15 组件5：g_danmaku 全局指针 → 单例访问器（与学生祝福弹幕同层）
-        DanmakuWidget::danmakuWidget()->push(content.isEmpty() ? title : (title + QStringLiteral("：") + content));
-        // 同样进托盘通知留存（与 popup 行为一致，别丢静默列表）
-        if (g_tray) {
-            g_tray->showMessage(title, content.isEmpty() ? title : content,
-                                QSystemTrayIcon::Information, 10000);
-        }
-        return QString();
-    }
-
-    // ── 循环提醒（2026-10-09 接线 · §1.2 loopRemind）：flags.loop / params.repeat ──
-    // 展示超时未确认 → 间隔重现；只有学生点确认才终止。id 用 notice_id 或 title（幂等刷新）。
-    const bool loop = flags.value(QStringLiteral("loop")).toBool(false)
-                      || params.value(QStringLiteral("repeat")).toBool(false)
-                      || params.value(QStringLiteral("loopRemind")).toBool(false);
-    if (loop) {
-        const QString loopId = params.value(QStringLiteral("notice_id")).toString(
-            params.value(QStringLiteral("id")).toString());
-        LoopReminder::Config cfg;
-        cfg.intervalSec = params.value(QStringLiteral("intervalSec")).toInt(
-                              flags.value(QStringLiteral("interval_sec")).toInt(60));
-        // 确认回调：学生点「确认」→ 终止循环（唯一正常退出路径），并二次回执云端
-        std::function<void(const QString &)> loopConfirm = [loopId, id](const QString &reply) {
-            g_loopReminder.confirm(loopId);
-            if (!id.isEmpty()) {
-                QJsonObject d;
-                d.insert(QStringLiteral("confirmed"), true);
-                d.insert(QStringLiteral("reply"), reply);
-                sendActionReceipt(id, QStringLiteral("notify"), QStringLiteral("confirmed"),
-                                  QString(), d);
-            }
-        };
-        // 立即展示第一轮：并入灵动岛（确认按钮现在在**岛本体**上），点「确认」→ loopConfirm
-        {
-            QStringList loopActs;
-            loopActs << QStringLiteral("确认");
-            for (const QString &rr : replies)
-                if (!rr.trimmed().isEmpty() && !loopActs.contains(rr)) loopActs << rr;
-            IslandOverlay::instance()->setSeverity(severity);
-            IslandOverlay::instance()->showWithActions(title, content, QStringLiteral("bell"),
-                                                       IslandOverlay::Form::Centered, loopActs,
-                                                       loopConfirm, 0, true);
-        }
-        if (tts)
-            speakText(content.trimmed().isEmpty() ? title
-                                                  : (title + QStringLiteral("：") + content));
-        if (g_tray) {
-            g_tray->showMessage(title, content.isEmpty() ? title : content,
-                                QSystemTrayIcon::Information, 10000);
-        }
-        return QString();
-    }
-
-    // 确认/快捷回复回调：把结果作为**二次回执**发给云端（原 notify 回执已发 done，
-    // 这条补充 confirmed+reply，云端 recordResult 按 id 配对；管理端据此显示"已确认"）。
-    std::function<void(const QString &reply)> onConfirm;
-    if (needConfirm || emergency) {
-        onConfirm = [id](const QString &reply) {
-            if (id.isEmpty()) return;
-            QJsonObject d;
-            d.insert(QStringLiteral("confirmed"), true);
-            d.insert(QStringLiteral("reply"), reply);
-            sendActionReceipt(id, QStringLiteral("notify"), QStringLiteral("confirmed"), QString(), d);
-        };
-    }
-
-    // ── #98：形态分流（2026-10-09）────────────────────────────────────────
-    // 用户要的是"弹窗则居中，全屏则放大全屏"。所以**纯展示类**的通知走灵动岛：
-    //   popup      → 灵动岛 Centered（屏幕正中卡片）
-    //   fullscreen → 灵动岛 Fullscreen（铺满整屏，带放大过渡）
-    //   island     → 灵动岛 Capsule（顶部胶囊）
-    // ⚠️ 需要交互的（要确认 / 有快捷回复 / 紧急"点一下才关"）走灵动岛的 showWithActions：
-    //    岛本体自带按钮行（2026-10-09 起「确认」已并入岛），不再依赖 NotifyWindow。
-    // ── 时长：>0 用给定秒数；0/缺省 → 按字数自适应（约 5 秒起）────────────────────
-    // ⚠️ 2026-10-09 修 bug：原来直接把 seconds*1000 传给灵动岛，而灵动岛按
-    //    "durationMs>0 才自动收"判定 ⇒ seconds=0 时永远不消失、一直置顶。
-    //    这里把"0=自适应"的契约在**传参前**兑现，公式复刻 NotifyWindow 那份
-    //    （短 5s、长内容按字数抬升），避免两处口径漂移。
-    const int durMs = seconds > 0
-        ? qMin(seconds, 3600) * 1000
-        : int(qMax(5000.0, 2500.0 + (title + QStringLiteral("：") + content).length() * 120.0));
-
-    // ── 形态分流：**一律经灵动岛**（P1 · 2026-10-14 后 NotifyWindow 已删除，岛为唯一入口）──
-    //   popup → Centered（正中卡片）｜island → Capsule（顶部胶囊）｜fullscreen → Fullscreen
-
-    // ⚠️ 2026-10-09 修 bug「全屏通知没有颜色」：配色档必须**无条件先设**。
-    //    原来只在"确认/紧急"那条 else 分支里调 setSeverity ⇒ **纯展示的全屏通知**
-    //    （kind=fullscreen 且不需要确认）压根没设 severity，全屏永远是默认黑底，
-    //    remind/inform/urgent 三档配色全被吞掉。而且不设还会残留上一条的档。
-    //    （severity 只对 Fullscreen 生效，Centered/Capsule 走各自的固定配色，不受影响。）
-    IslandOverlay::instance()->setSeverity(severity);
-
-    const bool needsInteraction = needConfirm || emergency;
-    if (!needsInteraction) {
-        islandShow(title, content, QStringLiteral("bell"), durMs, false, QString(), f, true);
-    } else {
-        // 确认 / 紧急：按钮行（「确认」+ 快捷回复），点哪枚回哪句。
-        // ⚠️ 胶囊那档太矮放不下按钮 ⇒ 升到 Centered（全屏仍是 Fullscreen）。
-        if (f == IslandOverlay::Form::Capsule) f = IslandOverlay::Form::Centered;
-        QStringList acts;
-        acts << QStringLiteral("确认");
-        for (const QString &rr : replies)
-            if (!rr.trimmed().isEmpty() && !acts.contains(rr)) acts << rr;
-        IslandOverlay::instance()->showWithActions(title, content, QStringLiteral("bell"),
-                                                   f, acts, onConfirm, 0, true);
-    }
-
-    // TTS（调用方要求时）：读「标题：正文」，与岛渲染口径一致
-    if (tts)
-        speakText(content.trimmed().isEmpty() ? title
-                                              : (title + QStringLiteral("：") + content));
-
-    // Windows 通知中心留存（托盘在才有）—— 换呈现不该丢掉静默列表
-    if (g_tray) {
-        g_tray->showMessage(title, content.trimmed().isEmpty() ? title : content,
-                            QSystemTrayIcon::Information, 10000);
-    }
-    return QString();   // 成功
-}
+// ── 灵动岛统一入口已迁至 src/notify/notify_entry.{h,cpp}（2026-10-30 main 拆分 #7）──
+//   islandShow / islandShowAt / trayNotify / notifyFromParams + 设计注释整块迁出；
+//   通知体系全局（g_tray/g_remoteControl/g_notifGate/g_loopReminder）与 sendActionReceipt
+//   提升为文件作用域外部链接（namespace 上方/下方），本文件只留调用点。
 
 /* ══════════════════════════════════════════════════════════════════════════
  * OTA 自更新（self_update 指令 · 2026-10-05）
@@ -3936,25 +3681,7 @@ static void otaStartPeriodicCheck()
 }
 
 
-// 统一回执出口（被控端→云端）。断链时不静默：如实记一条，避免"以为回了其实没回"。
-static void sendActionReceipt(const QString &id, const QString &action, const QString &result,
-                              const QString &error = QString(), const QJsonObject &data = QJsonObject())
-{
-    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) {
-        qInfo("[agent-qt] 回执欲发但当前未连接（id=%s result=%s），如实记录", qPrintable(id), qPrintable(result));
-        return;
-    }
-    QJsonObject p;
-    p.insert(QStringLiteral("id"), id);
-    p.insert(QStringLiteral("action"), action);
-    p.insert(QStringLiteral("result"), result);
-    if (!error.isEmpty()) p.insert(QStringLiteral("error"), error);
-    if (!data.isEmpty()) p.insert(QStringLiteral("data"), data);
-    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("receipt"), p));
-    qInfo("[agent-qt] 📤 回执 id=%s action=%s result=%s%s",
-          qPrintable(id), qPrintable(action), qPrintable(result),
-          error.isEmpty() ? "" : qPrintable(" error=" + error));
-}
+// sendActionReceipt 已迁至本文件 namespace 下方（文件作用域），供 notify_entry 模块 extern 复用。
 
 // A6（2026-10-11）：**周期遥测**上报（噪音采样这类"没有指令 id、要持续吐数"的场景）。
 // ⚠️ 为什么不走 receipt：云端的 recordResult 是**按指令 id 落表**的（registry.js:636），
@@ -6987,6 +6714,26 @@ void captureAndSend(const QString &outDir)
 }
 
 } // namespace
+
+// ── sendActionReceipt：文件作用域定义（从匿名 namespace 提出，供 notify_entry 模块 extern 复用）──
+void sendActionReceipt(const QString &id, const QString &action, const QString &result,
+                       const QString &error, const QJsonObject &data)
+{
+    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) {
+        qInfo("[agent-qt] 回执欲发但当前未连接（id=%s result=%s），如实记录", qPrintable(id), qPrintable(result));
+        return;
+    }
+    QJsonObject p;
+    p.insert(QStringLiteral("id"), id);
+    p.insert(QStringLiteral("action"), action);
+    p.insert(QStringLiteral("result"), result);
+    if (!error.isEmpty()) p.insert(QStringLiteral("error"), error);
+    if (!data.isEmpty()) p.insert(QStringLiteral("data"), data);
+    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("receipt"), p));
+    qInfo("[agent-qt] 📤 回执 id=%s action=%s result=%s%s",
+          qPrintable(id), qPrintable(action), qPrintable(result),
+          error.isEmpty() ? "" : qPrintable(" error=" + error));
+}
 // ── sendEvent：文件作用域定义（从匿名 namespace 提出，供 study_mode 模块 extern 复用）──
 void sendEvent(const QString &level, const QString &msg, const QJsonObject &extra)
 {

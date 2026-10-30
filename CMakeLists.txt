@@ -272,6 +272,11 @@ add_executable(stelarith-agent-qt
   #   仍驻 main，按既有 extern 模式（g_uid/agentEnvPath 同款）复用，纯搬迁零行为变化。
   src/study_mode/study_mode.cpp
   src/study_mode/study_mode.h
+  # ── 灵动岛统一入口（2026-10-30 main 拆分：#7 迁出，原 main.cpp 3541-3808）──
+  #   islandShow/islandShowAt/trayNotify/notifyFromParams；通知体系全局与 sendActionReceipt
+  #   提升文件作用域外部链接供本模块 extern 复用（同 g_uid/agentEnvPath 模式）。
+  src/notify/notify_entry.cpp
+  src/notify/notify_entry.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──
