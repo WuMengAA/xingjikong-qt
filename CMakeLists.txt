@@ -277,6 +277,10 @@ add_executable(stelarith-agent-qt
   #   提升文件作用域外部链接供本模块 extern 复用（同 g_uid/agentEnvPath 模式）。
   src/notify/notify_entry.cpp
   src/notify/notify_entry.h
+  # ── P3 长期记录落盘内核（2026-10-30 main 拆分：#6a 迁出，原 main.cpp 4036-4113）──
+  #   dataRoot/appendJsonl/logNoiseSample/logStudyStart/logStudyStop；零 main 全局依赖。
+  src/p3log/p3_log.cpp
+  src/p3log/p3_log.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──

@@ -71,6 +71,7 @@
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
 #include "study_mode/study_mode.h"  // 2026-10-30 自习模式（噪音异常自动录制）迁出
 #include "notify/notify_entry.h" // 2026-10-30 灵动岛统一入口迁出
+#include "p3log/p3_log.h" // 2026-10-30 P3 长期记录落盘内核迁出
 #include "vnc_bridge.h"       // 2026-10-18：远控桥（主 WS vnc-data ↔ 本地 VNC，纯字节）
 #ifdef STE_USE_LIBVNCSERVER
 #include "vnc_server.h"         // 2026-10-18：in-agent VNC Server（libvncserver 封装，方案 A）
@@ -2808,12 +2809,6 @@ void openNoiseLogDialog();  // 前向声明：P3 噪音长期记录查看
 void openStudyLogDialog();  // 前向声明：P3 自习模式长期记录查看
 void openPlayScheduleDialog(); // 前向声明：P3 播放时段配置
 
-// P3 前置声明：下方对话框 / lambda 在定义前用到这些静态辅助函数（定义在 executeAction 之前）
-static QString dataRoot();
-static void appendJsonl(const QString &subdir, const QJsonObject &o);
-static void logNoiseSample(double db, bool active, int seq, bool study, bool ok);
-static qint64 logStudyStart(double th, int need, int recSec);
-static void logStudyStop(qint64 startTs, int alertCount);
 static PluginHost *g_pluginHost = nullptr;   // P2：插件宿主（进程外插件 ABI）；定义在 openPluginStore 之前以便对话框使用
 static AutomationEngine *g_automationEngine = nullptr; // 2026-10-27 Phase 3：规则引擎单例（executeAction 经此下发/拉取规则）
 void runSelfCheck()
@@ -4033,84 +4028,9 @@ static void ensureNoise()
 
 // studyOnSample / studyTriggerRecord 已迁至 src/study_mode/study_mode.cpp（2026-10-30）
 
-// ── P3 功能补齐：噪音/自习长期记录 + 播放时段管理 的本地落盘与查询 ──────
-// 落盘目录统一在 AppDataLocation/Stelarith 下（与现存 island_history 同族，独立子目录）。
-static QString dataRoot()
-{
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-                        + QStringLiteral("/Stelarith");
-    QDir().mkpath(dir);
-    return dir;
-}
-
-// 追加一行 JSON（Compact + 换行）到 subdir/YYYY-MM-DD.jsonl。
-static void appendJsonl(const QString &subdir, const QJsonObject &o)
-{
-    const QString dir = dataRoot() + QLatin1Char('/') + subdir;
-    QDir().mkpath(dir);
-    // 2026-10-21（审查 #13）：按天文件从不清理 —— 500ms 采样一天 ~13MB、一学期 2GB+，
-    //   而查看端（openNoiseLogDialog/buildNoiseLogText）是把**所有文件全读进内存**再
-    //   统计的，学期末点开必卡。每天**首次写入**时清掉 7 天前的旧文件（只清 jsonl，
-    //   不碰当天/近几天；一天一次，不增加高频写路径的开销）。
-    {
-        static QDate lastPruned;
-        const QDate today = QDate::currentDate();
-        if (lastPruned != today) {
-            lastPruned = today;
-            const QFileInfoList entries =
-                QDir(dir).entryInfoList({ QStringLiteral("*.jsonl") }, QDir::Files);
-            const QDate cutoff = today.addDays(-7);
-            for (const QFileInfo &fi : entries) {
-                const QDate d = QDate::fromString(fi.completeBaseName(), QStringLiteral("yyyy-MM-dd"));
-                if (d.isValid() && d < cutoff) QFile::remove(fi.absoluteFilePath());
-            }
-        }
-    }
-    const QString file = dir + QLatin1Char('/') + QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd")) + QStringLiteral(".jsonl");
-    QFile f(file);
-    if (f.open(QIODevice::Append | QIODevice::Text)) {
-        f.write(QJsonDocument(o).toJson(QJsonDocument::Compact));
-        f.write("\n");
-    }
-}
-
-// 噪音采样落盘（采不到不记，避免污染趋势）。
-static void logNoiseSample(double db, bool active, int seq, bool study, bool ok)
-{
-    if (!ok) return;
-    QJsonObject o;
-    o.insert(QStringLiteral("ts"), QDateTime::currentSecsSinceEpoch());
-    o.insert(QStringLiteral("db"), db);
-    o.insert(QStringLiteral("active"), active);
-    o.insert(QStringLiteral("seq"), seq);
-    o.insert(QStringLiteral("study"), study);
-    appendJsonl(QStringLiteral("noise_log"), o);
-}
-
-// 自习会话：开始/结束各记一行（带 startTs 便于算时长）。返回 startTs。
-static qint64 logStudyStart(double th, int need, int recSec)
-{
-    const qint64 ts = QDateTime::currentSecsSinceEpoch();
-    QJsonObject o;
-    o.insert(QStringLiteral("event"), QStringLiteral("start"));
-    o.insert(QStringLiteral("ts"), ts);
-    o.insert(QStringLiteral("thresholdDb"), th);
-    o.insert(QStringLiteral("streakNeed"), need);
-    o.insert(QStringLiteral("recordSec"), recSec);
-    appendJsonl(QStringLiteral("study_log"), o);
-    return ts;
-}
-static void logStudyStop(qint64 startTs, int alertCount)
-{
-    QJsonObject o;
-    o.insert(QStringLiteral("event"), QStringLiteral("stop"));
-    o.insert(QStringLiteral("ts"), QDateTime::currentSecsSinceEpoch());
-    o.insert(QStringLiteral("startTs"), startTs);
-    o.insert(QStringLiteral("durationSec"),
-             startTs > 0 ? (QDateTime::currentSecsSinceEpoch() - startTs) : 0);
-    o.insert(QStringLiteral("alertCount"), alertCount);
-    appendJsonl(QStringLiteral("study_log"), o);
-}
+// ── P3 长期记录落盘内核已迁至 src/p3log/p3_log.{h,cpp}（2026-10-30 main 拆分 #6a）──
+//   dataRoot / appendJsonl / logNoiseSample / logStudyStart / logStudyStop 迁出；
+//   零 main 全局依赖，main 侧查询对话框与自习/噪音接线经 #include 同名调用。
 
 // ── P3 播放时段管理：时段判断 ───────────────────────────────────
 // 没开时段限制 → 随时可播；开了但窗口为空 → 也放开；否则落在任一窗口内才放行。
