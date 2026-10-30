@@ -438,21 +438,25 @@ void Updater::onDownloadFinished()
         fail(QStringLiteral("建不了解压目录：%1").arg(QDir::toNativeSeparators(staging)));
         return;
     }
-    QString why;
-    if (!extractZip(m_zipPath, staging, &why)) {
-        fail(QStringLiteral("解压失败：%1").arg(why));
-        return;
-    }
-    QFile::remove(m_zipPath);   // 130MB 的包留着没用，清掉
+    // P1-1（2026-10-30）：解压改异步，避免主线程 waitForFinished(20min) 冻结 UI。
+    // 解压完成后的「替换脚本 + 退出」流程放进回调，与原来同步版顺序完全一致。
+    extractZipAsync(m_zipPath, staging, [this, staging](bool ok, const QString &why) {
+        if (!ok) {
+            fail(QStringLiteral("解压失败：%1").arg(why));
+            return;
+        }
+        QFile::remove(m_zipPath);   // 130MB 的包留着没用，清掉
 
-    setState(QStringLiteral("launching"), QStringLiteral("正在重启以完成更新…"));
-    if (!launchReplacer(staging, &why)) {
-        fail(QStringLiteral("写替换脚本失败：%1").arg(why));
-        return;
-    }
-    logf("[update] 替换脚本已启动，本进程即将退出");
-    // 留一点时间让 logf 落盘、让脚本把句柄拿稳
-    QTimer::singleShot(500, qApp, [] { QCoreApplication::quit(); });
+        setState(QStringLiteral("launching"), QStringLiteral("正在重启以完成更新…"));
+        QString why2;
+        if (!launchReplacer(staging, &why2)) {
+            fail(QStringLiteral("写替换脚本失败：%1").arg(why2));
+            return;
+        }
+        logf("[update] 替换脚本已启动，本进程即将退出");
+        // 留一点时间让 logf 落盘、让脚本把句柄拿稳
+        QTimer::singleShot(500, qApp, [] { QCoreApplication::quit(); });
+    });
 }
 
 bool Updater::extractZip(const QString &zip, const QString &dest, QString *why)
@@ -534,6 +538,99 @@ bool Updater::extractZip(const QString &zip, const QString &dest, QString *why)
         return false;
     }
     return true;
+}
+
+// ── P1-1（2026-10-30）：异步解压，不阻塞主线程 ─────────────────────────────
+// 与同步 extractZip 同一套语义（tar 优先 → PowerShell 回落 → 尾部自检 exeName），
+// 但全程用 QProcess::finished 信号驱动，绝不在主线程 waitForFinished。
+// done(ok, why) 在解压彻底结束后调用；成功 ok=true、why 空；失败 ok=false、why 为原因。
+void Updater::extractZipAsync(const QString &zip, const QString &dest,
+                              std::function<void(bool, const QString &)> done)
+{
+    // 包名来自云端清单，理论上任意；这里再确认一次它真的是个文件。
+    if (!QFileInfo::exists(zip)) {
+        done(false, QStringLiteral("找不到已下载的包：%1").arg(QDir::toNativeSeparators(zip)));
+        return;
+    }
+
+    const QString exeName = QFileInfo(QCoreApplication::applicationFilePath()).fileName();
+    const QString tar = qEnvironmentVariable("SystemRoot", QStringLiteral("C:\\Windows"))
+                        + QStringLiteral("/System32/tar.exe");
+
+    // 尾部自检 + 收口（成功/失败都走这里）。
+    const auto finish = [dest, exeName, done](bool ok, const QString &detail) {
+        if (!ok) { done(false, detail); return; }
+        // ⚠️ 关键自检：解压出来的东西必须真的像个管理端包。
+        if (!QFileInfo::exists(dest + QLatin1Char('/') + exeName)) {
+            done(false, QStringLiteral("解压后没找到 %1，这个包与本程序不匹配（拒绝覆盖）").arg(exeName));
+            return;
+        }
+        done(true, QString());
+    };
+
+    const auto tryPowershell = [this, zip, dest, exeName, done, finish](const QString &fallbackDetail) {
+        logf("[update] tar 路径不可用（%s），回落 PowerShell Expand-Archive",
+             fallbackDetail.toUtf8().constData());
+        const QString ps = QStringLiteral(
+            "$ErrorActionPreference='Stop';"
+            "Expand-Archive -LiteralPath \"%1\" -DestinationPath \"%2\" -Force")
+            .arg(QString(zip).replace(QLatin1Char('"'), QStringLiteral("`\"")))
+            .arg(QString(dest).replace(QLatin1Char('"'), QStringLiteral("`\"")));
+        auto *p2 = new QProcess(this);
+        p2->setProgram(QStringLiteral("powershell.exe"));
+        p2->setArguments({ QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"),
+                           QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"),
+                           QStringLiteral("-Command"), ps });
+        p2->setProcessChannelMode(QProcess::MergedChannels);
+        stelarithHideChildConsole(*p2);   // #368 需求①：PowerShell 解压静默
+        connect(p2, &QProcess::finished, this,
+                [p2, finish](int code, QProcess::ExitStatus st) {
+                    const QString out = QString::fromLocal8Bit(p2->readAll()).trimmed();
+                    p2->deleteLater();
+                    if (st != QProcess::NormalExit || code != 0) {
+                        finish(false, QStringLiteral("PowerShell 解压失败（退出码 %1）：%2")
+                                       .arg(code).arg(out.left(300)));
+                    } else {
+                        finish(true, QString());
+                    }
+                });
+        connect(p2, &QProcess::errorOccurred, this,
+                [p2, finish](QProcess::ProcessError) {
+                    const QString err = p2->errorString();
+                    p2->deleteLater();
+                    finish(false, QStringLiteral("PowerShell 起不来：%1").arg(err));
+                });
+        p2->start();
+    };
+
+    if (QFileInfo::exists(tar)) {
+        auto *p = new QProcess(this);
+        p->setProgram(tar);
+        p->setArguments({ QStringLiteral("-xf"), QDir::toNativeSeparators(zip),
+                          QStringLiteral("-C"), QDir::toNativeSeparators(dest) });
+        p->setProcessChannelMode(QProcess::MergedChannels);
+        stelarithHideChildConsole(*p);   // #368 需求①：tar 解压静默，不弹控制台
+        connect(p, &QProcess::finished, this,
+                [p, finish](int code, QProcess::ExitStatus st) {
+                    const QString out = QString::fromLocal8Bit(p->readAll()).trimmed();
+                    p->deleteLater();
+                    if (st != QProcess::NormalExit || code != 0) {
+                        finish(false, QStringLiteral("tar 退出码 %1：%2")
+                                       .arg(code).arg(out.left(300)));
+                    } else {
+                        finish(true, QString());
+                    }
+                });
+        connect(p, &QProcess::errorOccurred, this,
+                [p, finish, tryPowershell](QProcess::ProcessError) {
+                    const QString err = p->errorString();
+                    p->deleteLater();
+                    tryPowershell(QStringLiteral("tar 起不来：%1").arg(err));
+                });
+        p->start();
+    } else {
+        tryPowershell(QStringLiteral("系统里没有 tar.exe，改用 PowerShell 解压…"));
+    }
 }
 
 bool Updater::launchReplacer(const QString &staging, QString *why)

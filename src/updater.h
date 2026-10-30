@@ -44,6 +44,7 @@
 
 #include <QObject>
 #include <QString>
+#include <functional>
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -122,6 +123,10 @@ private:
     void onDownloadFinished();
     /** 用系统 tar.exe（Win10 1803+ 自带 bsdtar）解压 zip；失败回落 PowerShell。 */
     bool extractZip(const QString &zip, const QString &dest, QString *why);
+    // 异步解压（P1-1 性能修复 2026-10-30）：不阻塞主线程。done(ok, why) 在解压彻底
+    // 结束后调用（成功 why 为空；失败 why 是原因）。替代原同步 extractZip 的 UI 冻结。
+    void extractZipAsync(const QString &zip, const QString &dest,
+                         std::function<void(bool, const QString &)> done);
     bool launchReplacer(const QString &staging, QString *why);
     /** exe 直更：写 apply-update.cmd（等旧进程退 → 安装器 /S → 拉起新版本）。 */
     bool launchExeInstaller(QString *why);
