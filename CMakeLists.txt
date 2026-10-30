@@ -227,6 +227,10 @@ add_executable(stelarith-agent-qt
   src/notification_gate.h
   src/edge_tts.cpp
   src/edge_tts.h
+  # 2026-10-30 main 拆分第一刀：TTS 统一播报（SAPI 兜底 + 音量序列 + token 去重 + 超时兜底）
+  # 从 src/main.cpp 整块迁出。main 只留 speakText() 调用点；本模块零 main 全局依赖。
+  src/tts/tts_speaker.cpp
+  src/tts/tts_speaker.h
   src/microphone.cpp
   src/microphone.h
   # ── 媒体工具层（2026-10-22 · AGENTS.md §10 第 1 刀）：ffmpeg 定位 / 摄像头绑定 / 设备解析 / 错误归类 ──
