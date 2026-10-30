@@ -272,6 +272,10 @@ add_executable(stelarith-agent-qt
   #   g_latestVer/g_channel/kAppVersion 提升文件作用域外部链接供本模块 extern 复用。
   src/ota/ota_state.cpp
   src/ota/ota_state.h
+  # ── OTA 自更新动作层（2026-10-31 main 拆分 #15）：compareVersion…otaRollback + OtaDeps 注入 ──
+  #   与 ota_state（状态机/路径）同域分工；startSelfUpdate/otaIsBusy 经 OtaDeps 注入。
+  src/ota/ota_update.cpp
+  src/ota/ota_update.h
   # ── 自习模式（2026-10-30 main 拆分：#5 迁出，原 main.cpp 4261-4370）──
   #   sendNoiseAlert/studyOnSample/studyTriggerRecord + 自动录制计时器；状态全局（g_study*）
   #   仍驻 main，按既有 extern 模式（g_uid/agentEnvPath 同款）复用，纯搬迁零行为变化。
