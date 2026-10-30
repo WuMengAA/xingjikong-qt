@@ -41,6 +41,7 @@
 #include "core/ExecOut.h"     // 2026-10-23 §10 第 3 刀：指令执行结果（跨 TU 共享）
 #include "core/AgentSettings.h" // 2026-10-23 §10 第 4 刀：本地功能开关（原嵌在匿名域内，跨不了 TU）
 #include "core/BlackboardCard.h" // 2026-10-24 P1：发布中心卡片 → 通知参数（纯映射，可单测）
+#include "ota/channel_persistence.h" // 2026-10-30 main 拆分：OTA 灰度渠道持久化迁出
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -292,6 +293,7 @@ void sendNoiseIncident(const QJsonObject &p)
 // noise_cloud_transport.cpp 的真实调用保活，锚本身是否存活无关紧要。
 void (*kSendNoiseIncidentAnchor)(const QJsonObject &) = &sendNoiseIncident;
 QString g_uid;                 // 本机设备码（register 时定下来，心跳复用，避免每次重算）；文件作用域外部链接，供 upload 模块跨 TU 引用
+QString agentEnvPath();                               // 前向声明（外部链接；定义见本文件末尾 namespace 之后，供 OTA 渠道持久化模块跨 TU 引用）
 namespace {
 
 constexpr int kFrameIntervalMs = 2000;   // 兜底默认（现由 previewIntervalMs() 读取，可 env 覆盖）
@@ -353,7 +355,6 @@ constexpr const char *kAppVersion = "0.6.51-rc.1";
 // 2026-10-10：灰度渠道持久化（发现①修复）—— 当前生效渠道在 main 启动时解析并落盘 channel.txt，
 // 后续任何重启/升级都自动沿用，不再依赖启动器注入 STE_QT_CHANNEL。见 resolvedChannel/persistChannel。
 static QString g_channel = QStringLiteral("stable");   // 供 register 上报；main 启动即解析覆盖
-QString resolvedChannel();                               // 前向声明（定义在 agentEnvPath 之后）
 
 int g_backoffMs = kFirstBackoffMs;
 // 2026-10-08：本机归属的班级码（OOBE 绑定后持久化，register 时带给云端 → 管理端按班分组）。
@@ -1442,77 +1443,13 @@ QString cleanLine(const QString &s)
 // agent.env 的路径 —— **唯一真源**：读、写、备份、提示文案全从这里出，别处不许自己拼字符串。
 //
 // ⚠️ 2026-10-07 从「exe 同目录」改到「数据目录」。原先返回 applicationDirPath()，也就是
-// `C:\Program Files\Stelarith\agent.env` —— 那是**程序目录**，不是数据目录，两个后果：
-//   ① 教室机以老师/学生账户跑时，Program Files 对普通账户**没有写权限** ⇒ 配置向导点「保存」
-//      看着存了（QFile::write 返回 true 前就静默失败），重启又变回「未配置」；
-//   ② OTA 换包要决定"备份谁"，备份程序目录里的配置文件本身就是个错的位置。
-// 数据目录 %LOCALAPPDATA%\xingjikong\ 与日志/截图/调度/OTA 状态同根 —— 普通账户可写、
-// 升级天然保留、换包碰不到。老机器上已有的旧配置由 migrateAgentEnvFromInstallDir() 搬运。
-QString agentEnvPath()
-{
-    static QString cached;                                    // 回退/迁移只算一次
-    if (!cached.isEmpty()) return cached;
-    const QString dir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
-    if (!QFileInfo::exists(dir) && !QDir().mkpath(dir)) {
-        // 连数据目录都建不出来（权限异常/只读盘）⇒ 回退老行为，宁可沿用装目录也别让程序连不上云端
-        cached = QCoreApplication::applicationDirPath() + QStringLiteral("/agent.env");
-        qWarning() << QStringLiteral("[agent-qt] 数据目录建不出来（%1）—— agent.env 回退到安装目录：%2").arg(dir, cached);
-        return cached;
-    }
-    cached = dir + QStringLiteral("/agent.env");
-    return cached;
-}
 
-// ── 2026-10-10：OTA 灰度渠道持久化（发现①修复）────────────────────────────
-// 渠道原本只由启动环境变量 STE_QT_CHANNEL 指定；但计划任务 action 与 OTA 自更新的
-// 重启助手(ota-relaunch.bat)默认不注入该变量 → 一旦重启/升级就拿不到 → 回落 stable，
-// 灰度机悄悄掉回稳定通道。这里把「当前生效渠道」落盘到数据目录 channel.txt：
-//   启动优先读环境变量 → 其次读 channel.txt → 都没有才 stable。
-// 首次以 gray 拉起后，之后任何重启/升级都自动沿用 gray（main 启动时 persistChannel 写回）。
-// ⚠️ 路径**必须**跟着 agentEnvPath() 走（而不是自己拼 LOCALAPPDATA）：那份实现已处理
-//    「目录建不出 → 回退安装目录 + qWarning」；自己拼的话 LOCALAPPDATA 一旦为空（服务账户/
-//    Session0）就会写到 C:/xingjikong/，写失败还**静默无声**，渠道悄悄丢（fail-silent 红线）。
-//    agentEnvPath() 定义在**本函数之前**（约 1023 行），可直接调用。
-QString channelFilePath()
-{
-    // 与 agent.env 同目录：配置在哪，渠道就在哪，不会出现两者分裂。
-    return QFileInfo(agentEnvPath()).path() + QStringLiteral("/channel.txt");
-}
 
-QString resolvedChannel()
-{
-    const QString env = qEnvironmentVariable("STE_QT_CHANNEL").trimmed();
-    if (!env.isEmpty()) return env;
-    QFile f(channelFilePath());
-    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        const QString v = QString::fromUtf8(f.readAll()).trimmed();
-        f.close();
-        if (!v.isEmpty()) return v;
-    }
-    return QStringLiteral("stable");
-}
 
-// 把当前生效渠道写回 channel.txt（幂等：内容相同则不动盘）
-void persistChannel(const QString &ch)
-{
-    const QString p = channelFilePath();
-    QFile f(p);
-    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        const QString cur = QString::fromUtf8(f.readAll()).trimmed();
-        f.close();
-        if (cur == ch) return;
-    }
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        f.write(ch.toUtf8());
-        f.write("\n");
-        f.close();
-        return;
-    }
-    // 写不出必须喊出来：渠道没持久化 = 重启/升级后悄悄回落 stable，
-    // 现场表现和"灰度机自己退出灰度"一模一样，不写日志事后根本查不到（fail-silent 红线）。
-    qWarning("[agent-qt] ⚠ channel.txt 写不出（%s：%s）—— 渠道不会持久化，重启/升级后可能回落 stable",
-             qPrintable(p), qPrintable(f.errorString()));
-}
+
+// ── OTA 灰度渠道持久化（2026-10-30 迁出 → src/ota/channel_persistence.{h,cpp}）──
+//   定义已不在本文件；main.cpp 经 #include "ota/channel_persistence.h" 调用 channelFilePath/
+//   resolvedChannel/persistChannel，agentEnvPath 跨 TU 引用在 OTA 模块内处理。
 
 /**
  * 老版本（≤0.6.22）把 agent.env 写在 exe 同目录，这里在**首次启动时**把它搬到数据目录。
@@ -7113,6 +7050,29 @@ void captureAndSend(const QString &outDir)
 }
 
 } // namespace
+
+// agentEnvPath()（2026-10-30 提升为文件作用域外部链接：原在匿名 namespace 内，因 OTA 渠道
+// 持久化模块跨 TU 引用而迁出；逻辑与原地逐字一致。）
+// `C:\Program Files\Stelarith\agent.env` —— 那是**程序目录**，不是数据目录，两个后果：
+//   ① 教室机以老师/学生账户跑时，Program Files 对普通账户**没有写权限** ⇒ 配置向导点「保存」
+//      看着存了（QFile::write 返回 true 前就静默失败），重启又变回「未配置」；
+//   ② OTA 换包要决定"备份谁"，备份程序目录里的配置文件本身就是个错的位置。
+// 数据目录 %LOCALAPPDATA%\xingjikong\ 与日志/截图/调度/OTA 状态同根 —— 普通账户可写、
+// 升级天然保留、换包碰不到。老机器上已有的旧配置由 migrateAgentEnvFromInstallDir() 搬运。
+QString agentEnvPath()
+{
+    static QString cached;                                    // 回退/迁移只算一次
+    if (!cached.isEmpty()) return cached;
+    const QString dir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
+    if (!QFileInfo::exists(dir) && !QDir().mkpath(dir)) {
+        // 连数据目录都建不出来（权限异常/只读盘）⇒ 回退老行为，宁可沿用装目录也别让程序连不上云端
+        cached = QCoreApplication::applicationDirPath() + QStringLiteral("/agent.env");
+        qWarning() << QStringLiteral("[agent-qt] 数据目录建不出来（%1）—— agent.env 回退到安装目录：%2").arg(dir, cached);
+        return cached;
+    }
+    cached = dir + QStringLiteral("/agent.env");
+    return cached;
+}
 
 // ── 录像/班级监控上传（2026-10-30 迁出 → src/upload/recording_upload.{h,cpp}）──
 //   定义已不在本文件；MediaSession.cpp 经 #include "upload/recording_upload.h" 调用，

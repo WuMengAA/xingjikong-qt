@@ -263,6 +263,10 @@ add_executable(stelarith-agent-qt
   #   g_uid 沿用 MediaSession.cpp 既有的「跨 TU 共享全局」约定（extern）。
   src/upload/recording_upload.cpp
   src/upload/recording_upload.h
+  # ── OTA 灰度渠道持久化（2026-10-30 main 拆分：#12 迁出，原 main.cpp 1466-1515）──
+  #   channelFilePath/resolvedChannel/persistChannel；agentEnvPath() 已提升为外部链接供本模块跨 TU 引用。
+  src/ota/channel_persistence.cpp
+  src/ota/channel_persistence.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──
