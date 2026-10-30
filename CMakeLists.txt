@@ -267,6 +267,11 @@ add_executable(stelarith-agent-qt
   #   channelFilePath/resolvedChannel/persistChannel；agentEnvPath() 已提升为外部链接供本模块跨 TU 引用。
   src/ota/channel_persistence.cpp
   src/ota/channel_persistence.h
+  # ── OTA 状态机 + 健康快照（2026-10-30 main 拆分：#4a 迁出，原 main.cpp 2189-2287/3688-3749）──
+  #   otaLoadState/otaPaused/otaNoteFailure/otaNoteSuccess/otaReportHealth + 各路径；
+  #   g_latestVer/g_channel/kAppVersion 提升文件作用域外部链接供本模块 extern 复用。
+  src/ota/ota_state.cpp
+  src/ota/ota_state.h
   # ── 自习模式（2026-10-30 main 拆分：#5 迁出，原 main.cpp 4261-4370）──
   #   sendNoiseAlert/studyOnSample/studyTriggerRecord + 自动录制计时器；状态全局（g_study*）
   #   仍驻 main，按既有 extern 模式（g_uid/agentEnvPath 同款）复用，纯搬迁零行为变化。
