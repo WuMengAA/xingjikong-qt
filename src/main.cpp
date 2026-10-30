@@ -2524,9 +2524,10 @@ static const qint64 kOtaMaxBytes = 300LL * 1024 * 1024;   // 安装包体积上�
 static QNetworkAccessManager *g_otaNam = nullptr;
 static QNetworkReply *g_otaReply = nullptr;
 static QFile *g_otaFile = nullptr;
-static QCryptographicHash *g_otaHash = nullptr;
 static QString g_otaId, g_otaSha, g_otaVer, g_otaPath;
 static qint64 g_otaGot = 0;
+static qint64 g_otaExisting = 0;          // 2026-10-31 Range 断点续传：本地已有字节数（续传起点）
+static bool g_otaAppendPending = false;   // 2026-10-31：是否带 Range 头续传（200 回落全量时清掉）
 static bool g_otaBusy = false;
 // 见前面 otaIsBusy 的说明：强制升级的触发判定在文件更前面，只能靠这个函数看到这个标志。
 static bool otaIsBusy() { return g_otaBusy; }
@@ -2697,32 +2698,68 @@ static void startSelfUpdate(const QString &id, const QJsonObject &params)
     }
     g_otaPath = dir + QLatin1Char('/') + base;
 
-    g_otaFile = new QFile(g_otaPath);
-    if (!g_otaFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        sendActionReceipt(id, action, QStringLiteral("failed"),
-                          QStringLiteral("无法写入下载文件：%1").arg(g_otaPath));
-        otaNoteFailure(QStringLiteral("无法写入下载目录（盘满了？）"));
-        delete g_otaFile; g_otaFile = nullptr;
-        return;
-    }
+    // 2026-10-31：Range 断点续传（弱网教室机 38MB 包中断不再从头拉）。
+    // 设计：先在**响应头到达后**再按状态决定写模式 ——
+    //   · 服务器回 206（接受 Range）→ 续写在已有字节之后（Append + g_otaGot=已有大小）；
+    //   · 服务器回 200（忽略 Range）→ 从头全量（Truncate + g_otaGot=0），GitHub/CF 代理均支持 206。
+    // 哈希改在下载完成后对**落盘成品**流式重算（见 otaOnFinished），续传与全量两种路径天然正确。
+    // 安全自愈：残留文件过不了 sha256 校验 → 删除 → 下次全量重试，绝不执行不可信内容。
+    g_otaExisting = QFileInfo(g_otaPath).size();
+    g_otaAppendPending = (g_otaExisting > 0);
+    g_otaFile = nullptr;                       // 等 metaDataChanged 再开（200/206 决定 Truncate/Append）
 
-    g_otaId = id; g_otaSha = sha; g_otaVer = ver; g_otaGot = 0; g_otaBusy = true;
-    if (g_otaHash) delete g_otaHash;
-    g_otaHash = new QCryptographicHash(QCryptographicHash::Sha256);
+    g_otaId = id; g_otaSha = sha; g_otaVer = ver; g_otaGot = (g_otaAppendPending ? g_otaExisting : 0);
+    g_otaBusy = true;
     if (!g_otaNam) g_otaNam = new QNetworkAccessManager();
 
     QNetworkRequest req{QUrl(url)};
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("StelarithAgentQt/%1").arg(kAppVersion));
+    if (g_otaAppendPending) {
+        // Range: bytes=<已有字节>- （无结束位 = 拉剩余到文件尾）。
+        req.setRawHeader("Range", "bytes=" + QByteArray::number(g_otaExisting) + "-");
+        qInfo("[agent-qt] ⬇ OTA 断点续传：已有 %lld/期望字节，发 Range 从 %lld 继续",
+              (long long)g_otaExisting, (long long)g_otaExisting);
+    }
 
     // 先回执"已受理"：管理端据此确认指令被接下（长下载不至于看起来"没反应"）
     sendActionReceipt(id, action, QStringLiteral("started"), QString(),
                       QJsonObject{{QStringLiteral("stage"), QStringLiteral("downloading")},
                                   {QStringLiteral("version"), ver}, {QStringLiteral("url"), url}});
-    qInfo("[agent-qt] ⬇ OTA 开始下载 %s → %s（期望 sha256=%s）",
-          qPrintable(url), qPrintable(g_otaPath), qPrintable(sha));
+    qInfo("[agent-qt] ⬇ OTA 开始下载 %s → %s（期望 sha256=%s%s）",
+          qPrintable(url), qPrintable(g_otaPath), qPrintable(sha),
+          g_otaAppendPending ? "，续传模式" : "");
 
     g_otaReply = g_otaNam->get(req);
+
+    // 响应头先到（Qt 保证 metaDataChanged 先于 readyRead）—— 在这里按 206/200 开文件。
+    QObject::connect(g_otaReply, &QNetworkReply::metaDataChanged, [] {
+        if (!g_otaReply) return;
+        const int status = g_otaReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool partial = (status == 206);
+        const qint64 startAt = (partial && g_otaAppendPending) ? g_otaExisting : 0;
+        if (status == 200 && g_otaAppendPending) {
+            qInfo("[agent-qt] ⬇ OTA 服务器忽略 Range（HTTP 200 全量），改为从头下载");
+            g_otaAppendPending = false;
+            g_otaGot = 0;
+        }
+        if (!g_otaFile) {
+            g_otaFile = new QFile(g_otaPath);
+            const QIODevice::OpenMode mode = (startAt > 0)
+                ? (QIODevice::WriteOnly | QIODevice::Append)
+                : (QIODevice::WriteOnly | QIODevice::Truncate);
+            if (!g_otaFile->open(mode)) {
+                qWarning("[agent-qt] ⬇ OTA 写入文件失败（%s）—— 中止下载", qPrintable(g_otaPath));
+                if (g_otaReply) g_otaReply->abort();
+                return;
+            }
+            if (startAt > 0) {
+                g_otaFile->seek(g_otaExisting);    // Append 模式下 seek 到既有大小（保险）
+                qInfo("[agent-qt] ⬇ OTA 已从 %lld 字节处续写（bytes=%lld-）",
+                      (long long)g_otaExisting, (long long)g_otaExisting);
+            }
+        }
+    });
 
     // 注意：这些 lambda **无捕获**，只读命名空间级全局量，避免函数返回后引用悬空。
     QObject::connect(g_otaReply, &QNetworkReply::readyRead, [] {
@@ -2731,7 +2768,9 @@ static void startSelfUpdate(const QString &id, const QJsonObject &params)
         g_otaGot += chunk.size();
         if (g_otaGot > kOtaMaxBytes) { g_otaReply->abort(); return; }  // 护栏③
         g_otaFile->write(chunk);
-        g_otaHash->addData(chunk);
+        // 2026-10-31：不再增量哈希 —— 断点续传下哈希须覆盖整包，
+        // 且在响应头到达前不知道是续写还是全量，增量无法自洽。改为 otaOnFinished
+        // 对落盘成品流式重算（38MB 读一遍毫秒级，安全性与原来等价：安装前必验 sha）。
     });
     QObject::connect(g_otaReply, &QNetworkReply::finished, [] { otaOnFinished(); });
 }
@@ -2751,8 +2790,18 @@ static void otaOnFinished()
 
     const QString id = g_otaId, ver = g_otaVer, sha = g_otaSha, path = g_otaPath;
     const qint64 got = g_otaGot;
-    const QString gotSha = g_otaHash ? QString::fromLatin1(g_otaHash->result().toHex()) : QString();
-    if (g_otaHash) { delete g_otaHash; g_otaHash = nullptr; }
+    // 2026-10-31：哈希改为对落盘成品流式重算（断点续传下增量不可自洽）。
+    // 任何半成品（网络中断尾部、误拼接）都算不出正确 sha → 走"校验不符"删除 → 下次重试。
+    QString gotSha;
+    {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            QCryptographicHash h(QCryptographicHash::Sha256);
+            QByteArray buf;
+            while ((buf = f.read(1024 * 1024)).size() > 0) h.addData(buf);
+            gotSha = QString::fromLatin1(h.result().toHex());
+        }
+    }
 
     // 三种失败都要进"退避账"：强制升级失败的机器不能立刻又装一遍。
     if (got > kOtaMaxBytes) {
@@ -2763,10 +2812,11 @@ static void otaOnFinished()
         return;
     }
     if (nerr != QNetworkReply::NoError) {
-        QFile::remove(path);
+        // 2026-10-31：网络错误**不删已下载文件** —— Range 断点续传靠它接着拉。
+        // 内容损坏由 sha256 校验兜底（校验不符才删）；只删"完整但不对"的半成品。
         sendActionReceipt(id, action, QStringLiteral("failed"),
-                          QStringLiteral("下载失败：%1").arg(nerrStr));
-        otaNoteFailure(QStringLiteral("下载失败：").append(nerrStr).left(160));
+                          QStringLiteral("下载中断：%1（已保留部分文件，下次自动续传）").arg(nerrStr));
+        otaNoteFailure(QStringLiteral("下载中断：").append(nerrStr).left(160));
         return;
     }
     if (gotSha != sha) {
