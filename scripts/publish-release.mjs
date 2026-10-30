@@ -518,6 +518,38 @@ async function cmdPublish() {
 			log(`     内网发布/临时网络问题属预期；确认无碍后可加 --no-verify 跳过。`);
 			log(`     人工核对：curl "${probe}"`);
 		}
+
+		// ── 发布后资产可达性自验（2026-10-31 加 · 404 事故闭环）──────────────
+		// 为什么必须：上面的 /api/public/ota 自验只证明"清单能取到"，不证明
+		// 「清单 url 指向的文件真的能下载」。10-30 事故 = assets/pkg/ 被清空，
+		// 清单完全正常、接口完全正常、教室机下载却 404 —— 这类故障在"自验"的眼皮
+		// 底下溜过去，等教室机报"更新失败"才暴露。这里直接 HEAD/GET 资产 URL：
+		//   · 非 200 → 硬失败（清单指向的文件不可达，发了也白发）；
+		//   · content-length 与清单 size 不符 → 硬失败（CDN/代理吐了残缺体）；
+		// 网络不可达仍算警告（与上方同口径，--no-verify 一并跳过）。
+		try {
+			const assetProbe = `${origin}${dir.replace(/\/$/, '')}/${encodeURIComponent(baseName)}`;
+			log(`  资产自验：GET ${assetProbe}（HEAD，不下载包体）`);
+			const aresp = await fetch(assetProbe, { method: 'HEAD', signal: AbortSignal.timeout(20000) });
+			if (aresp.status !== 200) {
+				fail(
+					`资产自验失败：GET ${assetProbe} 返回 HTTP ${aresp.status}（期望 200）。\n`
+					+ `  清单已声明 url，但文件取不到 —— 这等于"发了但教室机永远下不动"。\n`
+					+ `  人工核对：curl -I "${assetProbe}"；确认文件已在 ${path.relative(ROOT, dest)}。`
+				);
+			}
+			const gotLen = Number(aresp.headers.get('content-length') || 0);
+			if (gotLen && gotLen !== st.size) {
+				fail(
+					`资产自验失败：${assetProbe} 的 content-length=${gotLen}，清单 size=${st.size}。\n`
+					+ `  要么 CDN/代理缓存了残缺体，要么服务器返回了别的文件 —— 教室机会校验失败。`
+				);
+			}
+			log(`  ✓ 资产可达：HTTP 200，content-length 一致（${humanSize(st.size)}）`);
+		} catch (e) {
+			log(`  ⚠ 资产自验请求失败（${e.message}）—— 未确认资产可达（网络问题或 --no-verify 场景）。`);
+			log(`     人工核对：curl -I "${origin}${dir.replace(/\/$/, '')}/${encodeURIComponent(baseName)}"`);
+		}
 	}
 
 	log('\n下一步可以做的验证：');

@@ -23,7 +23,7 @@
 // （2026-10-20：管理台 POST /api/admin/ota 也支持带 channel 直接写灰度清单，
 //  走 manifestFileFor() 同一真源，不再只能运维手工编辑文件。）
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { OTA_MANIFEST_FILE } from './config.js';
 
@@ -131,4 +131,49 @@ export function latestFor(product, channel) {
     notes: String(p.notes || ''),
     mandatory: !!p.mandatory,
   };
+}
+
+/**
+ * OTA 资产健康检查（2026-10-31 加 · 404 事故闭环）。
+ * 云端启动时跑一次：遍历 stable + 全部 ota-<channel>.json 清单里每个产品的 url，
+ * 只对「指向本机资产目录」的 url 核对本地文件存在性 —— 资产被清/漏发会立刻告警，
+ * 而不是等教室机报"更新失败"。
+ *
+ * ⚠️ 为什么区分本地/外部：本轮 OTA 现代化把资产迁移到了 GitHub Release（gh 代理），
+ * 清单 url 变成外部地址，本地 assets/pkg 有文件反而是旧的。所以只查**本地指向**的
+ * url（路径含 /assets/），外部 url 认为"由外部托管"、跳过 —— 不误报。
+ *
+ * @returns {{missing: Array<{product:string, channel:string, version:string, url:string}>, checked: number}}
+ */
+export function assetHealthCheck() {
+  const missing = [];
+  let checked = 0;
+  const channels = [''];
+  // 扫同目录的 ota-<channel>.json（stable 之外的灰度/候选通道）
+  try {
+    const dir = path.dirname(OTA_MANIFEST_FILE);
+    for (const f of readdirSync(dir)) {
+      const m = /^ota-([a-z0-9_-]{1,16})\.json$/.exec(f);
+      if (m) channels.push(m[1]);
+    }
+  } catch { /* 读目录失败就当只有 stable */ }
+
+  for (const ch of channels) {
+    const m = loadManifest(ch);
+    if (!m || !m.products) continue;
+    for (const [product, e] of Object.entries(m.products)) {
+      if (!e || typeof e !== 'object' || !e.url) continue;
+      const url = String(e.url);
+      // 只校验指向本地 /assets/ 的 url（attr: 资产在 assets/pkg/ 下）
+      const am = /\/assets\/[^?#]*/.exec(url.split('?')[0]);
+      if (!am) continue;
+      const rel = am[0].replace(/^\/assets\//, '');
+      const file = path.join(path.dirname(OTA_MANIFEST_FILE), 'assets', rel.split('/').join(path.sep));
+      checked++;
+      if (!existsSync(file)) {
+        missing.push({ product, channel: ch || 'stable', version: String(e.version || ''), url });
+      }
+    }
+  }
+  return { missing, checked };
 }

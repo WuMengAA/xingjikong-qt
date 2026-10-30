@@ -27,6 +27,8 @@ import { ensureQmlPatch, qmlPatchManifest, qmlPatchZipPath } from './qml-patch.j
 // 设备绑定（2026-10-20）：二维码矩阵生成 + 一次性绑定票据（零依赖，自带单测）
 import { makeQrMatrix, issueDeviceBind, issueClassBind, getTicket, markBound, pollDeviceBind } from './bind-qr.js';
 import { hitRate, clientIp } from './ratelimit.js';
+// 噪音存证（2026-10-30 · P0-2 云端）：事件接收 + 图片 5 分钟到期 + 元数据长期 + 按班鉴权
+import { storeNoiseIncident, listNoiseIncidents, readNoiseEvidence, sweepExpiredNoise } from './noise-evidence.js';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
   VIEWER_TOKEN, VIEWER_TOKEN_IS_DEFAULT, VIEWER_SECRET,
   HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, PROTOCOL_MODE, QUEUE_SWEEP_INTERVAL_MS,
@@ -140,7 +142,7 @@ import { initInteract, interactReady, sweepInteract,
   submitSongRequest, submitFeedback, submitBlessing,
   listSongRequests, listBlessings, feedbackSummary,
   handleSongRequest, handleBlessing } from './interact.js';
-import { latestFor, cmpVersion, manifestFileFor } from './ota.js';
+import { latestFor, cmpVersion, manifestFileFor, assetHealthCheck } from './ota.js';
 // 2026-10-18 · VoiceHub「正在播放」桥：云端集中轮询一次、缓存在内存、经既有 WS 下发。
 // 为什么在云端而不是被控端：60 台教室机各连 VoiceHub = 60 条外网长连接，且教室断网就全瞎。
 // 只读（绝不下发写指令），数据源是公开接口 /api/music/broadcast。
@@ -330,6 +332,17 @@ if (!interactReady()) pushEvent('error', '互动数据不可持久化：点歌/�
   }
 }
 
+// 噪音存证图片周期清理（P0-2 · 2026-10-30）：图片只保留 5 分钟，到期后删本地副本
+// （元数据长期保留，供频次/排行）。读时也会即时判定过期 ⇒ 拉不到；这里只是顺手清磁盘。
+setInterval(() => {
+  try {
+    const r = sweepExpiredNoise();
+    if (r.removed) pushEvent('info', '噪音存证过期图片已清理', { removed: r.removed });
+  } catch (e) {
+    pushEvent('error', '噪音存证清理失败', { error: e.message });
+  }
+}, 60 * 1000);
+
 if (DEV_TOKEN_IS_DEFAULT) {
   console.warn(`[cloud] ⚠ 正在使用内置开发令牌 "${DEV_TOKEN}"，生产环境请设环境变量 CLOUD_WS_TOKEN`);
 }
@@ -370,6 +383,42 @@ const server = http.createServer((req, res) => {
   const RECORDINGS_ROOT = process.env.CLOUD_RECORDINGS_DIR
       ? resolve(process.env.CLOUD_RECORDINGS_DIR)
       : join(__dirname, '..', 'recordings');
+
+  // ── 噪音存证静态托管（P0-2 · 2026-10-30）──────────────────────────────────
+  // /recordings/noise_evidence/<uid>/<id>-<desk|cam>.jpg：图片，保留 5 分钟（读时判定过期 ⇒ 404）；
+  // /recordings/noise_events/<uid>/<id>.json：元数据，长期保留（频次/排行依赖）。
+  // 鉴权与下方 /recordings(mp4) 同口径：Bearer CLOUD_VIEWER_TOKEN 或网站票据 + 按班 scope。
+  // ⚠️ 必须在下方通用 /recordings/ 分支**之前**：否则会被 mp4 分支的宽泛规则吞掉。
+  if (u.pathname.startsWith('/recordings/noise_evidence/') || u.pathname.startsWith('/recordings/noise_events/')) {
+    const rauth = req.headers.authorization || '';
+    const rtoken = rauth.toLowerCase().startsWith('bearer ') ? rauth.slice(7).trim() : '';
+    const rStatic = !!rtoken && safeEqual(rtoken, VIEWER_TOKEN);
+    const rTicket = !!rtoken && !rStatic ? verifyViewerTicket(rtoken).ok : false;
+    if (!rtoken || (!rStatic && !rTicket)) {
+      return send(401, { ok: false, ecode: 'AU1003', code: 'TOKEN_INVALID', error: '未授权：需要 Bearer <CLOUD_VIEWER_TOKEN> 或网站账号签发的票据' });
+    }
+    req.__auth = rStatic ? { ok: true, mode: 'token', uid: null } : verifyViewerTicket(rtoken);
+    applyStoredClaims(req.__auth);
+    const rel = u.pathname.replace(/^\/recordings\//, '');
+    const m = /^(noise_evidence|noise_events)\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_.-]+\.(jpg|json))$/.exec(rel);
+    if (!m) return send(404, { ok: false, error: '路径不合法' });
+    const evUid = m[2];
+    if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(evUid))) {
+      pushEvent('warn', '噪音存证下载越权（不在其 scopes 内）', { uid: evUid });
+      return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权查看该设备的噪音存证' });
+    }
+    if (m[1] === 'noise_evidence') {
+      const rf = readNoiseEvidence(evUid, m[3]);
+      if (!rf) return send(404, { ok: false, error: '存证已过期或不存在' });   // 5 分钟到期 ⇒ 拉不到
+      res.writeHead(200, { 'content-type': rf.contentType, 'cache-control': 'private, max-age=0, no-store', 'content-length': rf.buffer.length });
+      res.end(rf.buffer);
+      return;
+    }
+    const buf = readFileSync(join(RECORDINGS_ROOT, rel));
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'private, max-age=0, no-store', 'content-length': buf.length });
+    res.end(buf);
+    return;
+  }
 
   // /recordings/* 静态托管（2026-10-07 · 班级监控回放）：录制 mp4 只读下载/播放。
   // 与管理面鉴权同位置（在鉴权之前）——管理端播放器直接拉 mp4，不带令牌；
@@ -699,7 +748,7 @@ const server = http.createServer((req, res) => {
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
     u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
     u.pathname === '/api/ota/latest' || u.pathname.startsWith('/api/repairs') ||
-    u.pathname === '/api/recordings' || u.pathname === '/api/qml-patch' ||
+    u.pathname === '/api/recordings' || u.pathname === '/api/noise-incidents' || u.pathname === '/api/qml-patch' ||
     u.pathname === '/api/qml-patch/download' || u.pathname.startsWith('/api/interact') ||
     // 2026-10-19 · 动作排行（管理面统计，需鉴权）
     u.pathname === '/api/actions/ranking' ||
@@ -1563,6 +1612,20 @@ const server = http.createServer((req, res) => {
       }
     }
     return send(200, { ok: true, recordings: out });
+  }
+
+  // 噪音存证列表（P0-2 · 2026-10-30）：返回某设备长期保留的存证元数据（节次/次数/读数/是否存图）。
+  // 鉴权：isManageApi 已设 req.__auth；此处再按班过滤（与 recordings 同口径）。
+  //   ⚠️ 图片不在此列（5 分钟到期），只列元数据；要图走 /recordings/noise_evidence/。
+  if (u.pathname === '/api/noise-incidents') {
+    const uid = u.searchParams.get('uid') || '';
+    if (!uid) return send(400, { ok: false, error: 'uid 必填' });
+    const ident = identityFromAuth(req.__auth);
+    if (!canAccess(ident, getDeviceClassCode(uid))) {
+      pushEvent('warn', '噪音存证列表越权（不在其 scopes 内）', { uid });
+      return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权查看该设备的噪音存证' });
+    }
+    return send(200, { ok: true, incidents: listNoiseIncidents(uid) });
   }
 
   // 设备报修（2026-10-07，《设备报修-第一版设计》落地）：报修 CRUD。
@@ -2671,6 +2734,26 @@ setInterval(() => {
 // CIMS 课表周期同步（2026-10-17）：CIMS_ENABLED=true 且 CIMS_PULL_INTERVAL_SEC>0 才启。
 startCimsScheduler();
 
+// OTA 资产健康自检（2026-10-31 加 · 404 事故闭环）：清单指向本地 assets 的文件必须存在。
+// 10-30 事故 = assets/pkg/ 被清空，清单/接口全部正常、教室机下载却 404，静默到"更新失败"才暴露。
+// 这里启动时扫一遍：缺文件立即 pushEvent error，运维看事件流水就知道，不用等教室机报错。
+// 只查指向本地 /assets/ 的 url（外部托管 = GitHub Release / CDN，由对端负责，跳过不误报）。
+try {
+  const ah = assetHealthCheck();
+  if (ah.missing.length > 0) {
+    for (const m of ah.missing) {
+      pushEvent('error', 'OTA 资产缺失（清单在但文件不在）',
+        { product: m.product, channel: m.channel, version: m.version, url: m.url });
+    }
+    pushEvent('error', 'OTA 资产自检未通过：清单指向的安装包不在本地，教室机会下载失败',
+      { missing: ah.missing.length, checked: ah.checked });
+  } else {
+    pushEvent('info', 'OTA 资产自检通过', { checked: ah.checked });
+  }
+} catch (e) {
+  pushEvent('warn', 'OTA 资产自检异常（不影响启动）', { error: e.message });
+}
+
 wss.on('connection', (ws, req) => {
   let registered = false;
   let uid = null;
@@ -2932,6 +3015,20 @@ wss.on('connection', (ws, req) => {
       if (p.type === 'noise_alert') {
         pushEvent('info', `噪音告警（${p.payload?.event || '?'}）已推给管理端`,
           { uid, viewers: hits, count: p.payload?.count ?? null });
+      }
+      return;
+    }
+
+    if (p.type === 'noise_incident') {
+      // 噪音存证事件（P0-2 · 2026-10-30）：被控端已在本地完成「3 次超阈→1 次事件」的判定与
+      // 抓帧，这里只做落盘 + 实时中继给管理端。图片保留 5 分钟（云端 noise-evidence.js 管）。
+      // 与 noise_sample 不同：这是低频事件（一节课最多几次），**进事件流水**便于审计溯源。
+      const r = storeNoiseIncident(uid, p.payload || {});
+      if (r.ok) {
+        pushEvent('info', '噪音存证已接收', { uid, id: r.id, hits: p.payload?.hits ?? null, images: r.savedImages.length });
+        relayToSubscribers(uid, 'noise_incident', { uid, ...(p.payload || {}), incidentId: r.id });
+      } else {
+        pushEvent('warn', '噪音存证接收失败', { uid, error: r.error || 'unknown' });
       }
       return;
     }
