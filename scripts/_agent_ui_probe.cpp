@@ -327,7 +327,7 @@ int main(int argc, char *argv[])
     view.engine()->addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider());
     view.engine()->rootContext()->setContextProperty(QStringLiteral("agentUi"), &ui);
 
-    // 假 voicehub（2026-10-28）：壳里的「广播站排期中心」浮层（BroadcastScheduleSheet）
+    // 假 voicehub（2026-10-28）：广播台页内联的排期中心面板（BroadcastScheduleSheet）
     // 引用 voicehub.xxx —— 产品由 main.cpp 注入真实桥接对象，探针不链 main.cpp，
     // 不注入就会刷 15 条 ReferenceError 把「无未知报错」这一项打红。
     // 成员面按 `grep -o "voicehub\.[A-Za-z_]*" BroadcastScheduleSheet.qml` 全量收集，
@@ -634,14 +634,8 @@ QtObject {
                 QCoreApplication::processEvents();
             }
 
-            // 广播站排期中心（795 行整页换新：st 蓝白调色板 288 处 → Theme）
-            root->setProperty("sheetOpen", true);
-            snap(QStringLiteral("sheet_broadcast"), 800);   // 抽屉滑入 360ms + 余量
-            root->setProperty("sheetOpen", false);
-            // ⚠️ 关抽屉也是 360ms 的动画，且 `visible: opened || drawerSlide.running`
-            //    ⇒ 不等它滑出去，下一张图右侧会挂着半截抽屉（2026-10-30 实测：
-            //    广播台页看起来"内容被切掉"，其实是抽屉残影盖在上面）。
-            waitMs(700);
+            // 排期中心（2026-10-30 改为嵌入广播台页内联面板，不再是独立浮层抽屉）：
+            // 它在 broadcastconsole 页里，已被下面的广播机逐页截图（bc_00_*）覆盖，无需再单独开抽屉。
 
             // 用途切到广播机：页清单多一页「广播台」（首屏），这是本轮壳绑定链的验证点
             const int errBefore = g_qmlErrors.size();

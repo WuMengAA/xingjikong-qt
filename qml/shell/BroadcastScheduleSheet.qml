@@ -1,7 +1,7 @@
 import QtQuick 2.15
 import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 
-// 广播站 · 排期中心（右侧滑出 SideSheet · 2026-10-22）
+// 广播站 · 排期中心（2026-10-22 起为右侧滑出 SideSheet；2026-10-30 改为嵌入广播台页的内联面板）
 //
 // 设计约定：
 //   · 2026-10-30 用户点单「全部换新」：原来本件自带一套「现代蓝白」调色板（本地 `st` 对象，
@@ -30,13 +30,12 @@ import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯�
 //   松手即把新顺序提交服务端；失败则回滚到服务端真值。
 //   「投稿→排期」仍只在本地面板内生效（服务端尚无「投稿直接入排期」接口），面板不伪造「已保存」。
 
+// 2026-10-30 用户点单「移动到广播里面」：本件从「右侧滑出抽屉」改为「嵌入广播台页的内联面板」。
+// 不再有 打开/关闭、遮罩、滑入动画、关闭按钮。实例化处用 `anchors.fill: parent` 给定高度，
+// 内部高度按该高度推演（与抽屉时代一致）。数据仍来自全局 context property `voicehub`。
 Item {
     id: root
-    property bool opened: false
-    signal closed()
-
-    // 打开时拉一次最新排期
-    onOpenedChanged: if (opened) { syncSchedule(); if (voicehub) voicehub.refreshSchedule() }
+    anchors.fill: parent
 
 
     // 抽屉宽度：宽屏 600，窄屏取 96% 宽（避免出界）
@@ -148,52 +147,13 @@ Item {
     // 排期变化实时同步（voicehub 可能稍后异步到达）
     Connections {
         target: voicehub
-        function onScheduleChanged() { if (root.opened) syncSchedule() }
+        function onScheduleChanged() { syncSchedule() }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // 遮罩（50% 黑）+ 点击关闭
-    // ════════════════════════════════════════════════════════════════
-    Rectangle {
+    // ── 内联面板内容（原抽屉内容；去掉遮罩/滑入/关闭按钮）──
+    Column {
         anchors.fill: parent
-        color: Theme.color.scrim
-        opacity: root.opened ? 1 : 0
-        visible: root.opened || scrimFade.running
-        Behavior on opacity { NumberAnimation { id: scrimFade; duration: Theme.motion.normal; easing.type: Easing.Bezier; easing.bezierCurve: [0.2,0,0,1] } }
-        MouseArea {
-            anchors.fill: parent
-            enabled: root.opened
-            onClicked: root.closed()
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════
-    // 抽屉
-    // ════════════════════════════════════════════════════════════════
-    Item {
-        id: drawer
-        width: root.drawerW
-        height: parent.height
-        x: root.opened ? (parent.width - width) : parent.width
-        visible: root.opened || drawerSlide.running
-        Behavior on x { NumberAnimation { id: drawerSlide; duration: Theme.motion.normal; easing.type: Easing.Bezier; easing.bezierCurve: [0.05,0.7,0.1,1.0] } }
-
-        // 左侧软阴影（无外部依赖的近似）
-        Rectangle {
-            anchors.fill: parent
-            anchors.leftMargin: -10
-            color: Theme.shadow.soft
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            color: Theme.color.surface
-        }
-
-        // ── 抽屉内容 ──
-        Column {
-            anchors.fill: parent
-            spacing: 0
+        spacing: 0
 
             // 顶栏
             Item {
@@ -225,22 +185,7 @@ Item {
                         }
                     }
                 }
-                // 关闭按钮
-                Item {
-                    id: closeBtn
-                    width: 40; height: 40
-                    anchors.right: parent.right; anchors.rightMargin: Theme.spacing.md
-                    anchors.verticalCenter: parent.verticalCenter
-                    Rectangle {
-                        anchors.fill: parent; radius: Theme.radius.full
-                        color: closeMa.pressed ? Qt.rgba(0,0,0,0.10) : (closeMa.containsMouse ? Qt.rgba(0,0,0,0.06) : "transparent")
-                    }
-                    Text { anchors.centerIn: parent; text: "✕"; font.pixelSize: 18; color: Theme.color.textSecondary }
-                    MouseArea {
-                        id: closeMa; anchors.fill: parent; hoverEnabled: true
-                        onClicked: root.closed()
-                    }
-                }
+                // （2026-10-30 去掉关闭按钮：本件已嵌入广播台页，不再作为独立浮层关闭）
             }
 
             // 服务未配置提示条
@@ -700,7 +645,6 @@ Item {
                     }
                 }
             }
-        }
     }
 
     // ── Snackbar ──

@@ -20,6 +20,7 @@ import QtQuick
 import QtQuick.Layouts
 import "../../components"
 import "../../components/theme"
+import "../"   // 2026-10-30：排期中心（BroadcastScheduleSheet）已嵌入本页，引用 qml/shell/ 下的兄弟组件
 
 Item {
     id: page
@@ -155,6 +156,20 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: page.goPage("playschedule")
                     }
+                }
+            }
+
+            // ── 排期中心（2026-10-30 用户点单「移动到广播里面」：从浮层抽屉改为内联面板）──
+            // 高度固定 600、内部按 Tab 各自滚动（与抽屉时代一致）；数据来自全局 `voicehub`。
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 600
+                radius: Theme.radius.lg
+                color: Theme.color.surface
+                clip: true
+                BroadcastScheduleSheet {
+                    anchors.fill: parent
                 }
             }
 

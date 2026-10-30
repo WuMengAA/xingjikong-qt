@@ -32,8 +32,6 @@ Rectangle {
     // ⇒ 三处一起删，视觉零变化，但壳从「加载不出来」恢复为可加载。
     //    （若将来真要接入 QtShadcn 的 C++ 单例，前提是先把 QtShadcnplugin 编出 DLL。）
 
-    property bool sheetOpen: false   // 广播站排期中心是否展开（2026-10-22）
-
     // 2026-10-30「全部换新」收口：`tok`（Md3 令牌别名）与 `Binding { target: Md3 … }` 一并删除。
     // 被控端 QML 至此**不再引用 Md3 令牌，也不再引用 md3 组件库**（末尾 3 处 Md3Card/Md3Dialog 已换）。
 
@@ -86,7 +84,7 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 12
 
-            // 广播站排期中心入口（蓝色按钮，预览其内部蓝白主题）
+            // 跳转到广播台页（排期中心现已嵌入该页，不再是独立浮层）
             Item {
                 height: 28; width: 72
                 Rectangle {
@@ -107,7 +105,7 @@ Rectangle {
                 }
                 MouseArea {
                     id: bcMa; anchors.fill: parent; hoverEnabled: true
-                    onClicked: shellRoot.sheetOpen = true
+                    onClicked: pageHost.goToId("broadcastconsole")
                 }
             }
             Text {
@@ -153,12 +151,6 @@ Rectangle {
         onActivated: pageHost.goTo(index)
     }
 
-    // ── 广播站排期中心（右侧滑出 SideSheet，2026-10-22）──────────────────
-    // 同目录兄弟组件，QML 直接按类型名解析，无需 import。
-    BroadcastScheduleSheet {
-        id: sheet
-        anchors.fill: parent
-        opened: shellRoot.sheetOpen
-        onClosed: shellRoot.sheetOpen = false
-    }
+    // ── 广播站排期中心：2026-10-30 起已嵌入广播台页（BroadcastConsolePage），
+    //    不再是独立浮层。顶部「广播站」按钮改为直接跳到该页（见上方 Row）。
 }
