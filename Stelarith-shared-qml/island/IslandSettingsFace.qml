@@ -28,9 +28,11 @@ Item {
     property var bridge: null
 
     // 一次性初值（打开面时从桥拉一次；之后本地跟手，不再回写）
-    property int sysVol:    face.bridge ? face.bridge.systemVolume : -1
-    property int notifyVol: face.bridge ? face.bridge.notifyVolume : 75
-    property var blacklist: face.bridge ? face.bridge.notifyBlacklist : []
+    // 2026-10-30：守卫补「属性未就绪」分支 —— bridge 为真值但 systemVolume/notifyVolume
+    // 仍是 undefined 时，原式会把 undefined 赋给 int（日志实锤 Unable to assign [undefined] to int）。
+    property int sysVol:    (face.bridge && face.bridge.systemVolume !== undefined) ? face.bridge.systemVolume : -1
+    property int notifyVol: (face.bridge && face.bridge.notifyVolume !== undefined) ? face.bridge.notifyVolume : 75
+    property var blacklist: (face.bridge && face.bridge.notifyBlacklist !== undefined) ? face.bridge.notifyBlacklist : []
 
     function act(cmd) {
         if (face.bridge && face.bridge.settingsAction) face.bridge.settingsAction(cmd)
