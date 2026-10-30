@@ -37,7 +37,7 @@ static bool      g_mediaStopping = false;  // 本次停止是我们主动发起�
 // ── 仍跨 TU 引用 main.cpp 的（不属于媒体会话域，等各自那一刀）──────────────
 extern QString   g_shotDir;      // 截图/存图目录（screenshot / 抓屏 / 相机自检共用 ⇒ 存储域）
 extern QString   g_mediaDir;     // 媒体库目录（media_list 默认扫这里 ⇒ 存储域）
-void uploadRecordingAsync(const QString &mp4Path);   // 定义在 main.cpp（云端上传域）
+#include "../upload/recording_upload.h"   // 云端上传域（录像完成后自动上传 recordings/，原在 main.cpp）
 
 namespace MediaSession {
 

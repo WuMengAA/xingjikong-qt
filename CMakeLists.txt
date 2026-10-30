@@ -258,6 +258,11 @@ add_executable(stelarith-agent-qt
   # ── 班级域缩略图上报（2026-10-23 · #459）：定时抓小图 → class-event{kind:thumbnail} ──
   src/media/ThumbnailReporter.cpp
   src/media/ThumbnailReporter.h
+  # ── 录像/班级监控上传（2026-10-30 main 拆分：#2/#3 上传簇迁出，原 main.cpp 7118-7161）──
+  #   record_stop 后把本地 rec-*.mp4 POST 云端 /api/recordings/upload（Bearer 设备令牌）。
+  #   g_uid 沿用 MediaSession.cpp 既有的「跨 TU 共享全局」约定（extern）。
+  src/upload/recording_upload.cpp
+  src/upload/recording_upload.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──

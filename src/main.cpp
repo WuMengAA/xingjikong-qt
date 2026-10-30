@@ -291,7 +291,7 @@ void sendNoiseIncident(const QJsonObject &p)
 // 编译器必须为它产出定义，从而连带产出 sendNoiseIncident。链接侧 sendNoiseIncident 由
 // noise_cloud_transport.cpp 的真实调用保活，锚本身是否存活无关紧要。
 void (*kSendNoiseIncidentAnchor)(const QJsonObject &) = &sendNoiseIncident;
-
+QString g_uid;                 // 本机设备码（register 时定下来，心跳复用，避免每次重算）；文件作用域外部链接，供 upload 模块跨 TU 引用
 namespace {
 
 constexpr int kFrameIntervalMs = 2000;   // 兜底默认（现由 previewIntervalMs() 读取，可 env 覆盖）
@@ -395,7 +395,6 @@ int g_frameSeq = 0;
 qint64 g_frameBytes = 0;      // 累计发出的 JPEG 净荷（不含帧头）——与云端 bytesIn 对账用这个
 int g_instructionSeq = 0;
 bool g_registered = false;     // 云端回了 registered
-QString g_uid;                 // 本机设备码（register 时定下来，心跳复用，避免每次重算）
 int g_heartbeatSeq = 0;
 int g_heartbeatMs = kHeartbeatIntervalMs;   // 实际心跳间隔：云端下发就听云端的
 int g_timeoutMs = 30000;                    // 云端判离线阈值（只用于日志说明，不自己判）
@@ -7115,50 +7114,9 @@ void captureAndSend(const QString &outDir)
 
 } // namespace
 
-// ── 录像上传（2026-10-22 移出匿名 namespace）─────────────────────────────
-// 必须排在 `} // namespace` 之后：它引用 g_uid，而 g_uid 在匿名域内（同 TU 可见，
-// 但要排在其后）。MediaSession.cpp 用 extern 跨 TU 调它，故需外部链接。
-// ── 班级监控上传（设计文档 3.6 第一版，2026-10-07）──
-// record_stop 后把本地 rec-*.mp4 POST 到云端 /api/recordings/upload（Bearer 设备令牌）。
-// 异步执行：QNetworkAccessManager 是 QObject，放在这里创建并负责自己生命周期。
-void uploadRecordingAsync(const QString &mp4Path)
-{
-    if (!QFileInfo::exists(mp4Path)) return;
-    const QString wsUrl = qEnvironmentVariable("STE_QT_WS_URL").trimmed();
-    if (wsUrl.isEmpty()) { qWarning("[rec] 上传跳过：没有 STE_QT_WS_URL"); return; }
-    // ws://host:port/ws/agent → http://host:port/api/recordings/upload?uid=...
-    QString httpUrl = wsUrl;
-    httpUrl.replace(QLatin1String("wss://"), QLatin1String("https://"))
-           .replace(QLatin1String("ws://"), QLatin1String("http://"));
-    const int wsIdx = httpUrl.indexOf(QLatin1String("/ws/"));
-    if (wsIdx > 0) httpUrl.truncate(wsIdx);
-    httpUrl += QStringLiteral("/api/recordings/upload?uid=") + g_uid;
-
-    auto *mgr = new QNetworkAccessManager();
-    QNetworkRequest req((QUrl(httpUrl)));
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
-    const QString token = qEnvironmentVariable("STE_QT_WS_TOKEN").trimmed();
-    if (!token.isEmpty()) req.setRawHeader("Authorization", "Bearer " + token.toUtf8());
-
-    QFile *file = new QFile(mp4Path);
-    if (!file->open(QIODevice::ReadOnly)) {
-        qWarning("[rec] 上传失败：打不开 %s", qPrintable(mp4Path));
-        delete file; delete mgr;
-        return;
-    }
-    QNetworkReply *reply = mgr->post(req, file);
-    QObject::connect(reply, &QNetworkReply::finished, [reply, file, mgr, mp4Path]() {
-        const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (code == 200) {
-            qInfo("[rec] 📹 录制已上传云端：%s", qPrintable(mp4Path));
-        } else {
-            qWarning("[rec] 上传失败（HTTP %d）：%s", code, qPrintable(mp4Path));
-        }
-        reply->deleteLater();
-        file->deleteLater();
-        mgr->deleteLater();
-    });
-}
+// ── 录像/班级监控上传（2026-10-30 迁出 → src/upload/recording_upload.{h,cpp}）──
+//   定义已不在本文件；MediaSession.cpp 经 #include "upload/recording_upload.h" 调用，
+//   g_uid 的跨 TU 引用在上传模块内处理。
 
 // ── U5-A3：QML 控制面板（2026-10-16）──────────────────────────────────
 // header-only（AgentUi + AgentShell 两个 Q_OBJECT 类），内联实现直接调用上面
