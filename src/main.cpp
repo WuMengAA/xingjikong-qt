@@ -69,6 +69,7 @@
 #include <QTextEdit>    // P3：长期记录对话框（QTextEdit 不在 QWidgets 总含头里）
 #include <QCheckBox>    // P3：播放时段配置对话框
 #include "cloud_proto.h"       // 协议 v1 信封（makeEnvelope 定义在这，别的 TU 共用）
+#include "study_mode/study_mode.h"  // 2026-10-30 自习模式（噪音异常自动录制）迁出
 #include "vnc_bridge.h"       // 2026-10-18：远控桥（主 WS vnc-data ↔ 本地 VNC，纯字节）
 #ifdef STE_USE_LIBVNCSERVER
 #include "vnc_server.h"         // 2026-10-18：in-agent VNC Server（libvncserver 封装，方案 A）
@@ -294,6 +295,19 @@ void sendNoiseIncident(const QJsonObject &p)
 void (*kSendNoiseIncidentAnchor)(const QJsonObject &) = &sendNoiseIncident;
 QString g_uid;                 // 本机设备码（register 时定下来，心跳复用，避免每次重算）；文件作用域外部链接，供 upload 模块跨 TU 引用
 QString agentEnvPath();                               // 前向声明（外部链接；定义见本文件末尾 namespace 之后，供 OTA 渠道持久化模块跨 TU 引用）
+// ── 自习状态全局：文件作用域（namespace 外），供 study_mode 模块 extern 复用（同 g_uid / agentEnvPath 模式）──
+static bool    g_studyOn = false;
+double  g_studyThreshDb = -45.0;    // 阈值（dB）—— 外部链接，供 study_mode 模块复用（同 g_uid 模式）
+int     g_studyStreakNeed = 3;      // 连续超阈拍数（外部链接）
+int     g_studyRecordSec = 30;      // 触发后录多久（秒）（外部链接）
+int     g_studyStreak = 0;          // 当前连续超阈计数（外部链接）
+int     g_studyAlertCount = 0;      // 本次自习累计触发次数（外部链接）
+static qint64   g_studyStartTs = 0;         // P3：本次自习开始时间（长期记录算时长用）
+// g_studyRecTimer 已迁至 src/study_mode/study_mode.cpp（模块内私有）
+
+// sendEvent：文件作用域前向声明（定义见本文件 namespace 下方），供 study_mode 模块 extern 复用。
+void sendEvent(const QString &level, const QString &msg, const QJsonObject &extra = QJsonObject());
+
 namespace {
 
 constexpr int kFrameIntervalMs = 2000;   // 兜底默认（现由 previewIntervalMs() 读取，可 env 覆盖）
@@ -3947,15 +3961,7 @@ static void sendActionReceipt(const QString &id, const QString &action, const QS
 //    遥测没有 id，硬塞 receipt 会在云端 results 表里塞一堆 id=undefined 的脏记录。
 //    云端对 type:"event" 已有处理（index.js:1284 → pushEvent 记进事件流水），
 //    所以遥测走 event，语义干净、也不污染指令结果表。
-static void sendEvent(const QString &level, const QString &msg, const QJsonObject &extra = QJsonObject())
-{
-    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;   // 没连就不发（遥测丢一拍无所谓）
-    QJsonObject p;
-    p.insert(QStringLiteral("level"), level);
-    p.insert(QStringLiteral("msg"), msg);
-    if (!extra.isEmpty()) p.insert(QStringLiteral("extra"), extra);
-    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("event"), p));
-}
+// sendEvent 已迁至本文件 namespace 下方（文件作用域），供 study_mode 模块 extern 复用。
 
 /* ══════════════════════════════════════════════════════════════════════════
  * OTA 健康快照上报（M3，2026-10-20）
@@ -4241,14 +4247,7 @@ static void otaOnFinished()
 //     → 每拍把 dB 实时回传管理端（type:noise_sample，走订阅中继，不进事件流水）。
 //   · 判异常：dB **连续 N 拍**都高于阈值才算（一次瞬时爆音不算，防误报）。
 //   · 触发：自动录一段摄像头（recordSec 秒）→ 停 → 上传云端 → 上报 noise_alert。
-static bool    g_studyOn = false;
-static double  g_studyThreshDb = -45.0;    // 阈值（dB）
-static int     g_studyStreakNeed = 3;      // 连续超阈拍数
-static int     g_studyRecordSec = 30;      // 触发后录多久（秒）
-static int     g_studyStreak = 0;          // 当前连续超阈计数
-static int     g_studyAlertCount = 0;      // 本次自习累计触发次数
-static qint64   g_studyStartTs = 0;         // P3：本次自习开始时间（长期记录算时长用）
-static QTimer *g_studyRecTimer = nullptr;  // 自动录制到点停
+// 自习状态全局（g_study*）整块已迁至本文件 namespace 上方（文件作用域），供 study_mode 模块 extern 复用。
 
 static void sendNoiseSample(const QJsonObject &p)
 {
@@ -4258,14 +4257,7 @@ static void sendNoiseSample(const QJsonObject &p)
     ModuleHost::instance()->forwardEvent(QStringLiteral("noise_sample"), p);           // 内置模块：同事件同口径
 }
 
-static void sendNoiseAlert(const QJsonObject &p)
-{
-    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;
-    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("noise_alert"), p));
-}
-
-static void studyOnSample(double db);      // 前向
-static void studyTriggerRecord();          // 前向
+// sendNoiseAlert / studyOnSample / studyTriggerRecord 已迁至 src/study_mode/study_mode.cpp（2026-10-30）
 
 // 懒建噪音采集器：noise_monitor_start 与 study_mode_start 共用（避免两处各 new 一份，
 // 两份实例会同时抢麦且各报各的）。采集在 noise_monitor 内部异步做，不阻塞主线程。
@@ -4283,7 +4275,7 @@ static void ensureNoise()
         if (g_studyOn) p.insert(QStringLiteral("thresholdDb"), g_studyThreshDb);
         sendNoiseSample(p);                 // 实时回传管理端（订阅中继）
         logNoiseSample(db, active, seq, g_studyOn, g_noise ? g_noise->captureAvailable() : false);  // P3：长期记录
-        if (g_studyOn) studyOnSample(db);   // 自习模式：超阈判定
+        if (g_studyOn) StudyMode::onSample(db);   // 自习模式：超阈判定（已迁 study_mode 模块）
     });
     QObject::connect(g_noise, &NoiseMonitor::failed, g_ws, [](const QString &reason) {
         qWarning().noquote() << QStringLiteral("[agent-qt] 噪音采集失败：%1").arg(reason);
@@ -4312,62 +4304,7 @@ static void ensureNoise()
     });
 }
 
-static void studyOnSample(double db)
-{
-    if (db > g_studyThreshDb) {
-        ++g_studyStreak;
-        if (g_studyStreak >= g_studyStreakNeed) {
-            g_studyStreak = 0;   // 触发后复位：持续噪声不会每拍都再触发（下轮要重新攒）
-            studyTriggerRecord();
-        }
-    } else {
-        g_studyStreak = 0;       // 一安静就断链，必需"连续"才算异常
-    }
-}
-
-static void studyTriggerRecord()
-{
-    QString dev = MediaTools::boundCamera();
-    if (dev.isEmpty()) dev = QStringLiteral("video0");
-    const QString err = MediaSession::beginRecording(dev, g_studyRecordSec);
-    if (!err.isEmpty()) {
-        // 起不来自动录制（如手动录制占着 / 设备被占）：如实上报，不静默吞
-        sendEvent(QStringLiteral("warn"), QStringLiteral("noise_alert_record_failed"),
-                  QJsonObject{ { QStringLiteral("reason"), err }, { QStringLiteral("device"), dev } });
-        return;
-    }
-    ++g_studyAlertCount;
-    {
-        QJsonObject e;
-        e.insert(QStringLiteral("event"), QStringLiteral("record_start"));
-        e.insert(QStringLiteral("device"), dev);
-        e.insert(QStringLiteral("seconds"), g_studyRecordSec);
-        e.insert(QStringLiteral("thresholdDb"), g_studyThreshDb);
-        e.insert(QStringLiteral("count"), g_studyAlertCount);
-        e.insert(QStringLiteral("path"), QDir::toNativeSeparators(MediaSession::recOutPath()));
-        sendNoiseAlert(e);
-    }
-    qInfo("[study] 噪音异常，自动录制开始（%d 秒，设备 %s）", g_studyRecordSec, qPrintable(dev));
-
-    if (!g_studyRecTimer) {
-        g_studyRecTimer = new QTimer();
-        g_studyRecTimer->setSingleShot(true);
-        QObject::connect(g_studyRecTimer, &QTimer::timeout, [] {
-            qint64 bytes = 0; int code = 0; QString err2;
-            const bool ok = MediaSession::endRecording(&bytes, &err2, &code);
-            QJsonObject e;
-            e.insert(QStringLiteral("event"), QStringLiteral("record_stop"));
-            e.insert(QStringLiteral("ok"), ok);
-            e.insert(QStringLiteral("bytes"), double(bytes));
-            e.insert(QStringLiteral("count"), g_studyAlertCount);
-            if (!ok) e.insert(QStringLiteral("reason"), err2);
-            sendNoiseAlert(e);
-            if (ok) qInfo("[study] 噪音异常录制完成：%lld 字节，已上传云端", (long long)bytes);
-            else    qWarning("[study] 噪音异常录制失败：%s", qPrintable(err2));
-        });
-    }
-    g_studyRecTimer->start(g_studyRecordSec * 1000 + 3000);   // 留 3s 余量（ffmpeg 自身 -t 也在计时）
-}
+// studyOnSample / studyTriggerRecord 已迁至 src/study_mode/study_mode.cpp（2026-10-30）
 
 // ── P3 功能补齐：噪音/自习长期记录 + 播放时段管理 的本地落盘与查询 ──────
 // 落盘目录统一在 AppDataLocation/Stelarith 下（与现存 island_history 同族，独立子目录）。
@@ -6096,7 +6033,7 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
     if (action == QStringLiteral("study_mode_stop")) {
         g_studyOn = false;
         g_studyStreak = 0;
-        if (g_studyRecTimer) g_studyRecTimer->stop();
+        StudyMode::stopRecordingTimer();   // 自动录制计时器已迁 study_mode 模块
         if (g_noise && g_noise->running()) g_noise->stop();
         logStudyStop(g_studyStartTs, g_studyAlertCount);   // P3：长期记录（会话结束 + 时长 + 触发数）
         out.result = QStringLiteral("done");
@@ -7050,6 +6987,17 @@ void captureAndSend(const QString &outDir)
 }
 
 } // namespace
+// ── sendEvent：文件作用域定义（从匿名 namespace 提出，供 study_mode 模块 extern 复用）──
+void sendEvent(const QString &level, const QString &msg, const QJsonObject &extra)
+{
+    if (!g_ws || g_ws->state() != QAbstractSocket::ConnectedState) return;   // 没连就不发（遥测丢一拍无所谓）
+    QJsonObject p;
+    p.insert(QStringLiteral("level"), level);
+    p.insert(QStringLiteral("msg"), msg);
+    if (!extra.isEmpty()) p.insert(QStringLiteral("extra"), extra);
+    g_ws->sendTextMessage(makeEnvelope(QStringLiteral("event"), p));
+}
+
 
 // agentEnvPath()（2026-10-30 提升为文件作用域外部链接：原在匿名 namespace 内，因 OTA 渠道
 // 持久化模块跨 TU 引用而迁出；逻辑与原地逐字一致。）
