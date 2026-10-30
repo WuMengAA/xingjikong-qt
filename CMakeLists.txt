@@ -303,6 +303,11 @@ add_executable(stelarith-agent-qt
   #   g_panelDeps 注入（方案 B），状态全局按既有 extern 模式复用。
   src/ui/agent_panel.cpp
   src/ui/agent_panel.h
+  # ── 播放时段管理/调度/软控/文件接收（2026-10-30 main 拆分：#10 迁出，原 main.cpp 3777-5715）──
+  #   executeAction（1938 行单函数）；依赖 main 匿名域符号经 g_actionDeps 注入（方案 B），
+  #   状态全局（g_currentFps/g_logPath/g_mediaDir/…）按既有 extern 模式复用。
+  src/action/execute_action.cpp
+  src/action/execute_action.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──
