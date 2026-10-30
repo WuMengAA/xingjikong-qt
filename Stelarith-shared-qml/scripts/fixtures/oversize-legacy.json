@@ -121,6 +121,13 @@
       "topLevel": 0,
       "plan": "[P1] 拆设备网格/预览/绑定三段。已收编内联分段按钮为共享件 Md3SegmentedButton（-40 行，1421→1381，#471） | 2026-10-25 回写 1381→1382：登记值滞后，本批未改此文件"
     },
+    "Stelarith-viewer-qt/qml/components/CameraController.qml": {
+      "lines": 278,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[B] 状态+逻辑控制器（ctrl.* 契约：子组件调 cc.refreshCams/deviceName/t* 等）。拆分需保持调用契约——逻辑函数组外置为辅助对象但状态属性仍在 ctrl，或迁 C++；均非纯移动，需可运行验证。2026-10-30 登记：待运行验证窗口再拆。"
+    },
     "Stelarith-viewer-qt/qml/components/CommandPalette.qml": {
       "lines": 201,
       "limit": 200,
@@ -141,6 +148,13 @@
       "qInvokable": 0,
       "topLevel": 0,
       "plan": "[P2] 拆点歌/祝福/反馈三个 tab 组件"
+    },
+    "Stelarith-viewer-qt/qml/lab/MaterialLab.qml": {
+      "lines": 820,
+      "limit": 200,
+      "qInvokable": 0,
+      "topLevel": 0,
+      "plan": "[B] 材料实验室页（本批最大超限，620 行超线）。需拆 4+ 份（Loader/子组件，按材料分类/操作/详情分段）。高风险 UI 手术，需可运行验证。2026-10-30 登记：待运行验证窗口再拆。"
     },
     "Stelarith-viewer-qt/qml/layout/DesktopConsole.qml": {
       "lines": 272,
