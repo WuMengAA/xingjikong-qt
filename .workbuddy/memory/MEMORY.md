@@ -69,7 +69,9 @@
 - **API 签名想当然 = 假阴性之源**：`Array.findIndex` 无 fromIndex；`MouseArea.clicked()` 在 Qt6 需 `clicked(null)`；普通 `Row` 写 `Layout.fillWidth` 会崩（需 RowLayout）。
 - **跨 TU 引用 main.cpp 符号前先查匿名域**（`ExecOut` 已提到 `core/ExecOut.h`）。
 - **被控端日志 UTF-8**：`%LOCALAPPDATA%\xingjikong\agent-qt.log`；`channel.txt`/`agent.env`/`classcode.txt`/`devrole.txt` 同目录。viewer-run.log 追加 ⇒ 轮询带 offset。
-- 抓图只用 `_shotpw.py`（DPI 感知+PrintWindow）；BitBlt 在 Win11/DWM 全黑；判有效看 PIL 黑占比<10%。
+  - 抓图只用 `_shotpw.py`（DPI 感知+PrintWindow）；BitBlt 在 Win11/DWM 全黑；判有效看 PIL 黑占比<10%。
+  - **「去掉 wrapper 漏补根级闭合括号」→ 整页静默空白**（2026-10-30 实证 `BroadcastScheduleSheet.qml`）：删抽屉/遮罩 wrapper 时误把内层 Column 收尾 `}` 当 wrapper 收尾删掉 ⇒ 整文件少一个 `}` ⇒ 该类型解析失败 ⇒ **整页静默加载失败、不报错、探针 PASS 也看不出**（page-level 错误不被 `g_qmlErrors` 捕获）。诊断只能**用 `qml.exe`（offscreen）直接加载**，它会报 `xxx.qml:行:1: Expected token '}'` + `Type X unavailable`。⇒ 删结构 wrapper 后务必比对源与副本的括号配平，`qmllint` 能抓但要在修复后复验。
+  - **跨子目录引用兄弟组件必须 `import "../"`**（2026-10-30 实证）：页面文件在 `qml/shell/pages/`（子目录），要引用 `qml/shell/` 下的兄弟组件（如 `BroadcastScheduleSheet`）时，不能只靠同目录隐式解析，必须显式 `import "../"`。同一目录（`qml/shell/`）下则无需 import。
 
 ## 6 能力落点：**被控端优先、岛为主入口**（2026-10-27 用户点名）
 - 老师面对的是**被控端那台讲台机**，不是管理端窗口。凡"老师当场要用"的能力（批注/PPT 翻页/截图/回桌面/音量/通知/课表/广播…）**主入口一律放被控端**，且**优先长在灵动岛上**。
