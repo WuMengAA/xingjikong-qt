@@ -46,6 +46,7 @@
 #include "remote/remote_control.h" // 2026-10-30 远控会话收口 + 泄漏看门狗迁出
 #include "ui/agent_panel.h" // 2026-10-30 main 拆分 #9：QML 控制面板数据接线（AgentPanelDeps/TrayState/g_panelDeps）
 #include "action/execute_action.h" // 2026-10-30 main 拆分 #10：播放时段管理/调度/软控/文件接收（ActionDeps/g_actionDeps/executeAction）
+#include "wire/frame_builder.h" // 2026-10-31 main 拆分 #12：协议 v1 信封三打包函数（makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -399,7 +400,7 @@ constexpr int kHeartbeatIntervalMs = 10000; // 心跳缺省值（云端 register
 constexpr int kHeartbeatMinMs = 1000;    // 下界：再密就白耗流量
 constexpr int kHeartbeatMaxMs = 60000;   // 上界：再稀就会被云端当离线
 // kMaxBackoffMs / kFirstBackoffMs 已提升文件作用域（namespace 上方，供 g_backoffMs 与 agent_panel 复用）。
-constexpr int kProtocolVersion = 1;      // 协议 v1（《星集控-协议规范v1-2026-10-03.md》）
+// kProtocolVersion 已迁至 src/wire/frame_builder.cpp（main 拆分 #12，帧构建模块）。
 // kProcessListLimit 已迁至 action/execute_action.h（main 拆分 #10，executeAction 迁移）。
 
 // ⚠️ 应用版本号的**唯一真源**（2026-10-05 统一）：
@@ -435,7 +436,7 @@ bool g_everRegistered = false;
 // 语音对讲（2026-10-07）：学生端播放器（waveOut，懒打开——只在收到音频帧时开）
 AudioPlayer g_audioPlayer;
 bool g_audioHintShown = false;   // "老师正在讲话"提示是否已显示（每会话一次）
-int g_audioUpSeq = 0;            // 语音通话上行帧序号（2026-10-09）
+// g_audioUpSeq 已迁至 src/wire/frame_builder.cpp（main 拆分 #12，帧构建模块）。
 // P1（2026-10-21）：语音编解码实例。**惰性初始化**（首次用到才开）——没开过语音的机器
 // 不该白占两个 Opus 上下文；编码器 16 kbps 起步，与方案 §5 P1 的档位一致。
 static OpusCodec g_opusEnc;      // 学生 mic 上行编码
@@ -561,91 +562,13 @@ QString envOr(const char *key, const QString &fallback)
 /* ---------- 协议 v1 封装 ----------
  * 文本：{"v":1,"type":...,"id":...,"ts":...,"payload":{...}}
  * 帧  ：[1B 版本=1][2B 大端 headerLen][header JSON][JPEG]
- * 为什么要这套：以前是"想到一条加一条"的扁平 {type,...}，没版本号、帧没序号，
- * 加任何新机制都要在两端各猜一遍。现在加功能 = 加一个带类型的消息，骨架不动。
+ * 三个打包函数（makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes）与 kProtocolVersion、
+ * 上行序号计数器已迁至 src/wire/frame_builder.{h,cpp}（main 拆分 #12）。
  */
 
 // ⚠️ makeEnvelope 的**定义**已经在文件末尾（匿名 namespace 外面）。
 // 原先它就写在下面那段匿名 namespace（103–3846 行）里，匿名域符号跨不了 TU ——
 // terminal_console.cpp 一调用就 LNK2019。调用点仍在 namespace 内，靠 cloud_proto.h 的声明可见。
-
-QByteArray makeFrameBytes(const QString &uid, int seq, const QByteArray &jpeg)
-{
-    QJsonObject h;
-    h.insert(QStringLiteral("v"), kProtocolVersion);
-    h.insert(QStringLiteral("type"), QStringLiteral("frame"));
-    h.insert(QStringLiteral("uid"), uid);
-    h.insert(QStringLiteral("seq"), seq);
-    h.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
-    h.insert(QStringLiteral("mime"), QStringLiteral("image/jpeg"));
-    h.insert(QStringLiteral("bytes"), jpeg.size());
-    const QByteArray header = QJsonDocument(h).toJson(QJsonDocument::Compact);
-
-    QByteArray out;
-    out.reserve(3 + header.size() + jpeg.size());
-    out.append(char(kProtocolVersion));                 // 1B 版本
-    out.append(char((header.size() >> 8) & 0xFF));      // 2B 大端 headerLen
-    out.append(char(header.size() & 0xFF));
-    out.append(header);
-    out.append(jpeg);
-    return out;
-}
-
-// 远控 vnc-data 上行帧（2026-10-18 · 统一方案 A）：本地 VNC 产出的 RFB 字节 → 云端。
-// 与画面帧同 v1 信封，区别：type=vnc-data / mime=application/vnc / direction=up / seq 自增
-// （云端按 uid 原样中继到订阅该设备的管理端，不重写信封）。
-static quint64 g_vncUpSeq = 0;
-QByteArray makeVncFrameBytes(const QByteArray &rfb)
-{
-    QJsonObject h;
-    h.insert(QStringLiteral("v"), kProtocolVersion);
-    h.insert(QStringLiteral("type"), QStringLiteral("vnc-data"));
-    h.insert(QStringLiteral("uid"), g_uid);
-    h.insert(QStringLiteral("seq"), QJsonValue(static_cast<qint64>(++g_vncUpSeq)));
-    h.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
-    h.insert(QStringLiteral("mime"), QStringLiteral("application/vnc"));
-    h.insert(QStringLiteral("direction"), QStringLiteral("up"));
-    h.insert(QStringLiteral("bytes"), rfb.size());
-    const QByteArray header = QJsonDocument(h).toJson(QJsonDocument::Compact);
-
-    QByteArray out;
-    out.reserve(3 + header.size() + rfb.size());
-    out.append(char(kProtocolVersion));                 // 1B 版本
-    out.append(char((header.size() >> 8) & 0xFF));      // 2B 大端 headerLen
-    out.append(char(header.size() & 0xFF));
-    out.append(header);
-    out.append(rfb);
-    return out;
-}
-
-// 语音通话上行帧（2026-10-09 · 语音通话设计 §4.1）：学生 mic → 云端。
-// 与画面帧同 v1 结构，区别在 mime（云端据此走 duplex 单播回老师）。
-// 2026-10-21（P1）：载荷从裸 PCM 换成 Opus 包 —— mime=audio/opus 标记编码类型。
-// ⚠️ 必须**按 mime 区分而不是按会话态猜**：滚动升级期间新旧端共存，
-//    旧管理端只认 audio/pcm（裸 PCM），新管理端两种都能解。
-QByteArray makeAudioFrameBytes(const QByteArray &payload, bool opus)
-{
-    QJsonObject h;
-    h.insert(QStringLiteral("v"), kProtocolVersion);
-    h.insert(QStringLiteral("type"), QStringLiteral("frame"));
-    h.insert(QStringLiteral("uid"), g_uid);
-    h.insert(QStringLiteral("seq"), ++g_audioUpSeq);
-    h.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
-    // ⚠️ QStringLiteral 只接受字面量（宏展开成 u"" 运算符），不能塞三元表达式。
-    h.insert(QStringLiteral("mime"),
-             opus ? QStringLiteral("audio/opus") : QStringLiteral("audio/pcm"));
-    h.insert(QStringLiteral("bytes"), payload.size());
-    const QByteArray header = QJsonDocument(h).toJson(QJsonDocument::Compact);
-
-    QByteArray out;
-    out.reserve(3 + header.size() + payload.size());
-    out.append(char(kProtocolVersion));
-    out.append(char((header.size() >> 8) & 0xFF));
-    out.append(char(header.size() & 0xFF));
-    out.append(header);
-    out.append(payload);
-    return out;
-}
 
 void scheduleReconnect();
 

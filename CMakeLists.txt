@@ -308,6 +308,11 @@ add_executable(stelarith-agent-qt
   #   状态全局（g_currentFps/g_logPath/g_mediaDir/…）按既有 extern 模式复用。
   src/action/execute_action.cpp
   src/action/execute_action.h
+  # ── 协议 v1 信封打包（2026-10-31 main 拆分 #12）：makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes ──
+  #   kProtocolVersion 与上行序号计数器（g_vncUpSeq/g_audioUpSeq）随函数迁出；
+  #   g_uid 按既有 extern 模式复用（main.cpp 文件作用域外部链接）。
+  src/wire/frame_builder.cpp
+  src/wire/frame_builder.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──
