@@ -286,6 +286,11 @@ add_executable(stelarith-agent-qt
   #   dataRoot/appendJsonl/logNoiseSample/logStudyStart/logStudyStop；零 main 全局依赖。
   src/p3log/p3_log.cpp
   src/p3log/p3_log.h
+  # ── P3 长期记录查询/展示（2026-10-30 main 拆分：#6b 迁出）──
+  #   readJsonlDir/openFolder/openNoiseLogDialog/openStudyLogDialog/buildNoiseLogText/
+  #   buildStudyLogText；dataRoot() 复用 p3_log（#6a），openFolder 与 main 侧共用。
+  src/p3log/p3_reader.cpp
+  src/p3log/p3_reader.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──
