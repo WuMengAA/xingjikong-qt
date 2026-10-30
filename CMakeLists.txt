@@ -297,6 +297,12 @@ add_executable(stelarith-agent-qt
   #   提升文件作用域外部链接供本模块 extern 复用（同 g_uid/agentEnvPath 模式）。
   src/remote/remote_control.cpp
   src/remote/remote_control.h
+  # ── QML 控制面板数据接线（2026-10-30 main 拆分：#9 迁出，原 main.cpp 6388-6955）──
+  #   buildSelfCheckItems/buildPluginList/pluginRegistryUrl/s_storeEntries/
+  #   agentUiFill（AgentUi 的 friend）/agentUiWire；依赖 main 匿名域函数经
+  #   g_panelDeps 注入（方案 B），状态全局按既有 extern 模式复用。
+  src/ui/agent_panel.cpp
+  src/ui/agent_panel.h
   # ── 指令执行结果（2026-10-23 · 第 3 刀）：跨 TU 共享，原在 main.cpp 匿名域 ──
   src/core/ExecOut.h
   # ── 本地功能开关（2026-10-23 · 第 4 刀地基）：原嵌在 main.cpp 匿名域内 ──
