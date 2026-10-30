@@ -47,6 +47,7 @@
 #include "ui/agent_panel.h" // 2026-10-30 main 拆分 #9：QML 控制面板数据接线（AgentPanelDeps/TrayState/g_panelDeps）
 #include "action/execute_action.h" // 2026-10-30 main 拆分 #10：播放时段管理/调度/软控/文件接收（ActionDeps/g_actionDeps/executeAction）
 #include "wire/frame_builder.h" // 2026-10-31 main 拆分 #12：协议 v1 信封三打包函数（makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes）
+#include "core/proc_inspect.h" // 2026-10-31 main 拆分 #13：进程/窗口只读检查（snapshotProcessNames/enumWindowsCb/visibleWindowsCached/windowTitleOf/memMbOf）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -989,7 +990,7 @@ static void reschedulePersisted()
 //   · 系统关键 / 安全软件 / 集控自身一律不可操作（复用 kProtected* 三张硬名单）。
 // 下方「批次 1」段定义的两个护栏函数；本域要先用，前置声明（签名须与定义逐字一致）
 QString protectedCategory(const QString &exeName);
-QHash<quint32, QString> snapshotProcessNames();
+// snapshotProcessNames 已迁至 src/core/proc_inspect.h（main 拆分 #13，见该头声明）。
 
 // SoftPolicy 已迁至 action/execute_action.h（main 拆分 #10，executeAction 迁移）。
 static QString g_softPolicyFile;                 // %LOCALAPPDATA%\xingjikong\soft-manage.json
@@ -1154,82 +1155,12 @@ QString protectedCategory(const QString &exeName)
 }
 
 /** 枚举所有进程 pid → exe 名。只读快照，不打开任何进程句柄。 */
-QHash<quint32, QString> snapshotProcessNames()
-{
-    QHash<quint32, QString> m;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return m;
-    PROCESSENTRY32W pe = {};
-    pe.dwSize = sizeof(pe);
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            m.insert((quint32)pe.th32ProcessID, QString::fromWCharArray(pe.szExeFile));
-        } while (Process32NextW(snap, &pe));
-    }
-    CloseHandle(snap);
-    return m;
-}
-
-/** EnumWindows 回调：收集「有非空标题的顶级窗口」→ (hwnd, pid)。与 Rust 同口径。 */
-BOOL CALLBACK enumWindowsCb(HWND hwnd, LPARAM lp)
-{
-    auto *acc = reinterpret_cast<QVector<QPair<HWND, quint32>> *>(lp);
-    DWORD pid = 0;
-    GetWindowThreadProcessId(hwnd, &pid);
-    if (pid == 0) return TRUE;
-    // 非阻塞取标题长度：挂起（无响应）窗口用 GetWindowTextLengthW 会卡死整条枚举，
-    // 必须改用 SendMessageTimeout + SMTO_ABORTIFHUNG（与 windowIconBase64 取图标同一策略）。
-    DWORD_PTR len = 0;
-    if (!SendMessageTimeoutW(hwnd, WM_GETTEXTLENGTH, 0, 0, SMTO_ABORTIFHUNG, 60, &len) || len == 0)
-        return TRUE;
-    acc->append({ hwnd, (quint32)pid });
-    return TRUE;
-}
-
-// 进程快照 + 可见窗口枚举的短时效缓存：管理端开「软件」弹窗会连发
-// process_list 与 list_shortcut_candidates 两条，原本各自独立枚举一遍窗口
-// （每条还要逐窗口非阻塞取标题）。两条间隔通常 <100ms，缓存 1.5s 让第二条
-// 直接复用，省掉一次完整枚举，避免拖慢弹窗响应。
-// WinCache 已迁至 action/execute_action.h（main 拆分 #10，executeAction 迁移）。
-static WinCache g_winCache;
-constexpr qint64 kWinCacheTtlMs = 1500;
-
-static const WinCache &visibleWindowsCached()
-{
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (!g_winCache.names.isEmpty() && now - g_winCache.at < kWinCacheTtlMs)
-        return g_winCache;
-    g_winCache.names = snapshotProcessNames();
-    g_winCache.wins.clear();
-    if (!g_winCache.names.isEmpty())
-        EnumWindows(enumWindowsCb, reinterpret_cast<LPARAM>(&g_winCache.wins));
-    g_winCache.at = now;
-    return g_winCache;
-}
-
-QString windowTitleOf(HWND hwnd)
-{
-    // 非阻塞取标题：GetWindowTextW 对挂起（无响应）窗口会卡住整条枚举，
-    // 必须改用 SendMessageTimeout + ABORTIFHUNG（与 enumWindowsCb 一致）。
-    wchar_t buf[1024] = { 0 };
-    DWORD_PTR n = 0;
-    if (!SendMessageTimeoutW(hwnd, WM_GETTEXT, (WPARAM)(sizeof(buf) / sizeof(wchar_t)),
-                             (LPARAM)buf, SMTO_ABORTIFHUNG, 60, &n) || n == 0)
-        return QString();
-    return QString::fromWCharArray(buf, (int)n);
-}
-
-/** 进程工作集内存（MB）。取不到返回 0 —— 权限不足是常态，不算失败。 */
-int memMbOf(quint32 pid)
-{
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
-    if (!h) return 0;
-    PROCESS_MEMORY_COUNTERS pmc = {};
-    pmc.cb = sizeof(pmc);
-    const BOOL ok = GetProcessMemoryInfo(h, &pmc, pmc.cb);
-    CloseHandle(h);
-    return ok ? (int)(pmc.WorkingSetSize / (1024 * 1024)) : 0;
-}
+/* ---------- 进程/窗口只读检查 ----------
+ * snapshotProcessNames / enumWindowsCb / visibleWindowsCached / windowTitleOf / memMbOf
+ * 与 WinCache 缓存（g_winCache/kWinCacheTtlMs）已迁至 src/core/proc_inspect.{h,cpp}
+ * （main 拆分 #13）。纯 Win32 只读快照、零 main 全局依赖；execute_action.cpp
+ * 经 g_actionDeps 函数指针访问（无需改动），main.cpp 的 ActionDeps 填充取地址即用。
+ */
 
 /** 追加一行到被控端日志文件（超过 2MB 直接重开，简单轮转，别无限涨）。 */
 void appendLogFile(const QString &line)

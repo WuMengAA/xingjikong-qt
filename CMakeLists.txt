@@ -320,6 +320,10 @@ add_executable(stelarith-agent-qt
   # ── 通用进程工具（2026-10-22 · 第 2 刀）：同步等进程退出但不卡主线程（录像/OTA/远控/终端共用）──
   src/core/ProcessUtil.cpp
   src/core/ProcessUtil.h
+  # ── 进程/窗口只读检查（2026-10-31 main 拆分 #13）：snapshotProcessNames/enumWindowsCb/visibleWindowsCached/windowTitleOf/memMbOf ──
+  #   纯 Win32 只读快照、零 main 全局依赖；execute_action.cpp 经 g_actionDeps 函数指针访问（无需改动）。
+  src/core/proc_inspect.cpp
+  src/core/proc_inspect.h
   # ── 发布中心卡片 → 通知参数（2026-10-24 · P1）：纯映射逻辑，渲染复用 notifyFromParams ──
   src/core/BlackboardCard.cpp
   src/core/BlackboardCard.h
