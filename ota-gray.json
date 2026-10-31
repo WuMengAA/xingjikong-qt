@@ -1,14 +1,14 @@
 {
   "products": {
     "agent": {
-      "version": "0.6.43",
-      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.43.exe",
-      "sha256": "42e031640b7d1e1d313b05908cb3c4173fa11b90a3bff3f62237aa817f7a6fd4",
-      "size": 32689242,
-      "notes": "v0.6.43",
-      "mandatory": false
+      "version": "0.6.51-rc.1",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.51-rc.1.exe",
+      "sha256": "15bd0a2ef1e7a247c93ca03c30630896037e4612412447a5cc5e5754726cb269",
+      "size": 38919698,
+      "notes": "【重要·强制更新】修复被控端「设置页整页空白」致命问题（此前完全无法进入设置，所有配置入口失效）；同步修正灵动岛相关设置项与若干稳定性问题。建议所有教室机立即升级。",
+      "mandatory": true
     }
   },
-  "generatedAt": "2026-10-17T03:23:56.097Z",
+  "generatedAt": "2026-10-31T07:15:09.605Z",
   "generatedBy": "scripts/publish-release.mjs"
 }
