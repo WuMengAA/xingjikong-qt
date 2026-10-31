@@ -54,7 +54,7 @@ Item {
     DragHandler {
         id: faceSwipe
         target: null                      // 只观测手势，不移动任何东西
-        enabled: root._expanded          // 所有展开面都允许滑动切面
+        enabled: root._expanded && !root.facePanelOn   // 2026-11-01：面面板（分页器）显示时交给 ListView 滑
         dragThreshold: 20                 // 默认 10 太灵敏，讲台上一抖就误判
         // 关键：不抢 Item（MouseArea）已经拿到的 grab —— 控件上的横拖归控件，空白区横拖才切面
         grabPermissions: PointerHandler.CanTakeOverFromHandlersOfDifferentType
@@ -349,6 +349,19 @@ Item {
         // 2026-10-31 · 苹果式极简：⋯弹层打开时面面板让位（弹层 z70 > 面板 z60，
         // 但面板开着会跟弹层抢视线 —— 弹层是"一次只开一扇"的顶层）。
         && !root.moreMenuOn
+    // 2026-11-01 · B 批：横向分页器与 face 双向同步守卫。
+    //   faceNow 变（外部/逻辑切换）→ 把 ListView 定位到对应页；用户滑页 → onCurrentIndexChanged 回写 face。
+    //   _fpSync 防“回写 face 又触发 onFaceNowChanged 再定位”的循环。
+    property bool _fpSync: false
+    onFaceNowChanged: {
+        if (!fpList) return
+        const fs = root.faceModel
+        let idx = 0
+        for (let i = 0; i < fs.length; ++i) if (fs[i].id === root.faceNow) { idx = i; break }
+        root._fpSync = true
+        fpList.currentIndex = idx
+        root._fpSync = false
+    }
     // ── 苹果式极简（2026-10-31 · 用户点单「灵动岛要简洁」）──────────────
     // 展开态默认**只一张当前通知大卡**；右侧竖排面签删除；历史/媒体/状态/
     // 批注/设置/自动化入口全部收进右上角「⋯」弹层。
@@ -2727,98 +2740,78 @@ Item {
                     border.color: root.th.light ? "#E2E2E2" : "#333333"
                 }
 
-                // ── 面 1：媒体（本机播放优先，其次 VoiceHub 远程广播）──
-                Item {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    visible: root.faceNow === 1
-                    opacity: root.faceNow === 1 ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-                    IslandMediaFace {
-                        anchors.fill: parent
-                        th: root.th
-                        useLocal: root.faceUseLocal
-                        title: root.faceTitle
-                        artist: root.faceArtist
-                        dur: root.faceDur
-                        pos: root.facePos
-                        timeText: root.faceTimeText()
-                        next: root.faceNext
+                // ── 横滑分页器（2026-11-01 · B 批）──────────────────────
+                // 5 个面从「叠放 + visible 瞬切」改为**横向 ListView 分页**：跟手拖动 + 松手吸附 +
+                //   切页滑动动画。ListView 是 QtQuick 核心（SwipeView 在门禁黑名单），且虚拟化只渲染
+                //   可见页 —— 不会 5 面同渲。第 0 页是「概」（空页）：滑到它 = faceNow 回 0 ⇒ 面板收起回概览。
+                ListView {
+                    id: fpList
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: dotRow.top
+                    clip: true
+                    orientation: ListView.Horizontal
+                    snapMode: ListView.SnapOneItem
+                    boundsBehavior: Flickable.StopAtBounds
+                    model: root.faceModel
+                    onCurrentIndexChanged: {
+                        if (root._fpSync) return
+                        const e = root.faceModel[currentIndex]
+                        if (e && e.id !== root.faceNow) {
+                            root._fpSync = true
+                            root.face = e.id
+                            root.faceUserPick = e.id
+                            root._fpSync = false
+                        }
+                    }
+                    delegate: Item {
+                        required property var modelData
+                        width: ListView.view.width
+                        height: ListView.view.height
+                        Loader {
+                            anchors.fill: parent
+                            anchors.margins: modelData.id === 5 ? 14 : 10
+                            sourceComponent: {
+                                switch (modelData.id) {
+                                case 1: return compMedia
+                                case 3: return compState
+                                case 4: return compAnnotate
+                                case 5: return compSettings
+                                case 6: return compAutomation
+                                }
+                                return null
+                            }
+                        }
                     }
                 }
-
-                // ── 面 2 已退役（2026-10-31 · 苹果式极简）────────────
-                // 历史不再作为可滑动面/紧凑预览：统一收进「⋯」弹层 → 「历史」，
-                // 走根级完整 historyPanel（筛选/已读/清空/分组/搜索全功能）。
-                // IslandHistoryFace 组件文件保留（其它端若引用不受影响），仅本面实例删除。
-
-                // ── 面 3：状态（桥/模块已给的展示态，不新造数据源）──────
-                Item {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    visible: root.faceNow === 3
-                    opacity: root.faceNow === 3 ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-                    IslandStateFace {
-                        anchors.fill: parent
-                        th: root.th
-                        rows: root.faceStatusRows
+                // 圆点指示（当前页高亮）
+                Row {
+                    id: dotRow
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 5
+                    spacing: 6
+                    Repeater {
+                        model: root.faceModel
+                        delegate: Rectangle {
+                            required property int index
+                            width: index === fpList.currentIndex ? 14 : 6
+                            height: 6
+                            radius: 3
+                            color: index === fpList.currentIndex
+                                   ? (root.th ? root.th.accent : "#6750A4")
+                                   : (root.th ? (root.th.light ? Qt.rgba(0, 0, 0, 0.18) : Qt.rgba(1, 1, 1, 0.22)) : "#888888")
+                            Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                        }
                     }
                 }
-
-                // ── 面 4：批注 / 白板（2026-10-27 · H 批）──────────────
-                // 用户裁决：这类"老师当场要用"的能力放被控端，且长在岛上。
-                // 本面只做显示 + 转发，真状态在 AnnotateDomain 里（见 IslandAnnotateFace 头注）。
-                Item {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    visible: root.faceNow === 4
-                    opacity: root.faceNow === 4 ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-                    IslandAnnotateFace {
-                        anchors.fill: parent
-                        th: root.th
-                        bridge: root.bridgeRef
-                    }
-                }
-
-                // ── 面 5：设置（2026-10-27 · C 批）──────────────────
-                // 用户裁决：音量/黑名单这类"老师当场要调"的能力放被控端，且长在岛上。
-                // 本面只做显示 + 拖动跟手 + 转发，真值在 C++ 域 / QSettings（见 IslandSettingsFace 头注）。
-                Item {
-                    anchors.fill: parent
-                    // 比其它面多留 4px 内边距：本面有贴边滑块，要避开 IslandSurface 的圆角裁剪边。
-                    anchors.margins: 14
-                    visible: root.faceNow === 5
-                    opacity: root.faceNow === 5 ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-                    IslandSettingsFace {
-                        anchors.fill: parent
-                        th: root.th
-                        bridge: root.bridgeRef
-                    }
-                }
-
-                // ── 面 6：自动化规则（2026-10-27 · Phase 3）────────────
-                // 用户裁决：自动化是被控端能力、主入口在岛；老师在讲台上当场配规则。
-                Item {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    visible: root.faceNow === 6
-                    opacity: root.faceNow === 6 ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-                    IslandAutomationFace {
-                        anchors.fill: parent
-                        th: root.th
-                        automationRef: root.automationRef
-                        bridgeRef: root.bridgeRef
-                    }
-                }
+                // ── 面内容 Component（供分页 delegate 按 id 取）──────────
+                Component { id: compMedia; IslandMediaFace { th: root.th; useLocal: root.faceUseLocal; title: root.faceTitle; artist: root.faceArtist; dur: root.faceDur; pos: root.facePos; timeText: root.faceTimeText(); next: root.faceNext } }
+                Component { id: compState; IslandStateFace { th: root.th; rows: root.faceStatusRows } }
+                Component { id: compAnnotate; IslandAnnotateFace { th: root.th; bridge: root.bridgeRef } }
+                Component { id: compSettings; IslandSettingsFace { th: root.th; bridge: root.bridgeRef } }
+                Component { id: compAutomation; IslandAutomationFace { th: root.th; automationRef: root.automationRef; bridgeRef: root.bridgeRef } }
             }
         }
     }
