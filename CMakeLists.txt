@@ -195,6 +195,9 @@ qt_add_executable(viewer-qt
   src/playback_proxy.h
   src/vnc_image_provider.cpp
   src/vnc_image_provider.h
+  # 2026-10-31 A 档第④步：远控 H264 画面 → QML image://h264/live（MfxH264Decoder 兜底解码）
+  src/H264ImageProvider.cpp
+  src/H264ImageProvider.h
   # 2026-10-15 组件6 配套：互动审批桥（审批数据面 + 共享灵动岛的桥面）。
   # 独立编译单元（不给 2700 行的 viewerbackend.cpp 再加负担）。
   src/interactbridge.cpp

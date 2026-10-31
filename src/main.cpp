@@ -42,6 +42,7 @@
 #include "class/class_admin.h"            // B1：抽屉「班级编辑」改绑（ClassAdmin::bindDevice）
 #include "svgiconprovider.h"
 #include "vnc_image_provider.h"   // 2026-10-18：远控画面 image://vnc/live
+#include "H264ImageProvider.h"     // A 档第④步：远控 H264 画面 image://h264/live
 #include <QTimer>
 #include <QDir>          // 2026-10-06 SPIKE：从磁盘加载 QML 需要定位 qml 目录
 #include <QFile>
@@ -549,6 +550,11 @@ int main(int argc, char *argv[])
     auto *vncProvider = new VncImageProvider;
     engine.addImageProvider(QStringLiteral("vnc"), vncProvider);
     backend.setVncImageProvider(vncProvider);
+    // A 档第④步（2026-10-31）：远控 H264 画面 image://h264/live。
+    // 与 vnc 同模式：provider 归 engine 所有，裸指针交给 backend（生命周期同 vnc）。
+    auto *h264Provider = new H264ImageProvider;
+    engine.addImageProvider(QStringLiteral("h264"), h264Provider);
+    backend.setH264ImageProvider(h264Provider);
     // 2026-10-23 #460 班级域缩略图：Image { source: "image://classthumb/<uid>?t<rev>" }。
     // 取 backend.classService() 顺带把 ClassService 建出来（ctor 里已建，这里只是访问）。
     engine.addImageProvider(QStringLiteral("classthumb"),

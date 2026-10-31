@@ -79,6 +79,7 @@ class AudioCapture; // 语音对讲（2026-10-07）：管理端采集（前向�
 class AudioPlayback; // B6：管理端播放（学生回传的 audio/pcm 帧）
 class VncClient;         // 远控 · 管理端 VNC 客户端（libvncclient，RFB over WS）
 class VncImageProvider;  // 远控画面 → QML（image://vnc/live）
+class H264ImageProvider; // 远控 H264 画面 → QML（image://h264/live，A 档第④步）
 
 class QDateTime;
 class QNetworkAccessManager;
@@ -468,6 +469,8 @@ public:
     Q_INVOKABLE bool mediaAvailable() const;
     /** 注册 QML 图像提供器（main.cpp 建 engine 时传入 image://vnc 那个实例）。 */
     void setVncImageProvider(VncImageProvider *p);
+    /** 注册 H264 图像提供器（A 档第④步，image://h264/live）。 */
+    void setH264ImageProvider(H264ImageProvider *p);
 
     /** 切到某台设备 → 向云端订阅它的画面。
      *  ⚠️ 2026-10-10：必须 `Q_INVOKABLE` —— 它是 Q_PROPERTY currentUid 的 WRITE，
@@ -914,6 +917,7 @@ private:
     // instruction/input，避免与 VNC 服务双重注入）；屏幕帧由 libvncclient 解出。
     VncClient *m_vnc = nullptr;
     VncImageProvider *m_vncProvider = nullptr;   // 非拥有（engine 持有）
+    H264ImageProvider *m_h264Provider = nullptr; // 非拥有（engine 持有，A 档第④步）
     bool m_vncActive = false;
     // 当前 VNC 会话对应的设备 uid。用于幂等：同一台重复 startVnc 不再重启会话
     //（2026-10-24：设备表每秒刷新 + 用户点击会让"选中"抖动，每次抖动都重启会话，

@@ -4,6 +4,7 @@
 #include "oauthlogin.h"
 #include "vnc_client.h"       // 2026-10-18：远控 VNC 客户端（libvncclient，RFB over WS）
 #include "vnc_image_provider.h" // 远控画面 → QML（image://vnc/live）
+#include "H264ImageProvider.h"   // A 档第④步：远控 H264 画面 → QML（image://h264/live）
 #include "class/class_service.h"   // 班级域（#460）：ClassService + typed Models
 #include "class/class_admin.h"     // 班级管理写操作（2026-10-24 方案 B）
 #include "audio_capture.h"   // 语音对讲（2026-10-07）：winmm waveIn 采集
@@ -365,6 +366,7 @@ ViewerBackend::~ViewerBackend()
     // 循环、理论风险极低，但清掉后 update() 调用点的判空（m_vncProvider &&）才
     // 在 engine 析构后真正生效。
     m_vncProvider = nullptr;
+    m_h264Provider = nullptr;   // A 档第④步：同 vnc，engine 已析构 provider，这里只清裸指针
     // 修复③（2026-10-19）：退出前把远控会话礼貌地收掉 —— 以前只停本地
     // VncClient，被控端侧 g_remoteControl 永真（灵动岛冻结 + server 空转），
     // 只能等被控端看门狗（25s 无保活）兜底，白冻 25s。send 后 flush 一把，
@@ -1579,6 +1581,12 @@ void ViewerBackend::onBinaryMessage(const QByteArray &buf)
                 onVncData(buf.mid(3 + hLen));
                 return;
             }
+            // A 档第④步（2026-10-31）：云端下发的 h264-data 帧 = 被控端 MF 编码的 annex-B NALU。
+            // 直接喂 H264ImageProvider（内部经 MfxH264Decoder 解出 QImage → image://h264/live）。
+            if (h.value(QStringLiteral("type")).toString() == QStringLiteral("h264-data")) {
+                if (m_h264Provider) m_h264Provider->feedNal(buf.mid(3 + hLen));
+                return;
+            }
             if (h.value(QStringLiteral("type")).toString() != QStringLiteral("frame")) {
                 logf("[viewer] FAIL 帧头 type 不是 frame");
                 return;
@@ -2519,6 +2527,11 @@ static QByteArray makeVncFrame(const QString &uid, const QByteArray &rfb)
 void ViewerBackend::setVncImageProvider(VncImageProvider *p)
 {
     m_vncProvider = p;
+}
+
+void ViewerBackend::setH264ImageProvider(H264ImageProvider *p)
+{
+    m_h264Provider = p;
 }
 
 void ViewerBackend::setVncState(const QString &s)
