@@ -70,13 +70,25 @@ Rectangle {
 
     radius: Theme.radius.md
     color: _tint
+
+    /**
+     * ⚠️ 高度不能用 `body.implicitHeight + margins*2` —— body 用 anchors 铺满时，
+     * 它的 implicitHeight 与"实际排版需要的高度"不是一回事（探针实测：算出来偏矮，
+     * 标题/原因/影响三行被压得重叠，重试按钮盖在文字上）。
+     * 正解：让 body 决定自身高度（anchors.top/bottom 不设，只设 left/right），
+     * 本 Rectangle 的 implicitHeight 跟着 body.implicitHeight 走。
+     * 同时给 Layout 附加属性 —— 本件会被放进 ColumnLayout（记录页），
+     * 不写 Layout.fillWidth 时宽度会塌成 0，文字被挤成一列竖排。
+     */
+    Layout.fillWidth: true
+    implicitWidth: body.implicitWidth + Theme.spacing.md * 2
     implicitHeight: body.implicitHeight + Theme.spacing.md * 2
 
     RowLayout {
         id: body
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.top: parent.top
         anchors.margins: Theme.spacing.md
         spacing: Theme.spacing.md
 
