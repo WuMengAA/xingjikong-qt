@@ -2735,89 +2735,16 @@ Item {
                     opacity: root.faceNow === 1 ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
-                    SvgIcon {
-                        id: faceMediaIcon
-                        name: "music"
-                        tint: root.th.accent
-                        px: 18
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                    }
-                    // 来源标签：让人一眼分清"本机在播"和"VoiceHub 远程广播"
-                    Text {
-                        anchors.left: faceMediaIcon.right
-                        anchors.leftMargin: 6
-                        anchors.verticalCenter: faceMediaIcon.verticalCenter
-                        text: root.faceUseLocal ? "本机播放" : "VoiceHub"
-                        color: root.th.sub
-                        font.pixelSize: 10
-                    }
-                    Text {
-                        id: faceMediaTitle
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: faceMediaIcon.bottom
-                        anchors.topMargin: 6
-                        text: root.faceTitle || "正在播放"
-                        color: root.th.fg
-                        font.pixelSize: 19
-                        font.weight: Font.Bold
-                        elide: Text.ElideRight
-                        maximumLineCount: 2
-                        wrapMode: Text.WrapAnywhere
-                    }
-                    Text {
-                        id: faceMediaArtist
-                        visible: root.faceArtist !== ""
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: faceMediaTitle.bottom
-                        anchors.topMargin: 2
-                        text: root.faceArtist
-                        color: root.th.sub
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
-                    }
-                    // 进度条（本地外推值；轨道 4px + 填充按 position/duration）
-                    Rectangle {
-                        id: faceBar
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: faceTime.top
-                        anchors.bottomMargin: 4
-                        height: 4
-                        radius: 2
-                        color: root.th.light ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(1, 1, 1, 0.14)
-                        Rectangle {
-                            width: root.faceDur > 0
-                                   ? Math.max(0, Math.min(1, root.facePos / root.faceDur)) * parent.width
-                                   : 0
-                            height: parent.height
-                            radius: 2
-                            color: root.th.accent
-                        }
-                    }
-                    Text {
-                        id: faceTime
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.bottom: faceNextTxt.visible ? faceNextTxt.top : parent.bottom
-                        anchors.bottomMargin: faceNextTxt.visible ? 2 : 0
-                        text: root.faceTimeText()
-                        color: root.th.sub
-                        font.pixelSize: 11
-                    }
-                    Text {
-                        id: faceNextTxt
-                        visible: root.faceNext !== ""
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.rightMargin: 44   // 让位鲸鱼（右下 36px + 余量）
-                        anchors.bottom: parent.bottom
-                        text: "接下来：" + root.faceNext
-                        color: root.th.sub
-                        font.pixelSize: 11
-                        elide: Text.ElideRight
+                    IslandMediaFace {
+                        anchors.fill: parent
+                        th: root.th
+                        useLocal: root.faceUseLocal
+                        title: root.faceTitle
+                        artist: root.faceArtist
+                        dur: root.faceDur
+                        pos: root.facePos
+                        timeText: root.faceTimeText()
+                        next: root.faceNext
                     }
                 }
 
@@ -2834,37 +2761,10 @@ Item {
                     opacity: root.faceNow === 3 ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
-                    Column {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        spacing: 8
-                        Repeater {
-                            model: root.faceStatusRows
-                            delegate: Item {
-                                required property var modelData
-                                width: parent.width
-                                height: 22
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData.k
-                                    color: root.th.sub
-                                    font.pixelSize: 12
-                                }
-                                Text {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 90
-                                    horizontalAlignment: Text.AlignRight
-                                    text: modelData.v
-                                    color: root.th.fg
-                                    font.pixelSize: 12
-                                    elide: Text.ElideRight
-                                }
-                            }
-                        }
+                    IslandStateFace {
+                        anchors.fill: parent
+                        th: root.th
+                        rows: root.faceStatusRows
                     }
                 }
 
