@@ -29,6 +29,12 @@ import {
   listStudents, addStudent, updateStudent, removeStudent, importStudents,
   getTimetable, saveTimetable, dropClassData,
 } from './class-data.js';
+// 2026-10-31：班级考勤（云端数据与 API 先行）。纯数据层在此，权限封装在下方 admin*。
+import {
+  recordAttendance, batchRecord, listByClassDate, listByClassRange,
+  getAttendance, updateAttendance, removeAttendance, attendanceStats,
+  dropClassAttendance,
+} from './class-attendance.js';
 // 2026-10-25：ClassIsland 档案 → 归一化课表信封（CIMS 退役后课表回落到我们自己的库，
 // 但格式保持与 ClassIsland 互通：老师手里的档案能直接导进来）。
 // classIslandGroupMeta：群顺序 + 「几班」标签（12 个群同名时靠首次出现序推断，不猜名字）
@@ -109,14 +115,17 @@ export function adminDeleteClass(code, strategy = 'refuse', ident = null) {
   const mb = dropRoomMembers(r.code);
   // 班级数据（学生名单 + 课表）随班销毁：不留孤儿行（与身份删成功之后同序）。
   const cd = dropClassData(r.code);
+  // 考勤记录同样随班销毁（2026-10-31）：留着会成为查不到班的幽灵行。
+  const at = dropClassAttendance(r.code);
   pushEvent('warn', '管理端删除班级', {
     classCode: r.code, className: r.name, released: uidList.length, subsDropped: dropped,
     eventsDropped: ev.deleted, membersDropped: mb.deleted, studentsDropped: cd.students,
+    attendanceDropped: at.removed,
   });
   return {
     ok: true, code: r.code, name: r.name, releasedDevices: uidList.length,
     subsDropped: dropped, eventsDropped: ev.deleted, membersDropped: mb.deleted,
-    studentsDropped: cd.students, timetableDropped: cd.timetables,
+    studentsDropped: cd.students, attendanceDropped: at.removed,
   };
 }
 
@@ -472,10 +481,92 @@ export function adminListTimetableGroups(rawProfile) {
     : { ok: false, error: '档案里没有任何日课表（ClassPlan 为空或格式不对）', groups: [] };
 }
 
+/* ───────────── 班级考勤（2026-10-31 · 云端数据与 API 先行）─────────────
+ * 数据层在 class-attendance.js（纯 CRUD + 查询，不碰权限）；这里只做权限封装与 HTTP 分发。
+ *
+ * 权限口径（与班级数据同一套思路，读写分档）：
+ *   · 读（按班按日列表 / 统计 / 区间）—— canReadClass：本班任一角色（owner/teacher/viewer）
+ *     或票里 scopes 覆盖（与名单/课表同宽，班主任·老师·广播室之外的本班成员也看得见）；
+ *   · 写（记录 / 批量 / 改判 / 删除）—— canManageMembers：owner/teacher 或管理员
+ *     （考勤是「全班都要照着做」的判定，不能谁路过都能改）。
+ * 记录人（recorder）一律用当前登录身份 uid，不从客户端取（防伪造记录人）。
+ *
+ * ⚠️ 角色模型沿用现有人三档（管理员 / 班主任·老师 / 广播室），不另造考勤专属角色；
+ *   广播室在本班若有 owner/teacher 角色也可记录，否则只能看 —— 口径与其他班级数据一致。
+ */
+
+/** 谁能读这个班的考勤（读权限比写宽一档，与 canReadClass 同语义）。 */
+function canReadAttendance(ident, code) {
+  if (!ident) return false;
+  if (canAccess(ident, code)) return true;
+  const role = ident.uid ? roleOf(code, ident.uid) : null;
+  return !!role;
+}
+
+/** 单条记录 / 改判。 */
+export function adminRecordAttendance(code, input = {}, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限记录该班考勤' };
+  const r = recordAttendance(hit.code, input, ident?.uid ?? 'system');
+  if (!r.ok) return r;
+  pushEvent('info', r.replaced ? '管理端改判考勤' : '管理端记录考勤', {
+    classCode: hit.code, studentId: r.record.studentId, status: r.record.status, by: ident?.uid ?? 'system',
+  });
+  return r;
+}
+
+/** 批量记录（全班一次性提交）。 */
+export function adminBatchAttendance(code, rows = [], ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限记录该班考勤' };
+  const r = batchRecord(hit.code, rows, ident?.uid ?? 'system');
+  if (r.ok) pushEvent('info', '管理端批量记录考勤', {
+    classCode: hit.code, total: r.total, succeeded: r.succeeded, failed: r.failed, by: ident?.uid ?? 'system',
+  });
+  return r;
+}
+
+/** 按班按日列出（可带 session 过滤）。 */
+export function adminListAttendance(code, q = {}, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canReadAttendance(ident, hit.code)) return { ok: false, error: '无权限查看该班考勤' };
+  return listByClassDate(hit.code, String(q.date ?? ''), String(q.session ?? ''));
+}
+
+/** 按班按日期区间列出。 */
+export function adminListAttendanceRange(code, q = {}, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canReadAttendance(ident, hit.code)) return { ok: false, error: '无权限查看该班考勤' };
+  return listByClassRange(hit.code, String(q.fromDate ?? ''), String(q.toDate ?? ''));
+}
+
+/** 某日考勤统计（含未记录人数）。 */
+export function adminAttendanceStats(code, q = {}, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canReadAttendance(ident, hit.code)) return { ok: false, error: '无权限查看该班考勤统计' };
+  return attendanceStats(hit.code, String(q.date ?? ''));
+}
+
+/** 删一条考勤（幂等）。 */
+export function adminRemoveAttendance(code, q = {}, ident = null) {
+  const hit = getClass(String(code ?? '').trim());
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限修改该班考勤' };
+  const r = removeAttendance(hit.code, String(q.studentId ?? ''), String(q.date ?? ''), String(q.session ?? ''));
+  if (r.ok && r.removed) pushEvent('info', '管理端删除考勤记录', { classCode: hit.code, studentId: q.studentId, by: ident?.uid ?? 'system' });
+  return r;
+}
+
 /**
  * HTTP 路由：POST /api/class/{create,rename,delete,unbind,bind,member-add,member-remove,members,my-classes,publish,
  *    students,student-add,student-update,student-remove,students-import,
- *    timetable,timetable-save,timetable-import,timetable-groups}
+ *    timetable,timetable-save,timetable-import,timetable-groups,
+ *    attendance-record,attendance-batch,attendance-list,attendance-range,attendance-stats,attendance-remove}
  * （鉴权在 index.js 的 isViewerApi 组，与 /api/device/bind-class 同一凭据口径；写操作过重认证门）。
  * timetable-import 收 **ClassIsland 原始档案** + 可选 group（多群时必填），云端归一化后落库；
  * timetable-groups 只预览档案里的课表群，不落库（导入前的选择器用）。
@@ -534,6 +625,24 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
                                  String(body.group ?? ''), ident);
       } else if (action === 'timetable-groups') {
         r = adminListTimetableGroups(body.profile ?? null);
+      } else if (action === 'attendance-record') {
+        // 2026-10-31 考勤：单条记录 / 改判（upsert）。写权限 = canManageMembers。
+        r = adminRecordAttendance(String(body.classCode ?? ''), body.record ?? {}, ident);
+      } else if (action === 'attendance-batch') {
+        // 全班一次性提交。写权限同 attendance-record。
+        r = adminBatchAttendance(String(body.classCode ?? ''), body.records ?? [], ident);
+      } else if (action === 'attendance-list') {
+        // 按班按日列出（可带 session）。读权限 = canReadClass（本班任一角色 + scopes）。
+        r = adminListAttendance(String(body.classCode ?? ''), body, ident);
+      } else if (action === 'attendance-range') {
+        // 按班按日期区间列出。读权限同 attendance-list。
+        r = adminListAttendanceRange(String(body.classCode ?? ''), body, ident);
+      } else if (action === 'attendance-stats') {
+        // 某日考勤统计（四状态计数 + 未记录人数）。读权限同 attendance-list。
+        r = adminAttendanceStats(String(body.classCode ?? ''), body, ident);
+      } else if (action === 'attendance-remove') {
+        // 删一条（幂等）。写权限 = canManageMembers。
+        r = adminRemoveAttendance(String(body.classCode ?? ''), body, ident);
       } else {
         return send(404, { ok: false, error: `未知班级管理操作：${action}` });
       }

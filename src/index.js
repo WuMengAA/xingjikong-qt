@@ -219,6 +219,7 @@ import { initClassDir, resolveClassCode, registerExternalCode, listClassDir, cla
 // 「每班一个永不停息的子服务器」的落地形态，物理上是一个持久房间而非一个进程。
 import { initClassRoom } from './class-room.js';
 import { initClassData } from './class-data.js';   // 2026-10-25 学生名单 + 班级课表（借 class-room 的连接）
+import { initClassAttendance } from './class-attendance.js';   // 2026-10-31 班级考勤（借 class-room 的连接）
 // 环境白名单（2026-10-24）：test 机由云端清单裁决。设备自报 env 一律忽略。
 import { initEnvWhitelist, setTestUid, listTestUids } from './env-gate.js';
 // 重认证门（2026-10-24）：管理端定期要求验证密码。云端不存密码，只记
@@ -301,6 +302,12 @@ loadRepairs();               // 打开设备报修表（repairs.json），重启
 {
   const r = initClassData();
   console.log(`[cloud] 班级数据：学生名单与课表表已就绪（同 class-room.db），现有学生 ${r.students} 人 / 课表 ${r.timetables} 份`);
+}
+// 班级考勤（2026-10-31）：考勤记录落同一个库。云端数据与 API 先行，
+// 管理端 UI 是下一阶段的事。必须放在 initClassRoom 之后（借它的连接）。
+{
+  const r = initClassAttendance();
+  console.log(`[cloud] 班级考勤：考勤记录表已就绪（同 class-room.db），现有 ${r.records} 条`);
 }
 // 环境白名单（2026-10-24）：test 设备清单从文件恢复。空白名单 = 全员生产，安全侧收缩。
 {
