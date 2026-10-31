@@ -2590,8 +2590,10 @@ Item {
             Item {
                 id: moreHost
                 // 位置吃标题右缘的 48px 让位带（exTitle.rightMargin: 48），不压标题。
-                // 仅展开态显示；历史完整面板打开时让位（弹层/面板二选一）。
-                visible: root._expanded && !root.historyOpen
+                // 仅展开态显示；2026-11-01 修 bug：**不再因 historyOpen 隐藏** ——
+                //   原来 !historyOpen 让「⋯」在历史打开时消失，而关历史只能点「⋯」，
+                //   形成死路「点通知就退不出来」。历史面板在头部下方、不遮挡本按钮。
+                visible: root._expanded
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.topMargin: 0
@@ -2625,6 +2627,9 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
+                            // 2026-11-01 修 bug：历史开着时点「⋯」= 收起历史（可靠出口）；
+                            //   否则切换弹层开关（开弹层时顺带收起历史）。
+                            if (root.historyOpen) { root.historyOpen = false; root.moreMenuOn = false; return }
                             root.moreMenuOn = !root.moreMenuOn
                             if (root.moreMenuOn) root.historyOpen = false
                         }
