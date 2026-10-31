@@ -2867,6 +2867,9 @@ Item {
         // submitH：同一套公式（虽然媒体态下本面板整体不可见，公式仍保持同步，
         // 防将来条件变动时错位）。
         // 2026-10-17 补 vhH：VoiceHub 远程广播行同款让位（#329）。
+        // 2026-10-31 注：曾加 morphNoticeClearH 给 morph「静态通知」展开态确认区让位，
+        //   但那确认区本身就是冗余重复渲染（主内容区已渲染通知），已随
+        //   IslandMorph 形态重构删除 —— 预算回归原式，无让位需求（见 IslandMorph 2026-10-31）。
         // 现在与预算同一套公式：从内容区（标题+描述+状态列表+进度条+频谱+播放栏+互动区+弹幕行+搜索页+投稿页）之下开始。
         anchors.topMargin: root.padH + root.headH + root.listH + root.ftH + root.specH + root.mediaH + root.vhH + root.interactH + root.danmakuH + root.searchH + root.submitH
         anchors.bottom: parent.bottom

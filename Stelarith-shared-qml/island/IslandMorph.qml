@@ -317,32 +317,14 @@ Item {
     }
 
     // ════════════════════════════════════════════════════════════
-    // 7) 静态通知形态（notice）—— 展开态完整文案 + 确认
+    // 7) 静态通知形态（notice）—— 收起态胶囊（图标 + 标题）
     // ════════════════════════════════════════════════════════════
-    Column {
-        visible: morph.mode === "notice" && morph.expanded
-        anchors.left: parent.left
-        anchors.leftMargin: 42
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.right: parent.right
-        anchors.rightMargin: 14
-        Text {
-            text: morph.mdata.title || "通知"
-            color: morph.th.fg
-            font.pixelSize: 15
-            font.weight: Font.Bold
-        }
-        Text {
-            text: morph.mdata.desc || ""
-            color: morph.th.sub
-            font.pixelSize: 13
-            topPadding: 4
-            wrapMode: Text.WrapAnywhere
-        }
-        ActionButton {
-            theme: morph.th; light: morph.th.light; role: "primary"
-            label: "知道了"
-            onClicked: morph.bridgeRef.morphAction("confirm")
-        }
-    }
+    // ⚠️ 2026-10-31 修「展开态冒出'通知/知道了'」：本形态**只接管收起态**胶囊
+    //    （mIcon + mText 已在上方按 !expanded 画）。原实现画了一个
+    //    `morph.mode==="notice" && morph.expanded` 的展开态表单（标题+描述+
+    //    「知道了」按钮）——但展开态下 expandedCol（主内容区）已经用真实
+    //    _title/_desc 渲染了通知，且自动裁决时 morphData 根本未填（recomputeMorph
+    //    只设 mode），表单退化成"通知/知道了"垃圾浮层，与主内容/历史面板重叠。
+    //    展开态由主内容区独占，本形态不再重复渲染（收起态胶囊不受影响）。
+    //    （原展开态表单已删除，2026-10-31。）
 }
