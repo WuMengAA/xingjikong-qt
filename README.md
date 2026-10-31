@@ -179,3 +179,39 @@ magic "SU"(2) | ver(1) | type(1) | session(4) | seq(8) | sendTs(8) | len(2) | ta
 **未做（后续批次）**：U2 延迟/统计层、U3 远控 RFB over 闪传通道（用户痛点验收靶点）、
 U4 文件传输 over 闪传通道 + file-relay 60s 缓存 + Psql；Qt 两端 C++ 客户端
 （ChaCha20-Poly1305 + QTcpSocket/QSslSocket，公网走 `flash.245959623.xyz:443`）。
+
+
+---
+
+## 十二、本地密钥存储（vault.py）
+
+> 2026-10-31 自建：GitHub PAT / 云令牌这类凭据的**进程级私人凭据库**。
+> 动机：凭据不该散落在 .env / 脚本 / 进程列表 / 对话里；上传 GitHub Release 资产等
+> 需要 PAT 的场景应有安全落点。实现**独立**（不依赖 WorkBuddy 凭据体系），云/端/站点通用。
+
+### 特性
+
+- **AES-256-GCM**（cryptography 50.x）：每条值独立 12B 随机 nonce + GCM tag，
+  同一值重写密文不同（不可比对）；篡改/错 key 一律优雅拒绝（InvalidTag 已归一）。
+- **独立主密钥**：`%%LOCALAPPDATA%%\stelarith-vault\master.key`（32B 随机）。
+  Windows ACL 已收紧到当前用户 (R,W)；丢失 = 全部不可解密（设计如此）。
+- **库文件**：`%%LOCALAPPDATA%%\stelarith-vault\vault.json`（仅密文，含版本头）。
+- **用户级存储**：绝不进 git；换机需整目录迁移 + 重设（主密钥不可导出明文）。
+
+### 用法（受管 Python；禁 cmd/PS 落地）
+
+```
+python scripts/vault.py init                                  # 首次生成 master.key（幂等）
+echo -n "<secret>" | python scripts/vault.py set github_pat   # 从 stdin 写（不落 shell 历史）
+python scripts/vault.py get  github_pat                       # 读明文到 stdout（脚本用；慎打印）
+python scripts/vault.py list                                  # 只列名字
+python scripts/vault.py delete github_pat
+python scripts/vault.py check                                 # 自检：ACL + 全部条目可解密
+```
+
+### 前置 / 边界
+
+- 受管 Python（3.14.3）已带 cryptography 50.0.2；其它解释器缺库会明确报错（不静默降级）。
+- set --value 显式传值会进进程列表（慎用）；默认从 stdin 读。
+- 名字禁路径分隔符（防逃逸写盘）；空值拒绝。
+- 已验证：加解密回环 / 篡改字节 / 同长度错 key / 换错 key / 空值 / 逐条独立——全优雅。
