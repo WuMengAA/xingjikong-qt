@@ -269,6 +269,9 @@ add_executable(stelarith-agent-qt
   # ── 班级域缩略图上报（2026-10-23 · #459）：定时抓小图 → class-event{kind:thumbnail} ──
   src/media/ThumbnailReporter.cpp
   src/media/ThumbnailReporter.h
+  # ── 远控 H264 推流（A 档第②步，2026-10-31）：MediaFoundation H264 硬编 + 定时抓帧/合成帧推流 ──
+  src/media/H264EncoderMf.cpp
+  src/media/H264Streamer.cpp
   # ── 录像/班级监控上传（2026-10-30 main 拆分：#2/#3 上传簇迁出，原 main.cpp 7118-7161）──
   #   record_stop 后把本地 rec-*.mp4 POST 云端 /api/recordings/upload（Bearer 设备令牌）。
   #   g_uid 沿用 MediaSession.cpp 既有的「跨 TU 共享全局」约定（extern）。
@@ -399,6 +402,9 @@ if(WIN32)
   # 2026-10-27（I 批）：PPT 域用 GetActiveObject（oleaut32）+ CLSIDFromProgID（ole32 已在上面）。
   # 不链 oleaut32 会 LNK2019：unresolved external symbol __imp_GetActiveObject。
   target_link_libraries(stelarith-agent-qt PRIVATE oleaut32)
+  # 2026-10-31（A 档第①步）：MediaFoundation H264 编码器（H264EncoderMf.cpp 用 IMFTransform）。
+  #   mfplat=核心；mf=MFT 枚举；mfuuid=MF_* GUID/属性键（MFVideoFormat_*/MF_MT_* 的导入库）。
+  target_link_libraries(stelarith-agent-qt PRIVATE mfplat mf mfuuid)
 endif()
 # 2026-10-22：系统媒体识别 SMTC（winrt/Windows.Media.Control.h，C++/WinRT 消费端）
 #   windowsapp.lib = WinRT 的 umbrella import lib（RequestAsync / RoInitialize 等）。

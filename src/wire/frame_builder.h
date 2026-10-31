@@ -19,3 +19,5 @@
 QByteArray makeFrameBytes(const QString &uid, int seq, const QByteArray &jpeg);
 QByteArray makeVncFrameBytes(const QByteArray &rfb);
 QByteArray makeAudioFrameBytes(const QByteArray &payload, bool opus);
+// 远控 H264 上行帧（A 档第②步）：被控端 MF 编码出的 annex-B NALU → 云端中继到管理端解码。
+QByteArray makeH264FrameBytes(const QByteArray &nalu);

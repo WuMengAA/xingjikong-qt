@@ -42,6 +42,10 @@ QByteArray makeFrameBytes(const QString &uid, int seq, const QByteArray &jpeg)
     return out;
 }
 
+// 远控 H264 上行帧序号（A 档第②步，2026-10-31）：被控端 MF 编码 NALU → 云端。
+// 与 vnc-data 同 v1 信封、同中继语义，仅 type/mime 不同。
+static quint64 g_h264UpSeq = 0;
+
 // 远控 vnc-data 上行帧（2026-10-18 · 统一方案 A）：本地 VNC 产出的 RFB 字节 → 云端。
 QByteArray makeVncFrameBytes(const QByteArray &rfb)
 {
@@ -92,5 +96,31 @@ QByteArray makeAudioFrameBytes(const QByteArray &payload, bool opus)
     out.append(char(header.size() & 0xFF));
     out.append(header);
     out.append(payload);
+    return out;
+}
+
+// 远控 H264 上行帧（A 档第②步，2026-10-31）：被控端 MF 编码出的 annex-B NALU → 云端。
+// 与 vnc-data 同 v1 信封、同中继语义（云端按 uid 原样中继到订阅该设备的管理端）；
+// 区别：type=h264-data / mime=video/h264-annexb / direction=up / seq 自增。
+QByteArray makeH264FrameBytes(const QByteArray &nalu)
+{
+    QJsonObject h;
+    h.insert(QStringLiteral("v"), kProtocolVersion);
+    h.insert(QStringLiteral("type"), QStringLiteral("h264-data"));
+    h.insert(QStringLiteral("uid"), g_uid);
+    h.insert(QStringLiteral("seq"), QJsonValue(static_cast<qint64>(++g_h264UpSeq)));
+    h.insert(QStringLiteral("ts"), QJsonValue(QDateTime::currentMSecsSinceEpoch()));
+    h.insert(QStringLiteral("mime"), QStringLiteral("video/h264-annexb"));
+    h.insert(QStringLiteral("direction"), QStringLiteral("up"));
+    h.insert(QStringLiteral("bytes"), nalu.size());
+    const QByteArray header = QJsonDocument(h).toJson(QJsonDocument::Compact);
+
+    QByteArray out;
+    out.reserve(3 + header.size() + nalu.size());
+    out.append(char(kProtocolVersion));                 // 1B 版本
+    out.append(char((header.size() >> 8) & 0xFF));      // 2B 大端 headerLen
+    out.append(char(header.size() & 0xFF));
+    out.append(header);
+    out.append(nalu);
     return out;
 }
