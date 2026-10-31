@@ -32,14 +32,14 @@
   /* ── 左导航（稿子的，不是产品的）── */
   .nav{width:var(--nav);flex:0 0 var(--nav);height:100vh;position:sticky;top:0;
        background:#0E0E11;padding:22px 14px;overflow-y:auto}
-  .nav .brand{font-size:13px;font-weight:700;letter-spacing:.02em;padding:0 8px 2px}
+  .nav .brand{font-size:13px;font-weight:700;letter-spacing:0;padding:0 8px 2px}
   .nav .brand span{display:block;font-size:11px;font-weight:400;color:var(--dim);margin-top:2px}
-  .nav .grp{font-size:10.5px;color:var(--dim);letter-spacing:.08em;margin:22px 8px 6px}
+  .nav .grp{font-size:10.5px;color:var(--dim);letter-spacing:0;margin:22px 8px 6px}
   .nav a{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;
          color:var(--muted);text-decoration:none;font-size:12.5px;cursor:pointer;
          transition:background .15s,color .15s}
   .nav a:hover{background:#17171B;color:var(--fg)}
-  .nav a.on{background:#1A1A1F;color:var(--fg);font-weight:600;position:relative}
+  .nav a.on{background:#1A1A1F;color:var(--fg);font-weight:700;position:relative}
   .nav a.on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;
        border-radius:2px;background:var(--fg)}
   .nav a i{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.45}
@@ -51,7 +51,7 @@
   .page.on{display:block;animation:fade .22s ease}
   @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
   .phead{margin-bottom:18px}
-  .phead h1{margin:0;font-size:19px;font-weight:700;letter-spacing:.01em}
+  .phead h1{margin:0;font-size:19px;font-weight:700;letter-spacing:0}
   .phead p{margin:5px 0 0;color:var(--dim);font-size:12px}
 
   /* ── 设备屏（模拟讲台机 1140×auto）── */
@@ -59,7 +59,7 @@
           box-shadow:0 24px 60px rgba(0,0,0,.55);min-height:640px}
   .ph{display:flex;align-items:flex-start;gap:16px;margin-bottom:20px}
   .ph .t{flex:1;min-width:0}
-  .ph h2{margin:0;font-size:21px;font-weight:700;letter-spacing:.01em}
+  .ph h2{margin:0;font-size:21px;font-weight:700;letter-spacing:0}
   .ph .s{margin:4px 0 0;font-size:12px;color:var(--muted)}
   .ph .acts{display:flex;gap:8px;flex-shrink:0}
 
@@ -68,7 +68,7 @@
   .card.muted{background:var(--surface2)}
   .card + .card{margin-top:12px}
   .ct{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
-  .ct h3{margin:0;font-size:14px;font-weight:600;letter-spacing:.01em}
+  .ct h3{margin:0;font-size:14px;font-weight:700;letter-spacing:0}
   .ct .sub{font-size:11.5px;color:var(--dim);font-weight:400}
   .ct .r{margin-left:auto}
 
@@ -91,7 +91,7 @@
   /* ── 药丸 / 状态 ── */
   .chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;
         border-radius:var(--r-full);background:#31313B;color:#C9C9D2;
-        font-size:11.5px;font-weight:500;white-space:nowrap}
+        font-size:11.5px;font-weight:400;white-space:nowrap}
   /* ⚠️ 药丸底必须比所在卡亮一档：在 muted 卡(#202025) 上与 #26262C 几乎同色 ⇒ 看着像没有底 */
   .chip.ok{background:rgba(74,222,128,.18);color:var(--ok)}
   .chip.warn{background:rgba(251,191,36,.18);color:var(--warn)}
@@ -116,7 +116,7 @@
 
   /* ── 表格化行：数字纵向对齐，比"左标签右值"更适合多列数据 ── */
   .t{display:grid;gap:12px;align-items:center}
-  .t.h{padding:0 0 9px;font-size:10.5px;color:var(--dim);letter-spacing:.03em}
+  .t.h{padding:0 0 9px;font-size:10.5px;color:var(--dim);letter-spacing:0}
   .t.r{padding:11px 0;font-size:13px}
   .t.r + .t.r{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
   .t5{grid-template-columns:118px 104px 1fr 96px 96px}
@@ -138,8 +138,8 @@
          text-align:center;padding:26px 20px 22px;gap:6px}
   .empty .glyph{width:44px;height:44px;border-radius:12px;background:var(--surface3);
         display:flex;align-items:center;justify-content:center;margin-bottom:6px;
-        color:var(--muted);font-size:17px;font-weight:600}
-  .empty h4{margin:0;font-size:13.5px;font-weight:600}
+        color:var(--muted);font-size:17px;font-weight:700}
+  .empty h4{margin:0;font-size:13.5px;font-weight:700}
   .empty p{margin:0;max-width:380px;font-size:12px;color:var(--dim);line-height:1.7}
   .empty .btn{margin-top:10px}
   .err{display:flex;gap:14px;align-items:flex-start;padding:16px 18px;border-radius:var(--r-md);
@@ -147,7 +147,7 @@
   .err .glyph{width:32px;height:32px;border-radius:9px;background:rgba(248,113,113,.16);
         color:var(--bad);display:flex;align-items:center;justify-content:center;
         font-weight:700;font-size:14px;flex:0 0 32px}
-  .err h4{margin:0;font-size:13px;font-weight:600}
+  .err h4{margin:0;font-size:13px;font-weight:700}
   .err p{margin:2px 0 0;font-size:12px;color:var(--muted)}
   .err .rt{margin-left:auto;align-self:center;flex:0 0 auto}
   /* ⚠️ 骨架基线必须比所在卡亮一档：若基线色≈卡底，动画跑到留白处整条就"消失"
@@ -166,15 +166,15 @@
   .sw.on::after{transform:translateX(18px);background:var(--fg)}
   .switchrow{display:flex;align-items:center;gap:14px;padding:9px 0}
   .switchrow .txt{flex:1;min-width:0}
-  .switchrow .txt b{display:block;font-size:13px;font-weight:500}
+  .switchrow .txt b{display:block;font-size:13px;font-weight:400}
   .switchrow .txt span{display:block;font-size:11.5px;color:var(--dim);margin-top:1px}
 
   /* ── 统计条 ── */
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
   .stat{background:var(--surface2);border-radius:var(--r-md);padding:12px 14px}
-  .stat .n{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  .stat .n{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:0}
   .stat .l{font-size:11px;color:var(--dim);margin-top:3px}
-  .stat .u{font-size:11px;color:var(--muted);font-weight:500;margin-left:3px}
+  .stat .u{font-size:11px;color:var(--muted);font-weight:400;margin-left:3px}
 
   /* ── 时间轴（时段页核心）── */
   .tl{position:relative;background:var(--surface3);border-radius:var(--r-md);
@@ -182,13 +182,13 @@
   .tl .grid{position:absolute;inset:0}
   .tl .grid span{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.05)}
   .tl .seg{position:absolute;top:14px;height:34px;border-radius:var(--r-sm);
-      background:var(--fg);color:#0B0B0D;font:600 10.5px/1 "Segoe UI",sans-serif;
-      display:flex;align-items:center;justify-content:center;letter-spacing:.02em;
+      background:var(--fg);color:#0B0B0D;font:700 11.5px/1 "Segoe UI",sans-serif;
+      display:flex;align-items:center;justify-content:center;letter-spacing:0;
       box-shadow:0 4px 14px rgba(0,0,0,.35);cursor:grab}
   .tl .seg.off{background:#3A3A43;color:var(--muted);box-shadow:none}
   .tl .seg .h{position:absolute;width:3px;height:14px;border-radius:2px;background:rgba(0,0,0,.25)}
   .tlx{display:flex;justify-content:space-between;padding:6px 1px 0;
-       font-size:10.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+       font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums}
 
   /* ── 广播社：周条 + 排期 ── */
   .week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
@@ -196,7 +196,7 @@
        cursor:pointer;transition:background .15s}
   .day:hover{background:#26262C}
   .day .w{font-size:10.5px;color:var(--dim)}
-  .day .d{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:1px}
+  .day .d{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:1px}
   .day .n{font-size:10px;color:var(--dim);margin-top:2px;height:13px}
   .day.on{background:var(--fg);color:#0B0B0D}
   .day.on .w,.day.on .n{color:rgba(11,11,13,.55)}
@@ -207,7 +207,7 @@
   .slot .bx{background:var(--surface2);border-radius:var(--r-md);padding:11px 14px;
             display:flex;align-items:center;gap:12px}
   .slot .bx .m{flex:1;min-width:0}
-  .slot .bx b{display:block;font-size:13px;font-weight:600}
+  .slot .bx b{display:block;font-size:13px;font-weight:700}
   .slot .bx span{display:block;font-size:11.5px;color:var(--dim);margin-top:1px}
   .slot .bx.sel{box-shadow:inset 0 0 0 1.5px var(--fg)}
   .slot .bx.free{background:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);
@@ -218,7 +218,7 @@
   .gate .mark{width:52px;height:52px;border-radius:14px;background:var(--surface2);
        display:flex;align-items:center;justify-content:center;margin:0 auto 14px;
        font-size:20px;color:var(--muted)}
-  .gate h3{margin:0;font-size:16px;font-weight:600}
+  .gate h3{margin:0;font-size:16px;font-weight:700}
   .gate p{margin:6px 0 18px;font-size:12px;color:var(--dim)}
   .field{background:var(--surface3);border-radius:var(--r-md);height:42px;display:flex;
          align-items:center;padding:0 14px;margin-bottom:10px;font-size:13px;color:var(--dim)}
@@ -229,7 +229,7 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
   .swatch{height:52px;border-radius:var(--r-md);display:flex;align-items:flex-end;
-          padding:7px 9px;font-size:10.5px;font-weight:600}
+          padding:7px 9px;font-size:10.5px;font-weight:700}
   .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .scale div{display:flex;align-items:baseline;gap:12px;padding:6px 0;
              box-shadow:inset 0 -1px 0 rgba(255,255,255,.04)}
@@ -243,14 +243,14 @@
   .principle:last-child{box-shadow:none}
   .principle .no{width:22px;flex:0 0 22px;height:22px;border-radius:7px;background:var(--surface3);
         font:600 11px/22px "Segoe UI",sans-serif;text-align:center;color:var(--muted)}
-  .principle b{display:block;font-size:13px;font-weight:600}
+  .principle b{display:block;font-size:13px;font-weight:700}
   .principle em{font-style:normal;display:block;font-size:12px;color:var(--muted);margin-top:2px;
         line-height:1.7}
   .bad-good{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
   .bad-good .box{border-radius:var(--r-md);padding:14px}
   .bad-good .box.no{background:rgba(248,113,113,.06)}
   .bad-good .box.yes{background:rgba(74,222,128,.06)}
-  .bad-good .lab{font-size:10.5px;font-weight:600;letter-spacing:.06em;margin-bottom:9px}
+  .bad-good .lab{font-size:10.5px;font-weight:700;letter-spacing:0;margin-bottom:9px}
   .bad-good .box.no .lab{color:var(--bad)}
   .bad-good .box.yes .lab{color:var(--ok)}
   .mono{font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;line-height:1.8;
@@ -267,6 +267,129 @@
     .grid2,.grid3,.bad-good{grid-template-columns:1fr}
     .stats{grid-template-columns:repeat(2,1fr)}
   }
+
+  /* ══════════ 2026-10-31 中文排版修正 ══════════════════════════════════
+     原稿按西文习惯定的值，对汉语读者有三处硬伤：
+     ① 微软雅黑只有 Regular(400) 与 Bold(700) 两档真实字重。写 500/600 会被浏览器
+        "合成粗"（把笔画加胖），12–13px 下笔画粘连、发虚 ⇒ 字重只用 400 / 700。
+     ② 汉字是方块字、没有升降部，同样的行高看起来比西文挤 ⇒ 行高 1.8 起。
+     ③ 汉字笔画密度高，10–11px 已糊成一团 ⇒ 最小 12px；弱化信息靠"提亮"而不是"缩小"
+        （原 #6E6E78 在卡片底仅 3.54:1，正文尺寸不达 WCAG AA）。
+     另：中文不加字距（letter-spacing 会让汉字散架），行宽收到 40em 以内（约 34 汉字）。 */
+  :root{--dim:#8A8A94}          /* 3.54:1 → 5.22:1，达 AA */
+  body{font-size:14px;line-height:1.8;line-break:strict;word-break:normal;
+       overflow-wrap:break-word}
+  h1,h2,h3,h4,.brand,.ph h2,.phead h1{letter-spacing:0}
+  .phead h1{font-size:19px;line-height:1.5}
+  .phead p{font-size:12.5px;line-height:1.75;max-width:54em}
+  .ph h2{font-size:20px;line-height:1.5}
+  .ph .s{font-size:12.5px;line-height:1.7}
+  .ct h3{font-size:14px;font-weight:700}
+  .ct .sub{font-size:12.5px}
+  .nav .brand{font-weight:700}
+  .nav .brand span{font-size:12px}
+  .nav .grp{font-size:11.5px;letter-spacing:0}
+  .nav a{font-size:13px}
+  .btn{font-weight:700;letter-spacing:0}
+  .chip{font-size:12.5px;font-weight:400}
+  .info,.lrow{font-size:13.5px}
+  .t.h{font-size:12px;letter-spacing:0}
+  .t.r{font-size:13.5px}
+  .stat .n{font-size:21px}
+  .stat .l{font-size:12px}
+  .day .w{font-size:12px}
+  .day .d{font-size:16px}
+  .day .n{font-size:12px}
+  .slot .tm{font-size:12.5px}
+  .slot .bx b{font-size:13.5px;font-weight:700}
+  .slot .bx span{font-size:12.5px}
+  .switchrow .txt b{font-size:13.5px;font-weight:700}
+  .switchrow .txt span{font-size:12.5px}
+  .empty h4{font-size:14px;font-weight:700}
+  .empty p{font-size:12.5px;line-height:1.85;max-width:24em}
+  .err h4{font-size:13.5px;font-weight:700}
+  .err p{font-size:12.5px;line-height:1.8}
+  .note{font-size:13px;line-height:1.9;max-width:40em}
+  .principle b{font-size:13.5px;font-weight:700}
+  .principle em{font-size:13px;line-height:1.9;max-width:40em}
+  .swatch{font-size:12px}
+  .todo{font-size:12px;line-height:1.8;max-width:34em}
+  .mono{font-size:12.5px;line-height:2}
+  .legend{font-size:12px}
+  .kv,.sp{font-size:12.5px}
+  .gate p{font-size:12.5px;line-height:1.85;max-width:26em;margin-left:auto;margin-right:auto}
+  .field{font-size:13px}
+  .scale .meta{font-size:11.5px}
+
+  /* ── 中文排版专页的图 ── */
+  .ruler{display:flex;flex-direction:column;gap:2px}
+  .rl{display:grid;grid-template-columns:64px 1fr 74px;align-items:center;gap:14px;
+      padding:9px 0;box-shadow:inset 0 -1px 0 rgba(255,255,255,.04)}
+  .rl .px{font:700 12px/1 "Segoe UI",sans-serif;color:var(--dim);
+          font-variant-numeric:tabular-nums}
+  .rl .sm{color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rl .vd{font-size:12px;text-align:right}
+  .rl .vd.no{color:var(--bad)}
+  .rl .vd.mid{color:var(--warn)}
+  .rl .vd.yes{color:var(--ok)}
+  .rl.danger{background:rgba(248,113,113,.05);border-radius:8px;padding-left:10px;padding-right:10px}
+
+  .lh{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .lh .b{background:var(--surface2);border-radius:10px;padding:12px 14px}
+  .lh .b .tag{font:700 11.5px/1 "Segoe UI",sans-serif;color:var(--dim);margin-bottom:8px;
+              display:block;font-variant-numeric:tabular-nums}
+  .lh .b p{margin:0;font-size:12.5px;color:var(--muted)}
+  .lh .b.ok{background:rgba(74,222,128,.07)}
+  .lh .b.ok .tag{color:var(--ok)}
+
+  .wt div{display:flex;align-items:baseline;gap:16px;padding:8px 0;
+          box-shadow:inset 0 -1px 0 rgba(255,255,255,.04)}
+  .wt .w{width:96px;flex:0 0 96px;font:700 11.5px/1 "Segoe UI",sans-serif;color:var(--dim);
+         font-variant-numeric:tabular-nums;padding-top:2px}
+  .wt .s{flex:1;font-size:14px}
+  .wt .j{font-size:11.5px;flex:0 0 92px;text-align:right}
+  .wt .j.no{color:var(--bad)}
+  .wt .j.yes{color:var(--ok)}
+
+  .mix{display:grid;gap:10px}
+  .mix .line{background:var(--surface2);border-radius:10px;padding:11px 14px;font-size:13.5px}
+  .mix .lab{font-size:11.5px;font-weight:700;margin-bottom:5px;letter-spacing:0}
+  .mix .no .lab{color:var(--bad)}
+  .mix .yes .lab{color:var(--ok)}
+  .mix .no{background:rgba(248,113,113,.06)}
+  .mix .yes{background:rgba(74,222,128,.06)}
+
+  /* WCAG 对比度条 */
+  .cbar{display:grid;grid-template-columns:104px 1fr 78px;gap:12px;align-items:center;
+        padding:7px 0}
+  .cbar .nm{font-size:12.5px;color:var(--muted)}
+  .cbar .tk{position:relative;height:12px;border-radius:6px;background:var(--surface3);
+            overflow:hidden}
+  .cbar .fl{height:100%;border-radius:6px}
+  .cbar .aa{position:absolute;top:-3px;bottom:-3px;width:1.5px;background:rgba(255,255,255,.55)}
+  .cbar .v{font:700 12px/1 "Segoe UI",sans-serif;text-align:right;
+           font-variant-numeric:tabular-nums}
+  .cbar .v.ok{color:var(--ok)} .cbar .v.mid{color:var(--warn)} .cbar .v.no{color:var(--bad)}
+
+  .widths{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .widths .w{background:var(--surface2);border-radius:10px;padding:14px}
+  .widths .w .lab{font-size:11.5px;font-weight:700;margin-bottom:8px}
+  .widths .w.bad .lab{color:var(--warn)} .widths .w.good .lab{color:var(--ok)}
+  .widths p{margin:0;font-size:13px;color:var(--muted);line-height:1.9}
+  .widths .narrow{max-width:24em}
+
+  /* 改造量条形图（以 0 为轴，正负分向） */
+  .wbar{display:grid;grid-template-columns:118px 1fr 86px;gap:12px;align-items:center;
+        padding:8px 0}
+  .wbar .nm{font-size:13px}
+  .wbar .nm small{display:block;font-size:11.5px;color:var(--dim);margin-top:1px}
+  .wbar .tk{position:relative;height:16px;border-radius:8px;background:var(--surface3);
+            overflow:hidden}
+  .wbar .z{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.35)}
+  .wbar .fl{position:absolute;top:0;bottom:0;border-radius:8px}
+  .wbar .v{font:700 12.5px/1 "Segoe UI",sans-serif;text-align:right;
+           font-variant-numeric:tabular-nums;color:var(--fg)}
+  .wbar .v.neg{color:var(--ok)}
 </style>
 </head>
 <body>
@@ -276,6 +399,7 @@
   <div class="grp">基础</div>
   <a class="on" data-go="tokens"><i></i>设计语言</a>
   <a data-go="comp"><i></i>组件与状态</a>
+  <a data-go="cjk"><i></i>中文排版</a>
   <div class="grp">界面</div>
   <a data-go="records"><i></i>记录</a>
   <a data-go="selfcheck"><i></i>自检</a>
@@ -347,7 +471,7 @@
         <div class="ct"><h3>字阶与间距</h3><span class="sub">4 档字阶，8 的倍数</span></div>
         <div class="scale">
           <div><span class="meta">21 / 700 页面标题</span><span style="font-size:21px;font-weight:700">记录</span></div>
-          <div><span class="meta">14 / 600 卡标题</span><span style="font-size:14px;font-weight:600">噪音记录</span></div>
+          <div><span class="meta">14 / 700 卡标题</span><span style="font-size:14px;font-weight:700">噪音记录</span></div>
           <div><span class="meta">13 / 400 正文</span><span style="font-size:13px">共 3 天 · 5830 条采样</span></div>
           <div><span class="meta">12 / 400 辅助</span><span style="font-size:12px;color:#A0A0AA">开启后每次采样都会记到这里</span></div>
         </div>
@@ -496,6 +620,146 @@
   </div>
 </section>
 
+<!-- ══════════════ 2.5 中文排版 ══════════════ -->
+<section class="page" id="p-cjk">
+  <div class="phead">
+    <h1>中文排版</h1>
+    <p>这一页是对上一版的自我修正：颜色和层级没大问题，但字号、字重、行高、行宽、标点全是按西文习惯定的。
+       汉语是方块字，笔画密度是西文的两三倍，同一套数值搬过来就是"看着高级、读着费劲"。</p>
+  </div>
+
+  <div class="screen">
+    <div class="ph"><div class="t">
+      <h2>三条病根</h2>
+      <p class="s">不是审美问题，是字体的物理属性问题</p>
+    </div></div>
+
+    <div class="card">
+      <div class="principle"><div class="no">一</div><div>
+        <b>微软雅黑只有两档真实字重：400 与 700</b>
+        <em>写 500 / 600 不会报错，浏览器会自己"合成加粗"——把笔画往两边加胖。12–13px 的汉字本来就密，
+        再被强行加胖就粘连、发虚、像糊了。所以字重要么 400、要么 700，没有中间档。</em>
+      </div></div>
+      <div class="principle"><div class="no">二</div><div>
+        <b>汉字没有升降部，同样的行高看起来比西文挤</b>
+        <em>西文的 x-height 上下留白是行距的一部分；汉字从字面到字面几乎占满字身框。
+        西文 1.5 倍行高在中文里相当于 1.35 倍，读三行就"积在一起"。中文正文行高从 1.8 起。</em>
+      </div></div>
+      <div class="principle"><div class="no">三</div><div>
+        <b>汉字的笔画密度不允许 10–11px</b>
+        <em>"警""翻""藏"这类字在 11px 下笔画会互相吃掉，投影出来更是一团。字号下不去，
+        就只能靠"提亮"来弱化次要信息——而不是缩小。原稿的 #6E6E78 在卡片底只有 3.54:1，
+        正文尺寸连 WCAG AA 都不过。</em>
+      </div></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="ct"><h3>图一 · 字号可读线</h3><span class="sub">同样一句"记录"，逐级缩到看不清为止</span></div>
+      <div class="ruler">
+        <div class="rl"><span class="px">16 px</span><span class="sm" style="font-size:16px">噪音记录与自习会话</span>
+          <span class="vd yes">标题</span></div>
+        <div class="rl"><span class="px">14 px</span><span class="sm" style="font-size:14px">噪音记录与自习会话</span>
+          <span class="vd yes">小标题</span></div>
+        <div class="rl"><span class="px">13 px</span><span class="sm" style="font-size:13px">噪音记录与自习会话</span>
+          <span class="vd yes">正文</span></div>
+        <div class="rl"><span class="px">12 px</span><span class="sm" style="font-size:12px">噪音记录与自习会话</span>
+          <span class="vd mid">下限</span></div>
+        <div class="rl danger"><span class="px">11 px</span><span class="sm" style="font-size:11px">噪音记录与自习会话</span>
+          <span class="vd no">不可用</span></div>
+        <div class="rl danger"><span class="px">10.5 px</span><span class="sm" style="font-size:10.5px">噪音记录与自习会话</span>
+          <span class="vd no">不可用</span></div>
+      </div>
+      <div class="note">
+        上一版全稿有十余处用了 10.5–11.5px（表头、脚注、药丸、周条）。这些是在设计工具里看着"精致"、
+        在现场看着"没有"的字号。已全部提到 <b>12px 起</b>：12 是中文屏显的物理下限。
+      </div>
+    </div>
+
+    <div class="card muted" style="margin-top:12px">
+      <div class="ct"><h3>图二 · 行高</h3><span class="sub">同一段文字，四种行高；绿框是可用的那一档</span></div>
+      <div class="lh">
+        <div class="b"><span class="tag">1.4</span>
+          <p style="line-height:1.4">开启噪音监测后，每次采样都会记到这里，并按天汇总成可读的一行。</p></div>
+        <div class="b"><span class="tag">1.6</span>
+          <p style="line-height:1.6">开启噪音监测后，每次采样都会记到这里，并按天汇总成可读的一行。</p></div>
+        <div class="b ok"><span class="tag">1.8 推荐</span>
+          <p style="line-height:1.8">开启噪音监测后，每次采样都会记到这里，并按天汇总成可读的一行。</p></div>
+        <div class="b"><span class="tag">2.0</span>
+          <p style="line-height:2.0">开启噪音监测后，每次采样都会记到这里，并按天汇总成可读的一行。</p></div>
+      </div>
+      <div class="note">1.4 与 1.6 在中文里会"行挤行"；2.0 又散成条目。1.8 是既能连续读、又不松散的一档。</div>
+    </div>
+
+    <div class="grid2" style="margin-top:12px">
+      <div class="card">
+        <div class="ct"><h3>图三 · 字重真伪</h3><span class="sub">同一句，四档字重</span></div>
+        <div class="wt">
+          <div><span class="w">400</span><span class="s" style="font-weight:400">配置自检</span>
+            <span class="j yes">真·常规</span></div>
+          <div><span class="w">500</span><span class="s" style="font-weight:500">配置自检</span>
+            <span class="j no">合成</span></div>
+          <div><span class="w">600</span><span class="s" style="font-weight:600">配置自检</span>
+            <span class="j no">合成</span></div>
+          <div><span class="w">700</span><span class="s" style="font-weight:700">配置自检</span>
+            <span class="j yes">真·粗体</span></div>
+        </div>
+        <div class="note">500 与 600 看着"稍微重一点"，代价是笔画加胖、边缘发毛。中文界面只有两档可用。</div>
+      </div>
+
+      <div class="card">
+        <div class="ct"><h3>图四 · 中英混排</h3><span class="sub">汉字与拉丁/数字之间要留四分之一个字</span></div>
+        <div class="mix">
+          <div class="line no"><div class="lab">错误 · 挤在一起</div>
+            版本0.6.51-rc.1，已连接云端服务，共5830条采样。</div>
+          <div class="line yes"><div class="lab">正确 · 留出气口</div>
+            版本 0.6.51-rc.1，已连接云端服务，共 5830 条采样。</div>
+        </div>
+        <div class="note">
+          中文与英文、数字之间加一个空格（约 1/4 字宽），是中文排版的通行做法。
+          不加不会报错，但读起来"粘"。上一版有 11 处漏了，已逐条补。
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:12px">
+      <div class="card">
+        <div class="ct"><h3>图五 · 标点</h3><span class="sub">中文用全角，括号也要全角</span></div>
+        <div class="mix">
+          <div class="line no"><div class="lab">错误 · 半角混排</div>
+            高二（3）班 · 提交于 12:10, 时长 20 分钟.</div>
+          <div class="line yes"><div class="lab">正确 · 全角标点</div>
+            高二（3）班 · 提交于 12:10，时长 20 分钟。</div>
+        </div>
+        <div class="note">
+          半角括号配汉字会"贴字"，逗号句号用半角会显得行末空一格。
+          另外打开 <b>line-break: strict</b>，避免「，」跑到下一行行首（避头尾）。
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ct"><h3>图六 · 行宽</h3><span class="sub">一行放多少字，决定要不要"换行找回上一句"</span></div>
+        <div class="widths">
+          <div class="w good"><div class="lab">24 em · 约 20 汉字</div>
+            <p class="narrow">开启噪音监测后，每次采样都会记到这里，并按天汇总成可读的一行。</p></div>
+          <div class="w bad"><div class="lab">全宽 · 约 52 汉字</div>
+            <p>开启噪音监测后，每次采样都会记到这里，并按天汇总成可读的一行。开启噪音监测后，每次采样都会记到这里，并按天汇总成可读的一行。</p></div>
+        </div>
+        <div class="note">中文舒适行宽 25–35 字。上一版的说明段落铺满 700px（约 50 字），读第二行要回头找起点。已收到 40em。</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="ct"><h3>图七 · 对比度实测</h3><span class="sub">WCAG 公式现算，白线 = AA 门槛 4.5:1</span></div>
+      <div id="cbar-wrap"></div>
+      <div class="note">
+        结论：<b>主文字与语义色全部 AAA</b>，次文字 6.9:1 达 AA；
+        唯一不过的是<b>弱文字 #6E6E78（3.54:1）</b>——上一版拿它写表头与脚注。
+        已提到 #8A8A94（5.22:1）。深色底上"看起来还行"的低对比文字，投影仪上会直接消失。
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ══════════════ 3 记录 ══════════════ -->
 <section class="page" id="p-records">
   <div class="phead">
@@ -567,7 +831,7 @@
     <div class="card muted" style="margin-top:12px">
       <div style="display:flex;gap:14px;align-items:center;padding:2px 0">
         <div style="flex:1">
-          <div style="font-size:12.5px;font-weight:600">没有更多了</div>
+          <div style="font-size:12.5px;font-weight:700">没有更多了</div>
           <div style="font-size:11.5px;color:var(--dim);margin-top:2px">
             记录只保留最近 30 天，更早的已按策略清理。需要长期留存请自行备份整个数据目录。</div>
         </div>
@@ -596,7 +860,7 @@
              color:#FBBF24;display:flex;align-items:center;justify-content:center;
              font-weight:700;font-size:15px;flex:0 0 44px">!</div>
         <div style="flex:1">
-          <div style="font-size:16px;font-weight:600">可以做部分管控，有 1 项需要处理</div>
+          <div style="font-size:16px;font-weight:700">可以做部分管控，有 1 项需要处理</div>
           <div style="font-size:12px;color:var(--muted);margin-top:3px">
             未绑定班级 —— 管理端能连上这台设备，但按班下发的课表与通知收不到。</div>
         </div>
@@ -680,7 +944,7 @@
         </div>
         <div class="seg" style="left:33.3%;width:14.6%"><span>08:00 – 11:30</span></div>
         <div class="seg" style="left:58.3%;width:12.5%"><span>14:00 – 17:00</span></div>
-        <div class="seg off" style="left:91.6%;width:8.4%"><span>22:00 – 24:00</span></div>
+        <div class="seg off" style="left:91.6%;width:8.4%"><span>22:00+</span></div>
       </div>
       <div class="tlx"><span>00</span><span>03</span><span>06</span><span>09</span><span>12</span>
         <span>15</span><span>18</span><span>21</span><span>24</span></div>
@@ -728,7 +992,7 @@
           <div style="width:40px;height:40px;border-radius:11px;background:var(--fg);color:#0B0B0D;
                display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;flex:0 0 40px">▶</div>
           <div style="flex:1">
-            <div style="font-size:15px;font-weight:600">打开广播社</div>
+            <div style="font-size:15px;font-weight:700">打开广播社</div>
             <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.65">
               查看今天的排期、开始一次广播、给广播社成员排班。</div>
           </div>
@@ -741,7 +1005,7 @@
           <div style="width:40px;height:40px;border-radius:11px;background:var(--surface3);color:var(--muted);
                display:flex;align-items:center;justify-content:center;font-size:16px;flex:0 0 40px">◷</div>
           <div style="flex:1">
-            <div style="font-size:15px;font-weight:600">播放时段</div>
+            <div style="font-size:15px;font-weight:700">播放时段</div>
             <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.65">
               今天 08:00–11:30、14:00–17:00 允许播放，其余时段静默。</div>
           </div>
@@ -760,7 +1024,7 @@
         <div class="bx"><div class="m"><b>早间新闻与天气</b><span>广播社 · 5 分钟 · 全站</span></div>
           <span class="chip ok"><i class="dot"></i>已播完</span></div></div>
       <div class="slot"><div class="tm">12:10</div>
-        <div class="bx sel"><div class="m"><b>午间点歌台</b><span>高二(3)班 提交 · 20 分钟 · 全站</span></div>
+        <div class="bx sel"><div class="m"><b>午间点歌台</b><span>高二（3）班 提交 · 20 分钟 · 全站</span></div>
           <span class="chip warn"><i class="dot"></i>14 分钟后</span></div></div>
       <div class="slot"><div class="tm">17:30</div>
         <div class="bx"><div class="m"><b>放学提醒</b><span>系统自动 · 2 分钟 · 全站</span></div>
@@ -869,7 +1133,7 @@
       <div class="ct"><h3>二、页面改造顺序（按收益/风险比）</h3></div>
       <div class="rows">
         <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">1 · 记录页</span>
-          <span class="v" style="text-align:left;flex:1">加统计条 + 行结论色。已有 AppInfoRow，改 QML + 少量 C++（给"安静/偏吵"结论）。风险低。</span></div>
+          <span class="v" style="text-align:left;flex:1">加统计条 + 行结论色。已有 AppInfoRow，改 QML + 少量 C++（给「安静／偏吵」结论）。风险低。</span></div>
         <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">2 · 自检页</span>
           <span class="v" style="text-align:left;flex:1">加顶部结论卡（一句话 + 一个动作）+ 每行证据串。C++ 已有 4 项数据，补 statusHint 即可。</span></div>
         <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">3 · 时段页</span>
@@ -878,6 +1142,15 @@
           <span class="v" style="text-align:left;flex:1">两个入口从自绘矩形换 AppCard + 图标 + 说明；排期空态换 AppEmptyState。纯 QML。</span></div>
         <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">5 · 广播社</span>
           <span class="v" style="text-align:left;flex:1">489 行整体重写（登录门 + 周条 + 排期）。建议拆 3 件：<code>ClubGate</code> / <code>ClubWeek</code> / <code>ClubSchedule</code>，各自 ≤150 行。</span></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="ct"><h3>改造量预估</h3><span class="sub">行数是"净改动"，不是最终文件大小</span></div>
+      <div id="work-wrap"></div>
+      <div class="note">
+        时段页最重（要新写一个时间轴组件），但它是唯一"删掉一类交互"的改造——用户从此不需要记格式。
+        广播社是净减（489 → 目标 300 以内），拆成三件后每件都能塞进 300 行红线。
       </div>
     </div>
 
@@ -923,6 +1196,71 @@
   var h = (location.hash || "").replace("#", "");
   if (h && document.getElementById("p-" + h)) go(h);
 })();
+
+  // 图七：对比度实测（WCAG 2.1 相对亮度公式，2026-10-31 现算）
+  (function () {
+    var rows = [
+      {nm:"主文字 / 卡片底", c:"16.28", ok:1, w:16.28},
+      {nm:"主文字 / 次级容器", c:"14.78", ok:1, w:14.78},
+      {nm:"药丸文字 / 卡片底", c:"10.87", ok:1, w:10.87},
+      {nm:"警告色 / 卡片底", c:"10.71", ok:1, w:10.71},
+      {nm:"成功色 / 卡片底", c:"10.26", ok:1, w:10.26},
+      {nm:"次文字 / 卡片底", c:"6.90", ok:1, w:6.90},
+      {nm:"危险色 / 卡片底", c:"6.46", ok:1, w:6.46},
+      {nm:"弱文字(原) / 卡片底", c:"3.54", ok:0, w:3.54}
+    ];
+    var MAX = 18, AA = 4.5;
+    var host = document.getElementById("cbar-wrap");
+    rows.forEach(function (r) {
+      var pct = (r.w / MAX * 100).toFixed(1);
+      var aa  = (AA / MAX * 100).toFixed(1);
+      var cls = r.w >= 7 ? "ok" : (r.w >= AA ? "ok" : "no");
+      var d = document.createElement("div");
+      d.className = "cbar";
+      d.innerHTML = "<div class='nm'>" + r.nm + "</div>" +
+        "<div class='tk'><div class='fl' style='width:" + pct +
+        "%;background:" + (r.ok ? "rgba(74,222,128,.55)" : "rgba(248,113,113,.55)") +
+        "'></div><div class='aa' style='left:" + aa + "%'></div></div>" +
+        "<div class='v " + cls + "'>" + r.c + ":1</div>";
+      host.appendChild(d);
+    });
+  })();
+
+  // 落地页：改造量条形图（净改动行数；负数=净减）
+  (function () {
+    var host = document.getElementById("work-wrap");
+    if (!host) return;
+    var rows = [
+      {nm:"记录",   q:+40, c:+22, note:"QML + C++"},
+      {nm:"自检",   q:+50, c:+18, note:"QML + C++"},
+      {nm:"时段",   q:+180, c:+60, note:"新组件 + C++"},
+      {nm:"广播台", q:+34, c:0,   note:"纯 QML"},
+      {nm:"广播社", q:-189, c:0,  note:"489→300，拆三件"}
+    ];
+    var maxPos = 0, maxNeg = 0;
+    rows.forEach(function (r) {
+      var t = r.q + r.c;
+      if (t > maxPos) maxPos = t;
+      if (t < maxNeg) maxNeg = t;
+    });
+    var span = maxPos - maxNeg || 1;
+    rows.forEach(function (r) {
+      var tot = r.q + r.c;
+      var pct = Math.abs(tot) / span * 100;
+      var zero = (0 - maxNeg) / span * 100;
+      var d = document.createElement("div");
+      d.className = "wbar";
+      var left = tot >= 0 ? zero : zero - pct;
+      var col = tot >= 0 ? "rgba(125,211,252,.62)" : "rgba(74,222,128,.62)";
+      d.innerHTML = "<div class='nm'>" + r.nm + "<small>" + r.note + "</small></div>" +
+        "<div class='tk'><div class='z' style='left:" + zero + "%'></div>" +
+        "<div class='fl' style='left:" + left + "%;width:" + pct + "%;background:" + col +
+        "'></div></div>" +
+        "<div class='v " + (tot >= 0 ? "" : "neg") + "'>" +
+        (tot >= 0 ? "+" : "") + tot + " 行</div>";
+      host.appendChild(d);
+    });
+  })();
 </script>
 </body>
 </html>
