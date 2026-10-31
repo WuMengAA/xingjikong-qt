@@ -50,6 +50,7 @@
 #include "wire/frame_builder.h" // 2026-10-31 main 拆分 #12：协议 v1 信封三打包函数（makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes）
 #include "core/proc_inspect.h" // 2026-10-31 main 拆分 #13：进程/窗口只读检查（snapshotProcessNames/enumWindowsCb/visibleWindowsCached/windowTitleOf/memMbOf）
 #include "policy/policy_engine.h" // 2026-10-31 main 拆分 #14：调度/软控/进程策略（ActionDeps 共享类型 + PolicyDeps 注入）
+#include "localapi/localapi_server.h" // 2026-10-31：本地 API 鉴权网关（127.0.0.1:8080，三条已知缺口之一）
 
 #include <QApplication>
 #include <QSystemTrayIcon>
@@ -3764,6 +3765,9 @@ int main(int argc, char *argv[])
     // OTA 自更新动作层注入（main 拆分 #15）：startSelfUpdate / otaIsBusy 定义仍在匿名域
     // （内部链接），main() 同 TU 取地址注入 OtaDeps（模块侧经 g_otaDeps-> 访问）。
     otaUpdateInit(OtaDeps{ &startSelfUpdate, &otaIsBusy });
+    // 本地 API 鉴权网关（2026-10-31 · 三条已知缺口之一）：127.0.0.1:8080，仅回环。
+    // 失败只记日志不阻塞；业务全在 src/localapi/（main 拆分纪律，只加这一行）。
+    localApiInit();
     if (!g_shotDir.isEmpty()) QDir().mkpath(g_shotDir);
     g_logPath = qEnvironmentVariable("STE_QT_LOG", dataDir + QStringLiteral("/agent-qt.log"));
 

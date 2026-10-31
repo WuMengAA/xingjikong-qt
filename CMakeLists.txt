@@ -357,6 +357,14 @@ add_executable(stelarith-agent-qt
   # ── 小鲸鱼音效（2026-10-11 · dsh-whale-widget 移植：winmm PlaySound 播 wav）──
   src/whale_audio.cpp
   src/whale_audio.h
+  # ── 本地 API 鉴权网关（2026-10-31 · 三条已知地基缺口之一）──
+  #   服务本机 127.0.0.1:8080（仅回环），token 头鉴权 + 限流 + 失败审计。
+  #   localapi_auth 只依赖 QtCore（可单测）；localapi_server 用 QTcpServer 手写最小 HTTP。
+  #   装配：main.cpp 启动路径调 localApiInit() 一行，业务全在本域（main 拆分纪律）。
+  src/localapi/localapi_auth.cpp
+  src/localapi/localapi_auth.h
+  src/localapi/localapi_server.cpp
+  src/localapi/localapi_server.h
   # ── 版本资源（configure_file 从 src/app.rc.in 生成，见上面的版本块）──
   ${CMAKE_CURRENT_BINARY_DIR}/app.rc
 )
