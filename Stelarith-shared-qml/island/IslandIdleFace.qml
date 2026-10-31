@@ -1,74 +1,132 @@
 import QtQuick 2.15
 import "."
 
-// 灵动岛 · 空闲面部（对齐 island.cpp 644-689）
+// 灵动岛 · 顶部菜单栏面部（macOS 菜单栏风格 · 2026-10-31 重构）
 //
-// 从 `IslandRoot.qml` 抽出的**第一块**（2026-10-16 · U 系列 D 档「IslandRoot 2207 行拆分」）。
-// 后续各块照此办理，规矩两条：
+// 原「空闲半胶囊」（时钟 + 横杠下三角）→ 常驻顶部**居中定宽横条**（C++ kBarW 520 × kBarH 38）：
+//   左：应用图标（星）+ 「星集控」
+//   右：通知铃（带未读角标）+ 时钟
+// 点整条 → 发 tapped()，由 IslandRoot 接 requestExpand（展开成下拉/面板）。
 //
-// 1. **只搬，不改**。几何 / 锚 / 字号 / 动效 / z 一律逐字保留 —— 拆分是纯结构搬迁，
-//    行为必须零变化。证明手段：拆前冻结探针基线（`_island_qml_probe.py` 的
-//    `=== tree ===` 全子树几何 + `root.*` 属性），拆后用
-//    `shared-qml/scripts/diff-island-tree.mjs` 比对，**差异必须为空**。
-//
-// 2. **隐式作用域搬不走**，这是拆分唯一的真代价。原来靠「子对象 → 组件根」隐式解析的
-//    裸标识符（`th`、`_idle`）和 `root.xxx` 前缀，一旦离开 IslandRoot 就**无声断链**
-//    （不报错，只是取值恒 undefined）。所以每个抽出的组件必须把自己的依赖
-//    **逐个声明成 property**，实例化处显式传入。
-//    ⚠️ 2026-10-16 U3 的教训：当时只 grep 带 `root.` 前缀的引用，漏掉 87 处裸 `th`，
-//       搬完全套面板的配色变默认值。这次逐块核对了裸标识符。
+// ⚠️ 依赖显式声明成 property（隐式作用域不会跟着搬进独立文件 —— D 档拆分踩过）：
+//    th（IslandTheme）、idle（是否空闲）、unread（未读条数）。
 Item {
     id: face
 
-    // ── 接口（由 IslandRoot 传入）─────────────────────────────
-    // 名字刻意用**不带下划线**的公开名：`_xxx` 是 IslandRoot 的内部约定，
-    // 子组件用公开名，避免"子组件里写 `_idle` 以为是自己的还是父的"这种二义。
-    property var th           // 主题令牌（IslandTheme 实例，必传）
-    property bool idle: true  // 空闲态（false ⇒ 整面淡出并让位给活动态）
+    // ── 接口 ──────────────────────────────────────────────
+    property var  th: null
+    property bool idle: true
+    property int  unread: 0
+    property string className: ""   // 2026-10-31：班级显示名（居中）
+    signal tapped()
 
     visible: face.idle
     opacity: face.idle ? 1 : 0
-    // 2026-10-18：淡出用 durShort（原硬编码 160）
     Behavior on opacity { NumberAnimation { duration: face.th ? face.th.durShort : 160 } }
 
-    IslandClock {
-        id: idleClock
-        theme: face.th
-        timePx: face.th.fsBody
-        // 岛宽 132（C++ kIdleW），鲸鱼占右 28px + 6 margin = 34px，时钟右留 38px
-        anchors.right: parent.right
-        anchors.rightMargin: 38
-        anchors.verticalCenter: parent.verticalCenter
+    // 整条可点（空闲态 gestureArea 是 disabled，这里自带点击）
+    MouseArea {
+        objectName: "idleBarMA"
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        onClicked: face.tapped()
     }
 
-    // 左半区：横杠 + 下三角
-    Item {
-        anchors.left: parent.left
+    // ── 中：班级名（居中，过长省略）────────────────────────
+    Text {
+        id: classLabel
+        visible: face.className !== ""
+        anchors.left: leftRow.right
+        anchors.right: rightRow.left
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        width: parent.width / 2
-        height: parent.height
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
+        maximumLineCount: 1
+        text: face.className
+        color: face.th ? face.th.sub : "#C8C8C8"
+        font.pixelSize: 12
+        font.weight: Font.Medium
+    }
+
+    // ── 左：应用标识 ───────────────────────────────────────
+    Row {
+        id: leftRow
+        anchors.left: parent.left
+        anchors.leftMargin: 14
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 8
 
         Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
+            width: 16
+            height: 16
+            radius: 4
+            color: face.th ? face.th.fg : "#FAFAFA"
+            Text {
+                anchors.centerIn: parent
+                text: "星"
+                color: face.th ? face.th.bg : "#1E1E1E"
+                font.pixelSize: 10
+                font.weight: Font.Medium
+            }
+        }
+        Text {
+            height: 16
+            verticalAlignment: Text.AlignVCenter
+            text: "星集控"
+            color: face.th ? face.th.fg : "#FAFAFA"
+            font.pixelSize: 13
+            font.weight: Font.Medium
+        }
+    }
+
+    // ── 右：铃铛 + 时钟 ───────────────────────────────────
+    Row {
+        id: rightRow
+        anchors.right: parent.right
+        anchors.rightMargin: 14
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 12
+
+        Item {
+            width: 16
+            height: 16
             anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: -3
-            width: 24; height: 4; radius: 2
-            color: face.th.idleFg
+
+            SvgIcon {
+                anchors.centerIn: parent
+                name: "bell"
+                tint: face.th ? face.th.sub : "#C8C8C8"
+                px: 16
+            }
+
+            // 未读角标
+            Rectangle {
+                visible: face.unread > 0
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: -6
+                anchors.rightMargin: -6
+                width: Math.max(14, badgeTxt.implicitWidth + 6)
+                height: 14
+                radius: 7
+                color: "#E24B4A"
+                Text {
+                    id: badgeTxt
+                    anchors.centerIn: parent
+                    text: face.unread > 99 ? "99+" : String(face.unread)
+                    color: "#FFFFFF"
+                    font.pixelSize: 9
+                    font.weight: Font.Medium
+                }
+            }
         }
 
-        Canvas {
-            anchors.horizontalCenter: parent.horizontalCenter
+        IslandClock {
             anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: 5
-            width: 10; height: 6
-            onPaint: {
-                var c = getContext("2d")
-                c.reset(); c.beginPath()
-                c.moveTo(0, 0); c.lineTo(width, 0); c.lineTo(width / 2, height)
-                c.closePath()
-                c.fillStyle = face.th.idleFg
-                c.fill()
-            }
+            theme: face.th
+            timePx: 13
         }
     }
 }

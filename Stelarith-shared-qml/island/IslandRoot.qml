@@ -707,8 +707,8 @@ Item {
     //    （IslandRoot.qml 头部原注释「view 按 root implicit 走」与实际行为相反）。
     //    探针实证：--media 收起态 geom=200x56（内容定宽），加媒体宽度分支后才 320x56。
     //    高度取 max(320, 内容预算)：内容比 320 高时不裁掉，正常就稳在 320（正好放 3 条历史）。
-    implicitWidth: root._idle ? root.th.shapeIdle * 3    // 4:3 比例 (44*3=132)
-                               : (root._expanded ? 680 : 320)
+    implicitWidth: root._idle ? root.th.shapeIdle * 3    // 4:3 预算 (44*3=132)；实际宽度由 C++ 驱动
+                               : (root._expanded ? 680 : 320)   // 预算；通知展开实际=520、媒体=680（C++ 定）
     implicitHeight: root._idle ? root.th.shapeIdle
                                : (root._expanded
                                   ? Math.max(320, root.padH + root.headH + root.listH + root.histH + root.ftH + root.specH + root.mediaH + root.vhH + root.interactH + root.danmakuH + root.searchH + root.submitH + root.actH + root.padH)
@@ -786,7 +786,7 @@ Item {
         // 2026-10-27（G4/G5/G6）：**面板态也不画** —— 面板是看板（课表/倒计时），
         // 右下角一只鲸鱼 + 一句标题气泡（"今天"/"今日课表"）纯属重复信息，
         // 还会压住课表最后一行（640×320 里第 7~8 节正好在右下）。
-        visible: !root._compactForm && !root._bigForm && !root._panelOn
+        visible: !root._compactForm && !root._bigForm && !root._panelOn && !root._idle
         // 空闲态鲸鱼正常大小（28px），底层扩大了能放下
         px: root._idle ? 28 : (root._expanded ? 36 : 28)
         bridgeRef: root.bridgeRef
@@ -819,14 +819,14 @@ Item {
         id: shell
         anchors.fill: parent
         // 圆角六档（#330 形态多样化 + 2026-10-17 补 Centered/Fullscreen 两档）
-        //   空闲半胶囊   → 正圆（height/2）
+        //   2026-10-31 菜单栏 → 12（圆角矩形，不是全圆 pill —— 520 宽 pill 像巨型胶囊）
         //   Mini 正圆档  → 正圆（无描述时收成角标，与 C++ geometryForForm 同口径）
         //   Mini 方牌档  → 28（比胶囊的 18 更"卡片"，但比卡片小）
         //   Banner 通栏  → 20（与 Centered 卡片同族，横幅不该比卡片更"圆"）
         //   Centered     → 24（520×200 的卡片，24 ≈ 12% 短边，iOS 卡片的手感）
         //   Fullscreen   → 28（铺满屏的大面板，再大就"像被啃掉角"）
         //   胶囊收起/展开 → height/2 / 18（原样不动）
-        radius: root._idle ? height / 2
+        radius: root._idle ? 12
                             : (root._formKind === "mini"
                                ? (root._miniOrb ? height / 2 : 28)
                                : (root._formKind === "banner"
@@ -887,6 +887,15 @@ Item {
         anchors.fill: parent
         th: root.th
         idle: root._idle
+        // 2026-10-31：菜单栏右铃角标用未读条数
+        unread: root.bridgeRef ? (root.bridgeRef.historyUnreadCount || 0) : 0
+        // 2026-10-31：菜单栏中间显示班级名（未绑定则空串 → 隐藏）
+        className: root.bridgeRef ? (root.bridgeRef.className || "") : ""
+        // 点整条 → 展开/收起（空闲态 gestureArea 是 disabled，靠这一路）
+        onTapped: {
+            if (root.bridgeRef && root.bridgeRef.requestExpand)
+                root.bridgeRef.requestExpand(!root._expanded)
+        }
     }
 
     // ══════════════════════════════════════════════════════════
