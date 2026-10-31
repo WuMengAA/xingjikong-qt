@@ -472,6 +472,12 @@ ColumnLayout {
             function onVncFrameReady(img) { vncImg.tick++ }
         }
 
+        // A档（2026-10-31）：H264 远控流小窗（右下角，真机出图时实时显示，沙箱空白属预期）
+        H264StreamView {
+            anchors { right: parent.right; bottom: parent.bottom; margins: 12 }
+            width: Math.min(parent.width * 0.28, 320); height: width * 9 / 16
+        }
+
         // 空态照稿 .empty：标题 12/操作色 + 说明 11/辅助色，两行。
         // 分三种情形（没选机器 / 正在接通 / 选了但没帧）：以前一句话包打天下，
         // 用户看不出是"正在办"还是"没人理"。

@@ -257,6 +257,8 @@ class ViewerBackend : public QObject
     // 当前画面**实际来自哪条链路**："none"（还没帧）/ "jpeg"（被控端 JPEG 推送）
     // / "vnc"（VNC 远控实时画面）。界面靠它告诉用户"现在看的是远控还是轮询"。
     Q_PROPERTY(QString frameSource READ frameSource NOTIFY frameSourceChanged)
+    // A档（2026-10-31）：H264 远控流是否已有帧到达（界面据此显示 image://h264/live 小窗）。
+    Q_PROPERTY(bool h264Available READ h264Available NOTIFY h264AvailableChanged)
     // 远程终端状态读数：界面靠它决定"开终端"按钮能不能点、显示什么提示。
     // 状态机 Idle → Pending（请求已发，等本机点头）→ Open（会话在跑）→ Idle。
     Q_PROPERTY(TermState termState READ termState NOTIFY termStateChanged)
@@ -453,6 +455,8 @@ public:
     bool vncActive() const { return m_vncActive; }
     QString vncState() const { return m_vncState; }
     QString frameSource() const { return m_frameSource; }
+    bool h264Available() const { return m_h264Available; }
+    void setH264Available(bool a);   // A档（2026-10-31）：h264-data 首帧到达置位
 
     // ── 远控（VNC over WebSocket · libvncclient）──
     /** 对 uid 这台设备拉起 VNC 会话：RFB 字节全部走主 WS 的 vnc-data 二进制帧。 */
@@ -743,6 +747,7 @@ signals:
     void studyChanged();
     /** 画面来源切换（jpeg ↔ rtc）——界面上那个链路徽标靠它刷新。 */
     void frameSourceChanged();
+    void h264AvailableChanged();
     /** 终端状态四件套（state/sid/note/busy）共用一个信号。 */
     void termStateChanged();
     /** 帧没画成（解码失败等）——界面可以往屏幕上说明一句，别让画面无声无息不动。 */
@@ -978,6 +983,7 @@ private:
 
     // ── 画面来源（JPEG 推送 vs VNC 远控）──
     QString m_frameSource = QStringLiteral("none");
+    bool m_h264Available = false;
 
     QJsonArray m_devices;
     PermissionManager *m_perms = nullptr;   // RBAC（2026-10-20）：前端权限镜像层（裸指针，生命周期由 main 托管）

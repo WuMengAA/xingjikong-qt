@@ -128,6 +128,12 @@ Item {
                 }
             }
 
+            // A档（2026-10-31）：H264 远控流小窗（右下角）
+            H264StreamView {
+                anchors { right: parent.right; bottom: parent.bottom; margins: 12 }
+                width: Math.min(parent.width * 0.28, 320); height: width * 9 / 16
+            }
+
             // 未选设备 / 无帧时的引导（不弹空白）
             Text {
                 anchors.centerIn: parent

@@ -115,6 +115,12 @@ Item {
             Connections { target: backend; function onVncFrameReady(img) { vncImg.tick++ } }
         }
 
+        // A档（2026-10-31）：H264 远控流小窗（右下角）
+        H264StreamView {
+            anchors { right: parent.right; bottom: parent.bottom; margins: 8 }
+            width: Math.min(parent.width * 0.4, 240); height: width * 9 / 16
+        }
+
         // 空态引导
         Text {
             anchors.centerIn: parent

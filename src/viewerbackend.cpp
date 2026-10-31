@@ -1585,6 +1585,7 @@ void ViewerBackend::onBinaryMessage(const QByteArray &buf)
             // 直接喂 H264ImageProvider（内部经 MfxH264Decoder 解出 QImage → image://h264/live）。
             if (h.value(QStringLiteral("type")).toString() == QStringLiteral("h264-data")) {
                 if (m_h264Provider) m_h264Provider->feedNal(buf.mid(3 + hLen));
+                setH264Available(true);   // 首帧到达：界面可显示 image://h264/live 小窗
                 return;
             }
             if (h.value(QStringLiteral("type")).toString() != QStringLiteral("frame")) {
@@ -1862,6 +1863,12 @@ void ViewerBackend::setStatic(bool s)
     if (s) logf("[viewer] 画面进入静态区（连续 %d 帧一致）→ 停止重绘", kStaticStreak);
     else   logf("[viewer] 画面恢复动态 → 恢复全帧率重绘");
     emit statsChanged();
+}
+void ViewerBackend::setH264Available(bool a)
+{
+    if (m_h264Available == a) return;
+    m_h264Available = a;
+    emit h264AvailableChanged();
 }
 void ViewerBackend::tickFps()
 {
