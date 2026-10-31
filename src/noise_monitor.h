@@ -96,6 +96,17 @@ public:
     //    ⚠️ 不做生产用途：它只是把 evaluate() 暴露出来，不改变任何采集行为。
     void injectSample(double db);
 
+    // ══ ⑤ 麦克风输入设备选择（2026-10-31 · 用户点单）══════════════════════════
+    //    现状：采集写死 WAVE_MAPPER（系统默认录音设备），换不了麦。
+    //    本块：枚举所有 WAVE_IN 输入设备、可指定设备 ID 采集、QSettings 持久化。
+    //    默认 -1 = 系统默认（WAVE_MAPPER，与既有行为一致），切了才生效。
+    /** 枚举录音输入设备：[名称]（含默认凭据空的场景）。索引即 waveIn 设备 ID。 */
+    static QStringList listInputDevices();
+    /** 当前选中的输入设备（-1 = 系统默认）。 */
+    int inputDevice() const { return m_inputDeviceId; }
+    /** 指定采集使用的输入设备；-1 = 系统默认。立即持久化（QSettings noiseInputDevice）。 */
+    void setInputDevice(int wDeviceId);
+
 signals:
     // 每次分析完成：dB（相对响度）、有没有噪音、事件序号
     void noiseSample(double db, bool active, int seq);
@@ -140,4 +151,7 @@ private:
     int    m_windowMax      = 200;                      // 约 200×2s ≈ 7 分钟的观察窗
     double m_baselineDb     = std::numeric_limits<double>::quiet_NaN();
     double m_effectiveThreshold = -45.0;                // 本次实际判定阈值（dBFS 口径）
+
+    // ── ⑤ 麦克风选择（2026-10-31）：-1 = WAVE_MAPPER（系统默认），与既有行为一致 ──
+    int m_inputDeviceId = -1;
 };

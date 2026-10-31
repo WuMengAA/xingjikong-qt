@@ -6,6 +6,7 @@
 #include <QMetaObject>
 #include <QElapsedTimer>
 #include <QByteArray>
+#include <QSettings>
 #include <QtMath>
 #include <algorithm>
 
@@ -23,7 +24,7 @@ namespace {
 // 返回 RMS(0..1)；<0 表示"采不到"（无设备 / 设备被占用 / 打开失败 / 没有数据）。
 // 0.0 是合法值（真采样到静音），与"采不到"必须区分开 —— 否则安静教室会被
 // 误报成"检测器坏了"，检测器坏了又会被误报成"很安静"。
-double captureRms(int sampleRate)
+double captureRms(int sampleRate, UINT devId)
 {
 #if defined(Q_OS_WIN)
     if (waveInGetNumDevs() == 0) return -1.0;    // 没有录音设备
@@ -38,7 +39,8 @@ double captureRms(int sampleRate)
     fmt.nAvgBytesPerSec = static_cast<DWORD>(sampleRate) * 2;
 
     // CALLBACK_NULL + 轮询：设备被语音对讲独占时这里会失败，直接返回"采不到"
-    if (waveInOpen(&h, WAVE_MAPPER, &fmt, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR)
+    // devId = WAVE_MAPPER（系统默认）≈ 旧行为；指定 ID = 按所选麦克风采集。
+    if (waveInOpen(&h, devId, &fmt, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR)
         return -1.0;
 
     const int bytes = sampleRate * 2 * 150 / 1000;   // 150ms 窗口 → 16k 时 4800B
@@ -101,10 +103,13 @@ double captureRms(int sampleRate)
 class NoiseMonitor::Task : public QRunnable
 {
 public:
-    Task(NoiseMonitor *owner, int rate, int seq) : m_owner(owner), m_rate(rate), m_seq(seq) {}
+    Task(NoiseMonitor *owner, int rate, int seq, int devId)
+        : m_owner(owner), m_rate(rate), m_seq(seq), m_devId(devId) {}
     void run() override
     {
-        const double rms = captureRms(m_rate);
+        // 指定设备采集（devId<0 → WAVE_MAPPER 系统默认）
+        const UINT dev = (m_devId >= 0) ? static_cast<UINT>(m_devId) : WAVE_MAPPER;
+        const double rms = captureRms(m_rate, dev);
         NoiseMonitor *o = m_owner;
         QMetaObject::invokeMethod(o, [o, rms, seq = m_seq] { o->onCaptured(rms, seq); },
                                   Qt::QueuedConnection);
@@ -114,12 +119,18 @@ private:
     NoiseMonitor *m_owner;
     int m_rate;
     int m_seq;
+    int m_devId;
 };
 
 NoiseMonitor::NoiseMonitor(QObject* parent) : QObject(parent)
 {
     m_pool.setMaxThreadCount(1);   // 采集串行，独占一个后台线程（不抢全局池）
     connect(&m_timer, &QTimer::timeout, this, &NoiseMonitor::sample);
+    // ⑤ 麦克风选择：读持久化（-1=系统默认；越界一律钳回默认，不弹错）
+    QSettings s;
+    const int saved = s.value(QStringLiteral("noiseInputDevice"), -1).toInt();
+    m_inputDeviceId = (saved >= 0 && saved < static_cast<int>(waveInGetNumDevs()))
+                          ? saved : -1;
 }
 
 NoiseMonitor::~NoiseMonitor()
@@ -157,7 +168,7 @@ void NoiseMonitor::sample()
     if (!m_running || m_busy) return;   // 上一轮还没回来就跳过（防设备慢时堆任务）
     m_busy = true;
     ++m_seq;
-    m_pool.start(new Task(this, m_sampleRate, m_seq));
+    m_pool.start(new Task(this, m_sampleRate, m_seq, m_inputDeviceId));
 }
 
 void NoiseMonitor::onCaptured(double rms, int seq)
@@ -241,4 +252,41 @@ void NoiseMonitor::injectSample(double db)
     // 测试/调试用：绕过麦克风直接喂一个 dB 值，走与真采集完全相同的判定与计数。
     // 不检查 m_running —— 无麦克风环境下也要能验状态机。
     evaluate(db, ++m_seq);
+}
+
+// ── ⑤ 麦克风输入设备选择（2026-10-31 · 用户点单）────────────────────────────
+QStringList NoiseMonitor::listInputDevices()
+{
+    QStringList out;
+#if defined(Q_OS_WIN)
+    const UINT n = waveInGetNumDevs();
+    for (UINT i = 0; i < n; ++i) {
+        WAVEINCAPSW caps = {};
+        if (waveInGetDevCapsW(i, &caps, sizeof(caps)) == MMSYSERR_NOERROR
+            && caps.szPname[0] != L'\0')
+            out << QString::fromWCharArray(caps.szPname).trimmed();
+        else
+            out << QStringLiteral("麦克风 %1").arg(i + 1);
+    }
+#endif
+    return out;   // 空 = 无录音设备（管理端据此显示"无/默认"）
+}
+
+void NoiseMonitor::setInputDevice(int wDeviceId)
+{
+    const int count = static_cast<int>(waveInGetNumDevs());
+    if (wDeviceId < -1 || wDeviceId >= count) {
+        qWarning().noquote() << QStringLiteral("[agent-qt] 麦克风设备 ID 越界，忽略：%1").arg(wDeviceId);
+        return;
+    }
+    if (m_inputDeviceId == wDeviceId)
+        return;   // 幂等：没变化不写盘不刷日志
+    m_inputDeviceId = wDeviceId;
+    QSettings s;
+    s.setValue(QStringLiteral("noiseInputDevice"), wDeviceId);
+    const QStringList all = listInputDevices();
+    const QString name = (wDeviceId < 0) ? QStringLiteral("系统默认")
+                                         : all.value(wDeviceId);
+    qInfo().noquote() << QStringLiteral("[agent-qt] 噪音采集麦克风 → %1（ID=%2）")
+                             .arg(name.isEmpty() ? QStringLiteral("未知") : name).arg(wDeviceId);
 }
