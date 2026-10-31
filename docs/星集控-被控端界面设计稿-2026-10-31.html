@@ -390,6 +390,45 @@
   .wbar .v{font:700 12.5px/1 "Segoe UI",sans-serif;text-align:right;
            font-variant-numeric:tabular-nums;color:var(--fg)}
   .wbar .v.neg{color:var(--ok)}
+
+  /* ── 记录页图表（纯 CSS）：柱状图 / 时长横条 ── */
+  .ch{display:grid;grid-template-columns:56px 1fr;gap:10px}
+  .ch-y{display:flex;flex-direction:column;justify-content:space-between;text-align:right;
+        font:400 12px/1 "Segoe UI",sans-serif;color:var(--dim);
+        font-variant-numeric:tabular-nums;padding:0 0 1px}
+  .ch-plot{position:relative;height:190px}
+  .ch-grid{position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,.05)}
+  .ch-cols{position:relative;display:grid;grid-template-columns:repeat(3,1fr);
+           gap:26px;height:100%;padding:0 10px}
+  .ch-col{position:relative;height:100%}
+  .ch-bar{position:absolute;left:0;right:0;bottom:0;border-radius:8px 8px 2px 2px;
+          background:linear-gradient(180deg,rgba(244,244,247,.20),rgba(244,244,247,.08))}
+  .ch-bar::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;
+                 border-radius:8px 8px 0 0;background:rgba(244,244,247,.85)}
+  .ch-bar.now{background:linear-gradient(180deg,rgba(244,244,247,.88),rgba(244,244,247,.40))}
+  .ch-in{position:absolute;left:0;right:0;bottom:10px;text-align:center;
+         font:700 12.5px/1.15 "Segoe UI",sans-serif;color:var(--fg);
+         font-variant-numeric:tabular-nums}
+  .ch-in small{display:block;margin-top:3px;font-size:11.5px;font-weight:400;
+               color:var(--muted);font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+  .ch-in.dark{color:#0B0B0D}
+  .ch-in.dark small{color:rgba(11,11,13,.66)}
+  .ch-x{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;padding:8px 10px 0;
+        text-align:center;font-size:12px;color:var(--muted)}
+  .ch-x b{font-weight:400;color:var(--fg)}
+  .ch-note{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;
+           padding-top:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+           font-size:12px;color:var(--dim)}
+
+  .ch-hrow{display:grid;grid-template-columns:104px 1fr 168px;gap:14px;align-items:center;
+           padding:11px 0}
+  .ch-hrow + .ch-hrow{box-shadow:inset 0 1px 0 rgba(255,255,255,.045)}
+  .ch-hk{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .ch-htrack{height:14px;border-radius:7px;background:var(--surface3);overflow:hidden}
+  .ch-hfill{height:100%;border-radius:7px;background:rgba(244,244,247,.5)}
+  .ch-hfill.warn{background:rgba(251,191,36,.62)}
+  .ch-hv{display:flex;align-items:center;gap:8px;justify-content:flex-end;font-size:12.5px;
+         color:var(--fg);font-variant-numeric:tabular-nums;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -764,76 +803,95 @@
 <section class="page" id="p-records">
   <div class="phead">
     <h1>记录</h1>
-    <p>改造点：把「一段等宽文本」拆成「统计条 + 按天行」，并给每行一个可读的结论色。</p>
+    <p>噪音按天、自习按次，都画成图。一眼看出哪天吵、哪次录到了声音。</p>
   </div>
 
   <div class="screen">
     <div class="ph">
       <div class="t">
         <h2>记录</h2>
-        <p class="s">噪音采样与自习会话的长期留档 · 只存在本机</p>
+        <p class="s">噪音采样与自习会话 · 只存在本机</p>
       </div>
-      <div class="acts"><button class="btn ghost">打开数据目录</button><button class="btn secondary">刷新</button></div>
+      <div class="acts"><button class="btn ghost">打开数据目录</button>
+        <button class="btn secondary">刷新</button></div>
     </div>
 
     <div class="stats">
       <div class="stat"><div class="n">3<span class="u">天</span></div><div class="l">有噪音数据</div></div>
       <div class="stat"><div class="n">5,830<span class="u">条</span></div><div class="l">采样总数</div></div>
       <div class="stat"><div class="n">2<span class="u">次</span></div><div class="l">自习会话</div></div>
-      <div class="stat"><div class="n" style="color:#FBBF24">91.2<span class="u">dB</span></div><div class="l">最高峰值</div></div>
+      <div class="stat"><div class="n" style="color:#FBBF24">91.2<span class="u">dB</span></div>
+        <div class="l">最高峰值</div></div>
     </div>
 
     <div class="card" style="margin-top:12px">
-      <div class="ct"><h3>噪音记录</h3><span class="sub">按天汇总 · 最近 3 天</span>
+      <div class="ct"><h3>噪音记录</h3><span class="sub">每天一根柱 · 高度是采样次数</span>
         <span class="r"><button class="btn ghost sm">打开文件夹</button></span></div>
-      <div class="t t5 h"><span>日期</span><span>当天结论</span>
-        <span class="num" style="color:var(--dim)">采样</span>
-        <span class="num" style="color:var(--dim)">均值 dB</span>
-        <span class="num" style="color:var(--dim)">峰值 dB</span></div>
-      <div class="t t5 r">
-        <span style="color:var(--muted)">10-31 今天</span>
-        <span class="c"><span class="chip ok"><i class="dot"></i>安静</span></span>
-        <span class="num">1,240</span><span class="num">46.2</span><span class="num">88.4</span>
+
+      <div class="ch">
+        <div class="ch-y"><span>3,000</span><span>2,000</span><span>1,000</span><span>0</span></div>
+        <div>
+          <div class="ch-plot">
+            <div class="ch-grid" style="bottom:0"></div>
+            <div class="ch-grid" style="bottom:33.3%"></div>
+            <div class="ch-grid" style="bottom:66.6%"></div>
+            <div class="ch-grid" style="bottom:100%"></div>
+            <div class="ch-cols">
+              <div class="ch-col">
+                <div class="ch-bar" style="height:63.3%"></div>
+                <div class="ch-in">84.6<small>峰值 · 均值 43.1</small></div>
+              </div>
+              <div class="ch-col">
+                <div class="ch-bar" style="height:83.5%"></div>
+                <div class="ch-in">91.2<small>峰值 · 均值 44.8</small></div>
+              </div>
+              <div class="ch-col">
+                <div class="ch-bar now" style="height:39.7%"></div>
+                <div class="ch-in dark">88.4<small>峰值 · 均值 46.2</small></div>
+              </div>
+            </div>
+          </div>
+          <div class="ch-x">
+            <span><b>10-29</b><br>1,980 次</span>
+            <span><b>10-30</b><br>2,610 次</span>
+            <span><b>10-31 今天</b><br>1,240 次</span>
+          </div>
+        </div>
       </div>
-      <div class="t t5 r">
-        <span style="color:var(--muted)">10-30</span>
-        <span class="c"><span class="chip warn"><i class="dot"></i>偏吵</span></span>
-        <span class="num">2,610</span><span class="num">44.8</span><span class="num">91.2</span>
-      </div>
-      <div class="t t5 r">
-        <span style="color:var(--muted)">10-29</span>
-        <span class="c"><span class="chip ok"><i class="dot"></i>安静</span></span>
-        <span class="num">1,980</span><span class="num">43.1</span><span class="num">84.6</span>
-      </div>
-      <div class="note">
-        「安静 / 偏吵」是<b>结论</b>，由 C++ 按阈值判定后给色，QML 不判断。
-        峰值永远单独列 —— 均值会掩盖一次摔门。
+
+      <div class="ch-note">
+        <span class="chip warn"><i class="dot"></i>三天峰值都过了 85 dB</span>
+        <span>今天柱子最短，是采样刚开始，不是变安静了。</span>
       </div>
     </div>
 
     <div class="card muted" style="margin-top:12px">
-      <div class="ct"><h3>自习记录</h3><span class="sub">共 2 次会话</span>
+      <div class="ct"><h3>自习记录</h3><span class="sub">每次会话一条 · 长度是时长</span>
         <span class="r"><button class="btn ghost sm">打开文件夹</button></span></div>
-      <div class="t t3 h"><span>开始时间</span><span>时长</span>
-        <span class="num" style="color:var(--dim)">结论</span></div>
-      <div class="t t3 r">
-        <span style="color:var(--muted)">10-31 14:05</span>
-        <span style="text-align:left">42 分 10 秒</span>
-        <span style="justify-self:end"><span class="chip warn"><i class="dot"></i>异常 3 次</span></span>
+
+      <div class="ch-hrow">
+        <span class="ch-hk">10-31 14:05</span>
+        <div class="ch-htrack"><div class="ch-hfill warn" style="width:100%"></div></div>
+        <div class="ch-hv">42 分 10 秒<span class="chip warn">异常 3 次</span></div>
       </div>
-      <div class="t t3 r">
-        <span style="color:var(--muted)">10-30 08:50</span>
-        <span style="text-align:left">25 分 0 秒</span>
-        <span style="justify-self:end"><span class="chip ok"><i class="dot"></i>全程安静</span></span>
+      <div class="ch-hrow">
+        <span class="ch-hk">10-30 08:50</span>
+        <div class="ch-htrack"><div class="ch-hfill" style="width:59%"></div></div>
+        <div class="ch-hv">25 分 0 秒<span class="chip ok">全程安静</span></div>
+      </div>
+
+      <div class="ch-note">
+        <span>最长为 42 分 10 秒，条长按它对齐。</span>
+        <span>黄条 = 那次会话录到了超标声音。</span>
       </div>
     </div>
 
     <div class="card muted" style="margin-top:12px">
       <div style="display:flex;gap:14px;align-items:center;padding:2px 0">
         <div style="flex:1">
-          <div style="font-size:12.5px;font-weight:700">没有更多了</div>
-          <div style="font-size:11.5px;color:var(--dim);margin-top:2px">
-            记录只保留最近 30 天，更早的已按策略清理。需要长期留存请自行备份整个数据目录。</div>
+          <div style="font-size:13px;font-weight:700">没有更多了</div>
+          <div style="font-size:12px;color:var(--dim);margin-top:3px;max-width:44em">
+            记录只保留最近 30 天，更早的已按策略清理。要长期留存，请备份整个数据目录。</div>
         </div>
         <button class="btn secondary sm">立即备份</button>
       </div>
