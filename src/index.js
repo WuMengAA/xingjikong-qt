@@ -2427,33 +2427,35 @@ viewerWss.on('connection', (ws) => {
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
-      // 管理端二进制帧 = 语音 PCM / 屏幕广播 JPEG / 远控 vnc-data（2026-10-18）。
+      // 管理端二进制帧 = 语音 PCM / 屏幕广播 JPEG / 远控 vnc-data / h264-data（2026-10-18 / A 档第②步）。
       const buf = Buffer.from(data);
-      // ── 远控统一 A：vnc-data 帧 → 目标设备主 WS（原样信封，云端只按 uid 中继）──
-      // 权限与「订阅画面」同一口径：看得到这台才能控它。语音/广播的裸字节走
-      // parseAnyFrame 的 legacy 分支（header=null），不会误进这条。
+      // ── 远控统一 A：vnc-data / h264-data 帧 → 目标设备主 WS（原样信封，云端只按 uid 中继）──
+      // 两种类型同权限口径（看得到这台才能控它 + 访问密码门控）；H264 远控与 VNC 共用控制通道，
+      // B 档真机联调时管理端经这条下发 start/stop 指令，被控端 H264Streamer 接收。
+      // 语音/广播的裸字节走 parseAnyFrame 的 legacy 分支（header=null），不会误进这条。
       let f = null;
       if (authed) {
         f = parseAnyFrame(buf);
-        if (f.ok && f.header?.type === 'vnc-data') {
+        if (f.ok && (f.header?.type === 'vnc-data' || f.header?.type === 'h264-data')) {
+          const t = f.header.type;
           const uid = String(f.header.uid ?? '').trim();
-          if (!uid) { pushEvent('warn', 'vnc-data 帧缺 uid，已丢弃', { bytes: buf.length }); return; }
+          if (!uid) { pushEvent('warn', `${t} 帧缺 uid，已丢弃`, { bytes: buf.length }); return; }
           // 2026-10-24：远程控制 = 直接操纵教室机器（最高危），加重认证门。
-          if (!reauthCheck(ws, 'vnc-data')) return;
+          if (!reauthCheck(ws, t)) return;
           if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid))) {
-            pushEvent('warn', 'vnc-data 被拒（无权限远控该设备）', { uid });
+            pushEvent('warn', `${t} 被拒（无权限远控该设备）`, { uid });
             sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限远控设备 ${uid}`);
             return;
           }
           // 2026-10-26：被控端访问密码门控——设了密码的设备，未过鉴权的管理端一帧都不转发。
           if (getVncAccess(uid).enabled && !(ws.__vncAuthed && ws.__vncAuthed.has(uid))) {
-            pushEvent('warn', 'vnc-data 被拒（未过访问密码鉴权）', { uid });
+            pushEvent('warn', `${t} 被拒（未过访问密码鉴权）`, { uid });
             sndErr(ws, 'VNC_AUTH_REQUIRED', `设备 ${uid} 已启用访问密码，请先鉴权`);
             return;
           }
           const r = vncDataToAgent(uid, buf);
           if (!r.ok) {
-            pushEvent('warn', 'vnc-data 未送达设备（可能不在线）', { uid, bytes: buf.length });
+            pushEvent('warn', `${t} 未送达设备（可能不在线）`, { uid, bytes: buf.length });
             snd(ws, 'vnc-relayed', { uid, ok: false, to: 0, detail: r.detail || '设备不在线' });
           }
           return;
@@ -3113,13 +3115,15 @@ wss.on('connection', (ws, req) => {
     if (isBinary) {
       const f = parseAnyFrame(Buffer.from(data));
       if (!f.ok) { sndErr(ws, f.code, f.detail); return; }
-      // ── 远控统一 A：设备 vnc-data 帧 → 订阅该 uid 的管理端主 WS（原样信封）──
-      if (f.header?.type === 'vnc-data') {
+      // ── 远控统一 A：设备 vnc-data / h264-data 帧 → 订阅该 uid 的管理端主 WS（原样信封）──
+      // 两种类型同口径中继（谁订阅投谁，不群发）；设备已鉴权，无需再查 canAccess。
+      // h264-data = 被控端 MF 编码出的 annex-B NALU（A 档第②步上行），管理端经 MfxH264Decoder 解。
+      if (f.header?.type === 'vnc-data' || f.header?.type === 'h264-data') {
         const hUid = String(f.header.uid ?? '').trim();
         // 原样转发整个信封（含 header 的 uid/direction/seq），云端不重写。
         const r2 = vncDataToViewer(hUid || uid, Buffer.from(data));
         if (r2.to === 0) {
-          pushEvent('warn', 'vnc-data 未送达任何管理端（无人订阅该设备）',
+          pushEvent('warn', `${f.header.type} 未送达任何管理端（无人订阅该设备）`,
             { uid: hUid || uid, bytes: data.length });
         }
         return;
