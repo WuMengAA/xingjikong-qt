@@ -300,7 +300,9 @@ Item {
     readonly property var faceModel: {
         var fs = [{ id: 0, label: "概" }];
         if (root.mediaFaceOn) fs.push({ id: 1, label: "媒" });
-        if (root.histFaceOn)  fs.push({ id: 2, label: "史" });
+        // 2026-10-31 · 苹果式极简：历史不再作为可滑动面 —— 统一收进「⋯」弹层，
+        // 走完整 historyPanel（facePanel 里的 IslandHistoryFace 紧凑预览一并退役，
+        // 历史要看就开完整列表，概览上不再有"史"面签、左右滑也不再滑到历史）。
         fs.push({ id: 3, label: "态" });
         // 2026-10-27（H 批）：批注面常驻。用户裁决「这些功能大多是加入到被控端，
         // 而且大部分和灵动岛有关」—— 老师上课点不到管理端，岛才是他的手。
@@ -331,16 +333,41 @@ Item {
     }
     readonly property bool facesOn: root._expanded && !root._showActionsNow
         && !root.searchPageOn && !root.submitPageOn && root.faceModel.length >= 2
+        // 2026-10-31 · 苹果式极简：历史完整面板打开时不再叠加面签/面面板
+        && !root.historyOpen
     readonly property int faceNow: {
         // 用户主动选过：失效面彻底回落概览，且**不再自动恢复**（用户意图优先）。
         if (root.face === 1 && !root.mediaFaceOn && root.faceUserPick >= 0) return 0;
-        if (root.face === 2 && !root.histFaceOn && root.faceUserPick >= 0) return 0;
         // 用户从未主动选：系统替我记住最近的面，失效时回落但恢复后自动回来。
         if (root.face === 1 && !root.mediaFaceOn) return 0;
-        if (root.face === 2 && !root.histFaceOn) return 0;
+        // 2026-10-31 · 苹果式极简：历史已不是可滑动面（face=2 退役），
+        // face=2 一旦残留（旧状态被带回）一律回概览。
+        if (root.face === 2) return 0;
         return root.face;
     }
     readonly property bool facePanelOn: root.facesOn && root.faceNow !== 0
+        // 2026-10-31 · 苹果式极简：⋯弹层打开时面面板让位（弹层 z70 > 面板 z60，
+        // 但面板开着会跟弹层抢视线 —— 弹层是"一次只开一扇"的顶层）。
+        && !root.moreMenuOn
+    // ── 苹果式极简（2026-10-31 · 用户点单「灵动岛要简洁」）──────────────
+    // 展开态默认**只一张当前通知大卡**；右侧竖排面签删除；历史/媒体/状态/
+    // 批注/设置/自动化入口全部收进右上角「⋯」弹层。
+    //   historyOpen  ⋯弹层点「历史」→ 打开完整历史面板（根级 historyPanel）
+    //   moreMenuOn   ⋯弹层开关（点外部关闭）
+    property bool historyOpen: false
+    property bool moreMenuOn: false
+    // ⋯弹层的入口：显式组装（不再从 faceModel 派生，历史已独立出去走完整面板）。
+    // 历史：有历史才出现；媒体：有媒体才出现；状态/批注/设置恒在；自动化：规则面开时。
+    readonly property var moreEntries: {
+        var out = [];
+        if (root.mediaFaceOn) out.push({ id: 1, label: "媒体" });
+        if (root.histFaceOn)  out.push({ id: 2, label: "历史" });
+        out.push({ id: 3, label: "状态" });
+        out.push({ id: 4, label: "批注" });
+        out.push({ id: 5, label: "设置" });
+        if (root.automationFaceOn) out.push({ id: 6, label: "自动化" });
+        return out;
+    }
     // 媒体面的数据源：本机 ffplay 优先，其次 VoiceHub 远程广播。
     readonly property bool faceUseLocal: root._mediaActive || root.mediaIsContent
     readonly property string faceTitle: root.faceUseLocal ? root._mediaTitle
@@ -514,7 +541,7 @@ Item {
         ? Math.max(46, 10 + ((root.searchPageOn || root.submitPageOn) ? 0 : exTitle.height) + 6 + (root._ftActive ? 0 : exDesc.height))
         : 0
     readonly property int listH: (root._expanded && stList.rows > 0
-                                  && !root.searchPageOn && !root.submitPageOn)
+                                  && !root.searchPageOn && !root.submitPageOn && !root.historyOpen)
         ? stList.implicitHeight + 8 : 0
     // 历史面板高度：展开态 + 有历史 + 无活跃按钮时才给空间。
     // 2026-10-12 修「展开后太矮、历史显示不全」：每条 44→48px、封顶 200→300px，
@@ -525,7 +552,8 @@ Item {
     readonly property int histVisibleMax: 3
     // 2026-10-13：语音对讲中（频谱态）不显示历史面板 —— 频谱区与历史区都在展开态，
     // 同屏会挤，且对讲本身就是临时的。收起频谱后历史照常出来。
-    readonly property int histH: (root._expanded && root._history.length > 0 && !root._showActionsNow
+    readonly property int histH: (root._expanded && root.historyOpen && root._history.length > 0
+                                  && !root._showActionsNow
                                   && !root._spectrumActive && !root.mediaIsContent
                                   && !root.facePanelOn   // #330：面面板打开时不占位
                                   && !root._panelOn)     // 2026-10-27：组件面板打开时不占位
@@ -1158,12 +1186,18 @@ Item {
                 color: root.th.fg
                 // #330：多界面开面时标题**压到 20px 单行** —— 面面板要吃内容区，
                 // 128px 的自适应大字标题会把面板挤成一条缝（2026-10-17 截图实证）。
-                font.pixelSize: root.facesOn ? Math.min(root.exTitlePx, 20) : root.exTitlePx
+                // 2026-10-31 · 苹果式极简：面签已删、facesOn 恒真（概/态/笔/设 恒 4 面），
+                // 不能再拿它压缩标题 —— 否则概览大卡标题永远是小字。改绑 facePanelOn
+                // （只有面面板真满盖内容区时才让位）。
+                // 2026-10-31 补：historyOpen（历史完整面板）同样让位 —— 大标题占 ~90px，
+                // 会把历史面板顶到 320 底部之外、底缘被裁（探针截图实证）。
+                font.pixelSize: (root.facePanelOn || root.historyOpen)
+                                ? Math.min(root.exTitlePx, 20) : root.exTitlePx
                 font.weight: Font.Bold
                 minimumPixelSize: root.th.fsTitleXs
                 fontSizeMode: Text.Fit
                 wrapMode: Text.WrapAnywhere
-                maximumLineCount: root.facesOn ? 1 : 3
+                maximumLineCount: (root.facePanelOn || root.historyOpen) ? 1 : 3
                 elide: Text.ElideRight
             }
 
@@ -1210,8 +1244,10 @@ Item {
                 //    隐藏不零高 = 45px 幽灵占位把播放栏/搜索页整体顶下去（锚链对
                 //    不可见 item 依然起效——2026-10-15 实测）。
                 // 组件3：投稿页同款让位。
-                visible: !root.searchPageOn && !root.submitPageOn
-                height: (root.searchPageOn || root.submitPageOn) ? 0 : stList.implicitHeight
+                // 2026-10-31 · 苹果式极简：历史完整面板打开时同款让位（§七 一次只
+                // 展开一件事——历史面板要吃满内容区，StateList 让位避免挤爆底部）。
+                visible: !root.searchPageOn && !root.submitPageOn && !root.historyOpen
+                height: (root.searchPageOn || root.submitPageOn || root.historyOpen) ? 0 : stList.implicitHeight
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: exDesc.bottom
@@ -2523,71 +2559,136 @@ Item {
                     onTriggered: root.submitPhase = 2
                 }
             }
-            // ── 多界面切换器（#330）：展开态右上竖排面签 ──────────────
-            // 位置吃标题右缘的 48px 让位带（exTitle.rightMargin: 48），不压标题；
-            // 每个面签 22×16 单字（概/媒/史/态）—— 教室机 emoji/符号会 tofu，
-            // 面签用汉字是既有纪律（底导航图标同款）。点击切面，当前面高亮。
-            Column {
-                id: faceTabs
-                visible: root.facesOn
+            // ── 苹果式极简（2026-10-31 · 用户点单「灵动岛要简洁」）─────────
+            // 原「多界面切换器」右侧竖排面签（概/媒/史/态/笔/设/自）删除 ——
+            // 用户裁决：概览上不该直接堆功能入口，那排小字"概史态笔设"是
+            // "钙呀铯氦，笔设置"，说出去让人笑话。改为一颗「⋯」按钮，点开弹层。
+            Item {
+                id: moreHost
+                // 位置吃标题右缘的 48px 让位带（exTitle.rightMargin: 48），不压标题。
+                // 仅展开态显示；历史完整面板打开时让位（弹层/面板二选一）。
+                visible: root._expanded && !root.historyOpen
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.topMargin: 2
-                spacing: 4
+                anchors.topMargin: 0
+                width: 28
+                height: 24
 
-                Repeater {
-                    model: root.faceModel
-                    delegate: Rectangle {
-                        required property var modelData
-                        // ── 2026-10-18 · MD3 适配（用户裁决：仅控件/元素，透明度尽量不变）──
-                        // 面签是岛内最小的交互控件，按 MD3 规范对齐：
-                        //   形状：radius 5（非标）→ 网格对齐，配合 MD3 extraSmall(4) 档的观感
-                        //   状态层：hover/press 叠加 onSurface 色（MD3 state layer 口径 0.08/0.12）
-                        //   文字：10px 在 MD3 labelSmall(11) 之下，提到 11 保证教室机可读
-                        //   反馈：压下轻微收缩（90ms，跟手），选中态加轻微"亮起"过渡
-                        // ⚠️ 底色透明度**沿用原值**（浅 0.07 / 深 0.10），不按 MD3 的 0.12 改。
-                        id: faceTab
-                        width: 22
-                        height: 16
-                        // 形状：5 → 4（对齐 MD3 extraSmall 档；22×16 的小块上 4 与 5 观感差极小，
-                        //       但值落在规范档位上，日后统一迁移不再需要"这个 5 是哪来的"）
-                        radius: 4
-                        property bool hov: tabMa.containsMouse
-                        property bool down: tabMa.pressed
-                        color: root.faceNow === modelData.id
-                               ? root.th.accent
-                               : (root.th.light ? Qt.rgba(0, 0, 0, 0.07) : Qt.rgba(1, 1, 1, 0.10))
-                        // MD3 状态层：hover 8% / press 12%（叠在容器色之上，不改容器本身的透明度）
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: parent.radius
-                            color: root.th.light ? "#161616" : "#FAFAFA"
-                            opacity: faceTab.down ? 0.12 : (faceTab.hov ? 0.08 : 0)
-                            Behavior on opacity {
-                                NumberAnimation { duration: root.th ? root.th.durXShort : 120 }
+                // ── 「⋯」按钮 ─────────────────────────────
+                Rectangle {
+                    id: moreBtn
+                    objectName: "moreBtn"
+                    anchors.fill: parent
+                    radius: 6
+                    property bool hov: moreMa.containsMouse
+                    property bool down: moreMa.pressed
+                    color: moreBtn.down
+                           ? (root.th.light ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(1, 1, 1, 0.16))
+                           : (moreBtn.hov
+                              ? (root.th.light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.12))
+                              : Qt.rgba(0, 0, 0, 0))
+                    Text {
+                        anchors.centerIn: parent
+                        // 「⋯」是 U+22EF 中点线省略号；用三个「·」逐字排更稳（教室机字体）
+                        text: "···"
+                        color: root.th.sub
+                        font.pixelSize: 15
+                        font.weight: Font.Bold
+                    }
+                    MouseArea {
+                        id: moreMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.moreMenuOn = !root.moreMenuOn
+                            if (root.moreMenuOn) root.historyOpen = false
+                        }
+                    }
+                }
+
+                // ── 弹层（⋯点开）：历史/媒体/状态/批注/设置/自动化 ──────
+                // 从按钮右缘向下展开（面面板满盖内容区，弹层要盖在它上面，z 比面板高）。
+                // 点击项 → 关弹层 → 切到对应面；「历史」走完整 historyPanel。
+                Item {
+                    id: moreMenu
+                    visible: root.moreMenuOn && root._expanded
+                    anchors.right: parent.right
+                    anchors.top: moreBtn.bottom
+                    anchors.topMargin: 4
+                    width: 108
+                    z: 70
+
+                    // 菜单高度 = 项数 × 30 + 内边距 8
+                    height: root.moreEntries.length * 30 + 8
+
+                    // 柔和投影：主体 Rect 偏移 + 半透明黑（浅色）/ 半透明黑（深色用亮边即可）
+                    // ⚠️ 不用 MultiEffect（QtQuick.Effects 未 import，且探针/部分环境无该模块）。
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.topMargin: 3
+                        radius: 10
+                        color: root.th.light ? "#26000000" : "#66000000"
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 10
+                        color: root.th.bg
+                        border.width: 1
+                        border.color: root.th.light ? "#E2E2E2" : "#333333"
+                    }
+
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 4
+                        spacing: 2
+                        Repeater {
+                            model: root.moreEntries
+                            delegate: Rectangle {
+                                required property var modelData
+                                id: entryRow
+                                // 探针 --click 需要 objectName（Repeater delegate 的 id 不可寻址）
+                                objectName: "moreEntry_" + modelData.id
+                                width: parent.width
+                                height: 30
+                                radius: 6
+                                property bool hov: entryMa.containsMouse
+                                property bool down: entryMa.pressed
+                                color: entryRow.down
+                                       ? (root.th.light ? Qt.rgba(0, 0, 0, 0.12) : Qt.rgba(1, 1, 1, 0.16))
+                                       : (entryRow.hov
+                                          ? (root.th.light ? Qt.rgba(0, 0, 0, 0.08) : Qt.rgba(1, 1, 1, 0.12))
+                                          : Qt.rgba(0, 0, 0, 0))
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 10
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.label
+                                    color: root.th.fg
+                                    font.pixelSize: 12
+                                }
+                                MouseArea {
+                                    id: entryMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.moreMenuOn = false
+                                        if (modelData.id === 2) {
+                                            // 历史 → 完整 historyPanel（根级）
+                                            root.historyOpen = true
+                                            root.face = 0
+                                            root.faceUserPick = 0
+                                        } else {
+                                            // 其余面 → facePanel（面面板）
+                                            root.historyOpen = false
+                                            root.face = modelData.id
+                                            root.faceUserPick = modelData.id
+                                        }
+                                    }
+                                }
                             }
-                        }
-                        scale: faceTab.down ? 0.94 : 1.0
-                        Behavior on scale {
-                            NumberAnimation { duration: root.th ? root.th.durInstant : 90; easing.type: Easing.OutQuad }
-                        }
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            // 10 → 11（MD3 labelSmall 下限，教室机可读性）
-                            font.pixelSize: 11
-                            color: root.faceNow === modelData.id
-                                   ? (root.th.light ? "#FFFFFF" : "#101014")
-                                   : root.th.sub
-                        }
-                        MouseArea {
-                            id: tabMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            // ⚠️ 2026-10-18：用户主动选面 ⇒ 记录 faceUserPick。
-                            //    否则 faceNow 无法区分"系统回落"和"用户切换"，
-                            //    媒体/历史恢复时会违背用户意图自动跳回（见上面注释）。
-                            onClicked: { root.face = modelData.id; root.faceUserPick = modelData.id; }
                         }
                     }
                 }
@@ -2707,18 +2808,10 @@ Item {
                     }
                 }
 
-                // ── 面 2：历史（紧凑预览，最多 4 条 + 余量提示）────────────
-                // 2026-10-27 抽离为 IslandHistoryFace（统一布局规范 Phase 1）：
-                // 复用 IslandListRow，消除"各面手搓 48px 行"的漂移；右侧让位鲸鱼 44px。
-                IslandHistoryFace {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    anchors.rightMargin: 50   // 10 基础 + 40 余量给右下角鲸鱼（z:100）
-                    visible: root.faceNow === 2
-                    th: root.th
-                    history: root._history
-                    bridgeRef: root.bridgeRef
-                }
+                // ── 面 2 已退役（2026-10-31 · 苹果式极简）────────────
+                // 历史不再作为可滑动面/紧凑预览：统一收进「⋯」弹层 → 「历史」，
+                // 走根级完整 historyPanel（筛选/已读/清空/分组/搜索全功能）。
+                // IslandHistoryFace 组件文件保留（其它端若引用不受影响），仅本面实例删除。
 
                 // ── 面 3：状态（桥/模块已给的展示态，不新造数据源）──────
                 Item {
@@ -2842,7 +2935,11 @@ Item {
     //   · 面板从标题/描述区**下方**开始，不覆盖标题
     Item {
         id: historyPanel
-        visible: root._expanded && root._history.length > 0 && !root._showActionsNow
+        // 2026-10-31 · 苹果式极简：历史不再直接铺在概览上（用户点名"概述上不该
+        // 直接堆功能"），改为「⋯」弹层 → 「历史」显式打开。其余让位条件保留
+        // （频谱/媒体/面面板/组件面板打开时仍让位）。
+        visible: root._expanded && root.historyOpen && root._history.length > 0
+                 && !root._showActionsNow
                  && !root._spectrumActive   // 2026-10-13：对讲频谱态不显示历史（见 histH 注释）
                  && !root.mediaIsContent    // 2026-10-15 组件1：媒体占据岛面时让位互动区/弹幕行
                  // #330：多界面的面面板打开时整个让位 —— z 只在**同一父级**内比较，
@@ -3100,6 +3197,8 @@ Item {
 
                 // 2026-10-17：按"今天/昨天/M月d日"分段（分组串在 C++ 归档时就算好，
                 // 不让 QML 现算日期 —— 见 island.h HistoryItem 注释）。
+                // 2026-10-31：分组顺序由**模型序**决定（本 Qt 版本 section 按模型序展示，
+                // 不按属性值重排），桥已把模型按日期降序排（今天在前），这里只按 dateGroup 分组。
                 section.property: "dateGroup"
                 section.delegate: IslandSectionLabel {
                     width: historyList.width
