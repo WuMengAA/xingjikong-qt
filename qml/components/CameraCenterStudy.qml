@@ -1,5 +1,6 @@
 // 监控中心 · 「自习」页（2026-10-13 噪音异常自动录制；2026-10-29 抽出）
 // 原样保留：噪音检测阈值/连续拍数/录制时长配置、当前噪音电平条、最近样本条带、异常记录列表。
+// 2026-10-31：加「语音提醒安静」按钮（管理端联动，见 StudyNoiseReminder）。
 // 全部经 `cc` 取状态/调逻辑。
 import QtQuick
 import QtQuick.Layouts
@@ -124,6 +125,9 @@ Rectangle {
             }
             Text { text: "秒"; color: cc.tFg4; font.pixelSize: cc.tLabelM; anchors.verticalCenter: parent.verticalCenter }
         }
+
+        // ②b 管理端联动（2026-10-31）：语音提醒安静（StudyNoiseReminder 独立件保持 ≤200 行）
+        StudyNoiseReminder { cc: studyCard.cc }
 
         // ③④ 噪音电平 + 最近样本条带（已拆出为 StudyNoisePanel）
         StudyNoisePanel {
