@@ -525,6 +525,7 @@ private:
     Form m_form = Form::Capsule;
     bool m_light = false;
     QString m_className;   // 2026-10-31：班级显示名（菜单栏）
+    QString m_barLesson;   // 2026-11-01：菜单栏课表上次文案（变才 sync）
     bool m_interactive = false;   // 默认穿透
     bool m_idle = true;           // 空闲与否（无任务/通知）
     bool m_idleEnabled = true;    // 空闲半胶囊开关
@@ -591,6 +592,7 @@ private:
     // A3（2026-10-11）：空闲态时钟刷新。500ms 一跳、只在"空闲且可见"时 update()，
     // 保证跨分不延迟（半秒一查足够），活动态/隐藏态下不做任何重绘（零开销）。
     QTimer *m_clockTick = nullptr;
+    QTimer *m_barTick = nullptr;   // 2026-11-01：菜单栏课表 30s 刷新（仅文案变化时 sync）
 
     // ── A4（2026-10-11 · §6.1）：展开态长描述横向滚动（marquee）──
     // 需求：展开后标题+正文**滚动式展示、持续直到人为点击**。

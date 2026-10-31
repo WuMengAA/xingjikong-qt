@@ -33,6 +33,11 @@ QStringList faces();
 // 不编造"今天没有课"（那会把"没接上"伪装成"真没课"）。
 void init(ScheduleClock *clock);
 
+// 顶栏紧凑课表（2026-11-01）：菜单栏中间显示 —— 「正在上的课 · 剩N分」/「下节 科目 HH:MM」/
+// 「今天无课」/「今天已结课」。**空串 = 课表时钟未注入**（QML 侧隐藏，不编造）。
+// 读 TimesyncDomain::now()（与上下课判定同源），保证与倒计时面板自洽。
+QString barLessonText();
+
 // 组装结果。data 同时用于：① 交给 QML 渲染；② 原样进指令回执（端到端可断言）。
 struct Result {
     bool ok = false;

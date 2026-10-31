@@ -251,6 +251,27 @@ void init(ScheduleClock *clock)
     g_clock = clock;
 }
 
+// 顶栏紧凑课表（2026-11-01）：菜单栏中间那格。逻辑与倒计时面板的"目标推算"同源。
+QString barLessonText()
+{
+    if (!g_clock) return QString();
+    const QDateTime now = TimesyncDomain::now();
+    const QTime cur = now.time();
+    const QList<ScheduleClock::LessonInfo> lessons = g_clock->todayLessons();
+    if (lessons.isEmpty()) return QStringLiteral("今天无课");
+    for (const auto &l : lessons) {                       // 正在上课 → 距下课
+        if (cur >= l.startTime && cur < l.endTime) {
+            const int remain = qMax(0, int(cur.secsTo(l.endTime)) / 60);
+            return QStringLiteral("%1 · %2 · 剩 %3 分").arg(l.subjectName, l.periodName).arg(remain);
+        }
+    }
+    for (const auto &l : lessons) {                       // 课间 → 下一节
+        if (l.startTime > cur)
+            return QStringLiteral("下节 %1 · %2").arg(l.subjectName, l.startTime.toString(QStringLiteral("HH:mm")));
+    }
+    return QStringLiteral("今天已结课");
+}
+
 Result build(const QString &face, const QJsonObject &params)
 {
     Result r;

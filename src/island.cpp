@@ -32,6 +32,7 @@
 // 2026-10-22：系统媒体识别实例，注入 QML 给岛面/排期中心读「本机正在放什么」。
 #include "smtc_monitor.h"
 #include "danmaku.h"             // 2026-10-15 组件5：祝福弹幕全屏浮层
+#include "panel_domain.h"        // 2026-11-01：菜单栏动态课表（barLessonText）
 
 #include <QApplication>
 #include <QDebug>
@@ -267,6 +268,15 @@ IslandOverlay::IslandOverlay(QWidget *parent)
         }
     });
     m_clockTick->start();
+
+    // 2026-11-01：菜单栏动态课表 —— 30s 查一次，仅当文案变了才 sync（避免无谓全量重算）。
+    m_barTick = new QTimer(this);
+    m_barTick->setInterval(30000);
+    connect(m_barTick, &QTimer::timeout, this, [this]() {
+        const QString t = PanelDomain::barLessonText();
+        if (t != m_barLesson) { m_barLesson = t; if (m_bridge) m_bridge->sync(); }
+    });
+    m_barTick->start();
 
     // ── 2026-10-11 · QML 绘制层（用户裁决：视觉层改 QML）─────────────
     // 桥先建：QML 一加载就会读 bridge 的属性，不存在会报 ReferenceError。
