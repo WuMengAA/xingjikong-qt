@@ -71,3 +71,11 @@ scripts/_*.mjs
 # 与 _build_agent.py 同款理由：探针必须与它的驱动脚本一起入库，否则"可复跑"是假的。
 # 配套改动见 `_agent_ui_probe.cpp`（错误原文输出 / 遍历深度 / 按钮判据）。
 !scripts/_agent_ui_probe.py
+# 例外（2026-10-31）：`_ui_tiles_probe.py` 是共享 UI 三件新组件
+# （AppErrorState / AppSkeleton / AppStatTile）的**真实渲染回归**。
+# 理由同上：qmllint 对"给组件传了不存在的属性""Layout 用错"报 0 Error，
+# 运行时却是整页不加载；本探针是唯一能抓到的入口。
+# 它已实证抓出 2 个真缺陷（缺 QtQuick.Layouts 导入导致加载失败；
+# 错误态原因/影响间距 22px 大于标题间距 10px 导致读成两段）。
+# 只入库 .cpp/.qml 而不入库驱动 = 探针不可复跑，故一并例外。
+!scripts/_ui_tiles_probe.py
