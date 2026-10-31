@@ -124,11 +124,28 @@ Item {
         _sync()
     }
 
-    /** 只让 currentIndex 那页可见（其余保留实例、只是隐藏）。 */
+    /**
+     * 只让 currentIndex 那页可见（其余保留实例、只是隐藏）。
+     *
+     * ⚠️ 2026-10-31 修「页面叠在一起」：原实现只遍历**当前** pages，而 _buildAll()
+     * 只建不销毁 ⇒ 清单重算时被移出的实例仍 visible=true，永久叠在上层
+     *（实测：切到第 2 页后移出清单 ⇒ 子项 2→3、可见数 1→2）。修法：遍历 _cache 全
+     * 部实例补齐隐藏，再销毁不在清单里的。
+     */
     function _sync() {
-        for (var i = 0; i < count; i++) {
-            var it = _cache[pages[i].id]
-            if (it && it.hasOwnProperty("visible")) it.visible = (i === currentIndex)
+        var live = {}
+        for (var i = 0; i < count; i++) live[pages[i].id] = true
+        // 先全隐藏再点亮当前：保证中途不会两页同时可见
+        for (var id in _cache) if (_cache[id].hasOwnProperty("visible")) _cache[id].visible = false
+        if (currentIndex >= 0 && currentIndex < count) {
+            var cur = _cache[pages[currentIndex].id]
+            if (cur && cur.hasOwnProperty("visible")) cur.visible = true }
+        // 销毁已不在清单里的实例（QML 动态对象必须显式 destroy，否则泄漏）
+        for (var deadId in _cache) {
+            if (live[deadId]) continue
+            var dead = _cache[deadId]; delete _cache[deadId]
+            var k = _ids.indexOf(deadId); if (k >= 0) _ids.splice(k, 1)
+            if (dead) dead.destroy()
         }
     }
 
