@@ -290,6 +290,8 @@ public:
     // 切换展开（点击展开看详情）/ 收起
     void setExpanded(bool on);
     bool isExpanded() const { return m_expanded; }
+    // 2026-11-01：交互活动上报 —— 重置展开态「无操作 5s 自动收起」的计时（QML hover/点击调）。
+    void noteActivity();
 
     // 深/浅色：true=浅色（白底黑字），false=深色（黑底白字，默认）
     void setLightMode(bool light);

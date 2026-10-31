@@ -288,6 +288,12 @@ QString IslandBridge::channel() const
     return m_host ? m_host->channel() : QString();
 }
 
+// 2026-11-01：QML 交互上报 → 重置展开态 5s 无操作计时。
+void IslandBridge::notifyActivity()
+{
+    if (m_host) m_host->noteActivity();
+}
+
 // 2026-10-31：班级显示名（菜单栏中间）。main.cpp 在已知班级名时经 setClassName 推入。
 QString IslandBridge::className() const
 {

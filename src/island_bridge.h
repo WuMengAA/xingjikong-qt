@@ -191,6 +191,8 @@ public:
     Q_INVOKABLE void whaleClicked();
     // QML → C++：鲸鱼被长按（0.8s+），播松开音效
     Q_INVOKABLE void whaleLongPressed();
+    // 2026-11-01：QML 交互上报（hover/点击/滑动）→ 重置展开态「无操作 5s 自动收起」计时。
+    Q_INVOKABLE void notifyActivity();
 
     // 历史通知
     QVariantList history() const;

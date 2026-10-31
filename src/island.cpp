@@ -1792,7 +1792,7 @@ void IslandOverlay::setExpanded(bool on)
         // 只留 expandGuard 那道硬回收（展开态压着屏幕顶部，必须有兜底）。
         m_autoClose->stop();
         if (m_durationMs > 0) m_autoClose->start(qMax(5000, m_durationMs));
-        m_expandGuard->start(m_contentActive ? kExpandMaxMs : kIdleExpandMs);
+        m_expandGuard->start(kIdleExpandMs);   // 2026-11-01：统一 5s，交互经 noteActivity 重置
         emit expandedChanged(true);
         if (m_bridge) m_bridge->sync();
         return;
@@ -1824,14 +1824,19 @@ void IslandOverlay::setExpanded(bool on)
     //    硬超时按场景分档：
     //    · 无活跃通知（从空闲拉下来看一眼"暂无通知"）→ 5s 收，用户不需要看那么久
     //    · 有活跃通知内容 → 20s 收（原来的兜底）
-    if (on) m_expandGuard->start(m_contentActive ? kExpandMaxMs : kIdleExpandMs);
+    if (on) m_expandGuard->start(kIdleExpandMs);   // 2026-11-01：统一 5s（交互经 noteActivity 重置）
     else    m_expandGuard->stop();
     emit expandedChanged(on);
     if (m_bridge) m_bridge->sync();
 }
 
-void IslandOverlay::animateGeometry(const QRect &target)
+// 2026-11-01：交互活动上报 —— 展开态每有操作就重置「无操作 5s 自动收起」的计时。
+void IslandOverlay::noteActivity()
 {
+    if (m_expanded) m_expandGuard->start(kIdleExpandMs);
+}
+
+void IslandOverlay::animateGeometry(const QRect &target){
     m_geoAnim->stop();
     m_geoAnim->setStartValue(geometry());
     m_geoAnim->setEndValue(target);
