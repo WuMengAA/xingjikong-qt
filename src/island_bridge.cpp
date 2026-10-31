@@ -286,6 +286,12 @@ QString IslandBridge::channel() const
     return m_host ? m_host->channel() : QString();
 }
 
+// 2026-10-31：班级显示名（菜单栏中间）。main.cpp 在已知班级名时经 setClassName 推入。
+QString IslandBridge::className() const
+{
+    return m_host ? m_host->className() : QString();
+}
+
 // 2026-10-27（G4/G5/G6）：面板面名与数据。
 // QJsonObject → QVariantMap 走 Qt 自带的隐式转换；QML 侧拿到的是普通 JS 对象，
 // 直接 `data.lessons[i].subject` 读，不需要 JSON.parse。

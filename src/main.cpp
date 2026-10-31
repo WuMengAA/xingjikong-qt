@@ -1191,6 +1191,8 @@ static void saveClassName(const QString &name)
     const QString n = name.trimmed();
     if (n.isEmpty()) return;   // 空值不覆盖已有（站点没回名时别把旧的抹掉）
     g_className = n;
+    // 2026-10-31：同步给灵动岛菜单栏（岛为单例，实例化后即可推）
+    if (IslandOverlay *isl = IslandOverlay::instance()) isl->setClassName(g_className);
     QFile f(classNamePath());
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         f.write(g_className.toUtf8());

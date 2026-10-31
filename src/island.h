@@ -294,6 +294,9 @@ public:
     // 深/浅色：true=浅色（白底黑字），false=深色（黑底白字，默认）
     void setLightMode(bool light);
     bool lightMode() const { return m_light; }
+    // 2026-10-31：班级显示名（"1班"），菜单栏中间显示。由 main.cpp 在已知班级名时推入。
+    void setClassName(const QString &n);
+    QString className() const { return m_className; }
 
     // 交互穿透：true=点击穿透到下层应用（纯展示，默认）；false=本岛接收鼠标（可点确认/查看）
     void setInteractive(bool on);
@@ -521,6 +524,7 @@ private:
     bool m_expanded = false;
     Form m_form = Form::Capsule;
     bool m_light = false;
+    QString m_className;   // 2026-10-31：班级显示名（菜单栏）
     bool m_interactive = false;   // 默认穿透
     bool m_idle = true;           // 空闲与否（无任务/通知）
     bool m_idleEnabled = true;    // 空闲半胶囊开关

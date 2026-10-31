@@ -93,6 +93,10 @@ static IslandOverlay *g_island = nullptr;
 // 空闲半胶囊的尺寸（比活动态小一号，真的"收回顶部"）
 // 4:3 比例（132×44），放得下鲸鱼 28px + 时钟
 static const int kIdleW = 132;
+// 2026-10-31：空闲态改「macOS 顶部菜单栏」——常驻顶部、居中定宽横条。
+// 左应用标识 + 右通知铃/时钟，点击展开。宽度定死（不再由内容推导），高度贴 38 更"窄横条"。
+static const int kBarW = 520;
+static const int kBarH = 38;
 // 活动态胶囊的最小宽度（原来写死 200；收到文件时路径很长会撑宽，短文案时兜这个下限）
 static const int kMinContentW = 200;
 // 触控容差（像素）：手指按下到抬起之间会有肉眼看不见的抖动，
@@ -337,9 +341,10 @@ IslandOverlay::~IslandOverlay()
 QRect IslandOverlay::geometryForIdle() const
 {
     QScreen *screen = QGuiApplication::primaryScreen();
-    if (!screen) return QRect(0, 0, kIdleW, int(Idle));
+    if (!screen) return QRect(0, 0, kBarW, kBarH);
     const QRect sg = screen->geometry();
-    return QRect(sg.x() + (sg.width() - kIdleW) / 2, sg.y() + 10, kIdleW, int(Idle));
+    // 菜单栏：顶部居中定宽横条（y+8 贴顶，比活动态 y+24 更近顶）
+    return QRect(sg.x() + (sg.width() - kBarW) / 2, sg.y() + 8, kBarW, kBarH);
 }
 
 // 活动态的位置：宽度由内容决定（上限 60% 屏宽），顶部居中 y=24。
@@ -395,7 +400,8 @@ QRect IslandOverlay::geometryForContent(int shapeHeight) const
         const int descW = cfm.horizontalAdvance(m_desc);
         needW = 48 + chipW + 6 + descW + 42;
     }
-    const int w = qBound(kMinContentW, qMax(iconW + textW + 48, needW), maxW);
+    const int w = m_expanded ? kBarW                     // 2026-10-31：展开=菜单栏下拉，与横条同宽 520（不卡屏，与 geometryForIdle 一致）
+                             : qBound(kMinContentW, qMax(iconW + textW + 48, needW), maxW);
     return QRect(sg.x() + (sg.width() - w) / 2, sg.y() + 24, w, shapeHeight);
 }
 
@@ -2010,6 +2016,15 @@ void IslandOverlay::setLightMode(bool light)
     m_light = light;
     if (m_bridge) m_bridge->sync();
     update();
+}
+
+// 2026-10-31：班级显示名（菜单栏中间）。变了就 sync 让 QML 重读桥上 className。
+void IslandOverlay::setClassName(const QString &n)
+{
+    const QString t = n.trimmed();
+    if (m_className == t) return;
+    m_className = t;
+    if (m_bridge) m_bridge->sync();
 }
 
 void IslandOverlay::setInteractive(bool on)
