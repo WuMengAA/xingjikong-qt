@@ -1,4 +1,5 @@
 #include "noise_monitor.h"
+#include "noise/mic_selector.h"   // ⑤ 反向上报采集实例（它只持 QPointer，不反向依赖）
 
 #include <QDebug>
 #include <QThreadPool>
@@ -131,10 +132,12 @@ NoiseMonitor::NoiseMonitor(QObject* parent) : QObject(parent)
     const int saved = s.value(QStringLiteral("noiseInputDevice"), -1).toInt();
     m_inputDeviceId = (saved >= 0 && saved < static_cast<int>(waveInGetNumDevs()))
                           ? saved : -1;
+    MicSelector::setLiveMonitor(this);   // 选择器据此"课中换麦当场生效"
 }
 
 NoiseMonitor::~NoiseMonitor()
 {
+    MicSelector::setLiveMonitor(nullptr);
     stop();
 }
 

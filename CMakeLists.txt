@@ -240,6 +240,9 @@ add_executable(stelarith-agent-qt
   src/noise/noise_incident_pipeline.h
   src/noise/noise_assembly.cpp
   src/noise/noise_assembly.h
+  # ── 麦克风选择器（2026-10-31）：QML 单例 Stelarith.Mic（枚举/切换/持久化）──
+  src/noise/mic_selector.cpp
+  src/noise/mic_selector.h
   # ── 噪音提醒环（2026-10-31）：thresholdReached → 语音+事件（补 P0-1 无人接的信号）──
   src/noise/noise_announcer.cpp
   src/noise/noise_announcer.h

@@ -15,6 +15,8 @@
 import QtQuick
 import QtQuick.Layouts
 
+import Stelarith.Mic 1.0            // MicSelector 单例（麦克风枚举/切换，C++ 侧算好文案）
+
 import "../../../components"
 import "../../../components/theme"
 
@@ -23,6 +25,7 @@ Column {
 
     property var ctx
     property var vh
+
 
     width: parent ? parent.width : 0
     spacing: 14
@@ -54,6 +57,38 @@ Column {
                 supporting: "采集本机麦克风环境音量；记录在「记录」页"
                 checked: agentUi.noiseEnabled
                 onToggled: function (v) { agentUi.noiseEnabled = v }
+            }
+        }
+    }
+
+    // 麦克风选择（2026-10-31 用户点单「麦克风切换」）：采集此前写死系统默认麦。
+    // 数据面全在 C++（Stelarith.Mic 单例：waveIn 枚举 + QSettings 持久化），
+    // 本件零逻辑：文案与"当前使用"由 C++ 的 options 算好，这里只列出来、点一下调 select()。
+    // 课中换麦当场生效（采集实例在跑），课前换麦下次采集生效。
+    AppCard {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 0
+            AppCardTitle { text: "噪音采集麦克风" }
+            Text {
+                Layout.fillWidth: true
+                Layout.bottomMargin: 4
+                text: MicSelector.statusText
+                color: Theme.color.textSecondary
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
+            }
+            Repeater {
+                model: MicSelector.options
+                delegate: AppListItem {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    headline: modelData.name
+                    supporting: modelData.supporting
+                    onClicked: MicSelector.select(modelData.id)
+                }
             }
         }
     }
