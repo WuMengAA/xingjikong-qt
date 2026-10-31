@@ -891,6 +891,8 @@ Item {
         unread: root.bridgeRef ? (root.bridgeRef.historyUnreadCount || 0) : 0
         // 2026-10-31：菜单栏中间显示班级名（未绑定则空串 → 隐藏）
         className: root.bridgeRef ? (root.bridgeRef.className || "") : ""
+        // 2026-11-01：菜单栏中间动态课表
+        lesson: root.bridgeRef ? (root.bridgeRef.barLesson || "") : ""
         // 点整条 → 展开/收起（空闲态 gestureArea 是 disabled，靠这一路）
         onTapped: {
             if (root.bridgeRef && root.bridgeRef.requestExpand)

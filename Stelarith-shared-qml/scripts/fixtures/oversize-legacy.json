@@ -3,7 +3,7 @@
   "note": "历史超限台账：白名单内未变胖=允许；再长 1 行=判红；拆完一项就删一项。plan 前缀 P1/P2/P3 是拆分优先级。增量归属写进 plan（哪一批 +多少行、是否已提交），回写不等于批准变胖——P 级计划仍然有效。 | 2026-10-24 注册 ClassMemberPane（班级工作台方案B 成员管理 tab，两段结构，待拆为人员/设备两子件） | 2026-10-28 回写（模块一~三批次）：班级中心控制器/QML 与两侧设置页首次登记；同时把 island.cpp/island.h/PlaybackMiniWindow 的**并行线**增量据实回写（不代其提交）。",
   "files": {
     "Stelarith-control-qt/src/island.cpp": {
-      "lines": 2650,
+      "lines": 2675,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 67,

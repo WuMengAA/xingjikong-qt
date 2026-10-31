@@ -1,15 +1,15 @@
 import QtQuick 2.15
 import "."
 
-// 灵动岛 · 顶部菜单栏面部（macOS 菜单栏风格 · 2026-10-31 重构）
+// 灵动岛 · 顶部菜单栏面部（macOS 菜单栏风格 · 2026-11-01 升级）
 //
-// 原「空闲半胶囊」（时钟 + 横杠下三角）→ 常驻顶部**居中定宽横条**（C++ kBarW 520 × kBarH 38）：
-//   左：应用图标（星）+ 「星集控」
+// 常驻顶部**居中定宽横条**（C++ kBarW 520 × kBarH 38），三段：
+//   左：应用图标（星）+「星集控」+「· 班级名」
+//   中：动态课表（当前课/下一节摘要，30s 由 C++ 刷新）
 //   右：通知铃（带未读角标）+ 时钟
-// 点整条 → 发 tapped()，由 IslandRoot 接 requestExpand（展开成下拉/面板）。
+// 点整条 → tapped()，由 IslandRoot 接 requestExpand（展开成下拉/面板）。
 //
-// ⚠️ 依赖显式声明成 property（隐式作用域不会跟着搬进独立文件 —— D 档拆分踩过）：
-//    th（IslandTheme）、idle（是否空闲）、unread（未读条数）。
+// ⚠️ 依赖显式声明成 property（隐式作用域不会跟着搬进独立文件 —— D 档拆分踩过）。
 Item {
     id: face
 
@@ -17,7 +17,8 @@ Item {
     property var  th: null
     property bool idle: true
     property int  unread: 0
-    property string className: ""   // 2026-10-31：班级显示名（居中）
+    property string className: ""   // 班级显示名（星集控右侧）
+    property string lesson: ""      // 动态课表（中间）
     signal tapped()
 
     visible: face.idle
@@ -32,25 +33,7 @@ Item {
         onClicked: face.tapped()
     }
 
-    // ── 中：班级名（居中，过长省略）────────────────────────
-    Text {
-        id: classLabel
-        visible: face.className !== ""
-        anchors.left: leftRow.right
-        anchors.right: rightRow.left
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
-        anchors.verticalCenter: parent.verticalCenter
-        horizontalAlignment: Text.AlignHCenter
-        elide: Text.ElideRight
-        maximumLineCount: 1
-        text: face.className
-        color: face.th ? face.th.sub : "#C8C8C8"
-        font.pixelSize: 12
-        font.weight: Font.Medium
-    }
-
-    // ── 左：应用标识 ───────────────────────────────────────
+    // ── 左：应用标识 + 班级名 ──────────────────────────────
     Row {
         id: leftRow
         anchors.left: parent.left
@@ -79,6 +62,34 @@ Item {
             font.pixelSize: 13
             font.weight: Font.Medium
         }
+        Text {
+            height: 16
+            verticalAlignment: Text.AlignVCenter
+            visible: face.className !== ""
+            text: face.className !== "" ? "· " + face.className : ""
+            color: face.th ? face.th.sub : "#C8C8C8"
+            font.pixelSize: 12
+            elide: Text.ElideRight
+            maximumLineCount: 1
+        }
+    }
+
+    // ── 中：动态课表（居中，过长省略）──────────────────────
+    Text {
+        id: lessonLabel
+        visible: face.lesson !== ""
+        anchors.left: leftRow.right
+        anchors.right: rightRow.left
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        anchors.verticalCenter: parent.verticalCenter
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
+        maximumLineCount: 1
+        text: face.lesson
+        color: face.th ? face.th.sub : "#C8C8C8"
+        font.pixelSize: 12
+        font.weight: Font.Medium
     }
 
     // ── 右：铃铛 + 时钟 ───────────────────────────────────
