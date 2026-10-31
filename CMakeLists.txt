@@ -239,6 +239,9 @@ add_executable(stelarith-agent-qt
   src/noise/noise_incident_pipeline.h
   src/noise/noise_assembly.cpp
   src/noise/noise_assembly.h
+  # ── 噪音提醒环（2026-10-31）：thresholdReached → 语音+事件（补 P0-1 无人接的信号）──
+  src/noise/noise_announcer.cpp
+  src/noise/noise_announcer.h
   src/cloud_event_bridge.h
   src/notification_gate.cpp
   src/notification_gate.h

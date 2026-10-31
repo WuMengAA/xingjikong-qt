@@ -2544,8 +2544,7 @@ static void sendNoiseSample(const QJsonObject &p)
 
 // sendNoiseAlert / studyOnSample / studyTriggerRecord 已迁至 src/study_mode/study_mode.cpp（2026-10-30）
 
-// 懒建噪音采集器：noise_monitor_start 与 study_mode_start 共用（避免两处各 new 一份，
-// 两份实例会同时抢麦且各报各的）。采集在 noise_monitor 内部异步做，不阻塞主线程。
+// 懒建噪音采集器（noise_monitor_start 与 study_mode_start 共用，避免两实例抢麦各报各的）
 static void ensureNoise()
 {
     if (g_noise) return;
@@ -2567,6 +2566,8 @@ static void ensureNoise()
         sendEvent(QStringLiteral("warn"), QStringLiteral("noise_monitor_failed"),
                   QJsonObject{ { QStringLiteral("reason"), reason } });
     });
+    // 提醒环（2026-10-31）：3 次超阈 → 语音+事件；announcer 由噪音域装配创建，这里只接信号
+    QObject::connect(g_noise, &NoiseMonitor::thresholdReached, getNoiseAnnouncer(), &NoiseAnnouncer::onNoiseThreshold);
 
     // ── P0-1 / P0-2（2026-10-30）：笔记 P0 噪音检测 ───────────────────────────
     // ① 启用自适应基线：笔记要「80dB」，但 dBFS→dB SPL 的偏置随麦克风/驱动变化，
@@ -4181,9 +4182,8 @@ int main(int argc, char *argv[])
         s_schedClock = clock;
         clock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
 
-        // ── P0-2 分层装配（2026-10-30）：噪音存证链路 ────────────────────────
-        // 具体类型的 new/接线收在 createNoisePipeline（src/noise/noise_assembly.cpp），
-        // 这里只持有协调器，并把「课表节次」翻译成周期 key（换节次 ⇒ 重置统计周期）。
+        // ── P0-2 分层装配（2026-10-30）：噪音存证链路 + 提醒环 ──────────────
+        // 具体类型 new/接线收在 createNoisePipeline；这里持有协调器，并翻译课表节次为周期 key。
         g_noisePipeline = createNoisePipeline(&app);
         QObject::connect(clock, &ScheduleClock::periodStarted, g_noisePipeline,
             [pipe = g_noisePipeline](const QString& name, const QTime&) {
