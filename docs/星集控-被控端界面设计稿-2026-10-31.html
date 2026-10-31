@@ -838,15 +838,15 @@
             <div class="ch-grid" style="bottom:100%"></div>
             <div class="ch-cols">
               <div class="ch-col">
-                <div class="ch-bar" style="height:63.3%"></div>
+                <div class="ch-bar" style="height:66.0%"></div>
                 <div class="ch-in">84.6<small>峰值 · 均值 43.1</small></div>
               </div>
               <div class="ch-col">
-                <div class="ch-bar" style="height:83.5%"></div>
+                <div class="ch-bar" style="height:87.0%"></div>
                 <div class="ch-in">91.2<small>峰值 · 均值 44.8</small></div>
               </div>
               <div class="ch-col">
-                <div class="ch-bar now" style="height:39.7%"></div>
+                <div class="ch-bar now" style="height:41.3%"></div>
                 <div class="ch-in dark">88.4<small>峰值 · 均值 46.2</small></div>
               </div>
             </div>
@@ -860,8 +860,8 @@
       </div>
 
       <div class="ch-note">
-        <span class="chip warn"><i class="dot"></i>三天峰值都过了 85 dB</span>
-        <span>今天柱子最短，是采样刚开始，不是变安静了。</span>
+        <span>三天共 5,830 次采样，峰值最高 91.2 dB（10-30）。</span>
+        <span>今天 1,240 次，是三天里最少的。</span>
       </div>
     </div>
 
@@ -882,7 +882,7 @@
 
       <div class="ch-note">
         <span>最长为 42 分 10 秒，条长按它对齐。</span>
-        <span>黄条 = 那次会话录到了超标声音。</span>
+        <span>黄条 = 那次会话记到 3 次异常。</span>
       </div>
     </div>
 
@@ -1010,7 +1010,7 @@
       <div class="stats" style="grid-template-columns:repeat(3,1fr);margin-top:14px">
         <div class="stat"><div class="n">6.5<span class="u">小时</span></div><div class="l">今天允许播放</div></div>
         <div class="stat"><div class="n">17.5<span class="u">小时</span></div><div class="l">静默</div></div>
-        <div class="stat"><div class="n" style="color:#FBBF24">23:41</div><div class="l">距下次静默</div></div>
+        <div class="stat"><div class="n" style="color:#FBBF24">12<span class="u">分</span></div><div class="l">距下次静默</div></div>
       </div>
 
       <div class="note">
@@ -1022,8 +1022,8 @@
     <div class="card muted" style="margin-top:12px">
       <div class="ct"><h3>当前状态</h3></div>
       <div class="rows">
-        <div class="info"><span class="k">现在</span><span class="v" style="color:#4ADE80">在允许时段内 · 可播放</span></div>
-        <div class="info"><span class="k">下一次切换</span><span class="v">11:30 进入静默</span></div>
+        <div class="info"><span class="k">现在</span><span class="v">11:18 · <span style="color:#4ADE80">在允许时段内，可播放</span></span></div>
+        <div class="info"><span class="k">下一次切换</span><span class="v">11:30 进入静默（12 分钟后）</span></div>
         <div class="info"><span class="k">时区/时钟</span><span class="v">Asia/Shanghai · 已与 NTP 对齐（偏差 0.4 s）</span></div>
       </div>
     </div>
@@ -1083,7 +1083,7 @@
           <span class="chip ok"><i class="dot"></i>已播完</span></div></div>
       <div class="slot"><div class="tm">12:10</div>
         <div class="bx sel"><div class="m"><b>午间点歌台</b><span>高二（3）班 提交 · 20 分钟 · 全站</span></div>
-          <span class="chip warn"><i class="dot"></i>14 分钟后</span></div></div>
+          <span class="chip warn"><i class="dot"></i>52 分钟后</span></div></div>
       <div class="slot"><div class="tm">17:30</div>
         <div class="bx"><div class="m"><b>放学提醒</b><span>系统自动 · 2 分钟 · 全站</span></div>
           <span class="chip">待播</span></div></div>
@@ -1230,7 +1230,8 @@
         本稿是<b>设计意图</b>，不是实现。所有色值/字号/间距都与 <code>shared-qml/ui/theme/Theme.qml</code> 的现有令牌对齐
         （页面 #0B0B0D 近似、卡 #17171B、次级 #202025、14px 圆角、8 的倍数间距）；
         新增的只有「错误态 / 骨架 / 数字卡 / 时间轴」四种形状。<br>
-        稿子里出现的数字（3 天 / 5830 条 / 91.2 dB / 42 分 10 秒）是演示数据，来自探针假数据，不是现场实测。
+        稿子里出现的数字（3 天 / 5,830 条 / 91.2 dB / 42 分 10 秒 / 11:18）是演示数据，来自探针假数据，不是现场实测。
+        文案里只写<b>能由这些数字直接推出</b>的结论（"峰值最高 91.2"、"今天采样最少"），不写"都超过了某阈值""是因为刚开始采样"这类数据不支持的判断 —— 图上写错一个结论，比不写更糟。
       </div>
     </div>
   </div>
