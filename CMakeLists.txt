@@ -276,6 +276,10 @@ add_executable(stelarith-agent-qt
   #   与 ota_state（状态机/路径）同域分工；startSelfUpdate/otaIsBusy 经 OtaDeps 注入。
   src/ota/ota_update.cpp
   src/ota/ota_update.h
+  # ── OTA 下载簇（2026-10-31 main 拆分 #16）：startSelfUpdate/otaOnFinished/otaSelfCheck/otaStartPeriodicCheck ──
+  #   护栏 → 拉包（含 Range 断点续传）→ 成品校验 → 回滚三件套 → 派重启助手 → 启安装包。
+  src/ota/ota_download.cpp
+  src/ota/ota_download.h
   # ── 自习模式（2026-10-30 main 拆分：#5 迁出，原 main.cpp 4261-4370）──
   #   sendNoiseAlert/studyOnSample/studyTriggerRecord + 自动录制计时器；状态全局（g_study*）
   #   仍驻 main，按既有 extern 模式（g_uid/agentEnvPath 同款）复用，纯搬迁零行为变化。

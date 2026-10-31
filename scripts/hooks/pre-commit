@@ -1,0 +1,42 @@
+#!/bin/sh
+# main.cpp 膨胀门禁 · pre-commit（2026-10-31 加）
+#
+# 为什么要有它：门禁脚本 scripts/check-main-size.mjs 早就存在，但它只在"有人想起来跑"
+# 时才起作用。2026-10-31 实测：Range 断点续传一次提交就往 main.cpp 塞了 50 行、台账没更新，
+# 于是门禁从此失真，之后任何 AI / 任何会话都可以继续往里塞而无人知晓。
+#
+# 这道钩子把"靠自觉"变成"物理拦截"：只要这次提交动了 src/main.cpp，就必须先过门禁。
+#
+# 安装（每个克隆各装一次，钩子不入库）：
+#   cp scripts/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# 或者由 scripts/install-hooks.sh 统一安装。
+
+set -e
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT" || exit 1
+
+# 只在本仓（被控端）生效：其它子仓没有 main.cpp 门禁
+if [ ! -f scripts/check-main-size.mjs ]; then
+    exit 0
+fi
+
+# 仅当本次提交涉及 src/main.cpp 时才校验（别的提交不该被拦）
+if ! git diff --cached --name-only | grep -qx "src/main.cpp"; then
+    exit 0
+fi
+
+echo "[pre-commit] 检出 src/main.cpp 改动 → 跑膨胀门禁"
+if ! node scripts/check-main-size.mjs; then
+    cat <<'EOF'
+
+✗ 提交被拒：main.cpp 膨胀门禁未过。
+
+  规矩（AGENTS.md §main.cpp 禁令）：main.cpp 只做装配，业务判断进 src/<domain>/；
+  行数只许降不许升。要加装配代码？先拆等量代码出来，再跑 --update 下调台账。
+
+  想绕过？不许。若确属误判，请人工改 scripts/fixtures/main-size-baseline.json 并在
+  commit message 里写明理由（不是静默上调）。
+EOF
+    exit 1
+fi
+exit 0
