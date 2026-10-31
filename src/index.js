@@ -1244,16 +1244,20 @@ const server = http.createServer((req, res) => {
     return send(405, { ok: false, error: '方法不支持' });
   }
 
-  // ── 学生名单（2026-10-31）：GET 列出 / POST 增删改与批量导入 ────────────────
-  // 为什么补它：class-data.js 里 7 个函数早就写好了，但**一个 HTTP 路由都没挂** ——
-  //   管理端根本录不进学生。而考勤要求"学生必须在名单里"（recordAttendance 会拒幽灵行），
-  //   所以名单 API 是考勤的前置，必须一起补。
-  // ⚠️ 与考勤同理，必须排在 POST /api/class/ 之前（否则被 startsWith 吞掉）。
-  if (u.pathname === '/api/class/students') {
+  // ── 学生名单（2026-10-31）：按 viewer 既有约定补路由 ──────────────────────
+  // viewer（ClassAdmin::students/addStudent/updateStudent/removeStudent）用的是
+  // **action 式 URL**：POST /api/class/students（查询）/ student-add / student-update /
+  // student-remove，body 契约在 class_admin.cpp 里写死（{student:{...}} / {patch:{...}}）。
+  // 此前 class-data.js 数据层齐全但**一个路由都没挂** ⇒ 名单 UI 一直打在 404 上
+  // （class_students 至今 0 行，老师录不进学生）。这里按 viewer 的 body 契约补齐。
+  // ⚠️ 必须排在 POST /api/class/ 之前（否则被 startsWith 吞进 class-admin 分发）。
+  if (u.pathname === '/api/class/students' || u.pathname === '/api/class/student-add'
+      || u.pathname === '/api/class/student-update' || u.pathname === '/api/class/student-remove') {
+    const action = u.pathname.split('/').pop();
     const ident = identityFromAuth(req.__auth);
     const qCode = String(u.searchParams.get('classCode') || '').trim();
 
-    if (req.method === 'GET') {
+    if (req.method === 'GET' && action === 'students') {
       if (!qCode) return send(400, { ok: false, error: 'classCode 必填' });
       if (!canAccess(ident, qCode))
         return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权查看该班名单' });
@@ -1273,33 +1277,31 @@ const server = http.createServer((req, res) => {
         if (!canAccess(ident, code))
           return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权修改该班名单' });
         const by = ident?.uid ? String(ident.uid) : 'system';
-        const action = String(body.action || '').trim();
 
-        if (action === 'remove') {
-          const r = removeStudent(code, String(body.studentId || ''));
-          if (!r.ok) return send(400, { ok: false, error: r.error || '删除失败' });
-          pushEvent('info', '班级名单：删除学生', { classCode: code, studentId: body.studentId, by });
+        if (action === 'students') {                       // 查询（viewer fetchJson 用 POST）
+          const r = listStudents(code);
+          if (!r.ok) return send(400, { ok: false, error: r.error || '查询失败' });
+          return send(200, { ok: true, classCode: code, students: r.students || [], count: r.count || 0 });
+        }
+        if (action === 'student-add') {
+          const r = addStudent(code, (body.student && typeof body.student === 'object') ? body.student : body, by);
+          if (!r.ok) return send(400, { ok: false, error: r.error || '新增失败' });
+          pushEvent('info', '班级名单：新增学生', { classCode: code, studentId: r.student?.id, by });
           return send(200, r);
         }
-        if (action === 'update') {
+        if (action === 'student-update') {
           const r = updateStudent(code, String(body.studentId || ''), body.patch || {}, by);
           if (!r.ok) return send(400, { ok: false, error: r.error || '更新失败' });
           pushEvent('info', '班级名单：修改学生', { classCode: code, studentId: body.studentId, by });
           return send(200, r);
         }
-        if (action === 'import' || Array.isArray(body.students)) {
-          const rows = Array.isArray(body.students) ? body.students : (Array.isArray(body.rows) ? body.rows : []);
-          if (!rows.length) return send(400, { ok: false, error: 'students 不能为空' });
-          const r = importStudents(code, rows, by);
-          if (!r.ok) return send(400, { ok: false, error: r.error || '导入失败' });
-          pushEvent('info', '班级名单：批量导入', { classCode: code, count: rows.length, by });
+        if (action === 'student-remove') {
+          const r = removeStudent(code, String(body.studentId || ''));
+          if (!r.ok) return send(400, { ok: false, error: r.error || '删除失败' });
+          pushEvent('info', '班级名单：删除学生', { classCode: code, studentId: body.studentId, by });
           return send(200, r);
         }
-        // 默认：单条新增（带学号且已存在则幂等更新）
-        const r = addStudent(code, body, by);
-        if (!r.ok) return send(400, { ok: false, error: r.error || '新增失败' });
-        pushEvent('info', '班级名单：新增学生', { classCode: code, studentId: r.student?.id, by });
-        return send(200, r);
+        return send(404, { ok: false, error: '未知学生操作：' + action });
       });
       return;
     }
