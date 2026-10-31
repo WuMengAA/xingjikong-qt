@@ -2732,6 +2732,8 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 10
                     visible: root.faceNow === 1
+                    opacity: root.faceNow === 1 ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
                     SvgIcon {
                         id: faceMediaIcon
@@ -2829,6 +2831,8 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 10
                     visible: root.faceNow === 3
+                    opacity: root.faceNow === 3 ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
                     Column {
                         anchors.left: parent.left
@@ -2871,6 +2875,8 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 10
                     visible: root.faceNow === 4
+                    opacity: root.faceNow === 4 ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
                     IslandAnnotateFace {
                         anchors.fill: parent
@@ -2887,6 +2893,8 @@ Item {
                     // 比其它面多留 4px 内边距：本面有贴边滑块，要避开 IslandSurface 的圆角裁剪边。
                     anchors.margins: 14
                     visible: root.faceNow === 5
+                    opacity: root.faceNow === 5 ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
                     IslandSettingsFace {
                         anchors.fill: parent
@@ -2901,6 +2909,8 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 10
                     visible: root.faceNow === 6
+                    opacity: root.faceNow === 6 ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
                     IslandAutomationFace {
                         anchors.fill: parent
