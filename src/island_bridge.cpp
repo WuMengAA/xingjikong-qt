@@ -306,6 +306,12 @@ QString IslandBridge::barLesson() const
     return PanelDomain::barLessonText();
 }
 
+// 2026-11-01：今天看板（今日课表全量）—— 复用 PanelDomain 的 timetable 组装（含 now/next 态）。
+QVariantMap IslandBridge::todayDash() const
+{
+    return PanelDomain::build(QStringLiteral("timetable"), QJsonObject()).data.toVariantMap();
+}
+
 // 2026-10-27（G4/G5/G6）：面板面名与数据。
 // QJsonObject → QVariantMap 走 Qt 自带的隐式转换；QML 侧拿到的是普通 JS 对象，
 // 直接 `data.lessons[i].subject` 读，不需要 JSON.parse。

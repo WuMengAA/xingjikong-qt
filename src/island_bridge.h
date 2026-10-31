@@ -51,6 +51,8 @@ class IslandBridge : public QObject
     Q_PROPERTY(QString className READ className NOTIFY changed)
     // 2026-11-01：菜单栏中间的动态课表（当前课/下一节摘要）。空 = 课表未就绪（QML 隐藏）。
     Q_PROPERTY(QString barLesson READ barLesson NOTIFY changed)
+    // 2026-11-01：今天看板数据（今日课表全量：week/lessons/nowIndex/nextIndex/nowTime）。
+    Q_PROPERTY(QVariantMap todayDash READ todayDash NOTIFY changed)
     // ── 岛组件面板（2026-10-27 · G4/G5/G6：日期 / 课表 / 倒计时）──────────
     // panelFace 非空 = 展开区画的是**面板**（不是通知详情），值即面名。
     // panelData 是该面专属数据（PanelDomain 组装的 QJsonObject → QVariantMap）。
@@ -201,6 +203,7 @@ public:
     QString channel() const;    // 2026-10-27（F）：通知渠道（"课程提醒"）
     QString className() const;  // 2026-10-31：班级显示名（菜单栏中间用）
     QString barLesson() const;  // 2026-11-01：菜单栏动态课表摘要
+    QVariantMap todayDash() const;  // 2026-11-01：今天看板（今日课表全量）
     QString panelFace() const;  // 2026-10-27（G）：面板面名（空 = 无面板）
     QVariantMap panelData() const;
     int    historyUnreadCount() const;
