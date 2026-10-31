@@ -218,8 +218,8 @@ import { initClassDir, resolveClassCode, registerExternalCode, listClassDir, cla
 // 班级房间（2026-10-24 持久房间）：消息历史 + 成员表，落 class-room.db。
 // 「每班一个永不停息的子服务器」的落地形态，物理上是一个持久房间而非一个进程。
 import { initClassRoom } from './class-room.js';
-import { initClassData } from './class-data.js';   // 2026-10-25 学生名单 + 班级课表（借 class-room 的连接）
-import { initClassAttendance } from './class-attendance.js';   // 2026-10-31 班级考勤（借 class-room 的连接）
+import { initClassData, listStudents, addStudent, updateStudent, removeStudent, importStudents } from './class-data.js';   // 2026-10-25 学生名单 + 班级课表（借 class-room 的连接）
+import { initClassAttendance, listByClassDate, batchRecord, attendanceStats } from './class-attendance.js';   // 2026-10-31 班级考勤（借 class-room 的连接）
 // 环境白名单（2026-10-24）：test 机由云端清单裁决。设备自报 env 一律忽略。
 import { initEnvWhitelist, setTestUid, listTestUids } from './env-gate.js';
 // 重认证门（2026-10-24）：管理端定期要求验证密码。云端不存密码，只记
@@ -1242,6 +1242,128 @@ const server = http.createServer((req, res) => {
       return;
     }
     return send(405, { ok: false, error: '方法不支持' });
+  }
+
+  // ── 学生名单（2026-10-31）：GET 列出 / POST 增删改与批量导入 ────────────────
+  // 为什么补它：class-data.js 里 7 个函数早就写好了，但**一个 HTTP 路由都没挂** ——
+  //   管理端根本录不进学生。而考勤要求"学生必须在名单里"（recordAttendance 会拒幽灵行），
+  //   所以名单 API 是考勤的前置，必须一起补。
+  // ⚠️ 与考勤同理，必须排在 POST /api/class/ 之前（否则被 startsWith 吞掉）。
+  if (u.pathname === '/api/class/students') {
+    const ident = identityFromAuth(req.__auth);
+    const qCode = String(u.searchParams.get('classCode') || '').trim();
+
+    if (req.method === 'GET') {
+      if (!qCode) return send(400, { ok: false, error: 'classCode 必填' });
+      if (!canAccess(ident, qCode))
+        return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权查看该班名单' });
+      const r = listStudents(qCode);
+      if (!r.ok) return send(400, { ok: false, error: r.error || '查询失败' });
+      return send(200, { ok: true, classCode: qCode, students: r.students || [], count: r.count || 0 });
+    }
+
+    if (req.method === 'POST') {
+      let raw = '';
+      req.on('data', (c) => { raw += c; if (raw.length > 5e5) req.destroy(); });
+      req.on('end', () => {
+        let body;
+        try { body = JSON.parse(raw || '{}'); } catch { return send(400, { ok: false, error: '请求体不是合法 JSON' }); }
+        const code = String(body.classCode || qCode || '').trim();
+        if (!code) return send(400, { ok: false, error: 'classCode 必填' });
+        if (!canAccess(ident, code))
+          return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权修改该班名单' });
+        const by = ident?.uid ? String(ident.uid) : 'system';
+        const action = String(body.action || '').trim();
+
+        if (action === 'remove') {
+          const r = removeStudent(code, String(body.studentId || ''));
+          if (!r.ok) return send(400, { ok: false, error: r.error || '删除失败' });
+          pushEvent('info', '班级名单：删除学生', { classCode: code, studentId: body.studentId, by });
+          return send(200, r);
+        }
+        if (action === 'update') {
+          const r = updateStudent(code, String(body.studentId || ''), body.patch || {}, by);
+          if (!r.ok) return send(400, { ok: false, error: r.error || '更新失败' });
+          pushEvent('info', '班级名单：修改学生', { classCode: code, studentId: body.studentId, by });
+          return send(200, r);
+        }
+        if (action === 'import' || Array.isArray(body.students)) {
+          const rows = Array.isArray(body.students) ? body.students : (Array.isArray(body.rows) ? body.rows : []);
+          if (!rows.length) return send(400, { ok: false, error: 'students 不能为空' });
+          const r = importStudents(code, rows, by);
+          if (!r.ok) return send(400, { ok: false, error: r.error || '导入失败' });
+          pushEvent('info', '班级名单：批量导入', { classCode: code, count: rows.length, by });
+          return send(200, r);
+        }
+        // 默认：单条新增（带学号且已存在则幂等更新）
+        const r = addStudent(code, body, by);
+        if (!r.ok) return send(400, { ok: false, error: r.error || '新增失败' });
+        pushEvent('info', '班级名单：新增学生', { classCode: code, studentId: r.student?.id, by });
+        return send(200, r);
+      });
+      return;
+    }
+
+    return send(405, { ok: false, error: '只支持 GET / POST' });
+  }
+
+  // ── 班级考勤（2026-10-31）：GET 查询 / POST 写入 ──────────────────────────
+  // ⚠️ 必须排在下面的 POST /api/class/ 之前 —— 那个分支是 startsWith('/api/class/')，
+  //    放后面会被吞进 class-admin 的 action 分发（那里没有 attendance 分支，只会 404）。
+  //
+  // 鉴权：登录票 + canAccess(ident, classCode)。
+  //   **不要求重认证**，这里与其它班级写操作有意不同：考勤是一节课点一遍的日常教学操作，
+  //   不像删班/绑设备那样敏感，每节课逼老师重输密码等于不可用。
+  if (u.pathname === '/api/class/attendance') {
+    const ident = identityFromAuth(req.__auth);
+    const qCode = String(u.searchParams.get('classCode') || '').trim();
+
+    if (req.method === 'GET') {
+      if (!qCode) return send(400, { ok: false, error: 'classCode 必填' });
+      if (!canAccess(ident, qCode))
+        return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权查看该班考勤' });
+      const date = String(u.searchParams.get('date') || '').trim() || new Date().toISOString().slice(0, 10);
+      const session = String(u.searchParams.get('session') || '').trim();
+      const r = listByClassDate(qCode, date, session);
+      if (!r.ok) return send(400, { ok: false, error: r.error || '查询失败' });
+      const st = attendanceStats(qCode, date);
+      return send(200, {
+        ok: true, classCode: qCode, date, session,
+        records: r.records || [], stats: st.ok ? { counts: st.counts, recorded: st.recorded, unrecorded: st.unrecorded, rosterSize: st.rosterSize } : null,
+      });
+    }
+
+    if (req.method === 'POST') {
+      let raw = '';
+      req.on('data', (c) => { raw += c; if (raw.length > 2e5) req.destroy(); });
+      req.on('end', () => {
+        let body;
+        try { body = JSON.parse(raw || '{}'); } catch { return send(400, { ok: false, error: '请求体不是合法 JSON' }); }
+        const code = String(body.classCode || qCode || '').trim();
+        if (!code) return send(400, { ok: false, error: 'classCode 必填' });
+        if (!canAccess(ident, code))
+          return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权写入该班考勤' });
+        const by = ident?.uid ? String(ident.uid) : 'system';
+        // 批量写：rows=[{studentId|studentNo, status, session?}]；单条也走这里（body 自身即一条）
+        const rows = Array.isArray(body.rows) ? body.rows
+          : ((body.studentId || body.studentNo) ? [body] : []);
+        if (!rows.length) return send(400, { ok: false, error: 'rows 不能为空' });
+        const baseDate = String(body.date || '').trim() || new Date().toISOString().slice(0, 10);
+        const baseSession = String(body.session || '').trim();
+        const r = batchRecord(code, rows.map((x) => ({
+          studentId: x.studentId, studentNo: x.studentNo, studentName: x.studentName,
+          status: x.status,
+          date: String(x.date || baseDate).trim(),
+          session: String(x.session ?? baseSession).trim(),
+        })), by);
+        if (!r.ok) return send(400, { ok: false, error: r.error || '写入失败' });
+        pushEvent('info', '班级考勤已记录', { classCode: code, succeeded: r.succeeded, failed: r.failed, by });
+        return send(200, { ok: true, classCode: code, total: r.total, succeeded: r.succeeded, failed: r.failed, results: r.results });
+      });
+      return;
+    }
+
+    return send(405, { ok: false, error: '只支持 GET / POST' });
   }
 
   // 班级管理（2026-10-24）：POST /api/class/{create,rename,delete,unbind,
