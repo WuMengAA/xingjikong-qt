@@ -89,3 +89,12 @@ scripts/_*.mjs
 # 它造 4 种目录场景（缺失/正常/全坏/好坏混合）断言诊断分类 —— 用临时目录，不碰真实数据。
 # 留脚本 = 以后改 readJsonlDir 时能复跑确认「错误态 vs 空态」没又被合并成同一个。
 !scripts/_p3_reader_probe.py
+# 例外（2026-10-31）：开发调试启动器与麦克风真机实验。
+# · _dev_run.py + dev-run.cmd 是用户自己点调试的入口（编译→同步 QML→启动→日志实时转 UTF-8）。
+#   它替代了"我改完发截图"的交付方式 —— 之前生产实例占着全局互斥体，用户根本看不到改动。
+# · _mic_probe.py 对真实麦克风跑实验（本机 waveIn 有 3 个设备）。
+#   它推翻了 noise_monitor.cpp 里"mic 被语音对讲独占会失败"的过期注释：
+#   现代 Windows 走共享模式，实测长占期间短窗口采集照样能拿到数据。
+!scripts/_dev_run.py
+!scripts/_mic_probe.py
+!scripts/_mic_pump_probe.py

@@ -610,6 +610,10 @@ public:
         w->setWindowState((w->windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
     }
 
+    // QML 热重载（改 QML 免重编重启）；实现在 agent_shell_reload.cpp
+    bool reloadQml();
+    void enableQmlAutoReload();
+
     /** VoiceHub 联动模块（2026-10-17 #329）注入：设置页直接引用 `voicehub`
      *  上下文属性（与 agentUi 同一口径）。AgentShell 是**懒创建**（托盘点开才
      *  ensure），正常路径下本调用一定早于第一个 ensure；竞态兜底见 if 分支
@@ -620,9 +624,8 @@ public:
         if (s_live)
             s_live->engine()->rootContext()->setContextProperty(QStringLiteral("voicehub"), m);
         // ── 2026-10-19 远控崩溃同源修复（见 island.cpp setQmlObjectProperty）──
-        // context property 同样是**裸指针**：模块销毁后 QML 侧仍持有野指针，任何绑定重算
-        // 都会踩它（真机 dump：Qt6Core+0x38c0 / QQuickRepeater::setModel）。
-        // 对象销毁瞬间把 context property 置 null，让重算读到空值（QML 侧有 null 守卫）。
+        // context property 是裸指针：模块销毁后 QML 仍持有野指针，绑定重算会踩它
+        //（真机 dump：Qt6Core+0x38c0 / QQuickRepeater::setModel）。故销毁瞬间置 null。
         if (m && s_live) {
             AgentShell *live = s_live;
             QObject::connect(m, &QObject::destroyed, live, [live]() {
@@ -633,8 +636,7 @@ public:
         }
     }
 
-    /** 广播社成员模块（2026-10-23 #广播站移交）注入：与 setVoicehub 同口径，
-     *  上下文属性名 `broadcastClub`，页内直接引用。 */
+    /** 广播社成员模块（2026-10-23）注入：同 setVoicehub 口径，属性名 `broadcastClub`。 */
     static void setBroadcastClub(QObject *m)
     {
         s_broadcastClub = m;
@@ -679,28 +681,26 @@ private:
         //    （没有 SizeRootObjectToQML —— 首编即抓）；与岛同款用 ToView。
         setResizeMode(QQuickWidget::SizeRootObjectToView);
         engine()->rootContext()->setContextProperty(QStringLiteral("agentUi"), &m_ui);
-        // VoiceHub 联动模块（#329）：main.cpp 在注册模块后调 setVoicehub；懒创建保证
-        // 正常路径下这里一定拿得到（竞态兜底在 setVoicehub 的 if 分支）。
+        // VoiceHub 模块（#329）：main.cpp 注册后调 setVoicehub；懒创建保证这里拿得到。
         if (s_voicehub)
             engine()->rootContext()->setContextProperty(QStringLiteral("voicehub"), s_voicehub);
-        // 广播社成员模块（2026-10-23）：main.cpp 注册后调 setBroadcastClub；
-        // 懒创建保证正常路径下这里一定拿得到。
+        // 广播社模块（2026-10-23）：同上，main.cpp 注册后调 setBroadcastClub。
         if (s_broadcastClub)
             engine()->rootContext()->setContextProperty(QStringLiteral("broadcastClub"), s_broadcastClub);
         // 数据接线在 main.cpp（agentUiWire 定义处能访问全部 static 符号）。
         agentUiWire(&m_ui);
         // 与岛同模式：QML 相对 exe 目录（CMake POST_BUILD 拷到 build/qml/）。
-        const QString qml = QCoreApplication::applicationDirPath()
-                            + QStringLiteral("/qml/shell/AgentShell.qml");
-        setSource(QUrl::fromLocalFile(qml));
+        setSource(QUrl::fromLocalFile(QCoreApplication::applicationDirPath()
+                                      + QStringLiteral("/qml/shell/AgentShell.qml")));
         // QML 出错必须可见（fail-silent 是红线）：日志 + 控制台。
         connect(this, &QQuickWidget::statusChanged, this, [this](QQuickWidget::Status st) {
             if (st != QQuickWidget::Error) return;
-            const auto errs = errors();
-            for (const QQmlError &e : errs)
+            for (const QQmlError &e : errors())
                 qWarning("[agent-shell] QML ERROR: %s", qPrintable(e.toString()));
         });
-        // 常驻托盘程序不能"最后一个窗口关闭时退出"（main 已全局关掉，这里不额外处理）。
+        // 开发期热重载（STE_QML_RELOAD=1）：改 QML 自动重画。用环境变量而非菜单项——
+        // main.cpp 卡 4443 行台账，加菜单要多 2 行会破门禁。
+        if (qEnvironmentVariableIsSet("STE_QML_RELOAD")) enableQmlAutoReload();
     }
 
     AgentUi m_ui;
