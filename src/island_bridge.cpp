@@ -6,6 +6,8 @@
 // 2026-10-27（C 批）：岛「设」面的方法实现挪到 island_bridge_settings.cpp（600 行红线拆分），
 // 这里只留声明与批注动作；实现侧需要的 system_volume.h / core/AgentSettings.h 也在那边 include。
 
+#include <algorithm>
+#include <QDateTime>
 #include <QRegularExpression>
 #include <QSettings>
 
@@ -219,11 +221,26 @@ QVector<int> IslandBridge::historyOrder() const
     };
 
     for (int i = 0; i < n; ++i)
-        if (m_host->m_history.at(i).fromAdmin && pass(m_host->m_history.at(i)))
-            order.append(i);   // 第一批：管理端下发
-    for (int i = 0; i < n; ++i)
-        if (!m_host->m_history.at(i).fromAdmin && pass(m_host->m_history.at(i)))
-            order.append(i);   // 第二批：本机事件
+        if (pass(m_host->m_history.at(i)))
+            order.append(i);
+
+    // 2026-10-31：分组顺序修正。原实现先放管理端再放本机（追加序=旧→新），
+    //   ListView section 按**模型序**展示分组（本 Qt 版本不按属性值重排）⇒ 旧日期组顶到上面
+    //   （实测：历史同时有 10-27 与今天条目时，面板顶部先见 "10月27日"，用户以为日期错）。
+    //   改为按「日期降序（今天在前）→ 同日管理端先 → 同日时间降序（新在前）」排序。
+    //   管理端"置顶"语义保留在**同一天内**（跨天仍按日期走，否则昨天管理端会压过今天本机）。
+    auto dayStart = [](qint64 ts) -> qint64 {
+        if (ts <= 0) return 0;   // "更早" 归 0，排在所有真实日期之后
+        return QDateTime::fromSecsSinceEpoch(ts).date().startOfDay().toSecsSinceEpoch();
+    };
+    std::sort(order.begin(), order.end(), [this, &dayStart](int a, int b) {
+        const auto &ha = m_host->m_history.at(a);
+        const auto &hb = m_host->m_history.at(b);
+        const qint64 da = dayStart(ha.ts), db = dayStart(hb.ts);
+        if (da != db) return da > db;                          // 日期降序：今天在前
+        if (ha.fromAdmin != hb.fromAdmin) return ha.fromAdmin; // 同日管理端先
+        return ha.ts > hb.ts;                                  // 同日新在前
+    });
     return order;
 }
 
