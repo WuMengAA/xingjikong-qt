@@ -85,3 +85,7 @@ scripts/_*.mjs
 #   ② 基类与派生类同名 infoChanged 时，只发一个会让基类属性**不刷新**（必须双发）。
 # ②正是本批把端到端探针从 86/0 打到 84/2 的那个坑。留脚本 = 后人改 publish() 时能复跑。
 !scripts/_agent_ui_split_probe.py
+# 例外（2026-10-31）：`_p3_reader_probe.py` 守的是「读取失败被伪装成没有记录」这个真 bug。
+# 它造 4 种目录场景（缺失/正常/全坏/好坏混合）断言诊断分类 —— 用临时目录，不碰真实数据。
+# 留脚本 = 以后改 readJsonlDir 时能复跑确认「错误态 vs 空态」没又被合并成同一个。
+!scripts/_p3_reader_probe.py

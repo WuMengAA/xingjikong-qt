@@ -28,23 +28,92 @@
 #include <QLatin1Char>
 
 // 读 subdir 下全部 YYYY-MM-DD.jsonl，逐行解析成数组（跨日汇总用）。
-QJsonArray readJsonlDir(const QString &subdir)
+//
+// 2026-10-31：改为**带诊断**实现。原版把所有失败都折叠成"空数组"，
+// 导致「文件打不开 / 内容全坏」在上屏时与「还没启用」长得一模一样（详见头文件注释）。
+// 本函数逐种情况分类，并把人话原因写进 reason / impact 供错误态使用。
+P3ReadResult readJsonlDirWithDiag(const QString &host, const QString &subdir)
 {
-    QJsonArray arr;
-    const QString dir = dataRoot() + QLatin1Char('/') + subdir;
+    P3ReadResult r;
+    r.status = P3ReadResult::Ok;
+
+    if (host.trimmed().isEmpty()) {
+        r.status = P3ReadResult::Missing;
+        r.reason = QStringLiteral("本机数据目录不可用（路径为空）。");
+        r.impact = QStringLiteral("记录仍在磁盘上，但本页读不到；"
+                                  "请到「设置 › 通用 › 目录」确认数据目录，或直接打开文件夹查看。");
+        return r;
+    }
+
+    const QString dir = host + QLatin1Char('/') + subdir;
     QDir d(dir);
-    if (!d.exists()) return arr;
-    for (const QFileInfo &fi : d.entryInfoList(QStringList() << QStringLiteral("*.jsonl"), QDir::Files, QDir::Name)) {
+
+    // ① 目录不存在 = 该功能从没产生过记录 ⇒ 正常空态，**不是**错误
+    if (!d.exists()) {
+        r.reason.clear();
+        return r;
+    }
+
+    const QFileInfoList files =
+        d.entryInfoList(QStringList() << QStringLiteral("*.jsonl"), QDir::Files, QDir::Name);
+
+    // 目录在但一个 .jsonl 都没有：可能是刚启用、也可能是文件被外部挪走。
+    // 判为 Ok（空态）—— 我们没有证据说它是故障，不该吓用户。
+    if (files.isEmpty()) {
+        return r;
+    }
+
+    for (const QFileInfo &fi : files) {
         QFile f(fi.absoluteFilePath());
-        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            ++r.skippedFiles;   // 打不开：记下来，不再静默
+            continue;
+        }
+        ++r.readableFiles;
         while (!f.atEnd()) {
             const QByteArray line = f.readLine().trimmed();
             if (line.isEmpty()) continue;
-            const QJsonObject o = QJsonDocument::fromJson(line).object();
-            if (!o.isEmpty()) arr.append(o);
+            const QJsonDocument doc = QJsonDocument::fromJson(line);
+            if (!doc.isObject()) { ++r.badLines; continue; }
+            r.records.append(doc.object());
         }
     }
-    return arr;
+
+    // ② 一个文件都打不开 ⇒ 故障（权限 / 被杀软或备份进程占用）
+    if (r.readableFiles == 0 && r.skippedFiles > 0) {
+        r.status = P3ReadResult::Unreadable;
+        r.reason = QStringLiteral("记录文件打不开（%1 个文件全部读取失败）。").arg(r.skippedFiles);
+        r.impact = QStringLiteral("记录大概率还在磁盘上，可能被其他程序占用或权限不足。"
+                                  "可点「打开文件夹」直接查看，或重试一次。");
+        return r;
+    }
+
+    // ③ 文件读到了、但一行有效 JSON 都没有，且有坏行 ⇒ 数据损坏
+    if (r.records.isEmpty() && r.badLines > 0) {
+        r.status = P3ReadResult::Corrupt;
+        r.reason = QStringLiteral("记录文件内容无法解析（%1 行损坏）。").arg(r.badLines);
+        r.impact = QStringLiteral("原始文件没有被删除，仍可用「打开文件夹」取出或备份；"
+                                  "本页暂时无法汇总这些记录。");
+        return r;
+    }
+
+    // ④ 部分成功：好行照常上屏，但如实的坏行数要带给调用方
+    if (r.badLines > 0) {
+        r.reason = QStringLiteral("有 %1 行记录损坏，已跳过。").arg(r.badLines);
+    }
+    return r;
+}
+
+// 旧签名（默认数据根）：行为不变，内部走带诊断版本
+QJsonArray readJsonlDir(const QString &subdir)
+{
+    return readJsonlDirWithDiag(dataRoot(), subdir).records;
+}
+
+// 旧签名（显式数据根）：探针与复用方用
+QJsonArray readJsonlDir(const QString &host, const QString &subdir)
+{
+    return readJsonlDirWithDiag(host, subdir).records;
 }
 
 void openFolder(const QString &subdir)

@@ -107,8 +107,19 @@ Item {
                         }
                     }
 
+                    // ⚠️ 错误态与空态**互斥**：读取失败时不能再显示「还没有记录」。旧实现把
+                    // 「文件打不开 / 内容全坏」折叠成空，等于在用户记录完好时告诉他"没有"。
+                    AppErrorState {
+                        visible: agentUi.noiseLoadFailed
+                        title: "噪音记录读取失败"
+                        reason: agentUi.noiseFailReason
+                        impact: agentUi.noiseFailImpact
+                        retryText: "重新读取"
+                        onRetried: agentUi.refresh()
+                    }
+
                     AppEmptyState {
-                        visible: agentUi.noiseRecords.length === 0
+                        visible: !agentUi.noiseLoadFailed && agentUi.noiseRecords.length === 0
                         title: "还没有噪音记录"
                         description: "开启「噪音监测」或「自习模式」后，每次采样都会记到这里；"
                                    + "开启后本页会按天汇总采样次数与音量区间。"
@@ -154,8 +165,18 @@ Item {
                         }
                     }
 
+                    // 同噪音段：错误态与空态互斥（见上方注释）
+                    AppErrorState {
+                        visible: agentUi.studyLoadFailed
+                        title: "自习记录读取失败"
+                        reason: agentUi.studyFailReason
+                        impact: agentUi.studyFailImpact
+                        retryText: "重新读取"
+                        onRetried: agentUi.refresh()
+                    }
+
                     AppEmptyState {
-                        visible: agentUi.studyRecords.length === 0
+                        visible: !agentUi.studyLoadFailed && agentUi.studyRecords.length === 0
                         title: "还没有自习记录"
                         description: "开启「自习模式」后，每次会话的开始/结束、时长与异常录制次数都会记在这里。"
                         actionText: "打开记录文件夹"

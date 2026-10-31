@@ -210,10 +210,10 @@ void agentUiFill(AgentUi *ui)
     ui->applySelfCheckItems(buildSelfCheckItems());
     ui->m_plugins        = buildPluginList();
     ui->m_modules        = ModuleHost::instance()->snapshot().toVariantList();
-    // 2026-10-31：记录页从「一段等宽文本」改为「汇总 + 按天/按次的行」；
-    // 汇总与行都在 C++ 算好（QML 零统计），口径复用同一批 jsonl。
-    ui->applyNoiseLogView(buildNoiseLogText(), buildNoiseRecordView());
-    ui->applyStudyLogView(buildStudyLogText(), buildStudyRecordView());
+    // 2026-10-31：记录页从「一段等宽文本」改为「汇总 + 按天/按次的行」；汇总与行都在
+    // C++ 算好（QML 零统计）。拆解下沉到 p3_record_view（本文件 645 行/红线 600，不许加行）。
+    applyNoiseRecordView(ui);
+    applyStudyRecordView(ui);
     ui->m_playScheduleEnabled = AgentSettings::playScheduleEnabled();
     ui->m_playWindowsText     = AgentSettings::playWindows().join(QStringLiteral("\n"));
     {

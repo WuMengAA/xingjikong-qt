@@ -18,3 +18,18 @@
 //    这里给的就是最终要上屏的两列文本，QML 只负责画。
 QVariantMap buildNoiseRecordView();
 QVariantMap buildStudyRecordView();
+
+/**
+ * 「view 字典 → AgentRecordUi」的拆解入口（2026-10-31 二改）。
+ *
+ * 为什么放在本文件而不是 agent_panel.cpp 里就地拆：
+ *   agent_panel.cpp 已 645 行 / 红线 600 且不在白名单（新增超限），**一行都不能加**。
+ *   而拆解要把 {summary, rows, failReason, failImpact} 四个键分别喂给 apply* 的四个形参，
+ *   就地写至少 4 行。下沉到这里后，调用点仍是两行。
+ *
+ * 本头**不 include** agent_ui.h（避免把 776 行的 UI 声明拖进每个用它的 TU）；
+ * 故用前向声明，.cpp 里再 include。
+ */
+class AgentUi;
+void applyNoiseRecordView(AgentUi *ui);
+void applyStudyRecordView(AgentUi *ui);

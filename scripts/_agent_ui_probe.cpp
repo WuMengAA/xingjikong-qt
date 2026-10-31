@@ -84,10 +84,42 @@ bool hasShownText(QObject *root, const QString &s, QSet<QObject *> &seen, int de
     return false;
 }
 
-bool hasShownText(QObject *root, const QString &s)
+/**
+ * 找到 text == s 的那个 Text item（用来做几何断言）。
+ *
+ * 为什么除 hasShownText 之外还要它：hasShownText 只回答"这串字在该不该看得见"，
+ * **不回答"它和邻居有没有叠在一起"**。2026-10-31 实测吃过这个亏 ——
+ * AppErrorState 的 implicitHeight 算矮了，标题/原因/影响三行**文字重叠**、
+ * 重试按钮压在标题上，而 4 条 hasShownText 断言全部 PASS（文字确实"存在且在显示"）。
+ * 截图一看才发现。故这里补一条几何判据。
+ */
+QQuickItem *findTextItem(QObject *root, const QString &s, QSet<QObject *> &seen, int depth = 0)
+{
+    if (!root || depth > 24 || seen.contains(root)) return nullptr;
+    seen.insert(root);
+    auto *it = qobject_cast<QQuickItem *>(root);
+    if (it && !it->isVisible()) return nullptr;
+    const QVariant t = root->property("text");
+    if (t.isValid() && t.typeId() == QMetaType::QString && t.toString() == s) {
+        if (!it || effectivelyVisible(it)) return it;
+    }
+    for (QObject *c : root->children())
+        if (auto *r = findTextItem(c, s, seen, depth + 1)) return r;
+    if (it)
+        for (QQuickItem *c : it->childItems())
+            if (auto *r = findTextItem(c, s, seen, depth + 1)) return r;
+    return nullptr;
+}
+
+QQuickItem *findTextItem(QObject *root, const QString &s)
 {
     QSet<QObject *> seen;
-    return hasShownText(root, s, seen, 0);
+    return findTextItem(root, s, seen);
+}
+
+/* @@ANCHOR@@ */bool hasShownText(QObject *root, const QString &s)
+{
+    QSet<QObject *> seen;    return hasShownText(root, s, seen, 0);
 }
 
 void collectTexts(QObject *root, QStringList &texts, QStringList &btnTexts,
@@ -701,6 +733,80 @@ QtObject {
                           QStringLiteral("记录页空态上屏（无数据时可见）"));
                     check(hasShownText(root, QStringLiteral("打开记录文件夹")),
                           QStringLiteral("记录页空态带引导按钮"));
+
+                    // ── 错误态核验（2026-10-31 二改：修「错误被折叠成空」的真 bug）──
+                    // 造一次"文件打不开"的形状：failReason 非空 ⇒ 必须显示错误态，
+                    // 且**不能**同时显示「还没有噪音记录」（两者互斥）。
+                    QVariantMap evf;
+                    evf.insert(QStringLiteral("summary"), QString());
+                    evf.insert(QStringLiteral("rows"), QVariantList());
+                    evf.insert(QStringLiteral("failReason"),
+                               QStringLiteral("记录文件打不开（2 个文件全部读取失败）。"));
+                    evf.insert(QStringLiteral("failImpact"),
+                               QStringLiteral("记录大概率还在磁盘上，可能被其他程序占用或权限不足。"));
+                    QVariantMap svf;
+                    svf.insert(QStringLiteral("summary"), QString());
+                    svf.insert(QStringLiteral("rows"), QVariantList());
+                    svf.insert(QStringLiteral("failReason"),
+                               QStringLiteral("记录文件内容无法解析（5 行损坏）。"));
+                    svf.insert(QStringLiteral("failImpact"),
+                               QStringLiteral("原始文件没有被删除，仍可用「打开文件夹」取出。"));
+                    ui.applyNoiseLogView(QString(), evf,
+                                         evf.value(QStringLiteral("failReason")).toString(),
+                                         evf.value(QStringLiteral("failImpact")).toString());
+                    ui.applyStudyLogView(QString(), svf,
+                                         svf.value(QStringLiteral("failReason")).toString(),
+                                         svf.value(QStringLiteral("failImpact")).toString());
+                    ui.publish();
+                    QCoreApplication::processEvents();
+                    snap(QStringLiteral("records_error"));
+                    check(ui.noiseLoadFailed(), QStringLiteral("噪音读取失败标志位为真"));
+                    check(hasShownText(root, QStringLiteral("噪音记录读取失败")),
+                          QStringLiteral("记录页错误态上屏"));
+                    check(hasShownText(root, QStringLiteral("重新读取")),
+                          QStringLiteral("错误态带重试按钮"));
+                    check(!hasShownText(root, QStringLiteral("还没有噪音记录")),
+                          QStringLiteral("错误态与空态互斥（失败时不显示「还没有记录」）"));
+
+                    // ── 几何断言：错误态底块必须有真实尺寸（真正能抓 bug 的判据）────────
+                    // 2026-10-31 两次写错的经验，记下来免得后人再走一遍：
+                    //   ① 写"两个 Text 的 bounding box 不相交" → 坏版本也全 PASS。
+                    //      因为 QML 重叠的是**渲染出的字形**，item 的 box 从不超出自己。
+                    //   ② 写"正文不溢出底块" → 坏版本也全 PASS。同理。
+                    // 真正区分好坏的是：**底块（那个带 radius 的红块）高度塌没塌**。
+                    // 实测：好版本红底 236 行像素、跨 y=252..656；坏版本红底 **0 行**
+                    // （implicitHeight 算矮 + body 用 verticalCenter 铺 → 块被压成一条，底色画不出来）。
+                    // 这里直接查 item 几何，不依赖截图。
+                    {
+                        auto *tTitle = findTextItem(root, QStringLiteral("噪音记录读取失败"));
+                        auto *tBody = findTextItem(root, QStringLiteral(
+                            "记录文件打不开（2 个文件全部读取失败）。\n"
+                            "记录大概率还在磁盘上，可能被其他程序占用或权限不足。"));
+                        check(tTitle && tBody,
+                              QStringLiteral("错误态标题块与正文块都能定位到 item"));
+                        if (tTitle && tBody) {
+                            auto *rootItem = qobject_cast<QQuickItem *>(root);
+                            // 往上找第一个"有 radius 属性"的父 item = 错误态的红底块
+                            QQuickItem *box = tTitle->parentItem();
+                            while (box && box != rootItem
+                                   && box->metaObject()->indexOfProperty("radius") < 0) {
+                                box = box->parentItem();
+                            }
+                            const bool boxFound = box && box != rootItem;
+                            check(boxFound, QStringLiteral("找到错误态底块"));
+                            if (boxFound) {
+                                // ① 底块必须有真实高度（坏版本会塌成一行/0）
+                                check(box->height() > 40,
+                                      QStringLiteral("错误态底块有真实高度（坏版本会塌陷）"));
+                                // ② 底块必须比正文块更高（能包住它）
+                                check(box->height() > tBody->height(),
+                                      QStringLiteral("错误态底块高于正文块（包得住）"));
+                                // ③ 底块宽度必须接近内容区（塌成 0 宽时文字会竖排）
+                                check(box->width() > rootItem->width() * 0.8,
+                                      QStringLiteral("错误态底块铺满内容区宽度"));
+                            }
+                        }
+                    }
                     // 恢复有数据形状（后续广播机截图虽不涉记录页，仍保持一致）
                     agentUiFill(&ui);
                     emit ui.infoChanged();

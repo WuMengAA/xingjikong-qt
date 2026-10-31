@@ -4,7 +4,8 @@
 // 这样界面才能按行排版，而不是把一堆等宽字符糊在卡片里。
 #include "p3_record_view.h"
 
-#include "p3_reader.h"   // readJsonlDir
+#include "p3_reader.h"   // readJsonlDirWithDiag / build*LogText
+#include "p3_log.h"      // dataRoot()
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -36,7 +37,16 @@ QVariantMap buildNoiseRecordView()
     QVariantMap out;
     QVariantList rows;
 
-    const QJsonArray all = readJsonlDir(QStringLiteral("noise_log"));
+    const P3ReadResult rr = readJsonlDirWithDiag(dataRoot(), QStringLiteral("noise_log"));
+    const QJsonArray &all = rr.records;
+    // 读取失败：把原因/影响一并带出去（QML 走错误态，不再伪装成「还没有记录」）
+    if (!rr.isOk()) {
+        out.insert(QStringLiteral("summary"), QString());
+        out.insert(QStringLiteral("rows"), rows);
+        out.insert(QStringLiteral("failReason"), rr.reason);
+        out.insert(QStringLiteral("failImpact"), rr.impact);
+        return out;
+    }
     if (all.isEmpty()) {
         out.insert(QStringLiteral("summary"), QStringLiteral("还没有噪音记录"));
         out.insert(QStringLiteral("rows"), rows);
@@ -83,7 +93,15 @@ QVariantMap buildStudyRecordView()
     QVariantMap out;
     QVariantList rows;
 
-    const QJsonArray all = readJsonlDir(QStringLiteral("study_log"));
+    const P3ReadResult rr = readJsonlDirWithDiag(dataRoot(), QStringLiteral("study_log"));
+    const QJsonArray &all = rr.records;
+    if (!rr.isOk()) {
+        out.insert(QStringLiteral("summary"), QString());
+        out.insert(QStringLiteral("rows"), rows);
+        out.insert(QStringLiteral("failReason"), rr.reason);
+        out.insert(QStringLiteral("failImpact"), rr.impact);
+        return out;
+    }
     if (all.isEmpty()) {
         out.insert(QStringLiteral("summary"), QStringLiteral("还没有自习记录"));
         out.insert(QStringLiteral("rows"), rows);
@@ -127,4 +145,28 @@ QVariantMap buildStudyRecordView()
     out.insert(QStringLiteral("summary"), summary);
     out.insert(QStringLiteral("rows"), rows);
     return out;
+}
+// ── 「view 字典 → AgentRecordUi」拆解（2026-10-31 二改，动机见头文件）──────────
+// 这里 include agent_ui.h 是**唯一**的跨界点：.h 里只用前向声明，避免 776 行声明
+// 被拖进每个 include p3_record_view.h 的 TU。
+#include "../agent_ui.h"
+
+// 不用 bool 参数区分噪音/自习：applyView(x, y, z, true) 的调用点读起来要回翻签名，
+// 而这里恰是最容易写反的地方 —— 写反了不报错，只是噪音页显示成自习记录。
+void applyNoiseRecordView(AgentUi *ui)
+{
+    if (!ui) return;
+    const QVariantMap view = buildNoiseRecordView();
+    ui->applyNoiseLogView(buildNoiseLogText(), view,
+                          view.value(QStringLiteral("failReason")).toString(),
+                          view.value(QStringLiteral("failImpact")).toString());
+}
+
+void applyStudyRecordView(AgentUi *ui)
+{
+    if (!ui) return;
+    const QVariantMap view = buildStudyRecordView();
+    ui->applyStudyLogView(buildStudyLogText(), view,
+                          view.value(QStringLiteral("failReason")).toString(),
+                          view.value(QStringLiteral("failImpact")).toString());
 }

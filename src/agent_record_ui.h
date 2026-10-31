@@ -70,6 +70,16 @@ public:
     Q_PROPERTY(QVariantList noiseRecords     READ noiseRecords     NOTIFY infoChanged)
     Q_PROPERTY(QString      studySummaryText READ studySummaryText NOTIFY infoChanged)
     Q_PROPERTY(QVariantList studyRecords     READ studyRecords     NOTIFY infoChanged)
+    // 记录读取失败时的错误态（2026-10-31）：空态与错误态必须分开展示。
+    // 旧实现把「文件打不开 / 内容全坏」折叠成"没有记录"，等于对用户撒谎 ——
+    // 记录可能完好躺在磁盘上，界面却说没有，用户既不会去修也不会去找回。
+    // QML 用法：visible: agentUi.noiseLoadFailed，绑这三个字符串即可（不写任何判断）。
+    Q_PROPERTY(bool    noiseLoadFailed READ noiseLoadFailed NOTIFY infoChanged)
+    Q_PROPERTY(QString noiseFailReason READ noiseFailReason NOTIFY infoChanged)
+    Q_PROPERTY(QString noiseFailImpact READ noiseFailImpact NOTIFY infoChanged)
+    Q_PROPERTY(bool    studyLoadFailed READ studyLoadFailed NOTIFY infoChanged)
+    Q_PROPERTY(QString studyFailReason READ studyFailReason NOTIFY infoChanged)
+    Q_PROPERTY(QString studyFailImpact READ studyFailImpact NOTIFY infoChanged)
 
     // ══ 播放时段 ═════════════════════════════════════════════════════════
     Q_PROPERTY(bool    playScheduleEnabled READ playScheduleEnabled WRITE setPlayScheduleEnabled NOTIFY infoChanged)
@@ -88,6 +98,13 @@ public:
     QVariantList noiseRecords() const         { return m_noiseRecords; }
     QString      studySummaryText() const     { return m_studySummaryText; }
     QVariantList studyRecords() const         { return m_studyRecords; }
+    // 错误态（见上方 Q_PROPERTY 注释）
+    bool    noiseLoadFailed() const           { return !m_noiseFailReason.isEmpty(); }
+    QString noiseFailReason() const           { return m_noiseFailReason; }
+    QString noiseFailImpact() const           { return m_noiseFailImpact; }
+    bool    studyLoadFailed() const           { return !m_studyFailReason.isEmpty(); }
+    QString studyFailReason() const           { return m_studyFailReason; }
+    QString studyFailImpact() const           { return m_studyFailImpact; }
     bool         playScheduleEnabled() const  { return m_playScheduleEnabled; }
     QString      playWindowsText() const      { return m_playWindowsText; }
     QString      playStateText() const        { return m_playStateText; }
@@ -127,18 +144,29 @@ public:
     /**
      * 记录页「读数 → 上屏形状」一次性入口。
      * 入参形状见 src/p3log/p3_record_view.h：{ summary, rows:[{label,value}] }。
+     *
+     * reason/impact 非空 = 读取失败（此时 rows 通常为空，但界面要走错误态而非空态）。
+     * 两者由 p3log/p3_reader.cpp 的 P3ReadResult 给出，QML 只绑不判。
      */
-    void applyNoiseLogView(const QString &text, const QVariantMap &view)
+    void applyNoiseLogView(const QString &text, const QVariantMap &view,
+                           const QString &reason = QString(),
+                           const QString &impact = QString())
     {
         m_noiseLogText     = text;
         m_noiseSummaryText = view.value(QStringLiteral("summary")).toString();
         m_noiseRecords     = view.value(QStringLiteral("rows")).toList();
+        m_noiseFailReason  = reason;
+        m_noiseFailImpact  = impact;
     }
-    void applyStudyLogView(const QString &text, const QVariantMap &view)
+    void applyStudyLogView(const QString &text, const QVariantMap &view,
+                           const QString &reason = QString(),
+                           const QString &impact = QString())
     {
         m_studyLogText     = text;
         m_studySummaryText = view.value(QStringLiteral("summary")).toString();
         m_studyRecords     = view.value(QStringLiteral("rows")).toList();
+        m_studyFailReason  = reason;
+        m_studyFailImpact  = impact;
     }
     /** 自检四项 + 汇总（计数一律在此算，QML 不数数）。 */
     void applySelfCheckItems(const QVariantList &items)
@@ -204,6 +232,9 @@ private:
     bool    m_selfCheckAllOk = false;
     QString m_noiseSummaryText, m_studySummaryText;
     QVariantList m_noiseRecords, m_studyRecords;
+    // 读取失败原因/影响（空 = 没失败）。上屏由 QML 直接绑，不做判断。
+    QString m_noiseFailReason, m_noiseFailImpact;
+    QString m_studyFailReason, m_studyFailImpact;
     bool m_playScheduleEnabled = false;
 
     // agentUiFill 直接写这些成员（不触发 switchChanged），见 agent_ui.h 的快照写入约定
