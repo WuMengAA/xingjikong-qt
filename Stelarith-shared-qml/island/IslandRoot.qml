@@ -68,7 +68,7 @@ Item {
             if (!_didActive) return       // 没接管过（在控件上拖）⇒ 不切面
             _didActive = false
             if (!root._expanded) return
-            if (Math.abs(lastDx) < 28) return                    // 2026-11-01：「有位移就切」阈值 56→28
+            if (Math.abs(lastDx) < 22) return                    // 2026-11-01：更容易触发 56→28→22
             if (Math.abs(lastDx) < Math.abs(lastDy) * 1.2) return // 纵向为主才放行（1.4→1.2 更宽容）
             root.faceStep(lastDx < 0 ? 1 : -1)                    // 左滑 = 下一个面
         }
@@ -2807,7 +2807,7 @@ Item {
                         }
                     }
 
-                    // 松手吸附：**每次手势只切一页** —— 以手势起点页为基准，位移 >15% 才 ±1，绝不跳页。
+                    // 松手吸附：**每次手势只切一页** —— 以手势起点页为基准，位移 >8% 就 ±1，绝不跳页。
                     property int _dragStartPage: 0
                     onMovementStarted: {
                         if (width <= 0) return
@@ -2817,7 +2817,7 @@ Item {
                         if (width <= 0) return
                         const d = contentX / width - _dragStartPage
                         let target = _dragStartPage
-                        if (Math.abs(d) > 0.15) target = _dragStartPage + (d > 0 ? 1 : -1)
+                        if (Math.abs(d) > 0.08) target = _dragStartPage + (d > 0 ? 1 : -1)
                         target = Math.max(0, Math.min(pageCount - 1, target))
                         fpSnap.to = target * width
                         fpSnap.start()
