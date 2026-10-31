@@ -305,6 +305,7 @@ Item {
     readonly property bool histFaceOn: root._history.length > 0
     readonly property var faceModel: {
         var fs = [{ id: 0, label: "概" }];
+        fs.push({ id: 7, label: "今" });   // 2026-11-01：今天看板（提升功能密度 —— 今日课表全量）
         if (root.mediaFaceOn) fs.push({ id: 1, label: "媒" });
         // 2026-10-31 · 苹果式极简：历史不再作为可滑动面 —— 统一收进「⋯」弹层，
         // 走完整 historyPanel（facePanel 里的 IslandHistoryFace 紧凑预览一并退役，
@@ -380,6 +381,7 @@ Item {
     // 历史：有历史才出现；媒体：有媒体才出现；状态/批注/设置恒在；自动化：规则面开时。
     readonly property var moreEntries: {
         var out = [];
+        out.push({ id: 7, label: "今天" });   // 2026-11-01：今天看板入口
         if (root.mediaFaceOn) out.push({ id: 1, label: "媒体" });
         if (root.histFaceOn)  out.push({ id: 2, label: "历史" });
         out.push({ id: 3, label: "状态" });
@@ -2794,6 +2796,7 @@ Item {
                                     anchors.margins: modelData.id === 5 ? 14 : 10
                                     sourceComponent: {
                                         switch (modelData.id) {
+                                        case 7: return compToday
                                         case 1: return compMedia
                                         case 3: return compState
                                         case 4: return compAnnotate
@@ -2870,6 +2873,7 @@ Item {
                     }
                 }
                 // ── 面内容 Component（供分页 delegate 按 id 取）──────────
+                Component { id: compToday; IslandTodayPage { th: root.th; dash: root.bridgeRef ? root.bridgeRef.todayDash : ({}) } }
                 Component { id: compMedia; IslandMediaFace { th: root.th; useLocal: root.faceUseLocal; title: root.faceTitle; artist: root.faceArtist; dur: root.faceDur; pos: root.facePos; timeText: root.faceTimeText(); next: root.faceNext } }
                 Component { id: compState; IslandStateFace { th: root.th; rows: root.faceStatusRows } }
                 Component { id: compAnnotate; IslandAnnotateFace { th: root.th; bridge: root.bridgeRef } }

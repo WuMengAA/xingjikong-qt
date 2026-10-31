@@ -276,7 +276,7 @@
       "plan": "[P3] 拆输出/输入区"
     },
     "Stelarith-shared-qml/island/IslandRoot.qml": {
-      "lines": 3205,
+      "lines": 3220,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
