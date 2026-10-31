@@ -13,6 +13,7 @@
 
 #include "../island.h"       // IslandOverlay（setSuppressed / instance()->ensureIdle）
 #include "../vnc_bridge.h"   // VncBridge
+#include "../media/H264Streamer.h" // A档（2026-10-31）：远控停→H264 推流停（同生命周期）
 #ifdef STE_USE_LIBVNCSERVER
 #include "../vnc_server.h"   // VncServer（方案 A，编译开关同 main）
 #endif
@@ -48,6 +49,8 @@ void stopRemoteControlSession(const QString &reason)
     VncBridge::instance().stop();
     VncServer::instance().stop();
 #endif
+    // A档（2026-10-31）：远控停 → H264 推流停（同生命周期；无远控会话也早退安全）。
+    H264Streamer::instance().stop();
     g_currentFps = 5;   // 恢复默认
     qInfo("[agent-qt] 🟢 远控会话关闭（%s），抓屏帧率恢复 5 fps（原 %d）",
           qPrintable(reason), was);

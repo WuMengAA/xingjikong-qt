@@ -30,6 +30,7 @@
 #include "../noise_monitor.h"       // NoiseMonitor（噪音采集器）
 #include "../p3log/p3_log.h"        // logStudyStart/logStudyStop（自习长期记录）
 #include "../remote/remote_control.h" // stopRemoteControlSession（远控收口）
+#include "../media/H264Streamer.h"    // A档（2026-10-31）：远控期间并起 H264 推流（与 VNC 同生命周期）
 #include "../notify/notify_entry.h" // islandShow（岛气泡）
 #include "../media/MediaSession.h"  // MediaSession（播放时段判定）
 #include "../panel_domain.h"        // PanelDomain（岛组件面板）
@@ -1609,6 +1610,9 @@ ExecOut executeAction(const QString &action, const QJsonObject &params)
         }
         VncBridge::instance().start(VncServer::instance().port());
 #endif
+        // A档（2026-10-31）：远控期间并起 H264 推流（与 VNC 同生命周期；MF 不可用/0 产出时
+        // start 返回 false、后续 emit 0 帧，静默退化不影响主流程）。want 即远控 fps。
+        H264Streamer::instance().start(1280, 720, want);
         // 学生端知情（设计文档 6.5 隐私边界）：远控=屏幕正被老师查看，学生必须知道。
         // 灵动岛形态非打扰式提示（#98：统一走灵动岛，禁原生 QMessageBox），不遮操作。
         // 时长给的比原来的 3 秒长一些：远控一整节课都在，学生错过前 3 秒就再没提示了。

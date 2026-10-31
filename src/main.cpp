@@ -49,6 +49,7 @@
 #include "ui/agent_panel.h" // 2026-10-30 main 拆分 #9：QML 控制面板数据接线（AgentPanelDeps/TrayState/g_panelDeps）
 #include "action/execute_action.h" // 2026-10-30 main 拆分 #10：播放时段管理/调度/软控/文件接收（ActionDeps/g_actionDeps/executeAction）
 #include "wire/frame_builder.h" // 2026-10-31 main 拆分 #12：协议 v1 信封三打包函数（makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes）
+#include "media/H264Streamer.h"  // A档（2026-10-31）：H264 推流装配（信号接线，业务逻辑在 src/media/）
 #include "core/proc_inspect.h" // 2026-10-31 main 拆分 #13：进程/窗口只读检查（snapshotProcessNames/enumWindowsCb/visibleWindowsCached/windowTitleOf/memMbOf）
 #include "policy/policy_engine.h" // 2026-10-31 main 拆分 #14：调度/软控/进程策略（ActionDeps 共享类型 + PolicyDeps 注入）
 #include "localapi/localapi_server.h" // 2026-10-31：本地 API 鉴权网关（127.0.0.1:8080，三条已知缺口之一）
@@ -345,7 +346,7 @@ void sendActionReceipt(const QString &id, const QString &action, const QString &
 
 
 // ── OTA 全局：文件作用域（namespace 外），供 src/ota/ota_state 模块 extern 复用 ──
-extern const char *kAppVersion = "0.6.51-rc.1";
+extern const char *kAppVersion = "0.6.51-rc.2";
 QString g_channel = QStringLiteral("stable");   // 供 register 上报；main 启动即解析覆盖
 QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
 bool g_updateMandatory = false;     // 云端 ota.json 的 mandatory（true=强制自动升级）
@@ -2779,9 +2780,7 @@ void handleControlText(const QString &text)
     }
 
     // ── 远控（2026-10-18 · 统一方案 A · vnc-data 走主 WS）──────────────────────
-    // 起服入口已移到 remote_control_start（VncServer 自动选 loopback 端口、VncBridge
-    // 连它把 RFB 字节打成 vnc-data 帧走主 WS）。此分支保留只为兼容老云端：收到即幂等补起。
-    // sid/key/port 不再需要（主 WS 已鉴权；端口由 VncServer 自行决定）。
+    // 此分支保留只为兼容老云端：收到即幂等补起（起服真入口在 remote_control_start，见 execute_action）。
     if (type == QStringLiteral("tunnel.open")) {
 #ifdef STE_USE_LIBVNCSERVER
         if (!VncServer::instance().isRunning()) {
@@ -2790,8 +2789,6 @@ void handleControlText(const QString &text)
                 qWarning("[agent-qt] FAIL tunnel.open：VncServer 起服失败，忽略");
                 return;
             }
-            // 2026-10-21（审查 #8）：下面这条日志原来**一字不差打了两遍**，排障时
-            // 像起了两个 server —— 只留一条。
             qInfo("[agent-qt] 已在 127.0.0.1:%u 起 in-agent VNC Server（tunnel.open 兼容路径）", (unsigned)p);
         }
         VncBridge::instance().start(VncServer::instance().port());
@@ -4013,6 +4010,7 @@ int main(int argc, char *argv[])
         g_ws->sendBinaryMessage(makeVncFrameBytes(data));
         qInfo("[vnc-probe] up 已发 %d 字节", data.size());
     });
+    QObject::connect(&H264Streamer::instance(), &H264Streamer::h264FrameReady, &app, [](const QByteArray &nalu) { if (g_ws && g_ws->state() == QAbstractSocket::ConnectedState) g_ws->sendBinaryMessage(makeH264FrameBytes(nalu)); });  // A档（2026-10-31）H264 推流：NALU→h264-data 帧发主 WS（与 VncBridge 对称；MF 0 产出时静默无帧）
     // 语音对讲（2026-10-07）：云端转发来的音频帧（v1 二进制帧，mime=audio/pcm）。
     // 与画面帧区分：画面帧是 agent→云端→viewer 的单向（被控端不接收）；这里只收 audio。
     // 远控统一 A（2026-10-18）：主 WS 还会收到 vnc-data（管理端键鼠/更新请求，direction=down）。
