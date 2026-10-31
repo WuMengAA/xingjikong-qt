@@ -7,6 +7,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrl>
+#include <QUrlQuery>
 
 ClassAdmin::ClassAdmin(ViewerBackend *backend, QObject *parent)
     : QObject(parent)
@@ -272,6 +273,65 @@ void ClassAdmin::removeStudent(const QString &code, const QString &studentId)
     b.insert(QStringLiteral("classCode"), code);
     b.insert(QStringLiteral("studentId"), studentId);
     post(QStringLiteral("student-remove"), b, QStringLiteral("已移出该学生"));
+}
+
+// ── 班级考勤（2026-10-31）───────────────────────────────────────────────
+// 查：GET /api/class/attendance?classCode=&date= —— 返回 records（按学生排）+ 四档统计。
+// 写：走既有 post()（POST /api/class/attendance，upsert 幂等，点一下即存）。
+void ClassAdmin::attendance(const QString &code, const QString &date)
+{
+    if (!m_backend) return;
+    const QString base = m_backend->httpBaseUrl();
+    const QString token = m_backend->viewerToken();
+    if (base.isEmpty()) { emit attendanceList(code, date, QVariantList(), QVariantMap()); return; }
+
+    QUrl url(base + QStringLiteral("/api/class/attendance"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("classCode"), code);
+    if (!date.trimmed().isEmpty()) q.addQueryItem(QStringLiteral("date"), date.trimmed());
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    if (!token.isEmpty())
+        req.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + token.toUtf8());
+
+    auto *r = m_nam->get(req);
+    connect(r, &QNetworkReply::finished, this, [this, r, code, date] {
+        r->deleteLater();
+        QVariantList records;
+        QVariantMap stats;
+        const int status = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 200) {
+            const QJsonObject o = QJsonDocument::fromJson(r->readAll()).object();
+            const QJsonArray arr = o.value(QStringLiteral("records")).toArray();
+            for (const QJsonValue &v : arr)
+                if (v.isObject()) records.append(v.toObject().toVariantMap());
+            const QJsonObject st = o.value(QStringLiteral("stats")).toObject();
+            if (!st.isEmpty()) stats = st.toVariantMap();
+        }
+        emit attendanceList(code, date, records, stats);
+    });
+}
+
+void ClassAdmin::saveAttendance(const QString &code, const QString &date,
+                                const QString &session, const QVariantList &rows)
+{
+    QJsonArray arr;
+    for (const QVariant &v : rows) {
+        const QVariantMap m = v.toMap();
+        QJsonObject o;
+        if (m.contains(QStringLiteral("studentNo")))
+            o.insert(QStringLiteral("studentNo"), QJsonValue::fromVariant(m.value(QStringLiteral("studentNo"))));
+        if (m.contains(QStringLiteral("status")))
+            o.insert(QStringLiteral("status"), QJsonValue::fromVariant(m.value(QStringLiteral("status"))));
+        arr.append(o);
+    }
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    if (!date.trimmed().isEmpty()) b.insert(QStringLiteral("date"), date.trimmed());
+    if (!session.trimmed().isEmpty()) b.insert(QStringLiteral("session"), session.trimmed());
+    b.insert(QStringLiteral("rows"), arr);
+    post(QStringLiteral("attendance"), b, QStringLiteral("已保存该生的考勤状态"));
 }
 
 bool ClassAdmin::isClassIslandArchive(const QString &text)

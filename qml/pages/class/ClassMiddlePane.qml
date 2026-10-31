@@ -53,17 +53,19 @@ Item {
 
     // 分段定义只写一份（横竖屏共用）。窄栏用纯图标（label=""），宽栏带文字。
     readonly property var segModel: pane.compactSeg ? [
-        { value: "devices",   label: "", icon: "layout-grid",  tip: "设备 · 本班设备实时画面" },
-        { value: "students",  label: "", icon: "users",        tip: "学生 · 本班学生名单（存云端）" },
-        { value: "board",     label: "", icon: "tv",           tip: "展板 · 教室大屏常亮视图" },
-        { value: "timetable", label: "", icon: "clock",        tip: "课表 · 本班周课表与作息" },
-        { value: "members",   label: "", icon: "circle-check", tip: "成员 · 老师/助教账号与设备去留" }
+        { value: "devices",    label: "", icon: "layout-grid",   tip: "设备 · 本班设备实时画面" },
+        { value: "students",   label: "", icon: "users",         tip: "学生 · 本班学生名单（存云端）" },
+        { value: "attendance", label: "", icon: "check",         tip: "考勤 · 本班学生出勤点名（按天）" },
+        { value: "board",      label: "", icon: "tv",            tip: "展板 · 教室大屏常亮视图" },
+        { value: "timetable",  label: "", icon: "clock",         tip: "课表 · 本班周课表与作息" },
+        { value: "members",    label: "", icon: "circle-check",  tip: "成员 · 老师/助教账号与设备去留" }
     ] : [
-        { value: "devices",   label: "设备", icon: "layout-grid",  tip: "本班设备实时画面" },
-        { value: "students",  label: "学生", icon: "users",        tip: "本班学生名单（存云端）" },
-        { value: "board",     label: "展板", icon: "tv",           tip: "教室大屏常亮视图" },
-        { value: "timetable", label: "课表", icon: "clock",        tip: "本班周课表与作息（可导入 ClassIsland 档案）" },
-        { value: "members",   label: "成员", icon: "circle-check", tip: "老师/助教账号与设备去留" }
+        { value: "devices",    label: "设备", icon: "layout-grid",   tip: "本班设备实时画面" },
+        { value: "students",   label: "学生", icon: "users",         tip: "本班学生名单（存云端）" },
+        { value: "attendance", label: "考勤", icon: "check",         tip: "本班学生出勤点名（按天）" },
+        { value: "board",      label: "展板", icon: "tv",            tip: "教室大屏常亮视图" },
+        { value: "timetable",  label: "课表", icon: "clock",         tip: "本班周课表与作息（可导入 ClassIsland 档案）" },
+        { value: "members",    label: "成员", icon: "circle-check",  tip: "老师/助教账号与设备去留" }
     ]
 
     Column {
@@ -97,7 +99,8 @@ Item {
             currentIndex: pane.tab === "students" ? 1
                           : (pane.tab === "board" ? 2
                           : (pane.tab === "members" ? 3
-                          : (pane.tab === "timetable" ? 4 : 0)))
+                          : (pane.tab === "timetable" ? 4
+                          : (pane.tab === "attendance" ? 5 : 0))))
 
             ClassDeviceGrid {
                 model: pane.deviceModel
@@ -132,6 +135,12 @@ Item {
             ClassTimetablePane {
                 classCode: pane.classCode
                 className: pane.className
+                subscribed: pane.subscribed
+                toastFn: pane.toastFn
+            }
+            // 索引 5 = 考勤（声明顺序 = StackLayout 序号，排在课表后）。
+            ClassAttendancePane {
+                classCode: pane.classCode
                 subscribed: pane.subscribed
                 toastFn: pane.toastFn
             }

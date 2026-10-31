@@ -76,6 +76,11 @@ public:
 
     // ── 学生名单批量导入（CSV 在 QML 侧解析成 rows；云端按学号幂等 upsert）──
     Q_INVOKABLE void importStudents(const QString &code, const QVariantList &rows);
+    /** 考勤（2026-10-31）：拉某班某日的考勤记录 + 四档统计（GET /api/class/attendance）。 */
+    Q_INVOKABLE void attendance(const QString &code, const QString &date);
+    /** 考勤写入（2026-10-31）：rows = [{studentNo, status}]（upsert 幂等）。 */
+    Q_INVOKABLE void saveAttendance(const QString &code, const QString &date,
+                                    const QString &session, const QVariantList &rows);
 
     /** 读本地文本文件（选课表档案 / CSV 用）。
      *  为什么放在这里而不是 backend：班级域自包含（Android 上 pickFile 是异步的，
@@ -104,6 +109,10 @@ signals:
     void opFinished(const QString &op, bool ok, const QString &message);
     /** 一个班的学生名单（students() 结果；空数组 = 还没录入）。 */
     void studentsList(const QString &classCode, const QVariantList &students);
+    /** 一个班的考勤（attendance() 结果：records=[{studentNo,studentName,status}]，
+     *  stats={counts:{present,late,leave,absent}, recorded, rosterSize}）。 */
+    void attendanceList(const QString &classCode, const QString &date,
+                        const QVariantList &records, const QVariantMap &stats);
     /** 一个班的课表档案。2026-10-29：profile 直接是**结构化 QVariant**
      *  （对象→QVariantMap / 数组→QVariantList；无效 QVariant = 还没排课），
      *  QML 拿到即可用，**不再 JSON.parse**（§10.9 QML 纯净封杀令）。

@@ -1,15 +1,5 @@
-// 班级工作台 · 设备格子（页面级部件 · #461-#472）
-//
-// 定位：ClassDeviceGrid 的网格单元，视觉语言照抄 shell/DeviceCard（两层偏移投影 /
-// MD3 状态层 / 选中主色薄雾 / 工业青左规 / 等宽版本号），两处观感一致不另起炉灶。
-//
-// 与 DeviceCard 的三处刻意差异：
-//   ① 画面源走班级域 image://classthumb/<uid>?t<rev>（#460 ClassThumbProvider），
-//      不是旧墙 image://frames（那是集控页轮询链路，两链不混）；
-//   ② 缓存击穿用 thumbRev role（行数据变化 ⇒ source 绑定自动重算），不要手动 tick；
-//   ③ 无帧占位「暂无画面」（刚上线未上报，属正常态；故障文案见 UiTerms.states）。
-//
-// 数据真源：ClassDeviceModel（typed）—— 本件只收标量属性，不碰 backend。
+// 班级工作台 · 设备格子（ClassDeviceGrid 网格单元）；画面源 image://classthumb，
+// 无帧占位「暂无画面」；数据真源 ClassDeviceModel，本件只收标量属性不碰 backend。
 import QtQuick
 import "../../island"          // SvgIcon
 import "../../components/theme"   // Theme 设计令牌单例（pragma Singleton）
@@ -169,9 +159,7 @@ Item {
                 elide: Text.ElideRight
             }
 
-            // 状态行：在线给版本号（等宽技术字），离线给「多久没见」。
-            // 末尾追加**用途**（系统总图挂账①）：此前云端已下发 role、viewer 未消费，
-            // 管理端分不清这台是教室端还是广播端。云端没给就不追加（老设备兼容）。
+            // 状态行：版本/离线时长；末尾追加用途（教室端/广播端），云端没给就不追加。
             Text {
                 width: parent.width
                 text: {
