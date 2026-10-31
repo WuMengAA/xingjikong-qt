@@ -46,6 +46,30 @@ KEY_BYTES = 32
 NONCE_BYTES = 12
 
 
+# ── 控制台编码兜底（2026-10-31 · 用户实测崩溃后加）──────────────────────────
+# 病灶：Windows CMD 默认 GBK(cp936)；脚本里任何 emoji（⚠️/✅）或生僻中文写 stdout
+# 都会抛 UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0'，整个命令崩掉。
+# 不是"显示成乱码"这种小事 —— 是**写入失败 + 退出码 1**，把正常操作变成报错。
+# 修法：出口统一按 UTF-8 + errors="replace" 兜底（替换字符总比崩强），
+#      并把控制台代码页尽力切到 65001（失败不影响主流程）。
+def _init_console_encoding():
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        except Exception:  # noqa: BLE001 —— 尽力而为，切不了只是显示乱码
+            pass
+
+
+_init_console_encoding()
+
+
 def vault_dir():
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     return os.path.join(base, "stelarith-vault")
@@ -161,7 +185,9 @@ def write_vault(entries: dict) -> None:
 # ── 子命令 ─────────────────────────────────────────────────────────────────
 def cmd_init(_a):
     gen_master_key()
-    print("[vault] 就绪。写值：echo -n '<secret>' | python scripts/vault.py set <name>")
+    print("[vault] 就绪。写值（交互式，推荐）：python Stelarith-cloud/scripts/vault.py set <name>")
+    print("[vault] 脚本化：<你的工具> | python Stelarith-cloud/scripts/vault.py set <name>")
+    print("[vault] ⚠️ CMD 里没有 echo -n；别用 `echo -n xxx |`，会把 -n 写进值里。")
 
 
 def cmd_set(args):
@@ -172,8 +198,20 @@ def cmd_set(args):
         sys.exit(1)
     if args.value is not None:
         plain = args.value.encode("utf-8")
+    elif sys.stdin.isatty():
+        # 2026-10-31 修（用户实测报错）：交互式下原实现 sys.stdin.buffer.read() 会一直
+        # 等 EOF（要按 Ctrl+Z 再回车），命令行里根本没法用。TTY 时改走隐藏输入提示：
+        # 不回显、不进 shell 历史、不进进程列表，粘完回车即写入。
+        import getpass
+
+        try:
+            typed = getpass.getpass(f"[vault] 输入 {name} 的值（不回显，回车确认）: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[vault] 已取消", file=sys.stderr)
+            sys.exit(1)
+        plain = typed.encode("utf-8")
     else:
-        # 从 stdin 读（管道 / 交互一行）：不落 shell 历史、不进进程列表。
+        # 非 TTY（管道 / 重定向）：读全部 stdin。这是脚本化调用的正路。
         plain = sys.stdin.buffer.read().strip()
     if not plain:
         print("[vault] 值为空，拒绝写入", file=sys.stderr)

@@ -197,17 +197,38 @@ U4 文件传输 over 闪传通道 + file-relay 60s 缓存 + Psql；Qt 两端 C++
   Windows ACL 已收紧到当前用户 (R,W)；丢失 = 全部不可解密（设计如此）。
 - **库文件**：`%%LOCALAPPDATA%%\stelarith-vault\vault.json`（仅密文，含版本头）。
 - **用户级存储**：绝不进 git；换机需整目录迁移 + 重设（主密钥不可导出明文）。
+- **控制台编码兜底**：Windows CMD 默认 GBK，写 emoji/生僻字会 `UnicodeEncodeError` **崩命令**
+  （不是乱码小事，是退出码 1）。进程启动即把 stdout/stderr 切 UTF-8 + `errors=replace`，
+  并尽力把控制台代码页设到 65001。
 
-### 用法（受管 Python；禁 cmd/PS 落地）
+### 用法
+
+> ⚠️ **先看这条**：脚本要用**完整路径或先 cd 到仓库根**。
+> 在 `C:\Users\Administrator>` 下敲 `python scripts\vault.py ...` 会报
+> `can't open file 'C:\Users\Administrator\scripts\vault.py'` —— 相对路径是相对**当前目录**解析的。
+
+**交互式（推荐，手敲一次用这个）**：不带管道运行 `set`，会提示隐藏输入（不回显、不进 shell 历史、不进进程列表），
+粘贴后回车即写入，**不需要** Ctrl+Z。
 
 ```
-python scripts/vault.py init                                  # 首次生成 master.key（幂等）
-echo -n "<secret>" | python scripts/vault.py set github_pat   # 从 stdin 写（不落 shell 历史）
-python scripts/vault.py get  github_pat                       # 读明文到 stdout（脚本用；慎打印）
-python scripts/vault.py list                                  # 只列名字
-python scripts/vault.py delete github_pat
-python scripts/vault.py check                                 # 自检：ACL + 全部条目可解密
+cd /d D:\Stelarith\Stelarith-xingjikong-qt
+python Stelarith-cloud\scripts\vault.py init
+python Stelarith-cloud\scripts\vault.py set github_pat
+      → [vault] 输入 github_pat 的值（不回显，回车确认）: ****<粘贴 PAT><回车>
+python Stelarith-cloud\scripts\vault.py list
+python Stelarith-cloud\scripts\vault.py get github_pat
+python Stelarith-cloud\scripts\vault.py delete github_pat
+python Stelarith-cloud\scripts\vault.py check
 ```
+
+**脚本化（管道 / 重定向）**：读全部 stdin。
+
+```
+<你的工具> | python Stelarith-cloud\scripts\vault.py set github_pat
+```
+
+> ⚠️ **CMD 里没有 `echo -n`**。`echo -n xxx | python ...` 会把字面量 `-n` 写进值里
+> （PowerShell 同理，`-n` 是不同参数）。要用管道就别用 echo 拼，直接喂文件或工具输出。
 
 ### 前置 / 边界
 
