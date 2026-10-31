@@ -8,8 +8,14 @@
 // 在 ②③ 下用户的记录**可能完好地躺在磁盘上**，界面却告诉他没有 —— 这是让"有记录"
 // 这个状态本身变成谎话，比报错更糟（用户不会去修，也不会去找回）。
 //
-// 本探针用临时目录造出四种场景，断言诊断分类正确。
+// 本探针用临时目录造出五种场景，断言诊断分类正确。
 // 用法：python scripts/_p3_reader_probe.py
+//
+// ⚠️ 场景 ③（Unreadable）的造法值得单独说明，因为它在 Windows 上并不显然：
+//   只读属性、ACL 拒绝、改名都不行 —— 只读属性照样能打开；ACL 改动要提权且污染环境。
+//   正解是 CreateFileW 的 dwShareMode = 0：持有句柄期间**其他进程一律打不开**，
+//   等价于"被杀软或备份进程占住"，而这正是它要模拟的真实场景。句柄可随时关，
+//   用完立刻释放，不留环境残留。
 #include "p3_reader.h"
 
 #include <QCoreApplication>
@@ -19,12 +25,33 @@
 #include <QTemporaryDir>
 #include <QDebug>
 
+#ifdef Q_OS_WIN
+#  include <windows.h>
+#endif
+
 static int fails = 0;
 static void chk(const char *name, bool ok, const QString &detail)
 {
     qInfo().noquote() << (ok ? "PASS" : "FAIL") << name << " <- " << detail;
     if (!ok) ++fails;
 }
+
+#ifdef Q_OS_WIN
+/**
+ * 以"独占"方式持有文件句柄（dwShareMode=0 ⇒ 别人读/写/删全被拒）。
+ * 返回的句柄必须在场景结束前 closeExclusive()，否则临时目录也删不掉。
+ */
+static HANDLE openExclusive(const QString &path)
+{
+    const std::wstring w = path.toStdWString();
+    return ::CreateFileW(w.c_str(), GENERIC_READ, 0 /* no sharing */, nullptr,
+                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+static void closeExclusive(HANDLE h)
+{
+    if (h && h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+}
+#endif
 
 static void writeFile(const QString &path, const QString &content)
 {
@@ -103,6 +130,58 @@ int main(int argc, char **argv)
         chk("⑤ 目录在但无 .jsonl 文件 → Ok 空态（不是错误）",
             r.status == P3ReadResult::Ok && r.records.isEmpty(),
             QStringLiteral("status=%1").arg(int(r.status)));
+    }
+
+    // ══════════ 场景 ⑤.5：Unreadable —— 文件被独占（真实触发，非推测）══════════
+    // 这是上一批唯一"没真实触发过"的分支，本次补齐。
+    // 手法：CreateFileW(dwShareMode=0) 持住句柄 → 其他读者一律 ERROR_SHARING_VIOLATION，
+    // 与"被杀软/备份占用"是同一现象。
+    {
+#ifdef Q_OS_WIN
+        const QString sub = QStringLiteral("noise_log_exclusive");
+        QDir().mkpath(tmp.path() + "/" + sub);
+        const QString f = tmp.path() + "/" + sub + "/2026-10-31.jsonl";
+        writeFile(f, "{\"ts\":1761883200,\"db\":45.5}\n{\"ts\":1761883201,\"db\":50.0}\n");
+
+        HANDLE hold = openExclusive(f);
+        const bool gotLock = (hold != INVALID_HANDLE_VALUE && hold != nullptr);
+        chk("⑤.5 能造出「文件被独占」的前提条件", gotLock,
+            QStringLiteral("CreateFileW 返回 %1").arg(gotLock ? "有效句柄" : "INVALID"));
+
+        if (gotLock) {
+            // 前提校验：确认普通读取此刻真的失败（否则后面的断言等于没测）
+            QFile probe(f);
+            const bool canOpenNormally =
+                probe.open(QIODevice::ReadOnly | QIODevice::Text);
+            if (canOpenNormally) probe.close();
+            chk("⑤.5 前提成立：独占期间普通 open 确实失败", !canOpenNormally,
+                QStringLiteral("普通 open %1").arg(canOpenNormally ? "成功了(独占无效)" : "被拒(符合预期)"));
+
+            const P3ReadResult r = readJsonlDirWithDiag(tmp.path(), sub);
+            chk("⑤.5 文件被独占 → Unreadable（不是「还没有记录」）",
+                r.status == P3ReadResult::Unreadable,
+                QStringLiteral("status=%1 skipped=%2 readable=%3")
+                    .arg(int(r.status)).arg(r.skippedFiles).arg(r.readableFiles));
+            chk("⑤.5 跳过的文件数被数出来（1 个）", r.skippedFiles == 1,
+                QStringLiteral("skipped=%1").arg(r.skippedFiles));
+            chk("⑤.5 Unreadable 给出人话原因与影响",
+                !r.reason.isEmpty() && !r.impact.isEmpty(),
+                QStringLiteral("reason=%1...").arg(r.reason.left(18)));
+            // 影响文案必须告诉用户"记录还在"，否则他会以为数据丢了
+            chk("⑤.5 影响文案明确说记录还在磁盘上",
+                r.impact.contains(QStringLiteral("磁盘")) || r.impact.contains(QStringLiteral("还在")),
+                r.impact.left(30));
+
+            closeExclusive(hold);
+            // 释放后必须能正常读回 —— 证明前一条 Unreadable 是"占用"造成而非数据坏了
+            const P3ReadResult after = readJsonlDirWithDiag(tmp.path(), sub);
+            chk("⑤.5 释放句柄后恢复 Ok 且读回 2 条（证明数据完好）",
+                after.status == P3ReadResult::Ok && after.records.size() == 2,
+                QStringLiteral("status=%1 size=%2").arg(int(after.status)).arg(after.records.size()));
+        }
+#else
+        qInfo().noquote() << "SKIP 场景 ⑤.5（非 Windows 平台，独占语义不同）";
+#endif
     }
 
     // ══════════ 场景 ⑥：host 为空 → Missing（环境故障，不是"没数据"）══════

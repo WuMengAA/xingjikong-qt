@@ -505,6 +505,15 @@ QtObject {
         // 2026-10-31 新增：自检汇总行 + 记录页的汇总与行（组件显示雏形批次）
         check(hasText(QStringLiteral("共 3 项 · 通过 2 · 需处理 1")),
               QStringLiteral("自检页有汇总行（C++ 口径）"));
+        // 2026-10-31 接 AppStatTile：统计块的两个数字必须真的上屏。
+        // 查的是数字（"2"/"1"）+ 标签（"通过"/"需处理"）确实存在；存在性够用，
+        // 因为数值不是 0/1 边界值 —— 若绑定错位（比如两个 tile 拿同一个属性），
+        // "2" 与 "1" 就不会同时出现。
+        check(hasText(QStringLiteral("通过")) && hasText(QStringLiteral("需处理")),
+              QStringLiteral("自检页统计块两个标签上屏"));
+        check(ui.selfCheckPassCount() == 2 && ui.selfCheckFailCount() == 1,
+              QStringLiteral("统计数字由 C++ 算出（2 通过 / 1 需处理）"));
+        check(ui.selfCheckHasItems(), QStringLiteral("有检测项时统计块应显示"));
         check(hasText(QStringLiteral("共 3 天 · 5830 条采样")),
               QStringLiteral("记录页噪音汇总上屏"));
         check(hasText(QStringLiteral("1240 次 · 均值 46.2 dB · 峰值 88.4 dB")),

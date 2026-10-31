@@ -55,6 +55,13 @@ public:
     Q_PROPERTY(QString      selfCheckSummaryText READ selfCheckSummaryText NOTIFY infoChanged)
     /** 是否**全部**通过。空列表时为 false（"没检测过"不等于"通过"）。 */
     Q_PROPERTY(bool         selfCheckAllOk       READ selfCheckAllOk       NOTIFY infoChanged)
+    // 自检页统计块（2026-10-31 接 AppStatTile）：QML 只画数字，不做减法/计数。
+    // 为什么不让 QML 写 `items.length - passCount`：QML 数数违反 §10.9，
+    // 且"什么算通过"的口径只该由 C++ 定义一次（有多个来源会漂移）。
+    Q_PROPERTY(int          selfCheckPassCount   READ selfCheckPassCount   NOTIFY infoChanged)
+    Q_PROPERTY(int          selfCheckFailCount   READ selfCheckFailCount   NOTIFY infoChanged)
+    /** 有没有跑过检测（决定统计块整块显不显示；0 项时显示 0/0 会让人误解成"全过"）。 */
+    Q_PROPERTY(bool         selfCheckHasItems    READ selfCheckHasItems    NOTIFY infoChanged)
 
     // ══ 插件市场 / 内置模块 ═══════════════════════════════════════════════
     Q_PROPERTY(QVariantList plugins READ plugins NOTIFY infoChanged)
@@ -90,6 +97,10 @@ public:
     QVariantList selfCheckItems() const       { return m_selfCheckItems; }
     QString      selfCheckSummaryText() const { return m_selfCheckSummaryText; }
     bool         selfCheckAllOk() const       { return m_selfCheckAllOk; }
+    // 统计块：数字在上一次 applySelfCheckItems 时算好，getter 只读成员（不重复遍历）
+    int          selfCheckPassCount() const   { return m_selfCheckPassCount; }
+    int          selfCheckFailCount() const   { return m_selfCheckFailCount; }
+    bool         selfCheckHasItems() const    { return !m_selfCheckItems.isEmpty(); }
     QVariantList plugins() const              { return m_plugins; }
     QVariantList modules() const              { return m_modules; }
     QString      noiseLogText() const         { return m_noiseLogText; }
@@ -176,6 +187,10 @@ public:
         for (const QVariant &v : items) {
             if (v.toMap().value(QStringLiteral("ok")).toBool()) ++pass;
         }
+        // 存成成员而不是在 getter 里现算：统计块与汇总文案必须**同一次遍历**的结论，
+        // 各算一遍一旦口径改动就会文案说"通过 3"而数字块显示"通过 2"。
+        m_selfCheckPassCount = pass;
+        m_selfCheckFailCount = items.size() - pass;
         m_selfCheckAllOk = (!items.isEmpty() && pass == items.size());
         m_selfCheckSummaryText = QStringLiteral("共 %1 项 · 通过 %2 · 需处理 %3")
                                      .arg(items.size()).arg(pass).arg(items.size() - pass);
@@ -230,6 +245,8 @@ private:
     // 2026-10-31：自检汇总 + 记录页结构化行（都由 C++ 算好，QML 零统计）
     QString m_selfCheckSummaryText;
     bool    m_selfCheckAllOk = false;
+    int     m_selfCheckPassCount = 0;
+    int     m_selfCheckFailCount = 0;
     QString m_noiseSummaryText, m_studySummaryText;
     QVariantList m_noiseRecords, m_studyRecords;
     // 读取失败原因/影响（空 = 没失败）。上屏由 QML 直接绑，不做判断。

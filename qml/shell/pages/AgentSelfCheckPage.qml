@@ -59,7 +59,38 @@ Item {
                                   + "否则管理端不能正常管控这台设备。"
                     }
 
-                    // 汇总：数量直接由 C++ 给（QML 不数数）
+                    // 统计块（2026-10-31 接 AppStatTile）：把"通过 3 · 需处理 1"从一句话
+                    // 拆成两个能一眼扫到的数字。数字由 C++ 给，QML 不做减法。
+                    // 隐藏条件用 selfCheckHasItems：没检测过时显示 0/0 会被读成"全部通过"。
+                    // ⚠️ 两个 tile 用 preferredWidth 而不是 fillWidth：fillWidth 会让每块各占
+                    // 一半宽度、数字孤零零浮在左侧（实测截图确认）；这里给固定宽度 + 尾部
+                    // 弹簧，让它们紧凑排在左边，与上方标题同一视觉起点。
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        spacing: 12
+                        visible: agentUi.selfCheckHasItems
+
+                        AppStatTile {
+                            Layout.preferredWidth: 132
+                            value: agentUi.selfCheckPassCount
+                            unit: "项"
+                            label: "通过"
+                            emphasized: agentUi.selfCheckAllOk
+                        }
+                        AppStatTile {
+                            Layout.preferredWidth: 132
+                            value: agentUi.selfCheckFailCount
+                            unit: "项"
+                            label: "需处理"
+                            emphasized: agentUi.selfCheckFailCount > 0
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    // 汇总行：与统计块**并存**，不是重复。
+                    // 统计块给"通过几项/需处理几项"，这行给**总数与口径**（"共 N 项"）。
+                    // 少了"共 N 项"，只看到 2 和 1 的人不知道分母是 3 还是 4。
                     Text {
                         Layout.fillWidth: true
                         visible: agentUi.selfCheckItems.length > 0
