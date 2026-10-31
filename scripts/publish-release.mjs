@@ -246,6 +246,14 @@ async function cmdCheck() {
 			bad++;
 			continue;
 		}
+		const isLocal = /\/assets\//.test(String(e.url).split('?')[0]);
+		if (!isLocal) {
+			// 外部托管（如 gh.245959623.xyz 代理 / CDN）：云端不持有文件，
+			// 本地当然查不到 —— 这类 url 由 assetHealthCheck / 发布后资产自验负责
+			// （直接 HEAD 资产 URL 核验可达性），这里不再按「本地缺文件」误报 ✗。
+			log(`${tag} ✓ v${e.version}  ${humanSize(Number(e.size))}  sha256 一致（外部托管，跳过本地校验）`);
+			continue;
+		}
 		const p = pkgPathFromUrl(e.url);
 		if (!p) {
 			log(`${tag} ✗ url 无法解析：${e.url}`);
