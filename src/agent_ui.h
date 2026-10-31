@@ -610,9 +610,9 @@ public:
         w->setWindowState((w->windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
     }
 
-    // QML 热重载（改 QML 免重编重启）；实现在 agent_shell_reload.cpp
-    bool reloadQml();
-    void enableQmlAutoReload();
+    bool reloadQml();              // 以下三个实现均在 agent_shell_reload.cpp
+    void enableQmlAutoReload();    // 开发期：改 QML 自动重画（STE_QML_RELOAD=1）
+    void registerIconProvider();   // 面板图标 provider（漏注册 = 图标全空白且不报错）
 
     /** VoiceHub 联动模块（2026-10-17 #329）注入：设置页直接引用 `voicehub`
      *  上下文属性（与 agentUi 同一口径）。AgentShell 是**懒创建**（托盘点开才
@@ -680,6 +680,7 @@ private:
         // ⚠️ Qt 6.12 的枚举只有 SizeViewToRootObject / SizeRootObjectToView
         //    （没有 SizeRootObjectToQML —— 首编即抓）；与岛同款用 ToView。
         setResizeMode(QQuickWidget::SizeRootObjectToView);
+        registerIconProvider();   // ⚠️ 必须在 setSource 之前：否则首次加载图标就解析失败
         engine()->rootContext()->setContextProperty(QStringLiteral("agentUi"), &m_ui);
         // VoiceHub 模块（#329）：main.cpp 注册后调 setVoicehub；懒创建保证这里拿得到。
         if (s_voicehub)
@@ -698,8 +699,7 @@ private:
             for (const QQmlError &e : errors())
                 qWarning("[agent-shell] QML ERROR: %s", qPrintable(e.toString()));
         });
-        // 开发期热重载（STE_QML_RELOAD=1）：改 QML 自动重画。用环境变量而非菜单项——
-        // main.cpp 卡 4443 行台账，加菜单要多 2 行会破门禁。
+        // 开发期热重载（STE_QML_RELOAD=1）；用 env 而非菜单：main.cpp 卡 4443 行台账。
         if (qEnvironmentVariableIsSet("STE_QML_RELOAD")) enableQmlAutoReload();
     }
 

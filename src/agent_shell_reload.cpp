@@ -20,6 +20,8 @@
 #include <QQmlEngine>
 #include <QTimer>
 
+#include "svgiconprovider.h"   // 图标 provider（与 island 同一份实现）
+
 bool AgentShell::reloadQml()
 {
     if (!engine()) {
@@ -90,4 +92,24 @@ void AgentShell::enableQmlAutoReload()
     });
 
     qInfo("[agent-shell] QML 自动热重载已启用：改 build/qml 下文件会自动重画");
+}
+
+// ── SVG 图标 provider（2026-10-31 修 · 面板图标全空白的根因）──────────────
+//
+// 现象：开发实例打开控制面板，日志刷几十行
+//   `QML SvgIcon: Invalid image provider: image://svgicon/hourglass?color=...`
+//   底部导航、设置页侧栏的图标**全部空白**，但界面其余部分正常。
+//
+// 根因：`svgicon` 只在 island.cpp:288 注册给了**灵动岛自己的 engine**。
+//   QQuickWidget 各自持有独立 engine，AgentShell（控制面板）是另一个 QWidget，
+//   它的 engine 从未注册该 provider ⇒ 所有 image://svgicon/... 一律解析失败。
+//   island.cpp 那行上方的注释其实早就写明过这个坑（"挂错了图标全空白且不报错"），
+//   只是新增 AgentShell 时没照做。
+//
+// 注意：必须在 setSource() **之前**注册，否则首次加载就已经解析失败。
+void AgentShell::registerIconProvider()
+{
+    if (!engine()) return;
+    // addImageProvider 对同名重复注册是"替换"语义，重载后再次调用安全。
+    engine()->addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider);
 }
