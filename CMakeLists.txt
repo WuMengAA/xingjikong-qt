@@ -295,6 +295,10 @@ add_executable(stelarith-agent-qt
   #   buildStudyLogText；dataRoot() 复用 p3_log（#6a），openFolder 与 main 侧共用。
   src/p3log/p3_reader.cpp
   src/p3log/p3_reader.h
+  # ── P3 记录页结构化视图（2026-10-31：按天/按次汇总成"两列行"，给 QML 画）──
+  #   与 p3_reader 分家：reader 管"怎么读"，record_view 管"读出来给界面什么形状"。
+  src/p3log/p3_record_view.cpp
+  src/p3log/p3_record_view.h
   # ── 远控会话收口 + 泄漏看门狗（2026-10-30 main 拆分：#8 迁出）──
   #   stopRemoteControlSession/reapRemoteControlIfStale/saveVncAccessLocally(+vncAccessPath)；
   #   远控会话状态全局（g_currentFps/g_vncSessionStartMs/g_lastVncDownMs/g_vncMegaDone）

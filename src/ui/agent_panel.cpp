@@ -23,6 +23,7 @@
 #include "../ota/ota_state.h"     // otaPaused/otaLoadState（升级状态快照）
 #include "../ota/channel_persistence.h" // channelFilePath/persistChannel（更新渠道）
 #include "../p3log/p3_reader.h"   // buildNoiseLogText/buildStudyLogText/openFolder
+#include "../p3log/p3_record_view.h" // buildNoiseRecordView/buildStudyRecordView（记录页行）
 #include "../winlauncher.h"       // stelarithHideChildConsole（插件解压静默）
 #include "../plugin/pluginhost.h" // PluginHost（g_pluginHost 类型）
 
@@ -139,8 +140,7 @@ static QVariantList buildPluginList()
     return out;
 }
 
-// 记录文本（照 openNoiseLogDialog / openStudyLogDialog 的生成口径）
-// buildNoiseLogText / buildStudyLogText 已迁至 src/p3log/p3_reader.cpp（#6b）。
+// 记录文本与记录行（照 openNoiseLogDialog 口径）：文本在 p3_reader（#6b），按天/按次的行在 p3_record_view（10-31）。
 
 void agentUiFill(AgentUi *ui)
 {
@@ -207,11 +207,13 @@ void agentUiFill(AgentUi *ui)
     ui->m_desktopShortcut = agentDesktopShortcutExists();
 
     // ── A-3 第二批：自检 / 插件 / 记录 / 播放时段 ──
-    ui->m_selfCheckItems = buildSelfCheckItems();
+    ui->applySelfCheckItems(buildSelfCheckItems());
     ui->m_plugins        = buildPluginList();
     ui->m_modules        = ModuleHost::instance()->snapshot().toVariantList();
-    ui->m_noiseLogText   = buildNoiseLogText();
-    ui->m_studyLogText   = buildStudyLogText();
+    // 2026-10-31：记录页从「一段等宽文本」改为「汇总 + 按天/按次的行」；
+    // 汇总与行都在 C++ 算好（QML 零统计），口径复用同一批 jsonl。
+    ui->applyNoiseLogView(buildNoiseLogText(), buildNoiseRecordView());
+    ui->applyStudyLogView(buildStudyLogText(), buildStudyRecordView());
     ui->m_playScheduleEnabled = AgentSettings::playScheduleEnabled();
     ui->m_playWindowsText     = AgentSettings::playWindows().join(QStringLiteral("\n"));
     {

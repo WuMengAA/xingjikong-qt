@@ -69,11 +69,20 @@ class AgentUi : public QObject
     Q_PROPERTY(bool    otaPausedNow READ otaPausedNow  NOTIFY infoChanged)
     // ── A-3 第二批：自检 / 插件市场 / 记录 / 播放时段 ──
     Q_PROPERTY(QVariantList selfCheckItems READ selfCheckItems NOTIFY infoChanged)
+    // 自检汇总（2026-10-31）：QML 只上屏，不数数（"通过 N · 待处理 M"由 C++ 算）。
+    Q_PROPERTY(QString      selfCheckSummaryText READ selfCheckSummaryText NOTIFY infoChanged)
+    Q_PROPERTY(bool         selfCheckAllOk       READ selfCheckAllOk       NOTIFY infoChanged)
     Q_PROPERTY(QVariantList plugins        READ plugins        NOTIFY infoChanged)
     // ── 内置模块层（2026-10-16「模块化插件」）：编译进 agent 的官方模块，可启停不可卸载 ──
     Q_PROPERTY(QVariantList modules        READ modules        NOTIFY infoChanged)
     Q_PROPERTY(QString      noiseLogText   READ noiseLogText   NOTIFY infoChanged)
     Q_PROPERTY(QString      studyLogText   READ studyLogText   NOTIFY infoChanged)
+    // 记录页结构化视图（2026-10-31）：summary = 顶部一句话，records = 每行 {label, value}。
+    // 保留上面两个 *LogText 属性：托盘侧的历史纯文本口径仍在用，不在此批删除。
+    Q_PROPERTY(QString      noiseSummaryText READ noiseSummaryText NOTIFY infoChanged)
+    Q_PROPERTY(QVariantList noiseRecords     READ noiseRecords     NOTIFY infoChanged)
+    Q_PROPERTY(QString      studySummaryText READ studySummaryText NOTIFY infoChanged)
+    Q_PROPERTY(QVariantList studyRecords     READ studyRecords     NOTIFY infoChanged)
     Q_PROPERTY(bool         playScheduleEnabled READ playScheduleEnabled WRITE setPlayScheduleEnabled NOTIFY infoChanged)
     Q_PROPERTY(QString      playWindowsText     READ playWindowsText     WRITE setPlayWindowsText     NOTIFY infoChanged)
     Q_PROPERTY(QString      playStateText       READ playStateText       NOTIFY infoChanged)
@@ -212,10 +221,16 @@ public:
     QString updateChannel() const { return m_updateChannel; }
     QString channelNoteText() const { return m_channelNoteText; }
     QVariantList selfCheckItems() const { return m_selfCheckItems; }
+    QString selfCheckSummaryText() const { return m_selfCheckSummaryText; }
+    bool selfCheckAllOk() const { return m_selfCheckAllOk; }
     QVariantList plugins() const { return m_plugins; }
     QVariantList modules() const { return m_modules; }
     QString noiseLogText() const { return m_noiseLogText; }
     QString studyLogText() const { return m_studyLogText; }
+    QString noiseSummaryText() const { return m_noiseSummaryText; }
+    QVariantList noiseRecords() const { return m_noiseRecords; }
+    QString studySummaryText() const { return m_studySummaryText; }
+    QVariantList studyRecords() const { return m_studyRecords; }
     bool playScheduleEnabled() const { return m_playScheduleEnabled; }
     QString playWindowsText() const { return m_playWindowsText; }
     QString playStateText() const { return m_playStateText; }
@@ -342,6 +357,37 @@ public:
         m_storageTotalText  = total;
         m_storageHintText   = hint;
     }
+    // ── 2026-10-31：记录页/自检页的「读数 → 上屏形状」一次性入口 ──────────
+    // 为什么放这里而不是让 agent_panel.cpp 自己拼成员：
+    //   ① 汇总/计数属"展示状态"，跟着 AgentUi 走最自然（QML 侧仍只有只读属性）；
+    //   ② agent_panel.cpp 已 660+ 行（红线 600），接线处只该留一行调用，
+    //      不该为了 3 个成员的赋值再长 18 行。
+    // 入参形状见 src/p3log/p3_record_view.h：{ summary, rows:[{label,value}] }。
+    void applyNoiseLogView(const QString &text, const QVariantMap &view)
+    {
+        m_noiseLogText     = text;
+        m_noiseSummaryText = view.value(QStringLiteral("summary")).toString();
+        m_noiseRecords     = view.value(QStringLiteral("rows")).toList();
+    }
+    void applyStudyLogView(const QString &text, const QVariantMap &view)
+    {
+        m_studyLogText     = text;
+        m_studySummaryText = view.value(QStringLiteral("summary")).toString();
+        m_studyRecords     = view.value(QStringLiteral("rows")).toList();
+    }
+    /** 自检四项 + 汇总（百分比/计数一律在此算，QML 不数数）。 */
+    void applySelfCheckItems(const QVariantList &items)
+    {
+        m_selfCheckItems = items;
+        int pass = 0;
+        for (const QVariant &v : items) {
+            if (v.toMap().value(QStringLiteral("ok")).toBool()) ++pass;
+        }
+        m_selfCheckAllOk = (!items.isEmpty() && pass == items.size());
+        m_selfCheckSummaryText = QStringLiteral("共 %1 项 · 通过 %2 · 需处理 %3")
+                                     .arg(items.size()).arg(pass).arg(items.size() - pass);
+    }
+
     QString resetScopeText() const
     {
         return QStringLiteral("会删掉云端地址与令牌、时间/时段/自动化配置（相当于回到「未配置」，"
@@ -447,6 +493,11 @@ private:
     // ── A-3 第二批 ──
     QVariantList m_selfCheckItems, m_plugins, m_modules;
     QString m_noiseLogText, m_studyLogText, m_playWindowsText, m_playStateText;
+    // 2026-10-31：自检汇总 + 记录页结构化行（都由 C++ 算好，QML 零统计）
+    QString m_selfCheckSummaryText;
+    bool    m_selfCheckAllOk = false;
+    QString m_noiseSummaryText, m_studySummaryText;
+    QVariantList m_noiseRecords, m_studyRecords;
     bool m_playScheduleEnabled = false;
     // 2026-10-28 B4：更新渠道快照 + 说明（fill 时从 main.cpp 的 g_channel / channel.txt 重读）
     QString m_updateChannel = QStringLiteral("stable");
