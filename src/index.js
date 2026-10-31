@@ -67,6 +67,64 @@ function asciiHeaderName(name) {
 }
 
 /**
+ * HTTP Range 头解析（RFC 7233 子集 · 2026-10-31 抽为单一真源）。
+ *
+ * 为什么抽出来：这张逻辑原先**只存在于录制回放一处**（/api/recordings/*，10-26 为
+ * 视频 seek 加的）。OTA 的 /assets/ 分支当时没人动，于是：端侧 0.6.51 上了 Range
+ * 断点续传（control-qt b8f701c），云端却对同样的 Range 请求回 200 全量 ——
+ * 实测 `curl -r 1000000- <ota.exe>` 拿到 38919698B（整个包），续传等于没做。
+ * 两份实现并存还必然漂移（一处修了另一处不修），所以合并到这里。
+ *
+ * ⚠️ Range 是**外部可控输入**，必须严格正则 + 双向钳制；畸形/越界一律降级 200 全量
+ *    （宁可多传，不可崩或读越界）。
+ *
+ * @param {string} rawHeader  req.headers.range 原值
+ * @param {number} size       文件总字节数
+ * @returns {{start:number,end:number,partial:boolean,unsatisfiable:boolean}}
+ *   partial=true  → 调用方回 206 + content-range
+ *   unsatisfiable → 起点越过文件尾，回 416（必须带 content-range: bytes *\/size）
+ *   partial=false 且 !unsatisfiable → 回 200 全量
+ */
+function parseByteRange(rawHeader, size) {
+  const hdr = String(rawHeader || '').trim();
+  let start = 0;
+  let end = size - 1;
+  let partial = false;
+  const rm = /^bytes=(\d*)-(\d*)$/.exec(hdr);
+  if (rm) {
+    if (rm[1] === '' && rm[2] !== '') {
+      // bytes=-N：最后 N 字节（播放器探尾部 moov 时常用）
+      const n = Number(rm[2]);
+      if (Number.isFinite(n) && n > 0) {
+        start = Math.max(0, size - n);
+        end = size - 1;
+        partial = true;
+      }
+    } else {
+      const s = Number(rm[1]);
+      const hasEnd = rm[2] !== '';
+      const e = hasEnd ? Number(rm[2]) : size - 1;
+      // ⚠️ 这里刻意**不**要求 s <= e：越界起点（s >= size）必须先置 partial，
+      //    才能走到 416 分支。若在此挡掉，越界 Range 会降级成 200 全量 ——
+      //    客户端算错偏移本该收到 416，却被塞回整个文件（几十 MB 白传）。
+      //    只有**显式**反向区间（bytes=900-100，end 真比 start 小）才是语义无效，
+      //    按 RFC 7233 忽略 Range 降级 200 —— 那时 start 一定 < size，不误伤 416。
+      if (Number.isFinite(s) && Number.isFinite(e) && s >= 0) {
+        if (hasEnd && e < s) {
+          partial = false;
+        } else {
+          start = s;
+          end = Math.min(e, size - 1);
+          partial = true;
+        }
+      }
+    }
+  }
+  const unsatisfiable = partial && start >= size;
+  return { start, end, partial, unsatisfiable };
+}
+
+/**
  * 版本号比较已统一到 ota.js 的 cmpVersion（2026-10-08）：本文件不再保留本地副本。
  * 曾有一份本地 split('.') 实现（不认 alpha/rc），与 ota.js 导入的同名函数在本模块
  * 作用域内重复声明 → SyntaxError，云端进程启动即崩（10-08 重启 8788 实测）。
@@ -480,37 +538,12 @@ const server = http.createServer((req, res) => {
     // 加 206 后：播放器按需取字节段，seek 退化成一次带 Range 的小请求。
     // ⚠️ 安全：Range 是**外部可控输入**，必须严格正则解析 + 双向钳制；
     //    畸形/越界一律降级为 200 全量（宁可多传，不可崩或读越界）。
-    const rangeHdr = (req.headers.range || '').trim();
-    let start = 0;
-    let end = st.size - 1;
-    let partial = false;
-    const rm = /^bytes=(\d*)-(\d*)$/.exec(rangeHdr);
-    if (rm) {
-      if (rm[1] === '' && rm[2] !== '') {
-        // bytes=-N：最后 N 字节（播放器探尾部 moov 时常用）
-        const n = Number(rm[2]);
-        if (Number.isFinite(n) && n > 0) { start = Math.max(0, st.size - n); end = st.size - 1; partial = true; }
-      } else {
-        const s = Number(rm[1]);
-        const hasEnd = rm[2] !== '';
-        const e = hasEnd ? Number(rm[2]) : st.size - 1;
-        // ⚠️ 这里刻意**不**要求 s <= e：
-        //   越界起点（s >= size）必须先置 partial，才能走到下面的 416 分支。
-        //   若在此挡掉，越界 Range 会降级成 200 全量 —— 播放器一旦算错偏移，
-        //   本该报错却被塞回整个文件（几十 MB 白传），与"省流量"正好相反。
-        //   只有**显式**反向区间（bytes=900-100，end 真的比 start 小）才是语义无效，
-        //   按 RFC 7233 忽略 Range 降级 200 —— 那时 start 一定 < size，不会误伤 416。
-        if (Number.isFinite(s) && Number.isFinite(e) && s >= 0) {
-          if (hasEnd && e < s) {
-            partial = false;                       // 显式反向区间 → 无效，降级 200
-          } else {
-            start = s; end = Math.min(e, st.size - 1); partial = true;
-          }
-        }
-      }
-    }
+    // 2026-10-31：解析逻辑已抽到 parseByteRange()（单一真源，/assets/ 那一侧共用）。
+    // 这里只保留"怎么回"的三态分支，不再重复一份解析 —— 两份实现必然漂移。
+    const { start, end, partial, unsatisfiable: rangeUnsatisfiable } =
+      parseByteRange(req.headers.range, st.size);
     // 起点越过文件尾 ⇒ 416（RFC 7233），必须带 Content-Range: bytes */size
-    if (partial && start >= st.size) {
+    if (rangeUnsatisfiable) {
       res.writeHead(416, { ...recHead, 'content-range': `bytes */${st.size}`, 'accept-ranges': 'bytes' });
       return res.end();
     }
@@ -540,16 +573,34 @@ const server = http.createServer((req, res) => {
     //    ERR_INVALID_CHAR 并**终止整个进程**（2026-10-05 实测：一次下载把云端打挂了，
     //    教室机全掉线，要等看门狗 5 分钟才拉回来）。所以头里的名字一律 ASCII 化。
     const fname = asciiHeaderName(file.split(/[\\/]/).pop());
-    res.writeHead(200, {
+    const assetHead = {
       'content-type': file.endsWith('.ps1') ? 'text/plain; charset=utf-8' :
                       file.endsWith('.json') ? 'application/json; charset=utf-8' :
                       file.endsWith('.txt') || file.endsWith('.sha256') ? 'text/plain; charset=utf-8' :
                       'application/octet-stream',
-      'content-length': st.size,
       // 装机 bat 每次都该拿到最新的脚本（改了云端脚本要立刻在教室机生效）
       'cache-control': 'no-store',
       'content-disposition': `attachment; filename="${fname}"`,
-    });
+      'accept-ranges': 'bytes',
+    };
+    // ── HTTP Range / 206（2026-10-31 · OTA 断点续传闭环）────────────────────
+    // 实测发现：不加这段时，端侧 0.6.51 的 Range 续传对着 /assets/ 发请求，
+    // 云端回 200 全量 —— 弱网教室机一断就从头拉 37MB，续传形同虚设。
+    // 复用录制回放同款 parseByteRange（单一真源，避免两处逻辑漂移）。
+    const ar = parseByteRange(req.headers.range, st.size);
+    if (ar.unsatisfiable) {
+      res.writeHead(416, { ...assetHead, 'content-range': `bytes */${st.size}` });
+      return res.end();
+    }
+    if (ar.partial) {
+      res.writeHead(206, {
+        ...assetHead,
+        'content-length': ar.end - ar.start + 1,
+        'content-range': `bytes ${ar.start}-${ar.end}/${st.size}`,
+      });
+      return createReadStream(file, { start: ar.start, end: ar.end }).pipe(res);
+    }
+    res.writeHead(200, { ...assetHead, 'content-length': st.size });
     return createReadStream(file).pipe(res);
   }
 
