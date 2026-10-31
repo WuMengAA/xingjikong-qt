@@ -68,10 +68,16 @@ Item {
             if (!_didActive) return       // 没接管过（在控件上拖）⇒ 不切面
             _didActive = false
             if (!root._expanded) return
-            if (Math.abs(lastDx) < 56) return                    // 手抖不算切面
-            if (Math.abs(lastDx) < Math.abs(lastDy) * 1.4) return // 纵向为主，放行
+            if (Math.abs(lastDx) < 28) return                    // 2026-11-01：「有位移就切」阈值 56→28
+            if (Math.abs(lastDx) < Math.abs(lastDy) * 1.2) return // 纵向为主才放行（1.4→1.2 更宽容）
             root.faceStep(lastDx < 0 ? 1 : -1)                    // 左滑 = 下一个面
         }
+    }
+
+    // 2026-11-01：交互活动上报（hover 移动即算一次操作）—— 重置「无操作 5s 自动收起」计时。
+    //   鼠标先移到控件再点/拖，hover point 必变 ⇒ 单靠它就能覆盖鼠标的绝大多数操作。
+    HoverHandler {
+        onPointChanged: if (root.bridgeRef && root.bridgeRef.notifyActivity) root.bridgeRef.notifyActivity()
     }
 
     // ⚠️⚠️ 属性名**不能**叫 bridge！
