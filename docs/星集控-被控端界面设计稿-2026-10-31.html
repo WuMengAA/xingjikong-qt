@@ -8,12 +8,12 @@
   :root{
     /* ── 色彩：中性深色（被控端不用品牌紫）── */
     --bg:#08080A;        /* stage 外底 */
-    --screen:#0B0B0D;    /* 页面底 Theme.color.background */
-    --surface:#17171B;   /* 卡底 Theme.color.surface */
-    --surface2:#202025;  /* 次级容器 surfaceVariant */
-    --surface3:#2A2A31;  /* 输入/轨道 */
-    --fg:#F4F4F7;        /* textPrimary */
-    --muted:#A0A0AA;     /* textSecondary */
+    --screen:#09090B;    /* 页面底 = Theme.color.background(dark) */
+    --surface:#18181B;   /* 卡底 = Theme.color.surface(dark) */
+    --surface2:#27272A;  /* 次级容器 = Theme.color.surfaceVariant(dark) */
+    --surface3:#2A2A31;  /* 输入/轨道（令牌无此项，稿内自定）*/
+    --fg:#FAFAFA;        /* 主文字 = Theme.color.textPrimary(dark) */
+    --muted:#A1A1AA;     /* 次文字 = Theme.color.textSecondary(dark) */
     --dim:#6E6E78;
     --ok:#4ADE80;
     --warn:#FBBF24;
@@ -38,7 +38,7 @@
   .nav a{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;
          color:var(--muted);text-decoration:none;font-size:12.5px;cursor:pointer;
          transition:background .15s,color .15s}
-  .nav a:hover{background:#17171B;color:var(--fg)}
+  .nav a:hover{background:#18181B;color:var(--fg)}
   .nav a.on{background:#1A1A1F;color:var(--fg);font-weight:700;position:relative}
   .nav a.on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;
        border-radius:2px;background:var(--fg)}
@@ -78,12 +78,12 @@
        display:inline-flex;align-items:center;justify-content:center;gap:6px;
        transition:filter .15s,transform .08s}
   .btn:active{transform:scale(.97)}
-  .btn.solid{background:var(--fg);color:#0B0B0D}
+  .btn.solid{background:var(--fg);color:#09090B}
   .btn.solid:hover{filter:brightness(.92)}
   .btn.secondary{background:#26262C;color:var(--fg)}
   .btn.secondary:hover{background:#2E2E35}
   .btn.ghost{background:transparent;color:var(--muted)}
-  .btn.ghost:hover{background:#202025;color:var(--fg)}
+  .btn.ghost:hover{background:#27272A;color:var(--fg)}
   .btn.danger{background:var(--bad);color:#1A0B0B}
   .btn.sm{height:30px;padding:0 12px;font-size:12px;border-radius:8px}
   .btn[disabled]{opacity:.4;cursor:not-allowed}
@@ -92,7 +92,7 @@
   .chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;
         border-radius:var(--r-full);background:#31313B;color:#C9C9D2;
         font-size:11.5px;font-weight:400;white-space:nowrap}
-  /* ⚠️ 药丸底必须比所在卡亮一档：在 muted 卡(#202025) 上与 #26262C 几乎同色 ⇒ 看着像没有底 */
+  /* ⚠️ 药丸底必须比所在卡亮一档：在 muted 卡(#27272A) 上与 #26262C 几乎同色 ⇒ 看着像没有底 */
   .chip.ok{background:rgba(74,222,128,.18);color:var(--ok)}
   .chip.warn{background:rgba(251,191,36,.18);color:var(--warn)}
   .chip.bad{background:rgba(248,113,113,.18);color:var(--bad)}
@@ -128,7 +128,7 @@
   .pin{display:flex;gap:8px;margin:0 0 12px}
   .pin span{flex:1;height:46px;background:var(--surface3);border-radius:10px;
       display:flex;align-items:center;justify-content:center;
-      font:600 17px/1 "Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+      font:700 17px/1 "Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
   .pin span.empty{background:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.09)}
   .pin .caret{width:1.5px;height:18px;background:var(--fg);animation:blink 1.1s step-end infinite}
   @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
@@ -174,7 +174,7 @@
   .stat{background:var(--surface2);border-radius:var(--r-md);padding:12px 14px}
   .stat .n{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:0}
   .stat .l{font-size:11px;color:var(--dim);margin-top:3px}
-  .stat .u{font-size:11px;color:var(--muted);font-weight:400;margin-left:3px}
+  .stat .u{font-size:12px;color:var(--muted);font-weight:400;margin-left:3px}
 
   /* ── 时间轴（时段页核心）── */
   .tl{position:relative;background:var(--surface3);border-radius:var(--r-md);
@@ -182,13 +182,13 @@
   .tl .grid{position:absolute;inset:0}
   .tl .grid span{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.05)}
   .tl .seg{position:absolute;top:14px;height:34px;border-radius:var(--r-sm);
-      background:var(--fg);color:#0B0B0D;font:700 11.5px/1 "Segoe UI",sans-serif;
+      background:var(--fg);color:#09090B;font:700 12px/1 "Segoe UI",sans-serif;
       display:flex;align-items:center;justify-content:center;letter-spacing:0;
       box-shadow:0 4px 14px rgba(0,0,0,.35);cursor:grab}
   .tl .seg.off{background:#3A3A43;color:var(--muted);box-shadow:none}
   .tl .seg .h{position:absolute;width:3px;height:14px;border-radius:2px;background:rgba(0,0,0,.25)}
   .tlx{display:flex;justify-content:space-between;padding:6px 1px 0;
-       font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+       font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
 
   /* ── 广播社：周条 + 排期 ── */
   .week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
@@ -198,7 +198,7 @@
   .day .w{font-size:10.5px;color:var(--dim)}
   .day .d{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:1px}
   .day .n{font-size:10px;color:var(--dim);margin-top:2px;height:13px}
-  .day.on{background:var(--fg);color:#0B0B0D}
+  .day.on{background:var(--fg);color:#09090B}
   .day.on .w,.day.on .n{color:rgba(11,11,13,.55)}
   .slot{display:grid;grid-template-columns:64px 1fr;gap:14px;align-items:stretch;
         padding:9px 0}
@@ -242,7 +242,7 @@
   .principle{display:flex;gap:12px;padding:12px 0;box-shadow:inset 0 -1px 0 rgba(255,255,255,.04)}
   .principle:last-child{box-shadow:none}
   .principle .no{width:22px;flex:0 0 22px;height:22px;border-radius:7px;background:var(--surface3);
-        font:600 11px/22px "Segoe UI",sans-serif;text-align:center;color:var(--muted)}
+        font:700 12px/22px "Segoe UI",sans-serif;text-align:center;color:var(--muted)}
   .principle b{display:block;font-size:13px;font-weight:700}
   .principle em{font-style:normal;display:block;font-size:12px;color:var(--muted);margin-top:2px;
         line-height:1.7}
@@ -250,7 +250,7 @@
   .bad-good .box{border-radius:var(--r-md);padding:14px}
   .bad-good .box.no{background:rgba(248,113,113,.06)}
   .bad-good .box.yes{background:rgba(74,222,128,.06)}
-  .bad-good .lab{font-size:10.5px;font-weight:700;letter-spacing:0;margin-bottom:9px}
+  .bad-good .lab{font-size:12px;font-weight:700;letter-spacing:0;margin-bottom:9px}
   .bad-good .box.no .lab{color:var(--bad)}
   .bad-good .box.yes .lab{color:var(--ok)}
   .mono{font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;line-height:1.8;
@@ -276,7 +276,7 @@
      ③ 汉字笔画密度高，10–11px 已糊成一团 ⇒ 最小 12px；弱化信息靠"提亮"而不是"缩小"
         （原 #6E6E78 在卡片底仅 3.54:1，正文尺寸不达 WCAG AA）。
      另：中文不加字距（letter-spacing 会让汉字散架），行宽收到 40em 以内（约 34 汉字）。 */
-  :root{--dim:#8A8A94}          /* 3.54:1 → 5.22:1，达 AA */
+  :root{--dim:#9595A0}          /* 3.51:1 → 卡片 5.98 / 次级容器 5.02，两处均过 AA */
   body{font-size:14px;line-height:1.8;line-break:strict;word-break:normal;
        overflow-wrap:break-word}
   h1,h2,h3,h4,.brand,.ph h2,.phead h1{letter-spacing:0}
@@ -288,7 +288,7 @@
   .ct .sub{font-size:12.5px}
   .nav .brand{font-weight:700}
   .nav .brand span{font-size:12px}
-  .nav .grp{font-size:11.5px;letter-spacing:0}
+  .nav .grp{font-size:12px;letter-spacing:0}
   .nav a{font-size:13px}
   .btn{font-weight:700;letter-spacing:0}
   .chip{font-size:12.5px;font-weight:400}
@@ -319,7 +319,7 @@
   .kv,.sp{font-size:12.5px}
   .gate p{font-size:12.5px;line-height:1.85;max-width:26em;margin-left:auto;margin-right:auto}
   .field{font-size:13px}
-  .scale .meta{font-size:11.5px}
+  .scale .meta{font-size:12px}
 
   /* ── 中文排版专页的图 ── */
   .ruler{display:flex;flex-direction:column;gap:2px}
@@ -336,7 +336,7 @@
 
   .lh{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
   .lh .b{background:var(--surface2);border-radius:10px;padding:12px 14px}
-  .lh .b .tag{font:700 11.5px/1 "Segoe UI",sans-serif;color:var(--dim);margin-bottom:8px;
+  .lh .b .tag{font:700 12px/1 "Segoe UI",sans-serif;color:var(--dim);margin-bottom:8px;
               display:block;font-variant-numeric:tabular-nums}
   .lh .b p{margin:0;font-size:12.5px;color:var(--muted)}
   .lh .b.ok{background:rgba(74,222,128,.07)}
@@ -344,16 +344,16 @@
 
   .wt div{display:flex;align-items:baseline;gap:16px;padding:8px 0;
           box-shadow:inset 0 -1px 0 rgba(255,255,255,.04)}
-  .wt .w{width:96px;flex:0 0 96px;font:700 11.5px/1 "Segoe UI",sans-serif;color:var(--dim);
+  .wt .w{width:96px;flex:0 0 96px;font:700 12px/1 "Segoe UI",sans-serif;color:var(--dim);
          font-variant-numeric:tabular-nums;padding-top:2px}
   .wt .s{flex:1;font-size:14px}
-  .wt .j{font-size:11.5px;flex:0 0 92px;text-align:right}
+  .wt .j{font-size:12px;flex:0 0 92px;text-align:right}
   .wt .j.no{color:var(--bad)}
   .wt .j.yes{color:var(--ok)}
 
   .mix{display:grid;gap:10px}
   .mix .line{background:var(--surface2);border-radius:10px;padding:11px 14px;font-size:13.5px}
-  .mix .lab{font-size:11.5px;font-weight:700;margin-bottom:5px;letter-spacing:0}
+  .mix .lab{font-size:12px;font-weight:700;margin-bottom:5px;letter-spacing:0}
   .mix .no .lab{color:var(--bad)}
   .mix .yes .lab{color:var(--ok)}
   .mix .no{background:rgba(248,113,113,.06)}
@@ -373,7 +373,7 @@
 
   .widths{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .widths .w{background:var(--surface2);border-radius:10px;padding:14px}
-  .widths .w .lab{font-size:11.5px;font-weight:700;margin-bottom:8px}
+  .widths .w .lab{font-size:12px;font-weight:700;margin-bottom:8px}
   .widths .w.bad .lab{color:var(--warn)} .widths .w.good .lab{color:var(--ok)}
   .widths p{margin:0;font-size:13px;color:var(--muted);line-height:1.9}
   .widths .narrow{max-width:24em}
@@ -382,7 +382,7 @@
   .wbar{display:grid;grid-template-columns:118px 1fr 86px;gap:12px;align-items:center;
         padding:8px 0}
   .wbar .nm{font-size:13px}
-  .wbar .nm small{display:block;font-size:11.5px;color:var(--dim);margin-top:1px}
+  .wbar .nm small{display:block;font-size:12px;color:var(--dim);margin-top:1px}
   .wbar .tk{position:relative;height:16px;border-radius:8px;background:var(--surface3);
             overflow:hidden}
   .wbar .z{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.35)}
@@ -392,11 +392,14 @@
   .wbar .v.neg{color:var(--ok)}
 
   /* ── 记录页图表（纯 CSS）：柱状图 / 时长横条 ── */
-  .ch{display:grid;grid-template-columns:56px 1fr;gap:10px}
-  .ch-y{display:flex;flex-direction:column;justify-content:space-between;text-align:right;
+  /* 两列 × 两行：左列 y 轴只跨第 1 行（柱区），第 2 行留给 x 轴日期。
+     否则 .ch-y 的 space-between 会被日期行撑开，「0」跑到日期行上、与基线错位。 */
+  .ch{display:grid;grid-template-columns:56px 1fr;grid-template-rows:190px auto;gap:0 10px}
+  .ch-y{grid-column:1;grid-row:1;display:flex;flex-direction:column;
+        justify-content:space-between;text-align:right;
         font:400 12px/1 "Segoe UI",sans-serif;color:var(--dim);
-        font-variant-numeric:tabular-nums;padding:0 0 1px}
-  .ch-plot{position:relative;height:190px}
+        font-variant-numeric:tabular-nums}
+  .ch-plot{grid-column:2;grid-row:1;position:relative;height:190px}
   .ch-grid{position:absolute;left:0;right:0;height:1px;background:rgba(255,255,255,.05)}
   .ch-cols{position:relative;display:grid;grid-template-columns:repeat(3,1fr);
            gap:26px;height:100%;padding:0 10px}
@@ -409,11 +412,12 @@
   .ch-in{position:absolute;left:0;right:0;bottom:10px;text-align:center;
          font:700 12.5px/1.15 "Segoe UI",sans-serif;color:var(--fg);
          font-variant-numeric:tabular-nums}
-  .ch-in small{display:block;margin-top:3px;font-size:11.5px;font-weight:400;
+  .ch-in small{display:block;margin-top:3px;font-size:12px;font-weight:400;
                color:var(--muted);font-family:"Segoe UI","Microsoft YaHei",sans-serif}
-  .ch-in.dark{color:#0B0B0D}
+  .ch-in.dark{color:#09090B}
   .ch-in.dark small{color:rgba(11,11,13,.66)}
-  .ch-x{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;padding:8px 10px 0;
+  .ch-x{grid-column:2;grid-row:2;display:grid;grid-template-columns:repeat(3,1fr);
+        gap:26px;padding:8px 10px 0;
         text-align:center;font-size:12px;color:var(--muted)}
   .ch-x b{font-weight:400;color:var(--fg)}
   .ch-note{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;
@@ -491,12 +495,12 @@
       <div class="card">
         <div class="ct"><h3>色彩</h3><span class="sub">三级底色 + 三档文字 + 三档语义</span></div>
         <div class="swatches">
-          <div class="swatch" style="background:#0B0B0D;color:#B4B4BE">页面</div>
-          <div class="swatch" style="background:#17171B;color:#B4B4BE">卡片</div>
-          <div class="swatch" style="background:#202025;color:#B4B4BE">次级容器</div>
+          <div class="swatch" style="background:#09090B;color:#B4B4BE">页面</div>
+          <div class="swatch" style="background:#18181B;color:#B4B4BE">卡片</div>
+          <div class="swatch" style="background:#27272A;color:#B4B4BE">次级容器</div>
           <div class="swatch" style="background:#2A2A31;color:#B4B4BE">输入 / 轨道</div>
-          <div class="swatch" style="background:#F4F4F7;color:#0B0B0D">主文字 / 主按钮</div>
-          <div class="swatch" style="background:#A0A0AA;color:#0B0B0D">次文字</div>
+          <div class="swatch" style="background:#FAFAFA;color:#09090B">主文字 / 主按钮</div>
+          <div class="swatch" style="background:#A1A1AA;color:#09090B">次文字</div>
           <div class="swatch" style="background:#4ADE80;color:#08210F">成功</div>
           <div class="swatch" style="background:#FBBF24;color:#231A02">警告</div>
         </div>
@@ -511,8 +515,8 @@
         <div class="scale">
           <div><span class="meta">21 / 700 页面标题</span><span style="font-size:21px;font-weight:700">记录</span></div>
           <div><span class="meta">14 / 700 卡标题</span><span style="font-size:14px;font-weight:700">噪音记录</span></div>
-          <div><span class="meta">13 / 400 正文</span><span style="font-size:13px">共 3 天 · 5830 条采样</span></div>
-          <div><span class="meta">12 / 400 辅助</span><span style="font-size:12px;color:#A0A0AA">开启后每次采样都会记到这里</span></div>
+          <div><span class="meta">13 / 400 正文</span><span style="font-size:13px">共 3 天 · 5,830 条采样</span></div>
+          <div><span class="meta">12 / 400 辅助</span><span style="font-size:12px;color:#A1A1AA">开启后每次采样都会记到这里</span></div>
         </div>
         <div style="margin-top:10px">
           <div class="sp"><span style="width:44px">4</span><div class="bar" style="width:4px"></div><span>图标与文字之间</span></div>
@@ -532,7 +536,7 @@
 可跨午夜如 22:00-07:00）：
 
 08:00-11:30
-14:00-17:00</div>
+12:00-18:00</div>
           <div class="todo" style="color:#8A5C5C">错一次不会报错，只会「保存后没生效」。</div>
         </div>
         <div class="box yes">
@@ -540,7 +544,7 @@
           <div class="tl" style="height:64px">
             <div class="grid"><span style="left:16.6%"></span><span style="left:33.3%"></span><span style="left:50%"></span><span style="left:66.6%"></span><span style="left:83.3%"></span></div>
             <div class="seg" style="left:33.3%;width:14.6%">08:00–11:30</div>
-            <div class="seg" style="left:58.3%;width:12.5%">14:00–17:00</div>
+            <div class="seg" style="left:50%;width:25%">12:00–18:00</div>
           </div>
           <div class="tlx" style="padding-bottom:2px"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
           <div class="todo" style="color:#4F7A5C">滑块两端即时间，跨午夜自动拆两段。</div>
@@ -571,7 +575,7 @@
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px">
           <button class="btn solid sm">小号</button>
           <button class="btn secondary sm">小号次级</button>
-          <span style="font-size:11px;color:var(--dim)">sm = 30px，用于行内动作</span>
+          <span style="font-size:12px;color:var(--dim)">sm = 30px，用于行内动作</span>
         </div>
         <div class="note">
           一屏最多 <b>一个 solid</b>。危险色按钮只在二次确认里出现，且必须配「取消」在左。
@@ -628,7 +632,7 @@
             <p>开启「噪音监测」或「自习模式」后，每次采样都会记到这里，并按天汇总。</p>
             <button class="btn secondary sm">打开记录文件夹</button>
           </div>
-          <div style="text-align:center;padding:0 0 12px;font-size:10.5px;color:var(--dim)">AppEmptyState · 说清为什么空、怎么不空</div>
+          <div style="text-align:center;padding:0 0 12px;font-size:12px;color:var(--dim)">AppEmptyState · 说清为什么空、怎么不空</div>
         </div>
 
         <div class="card muted">
@@ -640,7 +644,7 @@
             <div class="sk" style="width:84%"></div>
             <div class="sk" style="width:46%"></div>
           </div>
-          <div style="text-align:center;font-size:10.5px;color:var(--dim)">AppSkeleton · 先给形状，再给内容</div>
+          <div style="text-align:center;font-size:12px;color:var(--dim)">AppSkeleton · 先给形状，再给内容</div>
         </div>
 
         <div class="card muted">
@@ -650,7 +654,7 @@
             <div><h4>拉取失败</h4><p>云端没有响应（超时 8 秒）。本机已装的插件仍可用。</p></div>
             <div class="rt"><button class="btn secondary sm">重试</button></div>
           </div>
-          <div class="note" style="margin-top:10px;font-size:11px;background:transparent;padding:0">
+          <div class="note" style="margin-top:10px;font-size:12px;background:transparent;padding:0">
             错误态三件事：<b>说原因、说影响、给动作</b>。只说「失败了」等于没说。
           </div>
         </div>
@@ -791,9 +795,11 @@
       <div class="ct"><h3>图七 · 对比度实测</h3><span class="sub">WCAG 公式现算，白线 = AA 门槛 4.5:1</span></div>
       <div id="cbar-wrap"></div>
       <div class="note">
-        结论：<b>主文字与语义色全部 AAA</b>，次文字 6.9:1 达 AA；
-        唯一不过的是<b>弱文字 #6E6E78（3.54:1）</b>——上一版拿它写表头与脚注。
-        已提到 #8A8A94（5.22:1）。深色底上"看起来还行"的低对比文字，投影仪上会直接消失。
+        结论：<b>主文字 16.97:1</b>，警告 10.61、成功 10.17 —— 这三项达 AAA；
+        药丸文字 6.91、次文字 6.91、危险色 6.40 是 <b>AA 但不是 AAA</b>（AAA 需 7:1）。
+        唯一不过线的是<b>弱文字 #6E6E78（3.51:1）</b>——上一版拿它写表头与脚注。
+        已提到 #9595A0：卡片底 5.98:1、次级容器底 5.02:1，两处都过 AA。
+        深色底上"看起来还行"的低对比文字，投影仪上会直接消失。
       </div>
     </div>
   </div>
@@ -830,8 +836,7 @@
 
       <div class="ch">
         <div class="ch-y"><span>3,000</span><span>2,000</span><span>1,000</span><span>0</span></div>
-        <div>
-          <div class="ch-plot">
+        <div class="ch-plot">
             <div class="ch-grid" style="bottom:0"></div>
             <div class="ch-grid" style="bottom:33.3%"></div>
             <div class="ch-grid" style="bottom:66.6%"></div>
@@ -851,11 +856,10 @@
               </div>
             </div>
           </div>
-          <div class="ch-x">
-            <span><b>10-29</b><br>1,980 次</span>
-            <span><b>10-30</b><br>2,610 次</span>
-            <span><b>10-31 今天</b><br>1,240 次</span>
-          </div>
+        <div class="ch-x">
+          <span><b>10-29</b><br>1,980 次</span>
+          <span><b>10-30</b><br>2,610 次</span>
+          <span><b>10-31 今天</b><br>1,240 次</span>
         </div>
       </div>
 
@@ -870,7 +874,7 @@
         <span class="r"><button class="btn ghost sm">打开文件夹</button></span></div>
 
       <div class="ch-hrow">
-        <span class="ch-hk">10-31 14:05</span>
+        <span class="ch-hk">10-31 08:35</span>
         <div class="ch-htrack"><div class="ch-hfill warn" style="width:100%"></div></div>
         <div class="ch-hv">42 分 10 秒<span class="chip warn">异常 3 次</span></div>
       </div>
@@ -891,7 +895,8 @@
         <div style="flex:1">
           <div style="font-size:13px;font-weight:700">没有更多了</div>
           <div style="font-size:12px;color:var(--dim);margin-top:3px;max-width:44em">
-            记录只保留最近 30 天，更早的已按策略清理。要长期留存，请备份整个数据目录。</div>
+            本页最多画 30 行（<code>kMaxRows</code>），更早的记录不删、只是不出现在这里；
+            超出时顶部会写明「只显示最近 N 条」。要长期留存，备份整个数据目录即可。</div>
         </div>
         <button class="btn secondary sm">立即备份</button>
       </div>
@@ -1001,21 +1006,22 @@
           <span style="left:83.3%"></span><span style="left:91.6%"></span>
         </div>
         <div class="seg" style="left:33.3%;width:14.6%"><span>08:00 – 11:30</span></div>
-        <div class="seg" style="left:58.3%;width:12.5%"><span>14:00 – 17:00</span></div>
-        <div class="seg off" style="left:91.6%;width:8.4%"><span>22:00+</span></div>
+        <div class="seg" style="left:50%;width:25%"><span>12:00 – 18:00</span></div>
       </div>
       <div class="tlx"><span>00</span><span>03</span><span>06</span><span>09</span><span>12</span>
         <span>15</span><span>18</span><span>21</span><span>24</span></div>
 
       <div class="stats" style="grid-template-columns:repeat(3,1fr);margin-top:14px">
-        <div class="stat"><div class="n">6.5<span class="u">小时</span></div><div class="l">今天允许播放</div></div>
-        <div class="stat"><div class="n">17.5<span class="u">小时</span></div><div class="l">静默</div></div>
+        <div class="stat"><div class="n">9.5<span class="u">小时</span></div><div class="l">今天允许播放</div></div>
+        <div class="stat"><div class="n">14.5<span class="u">小时</span></div><div class="l">静默</div></div>
         <div class="stat"><div class="n" style="color:#FBBF24">12<span class="u">分</span></div><div class="l">距下次静默</div></div>
       </div>
 
       <div class="note">
-        <b>第三段是灰的</b>：22:00–24:00 与「夜间默认静默」冲突，保存时会被拒绝并高亮。
-        冲突必须<b>在编辑现场</b>提示，而不是保存后弹一个「保存失败」。
+        时间只能落在 <b>00:00–23:59</b>：<code>QTime::fromString("24:00")</code> 返回无效值，
+        而 <code>MediaSession::isPlayAllowedNow()</code> 对无效端点直接 <code>continue</code>
+        —— 整条窗口被<b>静默跳过</b>，表现为「保存成功但没生效」。
+        所以越界必须在<b>拖动时</b>就挡住，不能等保存后弹「保存失败」。
       </div>
     </div>
 
@@ -1047,7 +1053,7 @@
     <div class="grid2">
       <div class="card" style="cursor:pointer">
         <div style="display:flex;gap:14px;align-items:flex-start">
-          <div style="width:40px;height:40px;border-radius:11px;background:var(--fg);color:#0B0B0D;
+          <div style="width:40px;height:40px;border-radius:11px;background:var(--fg);color:#09090B;
                display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;flex:0 0 40px">▶</div>
           <div style="flex:1">
             <div style="font-size:15px;font-weight:700">打开广播社</div>
@@ -1065,7 +1071,7 @@
           <div style="flex:1">
             <div style="font-size:15px;font-weight:700">播放时段</div>
             <div style="font-size:12px;color:var(--muted);margin-top:3px;line-height:1.65">
-              今天 08:00–11:30、14:00–17:00 允许播放，其余时段静默。</div>
+              今天 08:00–11:30、12:00–18:00 允许播放，其余时段静默。</div>
           </div>
           <div style="color:var(--dim);font-size:18px;line-height:1">›</div>
         </div>
@@ -1073,12 +1079,12 @@
     </div>
 
     <div class="card" style="margin-top:12px">
-      <div class="ct"><h3>今日排期</h3><span class="sub">10-31 周五 · 3 条</span>
+      <div class="ct"><h3>今日排期</h3><span class="sub">10-31 周六 · 3 条</span>
         <span class="r" style="display:flex;gap:6px">
           <span class="chip">全部</span><span class="chip ok">已播</span><span class="chip warn">待播</span>
         </span></div>
 
-      <div class="slot"><div class="tm">07:55</div>
+      <div class="slot"><div class="tm">08:05</div>
         <div class="bx"><div class="m"><b>早间新闻与天气</b><span>广播社 · 5 分钟 · 全站</span></div>
           <span class="chip ok"><i class="dot"></i>已播完</span></div></div>
       <div class="slot"><div class="tm">12:10</div>
@@ -1113,15 +1119,13 @@
 
     <div class="gate">
       <div class="mark">◍</div>
-      <h3>输入广播社口令</h3>
-      <p>口令由管理员在「班级管理」里生成，6 位。<br>不记得了？找管理员重置，不影响正在播的节目。</p>
-      <div class="pin">
-        <span>8</span><span>4</span><span>2</span><span>9</span><span>1</span>
-        <span class="empty"><i class="caret"></i></span>
-      </div>
-      <button class="btn solid">进入广播社</button>
-      <div style="font-size:11px;color:var(--dim);margin-top:12px">
-        口令只验证「你能排哪个站的节目」，不改变这台设备的用途。</div>
+      <h3>登录广播社</h3>
+      <p>用广播社账号（用户名 + 密码）登录。<br>不记得了？找管理员重置，不影响正在播的节目。</p>
+      <div class="field">用户名</div>
+      <div class="field">密码</div>
+      <button class="btn solid">登录</button>
+      <div style="font-size:12px;color:var(--dim);margin-top:12px">
+        账号只决定「你能排哪个站的节目」，不改变这台设备的用途。</div>
     </div>
   </div>
 
@@ -1132,19 +1136,19 @@
     </div>
 
     <div class="week">
-      <div class="day"><div class="w">周一</div><div class="d">27</div><div class="n">2 条</div></div>
-      <div class="day"><div class="w">周二</div><div class="d">28</div><div class="n">1 条</div></div>
-      <div class="day"><div class="w">周三</div><div class="d">29</div><div class="n">3 条</div></div>
-      <div class="day"><div class="w">周四</div><div class="d">30</div><div class="n">2 条</div></div>
-      <div class="day on"><div class="w">周五</div><div class="d">31</div><div class="n">3 条</div></div>
-      <div class="day"><div class="w">周六</div><div class="d">1</div><div class="n"></div></div>
-      <div class="day"><div class="w">周日</div><div class="d">2</div><div class="n"></div></div>
+      <div class="day"><div class="w">周一</div><div class="d">26</div><div class="n"></div></div>
+      <div class="day"><div class="w">周二</div><div class="d">27</div><div class="n">2 条</div></div>
+      <div class="day"><div class="w">周三</div><div class="d">28</div><div class="n">1 条</div></div>
+      <div class="day"><div class="w">周四</div><div class="d">29</div><div class="n">3 条</div></div>
+      <div class="day"><div class="w">周五</div><div class="d">30</div><div class="n">2 条</div></div>
+      <div class="day on"><div class="w">周六</div><div class="d">31</div><div class="n">3 条</div></div>
+      <div class="day"><div class="w">周日</div><div class="d">1</div><div class="n"></div></div>
     </div>
 
     <div class="card" style="margin-top:12px">
-      <div class="ct"><h3>10-31 周五</h3><span class="sub">3 条节目 · 可拖动换时间</span></div>
+      <div class="ct"><h3>10-31 周六</h3><span class="sub">3 条节目 · 可拖动换时间</span></div>
 
-      <div class="slot"><div class="tm">07:55</div>
+      <div class="slot"><div class="tm">08:05</div>
         <div class="bx"><div class="m"><b>早间新闻与天气</b><span>5 分钟 · 全站 · 王小雨</span></div>
           <span class="chip ok"><i class="dot"></i>已播</span></div></div>
       <div class="slot"><div class="tm">12:10</div>
@@ -1159,8 +1163,8 @@
 
     <div class="card muted" style="margin-top:12px">
       <div class="empty" style="padding:16px 12px 10px">
-        <h4>周六、周日没有任何排期</h4>
-        <p>周末通常不排节目。要排的话，点上面切换日期后选「新建节目」。</p>
+        <h4>周日（11-01）没有任何排期</h4>
+        <p>周末通常不排节目，今天（周六）是例外。要补排，点上面切换日期后选「新建节目」。</p>
       </div>
     </div>
   </div>
@@ -1190,15 +1194,15 @@
     <div class="card" style="margin-top:12px">
       <div class="ct"><h3>二、页面改造顺序（按收益/风险比）</h3></div>
       <div class="rows">
-        <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">1 · 记录页</span>
+        <div class="info"><span class="k" style="flex:0 0 100px;color:#FAFAFA">1 · 记录页</span>
           <span class="v" style="text-align:left;flex:1">加统计条 + 行结论色。已有 AppInfoRow，改 QML + 少量 C++（给「安静／偏吵」结论）。风险低。</span></div>
-        <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">2 · 自检页</span>
+        <div class="info"><span class="k" style="flex:0 0 100px;color:#FAFAFA">2 · 自检页</span>
           <span class="v" style="text-align:left;flex:1">加顶部结论卡（一句话 + 一个动作）+ 每行证据串。C++ 已有 4 项数据，补 statusHint 即可。</span></div>
-        <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">3 · 时段页</span>
+        <div class="info"><span class="k" style="flex:0 0 100px;color:#FAFAFA">3 · 时段页</span>
           <span class="v" style="text-align:left;flex:1">时间轴是<b>新组件</b>（AppTimeRange）：拖动 + 冲突高亮。C++ 侧解析口径不变，只是不再让用户手打。工作量最大，收益也最大。</span></div>
-        <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">4 · 广播台</span>
+        <div class="info"><span class="k" style="flex:0 0 100px;color:#FAFAFA">4 · 广播台</span>
           <span class="v" style="text-align:left;flex:1">两个入口从自绘矩形换 AppCard + 图标 + 说明；排期空态换 AppEmptyState。纯 QML。</span></div>
-        <div class="info"><span class="k" style="flex:0 0 100px;color:#F4F4F7">5 · 广播社</span>
+        <div class="info"><span class="k" style="flex:0 0 100px;color:#FAFAFA">5 · 广播社</span>
           <span class="v" style="text-align:left;flex:1">489 行整体重写（登录门 + 周条 + 排期）。建议拆 3 件：<code>ClubGate</code> / <code>ClubWeek</code> / <code>ClubSchedule</code>，各自 ≤150 行。</span></div>
       </div>
     </div>
@@ -1216,7 +1220,7 @@
       <div class="ct"><h3>三、本稿没做的</h3></div>
       <div class="rows">
         <div class="info" style="align-items:flex-start"><span class="k" style="flex:0 0 100px">设置页</span>
-          <span class="v" style="text-align:left;flex:1">10 个分片 703 行，已经是最"完整"的一页，设计收益最低。只提一条：分类菜单的选中态建议从反白改成左侧 2px 条 + 文字加粗，反白块太重。</span></div>
+          <span class="v" style="text-align:left;flex:1">10 个分片 1,018 行（Sec*.qml 931 + SettingsNav 87；外层 AgentSettingsPage 另有 225 行），已经是最"完整"的一页，设计收益最低。只提一条：分类菜单的选中态建议从反白改成左侧 2px 条 + 文字加粗，反白块太重。</span></div>
         <div class="info" style="align-items:flex-start"><span class="k" style="flex:0 0 100px">插件页</span>
           <span class="v" style="text-align:left;flex:1">只差三态与标题件，已在「组件与状态」页给出样式，不单独出稿。</span></div>
         <div class="info" style="align-items:flex-start"><span class="k" style="flex:0 0 100px">灵动岛</span>
@@ -1228,7 +1232,9 @@
       <div class="ct"><h3>四、口径声明</h3></div>
       <div class="note" style="margin-top:0">
         本稿是<b>设计意图</b>，不是实现。所有色值/字号/间距都与 <code>shared-qml/ui/theme/Theme.qml</code> 的现有令牌对齐
-        （页面 #0B0B0D 近似、卡 #17171B、次级 #202025、14px 圆角、8 的倍数间距）；
+        （页面 #09090B / 卡 #18181B / 次级 #27272A / 主文字 #FAFAFA / 次文字 #A1A1AA 均为
+        <code>Theme.qml</code> 深色分支原值，圆角 14px、间距 8 的倍数同令牌）<b>——已逐值核对，
+        不再写"近似"</b>；
         新增的只有「错误态 / 骨架 / 数字卡 / 时间轴」四种形状。<br>
         稿子里出现的数字（3 天 / 5,830 条 / 91.2 dB / 42 分 10 秒 / 11:18）是演示数据，来自探针假数据，不是现场实测。
         文案里只写<b>能由这些数字直接推出</b>的结论（"峰值最高 91.2"、"今天采样最少"），不写"都超过了某阈值""是因为刚开始采样"这类数据不支持的判断 —— 图上写错一个结论，比不写更糟。
@@ -1259,14 +1265,14 @@
   // 图七：对比度实测（WCAG 2.1 相对亮度公式，2026-10-31 现算）
   (function () {
     var rows = [
-      {nm:"主文字 / 卡片底", c:"16.28", ok:1, w:16.28},
-      {nm:"主文字 / 次级容器", c:"14.78", ok:1, w:14.78},
-      {nm:"药丸文字 / 卡片底", c:"10.87", ok:1, w:10.87},
-      {nm:"警告色 / 卡片底", c:"10.71", ok:1, w:10.71},
-      {nm:"成功色 / 卡片底", c:"10.26", ok:1, w:10.26},
-      {nm:"次文字 / 卡片底", c:"6.90", ok:1, w:6.90},
-      {nm:"危险色 / 卡片底", c:"6.46", ok:1, w:6.46},
-      {nm:"弱文字(原) / 卡片底", c:"3.54", ok:0, w:3.54}
+      {nm:"主文字 / 卡片底", c:"16.97", ok:1, w:16.97},
+      {nm:"主文字 / 次级容器", c:"14.27", ok:1, w:14.27},
+      {nm:"药丸文字 / 卡片底", c:"6.91", ok:1, w:6.91},
+      {nm:"警告色 / 卡片底", c:"10.61", ok:1, w:10.61},
+      {nm:"成功色 / 卡片底", c:"10.17", ok:1, w:10.17},
+      {nm:"次文字 / 卡片底", c:"6.91", ok:1, w:6.91},
+      {nm:"危险色 / 卡片底", c:"6.40", ok:1, w:6.40},
+      {nm:"弱文字(原) / 卡片底", c:"3.51", ok:0, w:3.51}
     ];
     var MAX = 18, AA = 4.5;
     var host = document.getElementById("cbar-wrap");
