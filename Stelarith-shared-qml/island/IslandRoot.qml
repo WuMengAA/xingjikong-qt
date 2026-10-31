@@ -2807,17 +2807,28 @@ Item {
                         }
                     }
 
-                    // 松手吸附：位移 >15% 就切页（有位移就切），否则回弹；统一柔缓 OutCubic 320ms。
+                    // 松手吸附：**每次手势只切一页** —— 以手势起点页为基准，位移 >15% 才 ±1，绝不跳页。
+                    property int _dragStartPage: 0
+                    onMovementStarted: {
+                        if (width <= 0) return
+                        _dragStartPage = Math.max(0, Math.min(pageCount - 1, Math.round(contentX / width)))
+                    }
                     onMovementEnded: {
                         if (width <= 0) return
-                        const cur = contentX / width
-                        const from = Math.round(cur)
-                        const frac = cur - from
-                        let target = from
-                        if (Math.abs(frac) > 0.15) target = from + (frac > 0 ? 1 : -1)
+                        const d = contentX / width - _dragStartPage
+                        let target = _dragStartPage
+                        if (Math.abs(d) > 0.15) target = _dragStartPage + (d > 0 ? 1 : -1)
                         target = Math.max(0, Math.min(pageCount - 1, target))
                         fpSnap.to = target * width
                         fpSnap.start()
+                    }
+                    // 拖动期把位移夹在起点页 ±1 页内 —— 保证手拖也不会越过一页（视觉上不出现"滑过头再弹回"）。
+                    onContentXChanged: {
+                        if (!moving || width <= 0) return
+                        const lo = (_dragStartPage - 1) * width
+                        const hi = (_dragStartPage + 1) * width
+                        if (contentX < lo) contentX = lo
+                        else if (contentX > hi) contentX = hi
                     }
                     NumberAnimation {
                         id: fpSnap
