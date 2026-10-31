@@ -79,3 +79,9 @@ scripts/_*.mjs
 # 错误态原因/影响间距 22px 大于标题间距 10px 导致读成两段）。
 # 只入库 .cpp/.qml 而不入库驱动 = 探针不可复跑，故一并例外。
 !scripts/_ui_tiles_probe.py
+# 例外（2026-10-31）：`_agent_ui_split_probe.py` 是 agent_ui.h 拆分方式的**可行性实验**。
+# 它证明了两件事，且都是"猜错就静默失效"的类型：
+#   ① Q_PROPERTY 拆到基类后 QML 能否读到（能）；
+#   ② 基类与派生类同名 infoChanged 时，只发一个会让基类属性**不刷新**（必须双发）。
+# ②正是本批把端到端探针从 86/0 打到 84/2 的那个坑。留脚本 = 后人改 publish() 时能复跑。
+!scripts/_agent_ui_split_probe.py

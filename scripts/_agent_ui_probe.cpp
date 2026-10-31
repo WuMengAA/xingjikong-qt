@@ -211,7 +211,35 @@ void agentUiFill(AgentUi *ui)
             m.insert(QStringLiteral("fix"), i == 1 ? QStringLiteral("去修复") : QString());
             checks << m;
         }
-        ui->m_selfCheckItems = checks;
+        ui->applySelfCheckItems(checks);   // 与产品同一入口（含汇总口径）
+    }
+    // 记录页结构化行：走产品同一入口 applyNoiseLogView / applyStudyLogView
+    {
+        auto row = [](const QString &l, const QString &v) {
+            QVariantMap m;
+            m.insert(QStringLiteral("label"), l);
+            m.insert(QStringLiteral("value"), v);
+            return m;
+        };
+        QVariantList noise;
+        noise << row(QStringLiteral("2026-10-31"),
+                     QStringLiteral("1240 次 · 均值 46.2 dB · 峰值 88.4 dB"))
+              << row(QStringLiteral("2026-10-30"),
+                     QStringLiteral("2610 次 · 均值 44.8 dB · 峰值 91.2 dB"))
+              << row(QStringLiteral("2026-10-29"),
+                     QStringLiteral("1980 次 · 均值 43.1 dB · 峰值 84.6 dB"));
+        QVariantMap nv;
+        nv.insert(QStringLiteral("summary"), QStringLiteral("共 3 天 · 5830 条采样"));
+        nv.insert(QStringLiteral("rows"), noise);
+        ui->applyNoiseLogView(QString(), nv);
+
+        QVariantList study;
+        study << row(QStringLiteral("10-31 14:05"), QStringLiteral("时长 42 分 10 秒 · 异常录制 3 次"))
+              << row(QStringLiteral("10-30 08:50"), QStringLiteral("时长 25 分 0 秒 · 异常录制 0 次"));
+        QVariantMap sv;
+        sv.insert(QStringLiteral("summary"), QStringLiteral("共 2 次自习会话"));
+        sv.insert(QStringLiteral("rows"), study);
+        ui->applyStudyLogView(QString(), sv);
     }
     // 插件市场（照 buildPluginList 的形状；status 是 C++ 生成的展示串）
     {
@@ -442,6 +470,15 @@ QtObject {
         check(hasText(QStringLiteral("配置自检")), QStringLiteral("自检页渲染（卡片标题在）"));
         check(hasText(QStringLiteral("自检项2")), QStringLiteral("自检条目按模型渲染"));
         check(hasText(QStringLiteral("去修复")), QStringLiteral("失败项有「去修复」按钮"));
+        // 2026-10-31 新增：自检汇总行 + 记录页的汇总与行（组件显示雏形批次）
+        check(hasText(QStringLiteral("共 3 项 · 通过 2 · 需处理 1")),
+              QStringLiteral("自检页有汇总行（C++ 口径）"));
+        check(hasText(QStringLiteral("共 3 天 · 5830 条采样")),
+              QStringLiteral("记录页噪音汇总上屏"));
+        check(hasText(QStringLiteral("1240 次 · 均值 46.2 dB · 峰值 88.4 dB")),
+              QStringLiteral("记录页按天渲染行"));
+        check(hasText(QStringLiteral("时长 42 分 10 秒 · 异常录制 3 次")),
+              QStringLiteral("记录页按次渲染行"));
         check(hasText(QStringLiteral("播放中：午间校园广播（今天还有 2 个时段）")),
               QStringLiteral("时段页状态文案上屏"));
 
@@ -636,6 +673,40 @@ QtObject {
 
             // 排期中心（2026-10-30 改为嵌入广播台页内联面板，不再是独立浮层抽屉）：
             // 它在 broadcastconsole 页里，已被下面的广播机逐页截图（bc_00_*）覆盖，无需再单独开抽屉。
+
+            // ── 空态实物核验（2026-10-31 组件显示雏形批次）─────────────────
+            // 记录页的"没数据"分支平时拍不到（上面给的是有数据形状）。
+            // 这里把两条记录视图清空、回到记录页拍一张：证明空态件真的占位、文案在、
+            // 而不是"隐藏了整块导致卡片塌成一条线"。
+            {
+                const int ri = ids.indexOf(QStringLiteral("records"));
+                if (ri >= 0) {
+                    QVariantMap ev;
+                    ev.insert(QStringLiteral("summary"), QStringLiteral("还没有噪音记录"));
+                    ev.insert(QStringLiteral("rows"), QVariantList());
+                    ui.applyNoiseLogView(QString(), ev);
+                    QVariantMap sv2;
+                    sv2.insert(QStringLiteral("summary"), QStringLiteral("还没有自习记录"));
+                    sv2.insert(QStringLiteral("rows"), QVariantList());
+                    ui.applyStudyLogView(QString(), sv2);
+                    // ⚠️ 必须走 publish()（双发），不能只 `emit ui.infoChanged()`：
+                    // 2026-10-31 拆分第一刀后，noise/study 记录属性已搬到基类 AgentRecordUi，
+                    // 只发派生类信号时基类属性**收不到通知** ⇒ 空态永远不上屏。
+                    // 本探针实测正是这样挂掉 2 条断言（记录页空态不可见）——留此注释防回归。
+                    ui.publish();
+                    QMetaObject::invokeMethod(pageHost, "goTo", Q_ARG(QVariant, ri));
+                    QCoreApplication::processEvents();
+                    snap(QStringLiteral("records_empty"));
+                    check(hasShownText(root, QStringLiteral("还没有噪音记录")),
+                          QStringLiteral("记录页空态上屏（无数据时可见）"));
+                    check(hasShownText(root, QStringLiteral("打开记录文件夹")),
+                          QStringLiteral("记录页空态带引导按钮"));
+                    // 恢复有数据形状（后续广播机截图虽不涉记录页，仍保持一致）
+                    agentUiFill(&ui);
+                    emit ui.infoChanged();
+                    QCoreApplication::processEvents();
+                }
+            }
 
             // 用途切到广播机：页清单多一页「广播台」（首屏），这是本轮壳绑定链的验证点
             const int errBefore = g_qmlErrors.size();

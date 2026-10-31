@@ -139,6 +139,10 @@ add_executable(stelarith-agent-qt
   src/ppt_com.cpp
   src/ppt_com.h
   src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
+  src/agent_record_ui.h  # 2026-10-31 拆分第一刀：记录/自检/插件/时段的 Q_OBJECT 基类。
+                         # ⚠️ 必须显式列入（同 agent_ui.h 的理由）：AUTOMOC 对「只被别的头 include
+                         # 的头文件」解析缓存不可靠，漏列 ⇒ moc 产物不生成 ⇒ 链接期 LNK2001
+                         # （staticMetaObject / metaObject / infoChanged 全 undefined，2026-10-31 实测）。
   src/singleinstance.cpp
   src/singleinstance.h
   # ── 课表时钟模块（2026-10-06 加：上下课提醒）──

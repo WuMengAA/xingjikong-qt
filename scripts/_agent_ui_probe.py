@@ -26,6 +26,9 @@ PROBE_SRC = os.path.join(ROOT, "scripts", "_agent_ui_probe.cpp")
 # 也顺带被验到，不用在伪件里复刻一遍再漂移。
 AGENT_UI_H = os.path.join(SRC, "agent_ui.h")
 MOC_OUT = os.path.join(OUT_DIR, "_agent_ui_moc.cpp")
+# 2026-10-31 拆分第一刀：AgentUi 的基类（记录/自检/插件/时段）也要 moc，理由见 main() 内注释
+AGENT_RECORD_UI_H = os.path.join(SRC, "agent_record_ui.h")
+MOC_RECORD_OUT = os.path.join(OUT_DIR, "_agent_record_ui_moc.cpp")
 REPORT = os.path.join(OUT_DIR, "_agent_ui_probe_report.txt")
 # 2026-10-30：单张截图升级为逐屏截图（页 ×6 + 设置 7 分类 + 广播浮层 + 广播机 7 页），
 # 落 OUT_DIR/_shots/NN_<id>.png。为什么不覆盖旧图：换新核验要能左右比较。
@@ -122,9 +125,13 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
     # 1) moc（头文件输入：moc 会 #include 回头文件，生成的 TU 才自洽）
-    if run([MOC, AGENT_UI_H, "-o", MOC_OUT]) != 0:
-        print("moc 失败")
-        return 2
+    # ⚠️ 2026-10-31 拆分第一刀后必须**两个头都 moc**：AgentUi 继承 AgentRecordUi，
+    #    基类的 Q_OBJECT 产物（staticMetaObject / 信号实现）不在 agent_ui.h 的 moc 里。
+    #    只 moc 派生头 ⇒ 链接期 11 个 undefined（LNK2001/LNK2019），实测确认。
+    for hdr, out in ((AGENT_RECORD_UI_H, MOC_RECORD_OUT), (AGENT_UI_H, MOC_OUT)):
+        if run([MOC, hdr, "-o", out]) != 0:
+            print("moc 失败：" + os.path.basename(hdr))
+            return 2
 
     # 2) 编译：探针本体 + moc + qrc 图标 + SvgIconProvider（自绘，Qt only）
     qrc_cpp = build_icon_qrc()
@@ -132,7 +139,7 @@ def main():
         print("rcc 失败（resources/icons 缺失？）")
         return 2
     objs = []
-    for s in [PROBE_SRC, MOC_OUT, qrc_cpp, SRC + r"\svgiconprovider.cpp"]:
+    for s in [PROBE_SRC, MOC_OUT, MOC_RECORD_OUT, qrc_cpp, SRC + r"\svgiconprovider.cpp"]:
         o = os.path.join(OUT_DIR, os.path.basename(s) + ".obj")
         if run([CL] + FLAGS + DEFINES + INCLUDES + ["/c", "/Fo" + o, s]) != 0:
             print("编译失败：", s)
@@ -146,13 +153,9 @@ def main():
         return 2
 
     # 4) 跑（cwd=_objs：平台插件按 exe 目录/cwd 找，且报告/截图落这里）
-    if os.path.exists(REPORT):
-        os.remove(REPORT)
-    # 截图目录整目录清空（只清自己产出的 _*.png，别的探针图不动）
-    if os.path.isdir(SHOTS):
-        for fn in os.listdir(SHOTS):
-            if fn.endswith(".png"):
-                os.remove(os.path.join(SHOTS, fn))
+    # ⚠️ 2026-10-31：不再 os.remove 旧报告/旧图 —— 环境的安全删除守卫会拦 bulk delete，
+    #    整个探针就卡在这一行（runs 0 秒、报告还是上一版的）。旧报告由探针自己
+    #    WriteOnly 覆写；旧图按同名覆盖，多余的旧图留着不影响判读。
     p = subprocess.run([exe], env=env(), cwd=OUT_DIR,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     print("探针退出码:", p.returncode, "（10=全过 20=有失败 30=壳没起来）")

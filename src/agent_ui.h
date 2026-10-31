@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include "agent_record_ui.h"   // 记录/自检/插件/时段快照（2026-10-31 第一刀）
+
 #include <QObject>
 #include <QQuickWidget>
 #include <QQmlContext>
@@ -43,7 +45,7 @@
 #include <QColor>        // 2026-10-28 模块三：设置页结果属性要给 QColor（connStateColor 等）
 #include <QFont>         // 同上：分类行的字重（QFont::Medium/Normal）由 C++ 给
 
-class AgentUi : public QObject
+class AgentUi : public AgentRecordUi
 {
     Q_OBJECT
     // 信息（只读；每次打开面板 / 写完开关后整体重读）
@@ -67,25 +69,11 @@ class AgentUi : public QObject
     Q_PROPERTY(QString otaLastText  READ otaLastText   NOTIFY infoChanged)
     Q_PROPERTY(QString otaNextText  READ otaNextText   NOTIFY infoChanged)
     Q_PROPERTY(bool    otaPausedNow READ otaPausedNow  NOTIFY infoChanged)
-    // ── A-3 第二批：自检 / 插件市场 / 记录 / 播放时段 ──
-    Q_PROPERTY(QVariantList selfCheckItems READ selfCheckItems NOTIFY infoChanged)
-    // 自检汇总（2026-10-31）：QML 只上屏，不数数（"通过 N · 待处理 M"由 C++ 算）。
-    Q_PROPERTY(QString      selfCheckSummaryText READ selfCheckSummaryText NOTIFY infoChanged)
-    Q_PROPERTY(bool         selfCheckAllOk       READ selfCheckAllOk       NOTIFY infoChanged)
-    Q_PROPERTY(QVariantList plugins        READ plugins        NOTIFY infoChanged)
-    // ── 内置模块层（2026-10-16「模块化插件」）：编译进 agent 的官方模块，可启停不可卸载 ──
-    Q_PROPERTY(QVariantList modules        READ modules        NOTIFY infoChanged)
-    Q_PROPERTY(QString      noiseLogText   READ noiseLogText   NOTIFY infoChanged)
-    Q_PROPERTY(QString      studyLogText   READ studyLogText   NOTIFY infoChanged)
-    // 记录页结构化视图（2026-10-31）：summary = 顶部一句话，records = 每行 {label, value}。
-    // 保留上面两个 *LogText 属性：托盘侧的历史纯文本口径仍在用，不在此批删除。
-    Q_PROPERTY(QString      noiseSummaryText READ noiseSummaryText NOTIFY infoChanged)
-    Q_PROPERTY(QVariantList noiseRecords     READ noiseRecords     NOTIFY infoChanged)
-    Q_PROPERTY(QString      studySummaryText READ studySummaryText NOTIFY infoChanged)
-    Q_PROPERTY(QVariantList studyRecords     READ studyRecords     NOTIFY infoChanged)
-    Q_PROPERTY(bool         playScheduleEnabled READ playScheduleEnabled WRITE setPlayScheduleEnabled NOTIFY infoChanged)
-    Q_PROPERTY(QString      playWindowsText     READ playWindowsText     WRITE setPlayWindowsText     NOTIFY infoChanged)
-    Q_PROPERTY(QString      playStateText       READ playStateText       NOTIFY infoChanged)
+    // ── A-3 第二批（自检 / 插件市场 / 记录 / 播放时段）已于 2026-10-31 整块搬到
+    //    src/agent_record_ui.h 的基类 AgentRecordUi（属性/getter/slot/signal/成员齐搬）。
+    //    搬因：本头 776 行已达白名单登记值，门禁「比登记长 1 行即 error」。
+    //    该簇的属性名与语义完全不变，QML 侧零改动。
+    //    ⚠️ 新增/修改 `infoChanged` 发射点时务必看 publish() 的双发说明。
     // 开关（QML 写 → switchChanged → main.cpp 真实写 → fill 回弹）
     Q_PROPERTY(bool notifyEnabled   READ notifyEnabled   WRITE setNotifyEnabled   NOTIFY infoChanged)
     Q_PROPERTY(bool voiceEnabled    READ voiceEnabled    WRITE setVoiceEnabled    NOTIFY infoChanged)
@@ -189,7 +177,17 @@ class AgentUi : public QObject
     Q_PROPERTY(bool actionResultVisible READ actionResultVisible NOTIFY infoChanged)
 
 public:
-    explicit AgentUi(QObject *parent = nullptr) : QObject(parent) {}
+    explicit AgentUi(QObject *parent = nullptr) : AgentRecordUi(parent)
+    {
+        // 基类开关（playScheduleEnabled）的 switchChanged 转发到本类的 switchChanged，
+        // 让 main.cpp 那条唯一的接线（connect(switchChanged, ...)）对两边一视同仁。
+        // 为什么用转发而不是让基类直接 emit 本类信号：基类不认识派生类型，
+        // 且本头会被 moc 单独编成 TU（见文件头三连坑）—— 那里看不到 AgentUi 的完整声明。
+        connect(this, &AgentRecordUi::switchChanged, this,
+                [this](const QString &k, const QVariant &v) {
+                    emit switchChanged(k, v.toBool());
+                });
+    }
 
     // ── getter（纯成员；moc 的属性系统会引用它们的地址）──
     QString appVersion() const { return m_appVersion; }
@@ -220,20 +218,6 @@ public:
     bool desktopShortcut() const { return m_desktopShortcut; }
     QString updateChannel() const { return m_updateChannel; }
     QString channelNoteText() const { return m_channelNoteText; }
-    QVariantList selfCheckItems() const { return m_selfCheckItems; }
-    QString selfCheckSummaryText() const { return m_selfCheckSummaryText; }
-    bool selfCheckAllOk() const { return m_selfCheckAllOk; }
-    QVariantList plugins() const { return m_plugins; }
-    QVariantList modules() const { return m_modules; }
-    QString noiseLogText() const { return m_noiseLogText; }
-    QString studyLogText() const { return m_studyLogText; }
-    QString noiseSummaryText() const { return m_noiseSummaryText; }
-    QVariantList noiseRecords() const { return m_noiseRecords; }
-    QString studySummaryText() const { return m_studySummaryText; }
-    QVariantList studyRecords() const { return m_studyRecords; }
-    bool playScheduleEnabled() const { return m_playScheduleEnabled; }
-    QString playWindowsText() const { return m_playWindowsText; }
-    QString playStateText() const { return m_playStateText; }
 
     // ── setter（写成员 + 通知；真实持久化在 main.cpp 的 switchChanged 接收端）──
     void setNotifyEnabled(bool v)   { if (m_notifyEnabled == v) return;   m_notifyEnabled = v;   emit infoChanged(); emit switchChanged(QStringLiteral("notifyEnabled"), v); }
@@ -248,8 +232,9 @@ public:
     // main.cpp 落盘 AgentSettings 之后 fill + publish 回弹（不假勾）。
     void setSafeModeAuto(bool v) { if (m_safeModeAuto == v) return; m_safeModeAuto = v; emit infoChanged(); emit switchChanged(QStringLiteral("safeModeAuto"), v); }
     void setTimeAutoSync(bool v) { if (m_timeAutoSync == v) return; m_timeAutoSync = v; emit infoChanged(); emit switchChanged(QStringLiteral("timeAutoSync"), v); }
-    void setPlayScheduleEnabled(bool v) { if (m_playScheduleEnabled == v) return; m_playScheduleEnabled = v; emit infoChanged(); emit switchChanged(QStringLiteral("playScheduleEnabled"), v); }
-    void setPlayWindowsText(const QString &v) { if (m_playWindowsText == v) return; m_playWindowsText = v; emit infoChanged(); }
+    // ⚠️ setPlayScheduleEnabled / setPlayWindowsText 的**定义在基类 AgentRecordUi**
+    //    （2026-10-31 拆分时随属性一起搬走）。此处不能留同名重载 —— 那会遮蔽基类版本，
+    //    让 QML 写属性时走派生类这份、丢掉 switchChanged（main.cpp 因此收不到落盘请求）。
     // 渠道切换：只写成员 + 上抛请求；真实落盘/重查在 main.cpp（那里才有 g_channel 与 channel.txt）
     void setUpdateChannel(const QString &v)
     {
@@ -357,36 +342,6 @@ public:
         m_storageTotalText  = total;
         m_storageHintText   = hint;
     }
-    // ── 2026-10-31：记录页/自检页的「读数 → 上屏形状」一次性入口 ──────────
-    // 为什么放这里而不是让 agent_panel.cpp 自己拼成员：
-    //   ① 汇总/计数属"展示状态"，跟着 AgentUi 走最自然（QML 侧仍只有只读属性）；
-    //   ② agent_panel.cpp 已 660+ 行（红线 600），接线处只该留一行调用，
-    //      不该为了 3 个成员的赋值再长 18 行。
-    // 入参形状见 src/p3log/p3_record_view.h：{ summary, rows:[{label,value}] }。
-    void applyNoiseLogView(const QString &text, const QVariantMap &view)
-    {
-        m_noiseLogText     = text;
-        m_noiseSummaryText = view.value(QStringLiteral("summary")).toString();
-        m_noiseRecords     = view.value(QStringLiteral("rows")).toList();
-    }
-    void applyStudyLogView(const QString &text, const QVariantMap &view)
-    {
-        m_studyLogText     = text;
-        m_studySummaryText = view.value(QStringLiteral("summary")).toString();
-        m_studyRecords     = view.value(QStringLiteral("rows")).toList();
-    }
-    /** 自检四项 + 汇总（百分比/计数一律在此算，QML 不数数）。 */
-    void applySelfCheckItems(const QVariantList &items)
-    {
-        m_selfCheckItems = items;
-        int pass = 0;
-        for (const QVariant &v : items) {
-            if (v.toMap().value(QStringLiteral("ok")).toBool()) ++pass;
-        }
-        m_selfCheckAllOk = (!items.isEmpty() && pass == items.size());
-        m_selfCheckSummaryText = QStringLiteral("共 %1 项 · 通过 %2 · 需处理 %3")
-                                     .arg(items.size()).arg(pass).arg(items.size() - pass);
-    }
 
     QString resetScopeText() const
     {
@@ -401,8 +356,21 @@ public:
 public slots:
     /** QML/打开面板时重读快照：发请求，main.cpp 接住后 fill + publish。 */
     void refresh() { emit refreshRequested(); }
-    /** 快照已变 → 让 QML 绑定重算。 */
-    void publish() { emit infoChanged(); }
+    /**
+     * 快照已变 → 让 QML 绑定重算。
+     *
+     * ⚠️⚠️ **必须双发**（2026-10-31 拆分后新增的硬要求）：
+     * 「记录/自检/插件/播放时段」那一簇属性已搬到基类 AgentRecordUi，它声明了自己
+     * 同名的 `infoChanged`。实测（scripts/_agent_ui_split_probe.py）：
+     *   · 只 `emit infoChanged()`   → 只发 AgentUi 的信号，基类属性 QML 不刷新（静默失效）
+     *   · 两个都 emit               → 两个信号各 1 次，两侧属性都刷新
+     * 这不是理论风险：漏发的表现是"页面能打开、数据永远旧值"，编译与运行都不报错。
+     */
+    void publish()
+    {
+        emit infoChanged();                 // AgentUi 自己的属性
+        emit AgentRecordUi::infoChanged();  // 基类那一簇属性（见上）
+    }
     void openLogDir() { emit openLogDirRequested(); }
     void openDataDir() { emit openDataDirRequested(); }
     /** 打开配置目录（2026-10-28 模块三：从托盘右键菜单移植进设置页）。
@@ -410,20 +378,6 @@ public slots:
     void openConfigDir() { emit openConfigDirRequested(); }
     void upgradeNow() { emit upgradeNowRequested(); }
     void toggleOtaPause() { emit toggleOtaPauseRequested(); }
-    // ── A-3 第二批 ──
-    void runSelfCheckCheck() { emit selfCheckRequested(); }
-    void selfCheckFix() { emit selfCheckFixRequested(); }
-    void pluginsRefresh() { emit pluginsRefreshRequested(); }
-    void pluginInstall(const QString &id) { emit pluginInstallRequested(id); }
-    void pluginEnable(const QString &id, bool enable) { emit pluginEnableRequested(id, enable); }
-    void pluginUninstall(const QString &id) { emit pluginUninstallRequested(id); }
-    void pluginInstallSample() { emit pluginSampleInstallRequested(); }
-    // ── 内置模块层 ──
-    void modulesRefresh() { emit modulesRefreshRequested(); }
-    void moduleEnable(const QString &id, bool enable) { emit moduleEnableRequested(id, enable); }
-    void openNoiseFolder() { emit noiseFolderRequested(); }
-    void openStudyFolder() { emit studyFolderRequested(); }
-    void savePlaySchedule() { emit playScheduleSaveRequested(); }
 
     // ── 通用分类（2026-10-28 模块三·按蓝图原文）────────────────────────
     /** url 配置：写 agent.env + 覆盖进程环境 + 断线回调立刻重连（不等退避）。 */
@@ -450,20 +404,6 @@ signals:
     void openConfigDirRequested();
     void upgradeNowRequested();
     void toggleOtaPauseRequested();
-    // ── A-3 第二批 ──
-    void selfCheckRequested();
-    void selfCheckFixRequested();
-    void pluginsRefreshRequested();
-    void pluginInstallRequested(const QString &id);
-    void pluginEnableRequested(const QString &id, bool enable);
-    void pluginUninstallRequested(const QString &id);
-    void pluginSampleInstallRequested();
-    // ── 内置模块层 ──
-    void modulesRefreshRequested();
-    void moduleEnableRequested(const QString &id, bool enable);
-    void noiseFolderRequested();
-    void studyFolderRequested();
-    void playScheduleSaveRequested();
     /** 渠道切换请求（main.cpp 接：写 channel.txt → 重查更新 → fill+publish 回弹）。 */
     void channelChangedRequested(const QString &channel);
     /** 设置页分类变了（右侧区块可见性靠它驱动）。 */
@@ -490,15 +430,6 @@ private:
     bool m_notifyEnabled = true, m_voiceEnabled = true, m_noiseEnabled = true;
     bool m_islandIdle = true, m_lightMode = false, m_autostart = false, m_desktopShortcut = false;
     bool m_pluginIslandPush = true;   // P0-0：与 main.cpp AgentSettings::pluginIslandPush() 默认同值
-    // ── A-3 第二批 ──
-    QVariantList m_selfCheckItems, m_plugins, m_modules;
-    QString m_noiseLogText, m_studyLogText, m_playWindowsText, m_playStateText;
-    // 2026-10-31：自检汇总 + 记录页结构化行（都由 C++ 算好，QML 零统计）
-    QString m_selfCheckSummaryText;
-    bool    m_selfCheckAllOk = false;
-    QString m_noiseSummaryText, m_studySummaryText;
-    QVariantList m_noiseRecords, m_studyRecords;
-    bool m_playScheduleEnabled = false;
     // 2026-10-28 B4：更新渠道快照 + 说明（fill 时从 main.cpp 的 g_channel / channel.txt 重读）
     QString m_updateChannel = QStringLiteral("stable");
     QString m_channelNoteText;
