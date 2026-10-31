@@ -92,13 +92,19 @@ Item {
         font.weight: Font.Medium
     }
 
-    // ── 右：铃铛 + 时钟 ───────────────────────────────────
+    // ── 右：时钟 + 铃铛（2026-11-01：通知放时间右边）────────────
     Row {
         id: rightRow
         anchors.right: parent.right
         anchors.rightMargin: 14
         anchors.verticalCenter: parent.verticalCenter
         spacing: 12
+
+        IslandClock {
+            anchors.verticalCenter: parent.verticalCenter
+            theme: face.th
+            timePx: 13
+        }
 
         Item {
             width: 16
@@ -132,12 +138,6 @@ Item {
                     font.weight: Font.Medium
                 }
             }
-        }
-
-        IslandClock {
-            anchors.verticalCenter: parent.verticalCenter
-            theme: face.th
-            timePx: 13
         }
     }
 }
