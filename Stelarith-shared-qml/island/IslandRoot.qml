@@ -360,12 +360,13 @@ Item {
     //   _fpSync 防“回写 face 又触发 onFaceNowChanged 再定位”的循环。
     property bool _fpSync: false
     onFaceNowChanged: {
-        if (!fpList) return
+        if (!fpFlick || fpFlick.width <= 0) return
         const fs = root.faceModel
         let idx = 0
         for (let i = 0; i < fs.length; ++i) if (fs[i].id === root.faceNow) { idx = i; break }
         root._fpSync = true
-        fpList.currentIndex = idx
+        if (fpSnap) fpSnap.stop()
+        fpFlick.contentX = idx * fpFlick.width
         root._fpSync = false
     }
     // ── 苹果式极简（2026-10-31 · 用户点单「灵动岛要简洁」）──────────────
@@ -2751,52 +2752,92 @@ Item {
                     border.color: root.th.light ? "#E2E2E2" : "#333333"
                 }
 
-                // ── 横滑分页器（2026-11-01 · B 批）──────────────────────
-                // 5 个面从「叠放 + visible 瞬切」改为**横向 ListView 分页**：跟手拖动 + 松手吸附 +
-                //   切页滑动动画。ListView 是 QtQuick 核心（SwipeView 在门禁黑名单），且虚拟化只渲染
-                //   可见页 —— 不会 5 面同渲。第 0 页是「概」（空页）：滑到它 = faceNow 回 0 ⇒ 面板收起回概览。
-                ListView {
-                    id: fpList
+                // ── 横滑分页器（2026-11-01 · B 批 · 自建 Flickable 跟手版）──
+                // 用 Flickable + Row 而非 ListView：**跟手拖动**（内容随手指实时位移）+ 松手用
+                //   **自定义柔缓曲线**（OutCubic 320ms）吸附。ListView 的吸附缓动是 Qt 内定、改不了。
+                //   第 0 页是「概」（空页）：滑到它 = faceNow 回 0 ⇒ 面板收起回概览。
+                Flickable {
+                    id: fpFlick
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.bottom: dotRow.top
                     clip: true
-                    orientation: ListView.Horizontal
-                    snapMode: ListView.SnapOneItem
+                    flickableDirection: Flickable.HorizontalFlick
                     boundsBehavior: Flickable.StopAtBounds
-                    model: root.faceModel
-                    onCurrentIndexChanged: {
-                        if (root._fpSync) return
-                        const e = root.faceModel[currentIndex]
-                        if (e && e.id !== root.faceNow) {
-                            root._fpSync = true
-                            root.face = e.id
-                            root.faceUserPick = e.id
-                            root._fpSync = false
+                    contentWidth: fpRow.width
+                    contentHeight: height
+                    readonly property int pageCount: root.faceModel.length
+                    readonly property real pageW: width
+                    readonly property int curPage: pageW > 0
+                        ? Math.max(0, Math.min(pageCount - 1, Math.round(contentX / pageW))) : 0
+
+                    // 初次定宽/尺寸变化 → 定位到当前 face 对应页（否则从概览进来会停在空「概」页）
+                    onWidthChanged: {
+                        if (width <= 0) return
+                        const fs = root.faceModel
+                        let idx = 0
+                        for (let i = 0; i < fs.length; ++i) if (fs[i].id === root.faceNow) { idx = i; break }
+                        contentX = idx * width
+                    }
+
+                    Row {
+                        id: fpRow
+                        Repeater {
+                            model: root.faceModel
+                            delegate: Item {
+                                required property var modelData
+                                width: fpFlick.pageW
+                                height: fpFlick.height
+                                Loader {
+                                    anchors.fill: parent
+                                    anchors.margins: modelData.id === 5 ? 14 : 10
+                                    sourceComponent: {
+                                        switch (modelData.id) {
+                                        case 1: return compMedia
+                                        case 3: return compState
+                                        case 4: return compAnnotate
+                                        case 5: return compSettings
+                                        case 6: return compAutomation
+                                        }
+                                        return null
+                                    }
+                                }
+                            }
                         }
                     }
-                    delegate: Item {
-                        required property var modelData
-                        width: ListView.view.width
-                        height: ListView.view.height
-                        Loader {
-                            anchors.fill: parent
-                            anchors.margins: modelData.id === 5 ? 14 : 10
-                            sourceComponent: {
-                                switch (modelData.id) {
-                                case 1: return compMedia
-                                case 3: return compState
-                                case 4: return compAnnotate
-                                case 5: return compSettings
-                                case 6: return compAutomation
-                                }
-                                return null
+
+                    // 松手吸附：位移 >15% 就切页（有位移就切），否则回弹；统一柔缓 OutCubic 320ms。
+                    onMovementEnded: {
+                        if (width <= 0) return
+                        const cur = contentX / width
+                        const from = Math.round(cur)
+                        const frac = cur - from
+                        let target = from
+                        if (Math.abs(frac) > 0.15) target = from + (frac > 0 ? 1 : -1)
+                        target = Math.max(0, Math.min(pageCount - 1, target))
+                        fpSnap.to = target * width
+                        fpSnap.start()
+                    }
+                    NumberAnimation {
+                        id: fpSnap
+                        target: fpFlick
+                        property: "contentX"
+                        duration: 320
+                        easing.type: Easing.OutCubic
+                        onStopped: {
+                            if (root._fpSync) return
+                            const e = root.faceModel[fpFlick.curPage]
+                            if (e && e.id !== root.faceNow) {
+                                root._fpSync = true
+                                root.face = e.id
+                                root.faceUserPick = e.id
+                                root._fpSync = false
                             }
                         }
                     }
                 }
-                // 圆点指示（当前页高亮）
+                // 圆点指示（跟随拖动实时高亮）
                 Row {
                     id: dotRow
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -2807,13 +2848,13 @@ Item {
                         model: root.faceModel
                         delegate: Rectangle {
                             required property int index
-                            width: index === fpList.currentIndex ? 14 : 6
+                            width: index === fpFlick.curPage ? 14 : 6
                             height: 6
                             radius: 3
-                            color: index === fpList.currentIndex
+                            color: index === fpFlick.curPage
                                    ? (root.th ? root.th.accent : "#6750A4")
                                    : (root.th ? (root.th.light ? Qt.rgba(0, 0, 0, 0.18) : Qt.rgba(1, 1, 1, 0.22)) : "#888888")
-                            Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                            Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                         }
                     }
                 }
