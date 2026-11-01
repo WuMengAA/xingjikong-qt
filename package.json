@@ -8,8 +8,10 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "npm run test:unit",
-    "test:unit": "node tests/unit-ecodes.mjs && node tests/unit-bind-qr.mjs && node tests/unit-class-dir.mjs",
+    "test:unit": "node tests/unit-ecodes.mjs && node tests/unit-bind-qr.mjs && node tests/unit-class-dir.mjs && node tests/unit-tenant.mjs && node tests/unit-perms-tenant.mjs && node tests/unit-class-data-tenant.mjs && node tests/unit-class-room-tenant.mjs && node tests/unit-class-attendance-tenant.mjs",
     "test:class-dir": "node tests/unit-class-dir.mjs",
+    "test:tenant": "node tests/unit-tenant.mjs && node tests/unit-perms-tenant.mjs",
+    "test:perms-tenant": "node tests/unit-perms-tenant.mjs",
     "test:bind-qr": "node tests/unit-bind-qr.mjs",
     "test:udp": "node tests/unit-udp-relay.mjs",
     "test:udp-session": "node tests/regression-udp-session.mjs",
@@ -19,7 +21,10 @@
     "test:confirm": "node tests/regression-confirm-receipt.cjs 8095",
     "test:recordings": "node tests/regression-recordings.cjs 8095",
     "test:repairs": "node tests/regression-repairs.cjs 8095",
-    "test:agent-ws": "node tests/regression-agent-ticket.mjs 8095"
+    "test:agent-ws": "node tests/regression-agent-ticket.mjs 8095",
+    "test:class-data-tenant": "node tests/unit-class-data-tenant.mjs",
+    "test:class-room-tenant": "node tests/unit-class-room-tenant.mjs",
+    "test:class-attendance-tenant": "node tests/unit-class-attendance-tenant.mjs"
   },
   "dependencies": {
     "ws": "^8.22.0"

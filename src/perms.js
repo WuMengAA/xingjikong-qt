@@ -16,6 +16,18 @@
 //   · 长期静态令牌 CLOUD_VIEWER_TOKEN ⇒ **全权**（老机器/离线机房不能断），但会记审计。
 //   · claims 票显式 scopes=[] ⇒ 无任何数据权限（与「无 claims」严格区分）。
 //
+// 租户（2026-11-02 · class_id 全链路多租户）：
+//   · **云端仍然不是租户真源**。租户来自票里的 claims.tenantId（或由 schoolId 解析），
+//     看不到就落默认组织（tenant.js 的 DEFAULT_TENANT）。
+//   · 判权顺序：**先判租户，再判 scope**。租户不同直接拒 —— 只比 classCode 在多校时代
+//     会把「隔壁学校的同码班」一起放行（两校都在用站点 class_0102 这类外部码）。
+//   · 豁免只有三种：全权身份（scopes=null）/ 平台超管 / 调用方没给目标租户（无从判，向后兼容）。
+
+import { DEFAULT_TENANT, deriveTenantId, normalizeTenantId } from './tenant.js';
+
+/** 租户 id 格式（与 tenant.js 同一口径；这里是本地副本，避免为一条正则去改模块导出面）。 */
+const TENANT_ID_RE = /^tn_[a-z0-9_-]{2,32}$/;
+//
 // scope 语义（契约 §4.2）：type ∈ {class, grade, school}，id 是班级码形态
 // （class_xlzx_2028_08）；授权父节点覆盖子节点（school 覆盖所有 class_<校>_*，
 // grade 覆盖 class_<校>_<届>_*）。目标设备先归约成 classCode 再比。
@@ -25,7 +37,8 @@ export function identityFromAuth(auth) {
   if (!auth || !auth.ok) return null;
   if (auth.mode === 'token') {
     // 长期静态令牌：全权（契约 §4.4）。uid=null（匿名），审计只靠连接/时间。
-    return { uid: null, roles: [], scopes: null };
+    // 租户维度也全权：运维视角要能跨校排障，但每次都会走 tenantBypass 留痕。
+    return { uid: null, roles: [], scopes: null, tenantId: DEFAULT_TENANT, tenantBypass: true };
   }
   const claims = auth.claims ?? null;
   return {
@@ -33,7 +46,35 @@ export function identityFromAuth(auth) {
     schoolId: claims?.schoolId ?? null,
     roles: Array.isArray(claims?.roles) ? claims.roles : [],
     scopes: Array.isArray(claims?.scopes) ? claims.scopes : null,
+    // 2026-11-02 多租户：票里显式带 tenantId 就用它；只有 schoolId 就解析一次；
+    // 都没有 ⇒ 默认组织。**绝不接受客户端参数指定租户**（本函数只读票）。
+    tenantId: claimTenant(claims),
+    tenantBypass: claims?.tenantBypass === true,
   };
+}
+
+/**
+ * 票里能推出哪个租户。
+ *
+ * 顺序（从强到弱）：
+ *   ① `claims.tenantId` —— 站点已经完成租户解析时给的，最权威
+ *   ② `claims.schoolId` —— 老票只有学校 id；先看它本身是不是合法租户 id
+ *      （`tn_xxx`），是就直接用；否则当作**学校名/旧 id**，去租户表里找同 id 的记录
+ *   ③ 都没有 ⇒ 默认组织（存量数据落点）
+ *
+ * ⚠️ 这里**不创造租户**：查不到就是默认租户，绝不因为来了个陌生 schoolId 就自动建租户
+ *    （那等于谁都能自封一所学校）。
+ */
+function claimTenant(claims) {
+  if (!claims) return DEFAULT_TENANT;
+  const explicit = String(claims.tenantId ?? '').trim();
+  if (explicit) return normalizeTenantId(explicit);
+  const sid = String(claims.schoolId ?? '').trim();
+  if (sid) {
+    if (TENANT_ID_RE.test(sid)) return normalizeTenantId(sid);
+    return normalizeTenantId(deriveTenantId(sid));
+  }
+  return DEFAULT_TENANT;
 }
 
 /** 平台级超管（schoolId=null 且 roles 含 platform_admin）：跳过 scope 过滤。 */
@@ -43,12 +84,32 @@ function isPlatform(ident) {
 
 /**
  * canAccess：这个连接能不能碰「classCode 归属的设备」。
+ *
+ * ⚠️ 2026-11-02 多租户：判 classCode 之前**先判租户**。只比 classCode 在单校时代够用，
+ *    多校之后学校的「1班」与另一所学校的「1班」可能有同一个外部码（站点 class_0102 两校都在用），
+ *    只比码就等于把隔壁学校的班也放行了。租户不同 → 直接拒，不再看 scope。
+ *
  * @param {object|null} ident identityFromAuth 的结果（null = 未鉴权，一律拒）
  * @param {string|null} classCode 目标设备的班级码（registry 里没有 = null）
+ * @param {object} [opts]
+ * @param {string|null} [opts.tenantId] 目标设备/班级的租户（能拿到就一定要传）
  * @returns {boolean}
  */
-export function canAccess(ident, classCode) {
+export function canAccess(ident, classCode, opts = {}) {
   if (!ident) return false;
+
+  // ── 租户闸（先于一切 scope 判定）──────────────────────────────────
+  // 三条豁免，各自有明确理由：
+  //   ① ident.scopes === null  → 静态令牌/旧票，契约 §4.4 规定全权（含跨校）
+  //   ② isPlatform(ident)      → 平台级超管，本来就是跨校角色
+  //   ③ 目标租户未知（没传）    → 无从判起，交回原有 scope 逻辑（向后兼容，
+  //                              调用方逐步补上 tenantId 就能收紧）
+  const tgtTenant = opts.tenantId == null ? null : normalizeTenantId(opts.tenantId);
+  if (tgtTenant !== null && ident.scopes !== null && !isPlatform(ident)) {
+    const mine = normalizeTenantId(ident.tenantId);
+    if (mine !== tgtTenant) return false;   // 跨租户：一律拒，不看 scope
+  }
+
   if (ident.scopes === null) return true;              // 全权：静态令牌 / 旧票（契约 §4.4-A）
   if (isPlatform(ident)) return true;                  // 平台级超管
   if (!classCode) return false;                        // 目标设备没有班级归属 → 谁都不该碰
@@ -67,11 +128,13 @@ export function canAccess(ident, classCode) {
  * @param {object|null} ident 权限身份
  * @param {Array} devices 设备数组
  * @param {(d:any)=>string|null} [getClass] 取班级码的回调（缺省读 d.classCode）
+ * @param {(d:any)=>string|null} [getTenant] 取租户的回调（缺省读 d.tenantId；拿不到就不判租户）
  */
-export function filterDevices(ident, devices, getClass) {
+export function filterDevices(ident, devices, getClass, getTenant) {
   if (!ident || ident.scopes === null || isPlatform(ident)) return devices;
   const gc = getClass || ((d) => (d && typeof d.classCode === 'string' ? d.classCode : null));
-  return devices.filter((d) => canAccess(ident, gc(d)));
+  const gt = getTenant || ((d) => (d && typeof d.tenantId === 'string' ? d.tenantId : null));
+  return devices.filter((d) => canAccess(ident, gc(d), { tenantId: gt(d) }));
 }
 
 /**

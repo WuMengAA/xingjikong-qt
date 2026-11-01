@@ -14,7 +14,9 @@
 //   · 删班走 dropClassSubs：受影响订阅者收 class-unsubscribed，本地置未订，
 //     不假装班还在（信任底线：状态不许造假）。
 
-import { resolveClassCode, renameClass, deleteClass, getClass } from './class-dir.js';
+import {
+  resolveClassCode, renameClass, deleteClass, getClass, tenantOfClass,
+} from './class-dir.js';
 import {
   bindDeviceToClass, unbindDeviceFromClass, listClasses, notifyClassBoundIfOnline, pushEvent,
   dropClassIndex, sendToClassDevices,
@@ -42,6 +44,49 @@ import { normalizeClassIslandProfile, classIslandGroupMeta, TIMETABLE_SCHEMA } f
 // 2026-10-25：班级接入码收归我方 —— 票据系统本就在 bind-qr.js（与设备自助码同一套码表、
 // 同一套 normalizeCode/过期清理），这里只做「按班签发」这一层，不另造码表。
 import { issueClassBind, getTicket, revokeTicket } from './bind-qr.js';
+import { DEFAULT_TENANT, normalizeTenantId } from './tenant.js';
+
+/**
+ * 从鉴权身份推出「这次操作属于哪个租户」。
+ *
+ * 纪律（2026-11-02 多租户）：
+ *   · **租户只从 ident 来，绝不接受请求体参数指定** —— 客户端能指定租户，
+ *     就等于客户端能跨校，那这一整套隔离等于没做（与 perms.js §4.5 ② 同源）。
+ *   · ident 为空（未鉴权）时回默认组织；此时后面的 canRead/canManage 会先拒掉，
+ *     不会真的用这个默认值写数据。
+ *   · 显式 `opts.tenantId` 只给**服务端自己已知**的场景用（如从票里的老班级码反查），
+ *     不是给 HTTP 层传的。
+ */
+function tenantOf(ident) {
+  return normalizeTenantId(ident && ident.tenantId);
+}
+
+/**
+ * 班级 + 租户的联合查询：**多租户下 getClass 必须带租户**。
+ *
+ * 为什么包一层而不在 22 处各写一遍：漏一处就是一处跨校泄漏，而"漏不漏"在
+ * review 时看不出来。统一走这里，调 `getClass(code, tenantOf(ident))` 就够。
+ *
+ * 返回 `{hit, tn}`：hit 为 null 表示本租户内没有这个班（**包括"别校有、本校没有"**，
+ * 后者对外必须表现成"班级不存在"，否则等于告诉攻击者别校有哪些班）。
+ */
+function findClass(code, ident) {
+  const tn = tenantOf(ident);
+  return { hit: getClass(String(code ?? '').trim(), tn), tn };
+}
+
+/**
+ * 一个班级码在本租户里**不存在**时，别校是否占着同一个码。
+ *
+ * 这个函数只用于**日志与排障**，绝不回给客户端 —— 「别校有这个码」本身就是
+ * 一条跨校信息（能推出隔壁学校开了哪些班）。
+ */
+function crossTenantHint(code) {
+  const c = String(code ?? '').trim();
+  if (!c) return null;
+  const owner = tenantOfClass(c);   // 不带租户提示：唯一确定的租户才回，跨校重码回 null
+  return owner;
+}
 
 /** 读 JSON body（≤16KB，与 bind-class 同款上限）。坏 JSON → cb(null) 由调用方定夺。 */
 function readJsonBody(req, cb) {
@@ -62,10 +107,11 @@ function readJsonBody(req, cb) {
 }
 
 /** 建班：只建班级身份，不碰任何设备。已存在（同码/同名）→ 幂等返回既有班。 */
-export function adminCreateClass({ code = '', name = '' } = {}) {
-  const r = resolveClassCode({ code, name, source: 'admin' });
+export function adminCreateClass({ code = '', name = '' } = {}, ident = null) {
+  const tn = tenantOf(ident);
+  const r = resolveClassCode({ code, name, source: 'admin', tenantId: tn });
   if (!r.ok) return { ok: false, error: r.error };
-  pushEvent('info', '管理端创建班级', { classCode: r.code, className: r.name });
+  pushEvent('info', '管理端创建班级', { classCode: r.code, className: r.name, tenantId: tn });
   return { ok: true, classCode: r.code, name: r.name, aliases: r.aliases };
 }
 
@@ -78,8 +124,9 @@ export function adminCreateClass({ code = '', name = '' } = {}) {
  */
 export function adminRenameClass(code, name, ident = null) {
   const c = String(code ?? '').trim();
+  const tn = tenantOf(ident);
   if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
-  const r = renameClass(code, name);
+  const r = renameClass(code, name, tn);
   if (!r.ok) return r;
   pushEvent('info', '管理端修改班级名', { classCode: r.class.code, className: r.class.name });
   return { ok: true, classCode: r.class.code, name: r.class.name };
@@ -93,30 +140,36 @@ export function adminRenameClass(code, name, ident = null) {
  */
 export function adminDeleteClass(code, strategy = 'refuse', ident = null) {
   const c = String(code ?? '').trim();
+  const tn = tenantOf(ident);
   if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
-  const hit = getClass(c);
-  if (!hit) return { ok: false, error: '班级不存在' };
-  const devs = listClasses().find((x) => x.code === hit.code);
+  const { hit } = findClass(c, ident);
+  if (!hit) {
+    // 别校有同码班时，对外仍是"班级不存在"（不泄漏别校班级清单），只落排障日志。
+    const other = crossTenantHint(c);
+    if (other) console.warn('[class-admin] 删班命中跨租户同码班，已拒', { code: c, mine: tn, other });
+    return { ok: false, error: '班级不存在' };
+  }
+  const devs = listClasses(tn).find((x) => x.code === hit.code);
   const uidList = devs ? devs.devices : [];
   if (uidList.length > 0 && strategy !== 'release') {
     return { ok: false, error: `班内还有 ${uidList.length} 台设备，确认移出后重试（strategy=release）`, deviceCount: uidList.length };
   }
-  for (const uid of uidList) unbindDeviceFromClass(hit.code, uid);
+  for (const uid of uidList) unbindDeviceFromClass(hit.code, uid, tn);
   // 运行时索引条目也必须清：只删 class-dir 的话，listClasses 的兜底分支会把
   // 目录已删的班又吐出来（幽灵班：devices 空、source 空）。回归见
   // tests/regression-class-admin.mjs ⑩。
-  dropClassIndex(hit.code);
+  dropClassIndex(hit.code, tn);
   const dropped = dropClassSubs(hit.code);
-  const r = deleteClass(hit.code);
+  const r = deleteClass(hit.code, tn);
   if (!r.ok) return r;
   // 房间内容随班一起销毁（成员表 + 消息历史）。顺序刻意放在身份删成功**之后**：
   // 反过来先清内容再删身份，一旦身份删失败就留下"空壳但有成员"的幽灵班。
-  const ev = dropRoomEvents(r.code);
-  const mb = dropRoomMembers(r.code);
+  const ev = dropRoomEvents(r.code, tn);
+  const mb = dropRoomMembers(r.code, tn);
   // 班级数据（学生名单 + 课表）随班销毁：不留孤儿行（与身份删成功之后同序）。
-  const cd = dropClassData(r.code);
+  const cd = dropClassData(r.code, tn);
   // 考勤记录同样随班销毁（2026-10-31）：留着会成为查不到班的幽灵行。
-  const at = dropClassAttendance(r.code);
+  const at = dropClassAttendance(r.code, tn);
   pushEvent('warn', '管理端删除班级', {
     classCode: r.code, className: r.name, released: uidList.length, subsDropped: dropped,
     eventsDropped: ev.deleted, membersDropped: mb.deleted, studentsDropped: cd.students,
@@ -134,10 +187,11 @@ export function adminUnbindDevice(code, uid, ident = null) {
   const c = String(code ?? '').trim();
   const u = String(uid ?? '').trim();
   if (!c || !u) return { ok: false, error: '缺班级码或 uid' };
+  const tn = tenantOf(ident);
   if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
-  const devs = listClasses().find((x) => x.code === c);
+  const devs = listClasses(tn).find((x) => x.code === c);
   if (!devs || !devs.devices.includes(u)) return { ok: false, error: '该设备不在此班' };
-  unbindDeviceFromClass(c, u);
+  unbindDeviceFromClass(c, u, tn);
   notifyClassBoundIfOnline(u, '', '');
   pushEvent('info', '管理端将设备移出班级', { classCode: c, uid: u });
   return { ok: true, classCode: c, uid: u };
@@ -152,8 +206,9 @@ export function adminBindDevice(code, uid, name = '', ident = null) {
   const c = String(code ?? '').trim();
   const u = String(uid ?? '').trim();
   if (!c || !u) return { ok: false, error: '缺班级码或 uid' };
+  const tn = tenantOf(ident);
   if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
-  const r = bindDeviceToClass(c, u, name);
+  const r = bindDeviceToClass(c, u, name, 'cloud', tn);
   if (!r.ok) return r;
   notifyClassBoundIfOnline(u, r.classCode, r.class.name);
   pushEvent('info', '管理端将设备加入班级', { classCode: r.classCode, uid: u });
@@ -170,11 +225,19 @@ export function adminBindDevice(code, uid, name = '', ident = null) {
  *      （防"助教把自己提成 owner"的提权链：成员表是权限真源，能写它就等于能提权）。
  */
 
-/** 能否管理这个班的成员。 */
+/**
+ * 能否管理这个班的成员。
+ *
+ * 2026-11-02 多租户：`canAccess` 与 `roleOf` **都必须带目标租户**。
+ *   · canAccess 不带 tenantId ⇒ 租户闸不生效，只剩 scope 比对 ⇒ 别校同码班放行；
+ *   · roleOf 不带 tenantId ⇒ 查的是所有学校的成员表里这个班码，A 校 teacher
+ *     在 B 校同码班自动成立。两条都是权限发放，不是显示问题。
+ */
 function canManageMembers(ident, code) {
   if (!ident) return false;
-  if (canAccess(ident, code)) return true;
-  const role = ident.uid ? roleOf(code, ident.uid) : null;
+  const tn = tenantOf(ident);
+  if (canAccess(ident, code, { tenantId: tn })) return true;
+  const role = ident.uid ? roleOf(code, ident.uid, tn) : null;
   return role === 'owner' || role === 'teacher';
 }
 
@@ -188,13 +251,13 @@ export function adminAddMember(code, uid, role = 'teacher', ident = null) {
   const want = String(role ?? '').trim().toLowerCase();
   if (!c || !u) return { ok: false, error: '缺班级码或成员账号' };
   if (!CLASS_ROLES.includes(want)) return { ok: false, error: `角色不合法（可选 ${CLASS_ROLES.join('/')}）` };
-  const hit = getClass(c);
+  const { hit, tn } = findClass(c, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班成员' };
-  if (want === 'owner' && !canAccess(ident, hit.code)) {
+  if (want === 'owner' && !canAccess(ident, hit.code, { tenantId: tn })) {
     return { ok: false, error: '只有管理员可指派 owner' };
   }
-  const r = addMember(hit.code, { id: u, type: 'user', role: want, by: ident?.uid ?? 'system' });
+  const r = addMember(hit.code, { id: u, type: 'user', role: want, by: ident?.uid ?? 'system' }, tn);
   if (!r.ok) return r;
   pushEvent('info', r.added ? '管理端添加班级成员' : '管理端更新班级成员', {
     classCode: hit.code, memberUid: u, role: r.role, by: ident?.uid ?? 'system',
@@ -209,15 +272,15 @@ export function adminRemoveMember(code, uid, ident = null) {
   const c = String(code ?? '').trim();
   const u = String(uid ?? '').trim();
   if (!c || !u) return { ok: false, error: '缺班级码或成员账号' };
-  const hit = getClass(c);
+  const { hit, tn } = findClass(c, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班成员' };
-  const cur = roleOf(hit.code, u);
+  const cur = roleOf(hit.code, u, tn);
   if (!cur) return { ok: true, removed: false, classCode: hit.code, uid: u };   // 幂等
-  if (cur === 'owner' && listMembers(hit.code).filter((m) => m.role === 'owner').length <= 1) {
+  if (cur === 'owner' && listMembers(hit.code, 'user', tn).filter((m) => m.role === 'owner').length <= 1) {
     return { ok: false, error: '这是该班唯一的 owner，请先指派另一位 owner' };
   }
-  const r = removeMember(hit.code, u);
+  const r = removeMember(hit.code, u, 'user', tn);
   if (!r.ok) return r;
   pushEvent('info', '管理端移除班级成员', { classCode: hit.code, memberUid: u, by: ident?.uid ?? 'system' });
   return { ok: true, removed: r.removed, classCode: hit.code, uid: u };
@@ -230,21 +293,28 @@ export function adminRemoveMember(code, uid, ident = null) {
  *  （本班任一角色、或 scopes 覆盖、或全权/平台超管）。
  *  全权身份（静态令牌 / 无 scopes 旧票）在 canAccess 里恒真 ⇒ 运维视角不受影响。 */
 export function adminListMembers(code, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canReadClass(ident, hit.code)) return { ok: false, error: '无权限查看该班成员' };
-  return { ok: true, classCode: hit.code, name: hit.name, members: listMembers(hit.code) };
+  return { ok: true, classCode: hit.code, name: hit.name, members: listMembers(hit.code, 'user', tn) };
 }
 
-/** 我的班级（管理端启动时用它决定"默认打开哪个班"，不用全量拉目录）。 */
+/**
+ * 我的班级（管理端启动时用它决定"默认打开哪个班"，不用全量拉目录）。
+ *
+ * 2026-11-02 多租户：**只列当前租户内的班**。同一个人可能同时挂在两所学校，
+ * 但一次登录只代表一个租户身份 —— 把别校的班混进来，界面会显示成"我的班"，
+ * 点进去再被 canAccess 拒，等于自造一条错误路径。
+ */
 export function adminMyClasses(ident) {
   const uid = ident?.uid ? String(ident.uid) : '';
   if (!uid) return { ok: true, classes: [] };
-  const mine = classesOf(uid).map((x) => {
-    const hit = getClass(x.classCode);
+  const tn = tenantOf(ident);
+  const mine = classesOf(uid, tn).map((x) => {
+    const hit = getClass(x.classCode, tn);
     return { classCode: x.classCode, role: x.role, name: hit ? hit.name : x.classCode };
   });
-  return { ok: true, uid, classes: mine };
+  return { ok: true, uid, tenantId: tn, classes: mine };
 }
 
 /* ───────────────── 班级接入码（2026-10-25 · 收归我方管理）─────────────────
@@ -269,10 +339,10 @@ export function adminMyClasses(ident) {
 export function adminIssueBindCode(code, ident = null) {
   const c = String(code ?? '').trim();
   if (!c) return { ok: false, error: '缺班级码' };
-  const hit = getClass(c);
+  const { hit, tn } = findClass(c, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限为该班生成接入码' };
-  const issued = issueClassBind(hit.code, hit.name || '');
+  const issued = issueClassBind(hit.code, hit.name || '', tn);
   if (!issued.ok) return issued;
   const t = issued.ticket;
   pushEvent('info', '已生成班级接入码', {
@@ -299,7 +369,7 @@ export function adminRevokeBindCode(code, ident = null) {
   if (!t) return { ok: false, error: '接入码无效或已过期' };
   // 票里带着班级 ⇒ 用班级校验权限（拿不到班级的码不许人乱撤）。
   if (t.classCode) {
-    const hit = getClass(t.classCode);
+    const { hit } = findClass(t.classCode, ident);
     if (hit && !canManageMembers(ident, hit.code)) {
       return { ok: false, error: '无权限作废该班的接入码' };
     }
@@ -324,7 +394,7 @@ const PUBLISH_TYPES = ['student-notice', 'class-notice', 'fullscreen-notice', 'h
 
 export function adminPublish(code, card = {}, ident = null) {
   const c = String(code ?? '').trim();
-  const hit = getClass(c);
+  const { hit, tn } = findClass(c, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限向该班发布' };
   const t = String(card?.type ?? '').trim();
@@ -339,7 +409,7 @@ export function adminPublish(code, card = {}, ident = null) {
     at: new Date().toISOString(),
   };
   // 推全班在线被控端（黑板渲染由被控端按 type 分流：全屏窗 / 顶部跑马灯）
-  const r = sendToClassDevices(hit.code, 'blackboard-card', payload);
+  const r = sendToClassDevices(hit.code, 'blackboard-card', payload, tn);
   // 落 Timeline（与管理端订阅者共享同一 class-event 通道，老师端实时可见"发了什么"）。
   // distinctContent：限流键并入内容指纹 ⇒ 1s 内连发两条**不同**内容都留痕；
   // 只有**内容相同**（老师手抖连点两下）才被限流吞掉。不加这个，第二条会被
@@ -364,25 +434,26 @@ export function adminPublish(code, card = {}, ident = null) {
 /** 能否读这个班的班级数据（读权限比写宽一档：viewer 也该看得见名单）。 */
 function canReadClass(ident, code) {
   if (!ident) return false;
-  if (canAccess(ident, code)) return true;
-  const role = ident.uid ? roleOf(code, ident.uid) : null;
+  const tn = tenantOf(ident);
+  if (canAccess(ident, code, { tenantId: tn })) return true;
+  const role = ident.uid ? roleOf(code, ident.uid, tn) : null;
   return !!role;
 }
 
 /** 学生名单（按座位/学号排）。 */
 export function adminListStudents(code, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canReadClass(ident, hit.code)) return { ok: false, error: '无权限查看该班学生名单' };
-  const r = listStudents(hit.code);
+  const r = listStudents(hit.code, tn);
   return { ...r, name: hit.name };
 }
 
 export function adminAddStudent(code, student = {}, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班学生名单' };
-  const r = addStudent(hit.code, student, ident?.uid ?? 'system');
+  const r = addStudent(hit.code, student, ident?.uid ?? 'system', tn);
   if (!r.ok) return r;
   pushEvent('info', r.replaced ? '管理端更新学生信息' : '管理端新增学生', {
     classCode: hit.code, studentId: r.student.id, name: r.student.name, by: ident?.uid ?? 'system',
@@ -391,28 +462,28 @@ export function adminAddStudent(code, student = {}, ident = null) {
 }
 
 export function adminUpdateStudent(code, studentId, patch = {}, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班学生名单' };
-  const r = updateStudent(hit.code, studentId, patch, ident?.uid ?? 'system');
+  const r = updateStudent(hit.code, studentId, patch, ident?.uid ?? 'system', tn);
   if (r.ok) pushEvent('info', '管理端修改学生信息', { classCode: hit.code, studentId, by: ident?.uid ?? 'system' });
   return r;
 }
 
 export function adminRemoveStudent(code, studentId, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班学生名单' };
-  const r = removeStudent(hit.code, studentId);
+  const r = removeStudent(hit.code, studentId, tn);
   if (r.ok && r.removed) pushEvent('info', '管理端移除学生', { classCode: hit.code, studentId, by: ident?.uid ?? 'system' });
   return r;
 }
 
 export function adminImportStudents(code, rows = [], ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限管理该班学生名单' };
-  const r = importStudents(hit.code, rows, ident?.uid ?? 'system');
+  const r = importStudents(hit.code, rows, ident?.uid ?? 'system', tn);
   if (r.ok) pushEvent('info', '管理端批量导入学生', {
     classCode: hit.code, added: r.added, updated: r.updated, bad: r.bad, by: ident?.uid ?? 'system',
   });
@@ -421,18 +492,18 @@ export function adminImportStudents(code, rows = [], ident = null) {
 
 /** 班级课表（没存过 → profile:null，前端必须显示「还没排课」而不是空白表）。 */
 export function adminGetTimetable(code, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canReadClass(ident, hit.code)) return { ok: false, error: '无权限查看该班课表' };
-  const r = getTimetable(hit.code);
+  const r = getTimetable(hit.code, tn);
   return { ...r, name: hit.name };
 }
 
 export function adminSaveTimetable(code, profile, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限修改该班课表' };
-  const r = saveTimetable(hit.code, profile, ident?.uid ?? 'system');
+  const r = saveTimetable(hit.code, profile, ident?.uid ?? 'system', tn);
   if (r.ok) pushEvent('info', '管理端保存班级课表', { classCode: hit.code, bytes: r.bytes, by: ident?.uid ?? 'system' });
   return r;
 }
@@ -445,7 +516,7 @@ export function adminSaveTimetable(code, profile, ident = null) {
  * 多课表群（一份档案含多个班）时必须显式指定 —— 猜错就是把 8 班课表挂到 1 班。
  */
 export function adminImportTimetable(code, rawProfile, groupKey = '', ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限修改该班课表' };
   const norm = normalizeClassIslandProfile(rawProfile, groupKey);
@@ -453,7 +524,7 @@ export function adminImportTimetable(code, rawProfile, groupKey = '', ident = nu
     // groups 回给 UI：让老师自己选，而不是我们猜
     return { ok: false, error: norm.error, groups: norm.groups || [] };
   }
-  const r = saveTimetable(hit.code, norm.normalized, ident?.uid ?? 'system');
+  const r = saveTimetable(hit.code, norm.normalized, ident?.uid ?? 'system', tn);
   if (r.ok) {
     // 审计口径统一用「X班」标签（群名可能 12 个都叫「新课表群」，写进日志等于没写）
     const g = norm.normalized.group;
@@ -498,17 +569,18 @@ export function adminListTimetableGroups(rawProfile) {
 /** 谁能读这个班的考勤（读权限比写宽一档，与 canReadClass 同语义）。 */
 function canReadAttendance(ident, code) {
   if (!ident) return false;
-  if (canAccess(ident, code)) return true;
-  const role = ident.uid ? roleOf(code, ident.uid) : null;
+  const tn = tenantOf(ident);
+  if (canAccess(ident, code, { tenantId: tn })) return true;
+  const role = ident.uid ? roleOf(code, ident.uid, tn) : null;
   return !!role;
 }
 
 /** 单条记录 / 改判。 */
 export function adminRecordAttendance(code, input = {}, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限记录该班考勤' };
-  const r = recordAttendance(hit.code, input, ident?.uid ?? 'system');
+  const r = recordAttendance(hit.code, input, ident?.uid ?? 'system', tn);
   if (!r.ok) return r;
   pushEvent('info', r.replaced ? '管理端改判考勤' : '管理端记录考勤', {
     classCode: hit.code, studentId: r.record.studentId, status: r.record.status, by: ident?.uid ?? 'system',
@@ -518,10 +590,10 @@ export function adminRecordAttendance(code, input = {}, ident = null) {
 
 /** 批量记录（全班一次性提交）。 */
 export function adminBatchAttendance(code, rows = [], ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限记录该班考勤' };
-  const r = batchRecord(hit.code, rows, ident?.uid ?? 'system');
+  const r = batchRecord(hit.code, rows, ident?.uid ?? 'system', tn);
   if (r.ok) pushEvent('info', '管理端批量记录考勤', {
     classCode: hit.code, total: r.total, succeeded: r.succeeded, failed: r.failed, by: ident?.uid ?? 'system',
   });
@@ -530,34 +602,34 @@ export function adminBatchAttendance(code, rows = [], ident = null) {
 
 /** 按班按日列出（可带 session 过滤）。 */
 export function adminListAttendance(code, q = {}, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canReadAttendance(ident, hit.code)) return { ok: false, error: '无权限查看该班考勤' };
-  return listByClassDate(hit.code, String(q.date ?? ''), String(q.session ?? ''));
+  return listByClassDate(hit.code, String(q.date ?? ''), String(q.session ?? ''), tn);
 }
 
 /** 按班按日期区间列出。 */
 export function adminListAttendanceRange(code, q = {}, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canReadAttendance(ident, hit.code)) return { ok: false, error: '无权限查看该班考勤' };
-  return listByClassRange(hit.code, String(q.fromDate ?? ''), String(q.toDate ?? ''));
+  return listByClassRange(hit.code, String(q.fromDate ?? ''), String(q.toDate ?? ''), tn);
 }
 
 /** 某日考勤统计（含未记录人数）。 */
 export function adminAttendanceStats(code, q = {}, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canReadAttendance(ident, hit.code)) return { ok: false, error: '无权限查看该班考勤统计' };
-  return attendanceStats(hit.code, String(q.date ?? ''));
+  return attendanceStats(hit.code, String(q.date ?? ''), tn);
 }
 
 /** 删一条考勤（幂等）。 */
 export function adminRemoveAttendance(code, q = {}, ident = null) {
-  const hit = getClass(String(code ?? '').trim());
+  const { hit, tn } = findClass(code, ident);
   if (!hit) return { ok: false, error: '班级不存在' };
   if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限修改该班考勤' };
-  const r = removeAttendance(hit.code, String(q.studentId ?? ''), String(q.date ?? ''), String(q.session ?? ''));
+  const r = removeAttendance(hit.code, String(q.studentId ?? ''), String(q.date ?? ''), String(q.session ?? ''), tn);
   if (r.ok && r.removed) pushEvent('info', '管理端删除考勤记录', { classCode: hit.code, studentId: q.studentId, by: ident?.uid ?? 'system' });
   return r;
 }
@@ -578,7 +650,8 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
     try {
       let r;
       if (action === 'create') {
-        r = adminCreateClass({ code: String(body.classCode ?? ''), name: String(body.className ?? '') });
+        // ⚠️ ident 必须传：建班要落在**本租户**，否则两校都会往默认组织建班。
+        r = adminCreateClass({ code: String(body.classCode ?? ''), name: String(body.className ?? '') }, ident);
       } else if (action === 'rename') {
         r = adminRenameClass(String(body.classCode ?? ''), String(body.className ?? ''), ident);
       } else if (action === 'delete') {

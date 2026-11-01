@@ -14,7 +14,10 @@ import { wrapOutgoing, makeFrame } from './protocol.js';
 import { enqueueDispatch, dropDispatch, settle as settleQueue, pendingFor, listPendingAll, paramsOf, dispatchOwnerOf } from './store.js';
 // 班级身份的唯一真源（2026-10-20）：码/名/别名的解析与落盘都在 class-dir.js。
 // 本文件只负责"设备在哪个班"的运行时索引 —— 两边职责不重叠。
-import { resolveClassCode, getClass, listClassDir } from './class-dir.js';
+import { resolveClassCode, getClass, listClassDir, listClassDirAll, tenantOfClass } from './class-dir.js';
+// 租户身份（2026-11-02 多租户）：设备与班级都要记「哪所学校」。
+// registry 只存归属，不解析票、不做鉴权 —— 那分别是 perms.js / index.js 的事。
+import { DEFAULT_TENANT, normalizeTenantId } from './tenant.js';
 // 环境白名单（2026-10-24）：设备是 test 还是 prod，云端唯一裁决（设备自报一律忽略）。
 import { isTestUid } from './env-gate.js';
 
@@ -155,12 +158,36 @@ export function isVncAccessEnabled(uid) {
  */
 const classes = new Map();
 
-/** 把已落盘的班级目录灌进运行时索引（云端启动时调一次）。 */
+/**
+ * 班级索引的键：`${tenantId}\0${code}`。
+ *
+ * ⚠️ 2026-11-02 多租户：原来只用 `code` 当键。单校时代没问题；多校之后两所学校
+ * 可能都在用同一个外部码（站点老体系 `class_0102`），只用 code 当键 ⇒ 后一所学校的
+ * 班把前一所的设备列表整条覆盖，按班下发会发到隔壁学校去。
+ * 与 class-dir.js 的 dirKey 同一套思路（那边也改成带租户）。
+ */
+function classKey(tenantId, code) {
+  return `${normalizeTenantId(tenantId)}\u0000${String(code ?? '').trim()}`;
+}
+
+/**
+ * 把已落盘的班级目录灌进运行时索引（云端启动时调一次）。
+ *
+ * ⚠️ 2026-11-02 多租户：这里**必须灌全部租户**（listClassDirAll），不能只灌默认租户 ——
+ * 只灌默认的话，非默认学校的班在重启后全从索引里消失，按班下发直接找不到目标。
+ * 与 class-dir 的分工不变：那边的 listClassDir 是「给界面看的本租户视图」，
+ * 这里是启动重建运行时索引，用的是对账口径。
+ */
 export function hydrateClassesFromDir() {
   let n = 0;
-  for (const rec of listClassDir()) {
-    let c = classes.get(rec.code);
-    if (!c) { c = { code: rec.code, name: rec.name || rec.code, devices: [] }; classes.set(rec.code, c); n++; }
+  for (const rec of listClassDirAll()) {
+    const k = classKey(rec.tenantId, rec.code);
+    let c = classes.get(k);
+    if (!c) {
+      c = { code: rec.code, name: rec.name || rec.code, devices: [], tenantId: normalizeTenantId(rec.tenantId) };
+      classes.set(k, c);
+      n++;
+    }
     if (rec.name) c.name = rec.name;
   }
   return n;
@@ -344,6 +371,12 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
   if (isNewUid) pruneKnown();
   // 已知设备表：离线也留着，online 由 devices.has 派生；name/classCode 落这里，重连沿用。
   const resolvedClass = meta?.classCode ?? known.classCode ?? null;
+  // 租户（2026-11-02）：**沿用优先**。设备自报的 tenantId 不可信（学校机器自称别校
+  // 就能越权），所以只在「云端没有记录」时采纳自报值，之后一律以云端为准 ——
+  // 与 role 同口径。注册入口（index.js）会先用票/绑定记录算出权威租户再传进来。
+  const resolvedTenant = known.tenantId
+    ? normalizeTenantId(known.tenantId)
+    : normalizeTenantId(meta?.tenantId ?? DEFAULT_TENANT);
   // 用途：register 自报只在「云端没有记录」时被采纳（首次登记）；
   // 之后一律以云端为准 —— 否则改过用途的机器一重连就被自己改回去。
   const resolvedRole = known.role ? normalizeDeviceRole(known.role)
@@ -356,6 +389,7 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     uid,
     name: meta?.name ?? known.name ?? null,
     classCode: resolvedClass,
+    tenantId: resolvedTenant,
     role: resolvedRole,
     version: version || known.version || 'unknown',
     env,
@@ -363,7 +397,7 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
   });
   // 上限护栏：新设备才查（超限先淘汰最久未见的，避免被灌爆内存）
   // 注册带班级码 → 同步进班级索引（保证「按班下发」能找到这台）。
-  if (resolvedClass) addToClassIndex(uid, resolvedClass, meta?.className ?? '');
+  if (resolvedClass) addToClassIndex(uid, resolvedClass, meta?.className ?? '', resolvedTenant);
   devices.set(uid, {
     uid,
     version: version || 'unknown',
@@ -376,6 +410,7 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     lastError: null,
     name: knownDevices.get(uid)?.name ?? null,
     classCode: knownDevices.get(uid)?.classCode ?? null,
+    tenantId: knownDevices.get(uid)?.tenantId ?? DEFAULT_TENANT,
     env: knownDevices.get(uid)?.env ?? 'prod',
     recentFrame: old?.recentFrame ?? null,
     // 能力清单（2026-10-06 契合度）：被控端 register 带上来，云端**原样转给管端**，
@@ -497,6 +532,8 @@ export function listDevices() {
       // 设备名：没上报过就是 null，管端照旧回退显示 uid（不是 undefined）。
       name: kd.name ?? null,
       classCode: kd.classCode ?? null,
+      // 租户（2026-11-02）：管理端必须按它过滤；不传 = 平台视角看全部。
+      tenantId: normalizeTenantId(kd.tenantId),
       // 用途（2026-10-25）：管端据此显示「教室机 / 广播机」并按用途决定可用动作。
       role: normalizeDeviceRole(kd.role),
       version: d ? d.version : (kd.version || 'unknown'),
@@ -538,6 +575,26 @@ export function getDeviceClassCode(uid) {
 }
 
 /**
+ * 按 uid 查租户（**含离线设备**）。与 getDeviceClassCode 同一理由：
+ * 离线设备只剩 knownDevices 这条记录，权限判定照样要能拿到租户。
+ *
+ * 取值的优先级是**归属唯一口径**：
+ *   ① knownDevices 里记的 tenantId（绑班时写入 / 注册时解析得到）
+ *   ② 班级目录里该 `classCode` 的归属（历史数据没写租户时的兜底）
+ *   ③ 默认组织（存量数据落点）
+ * @returns {string} 合法的租户 id（永远不返回 null，避免调用方误判为"无租户=放行"）
+ */
+export function getDeviceTenant(uid) {
+  const known = knownDevices.get(uid);
+  if (known?.tenantId) return normalizeTenantId(known.tenantId);
+  if (known?.classCode) {
+    const fromDir = tenantOfClass(known.classCode, known.tenantId);
+    if (fromDir) return fromDir;
+  }
+  return DEFAULT_TENANT;
+}
+
+/**
  * 设置设备的展示元数据（名字 / 班级）。被控端 register 时带上来、或管理端手动改。
  * 落「已知设备表」，重连沿用；不影响在线状态。
  */
@@ -548,18 +605,22 @@ export function setDeviceMeta(uid, meta = {}) {
       uid,
       name: meta.name ?? null,
       classCode: meta.classCode ?? null,
+      tenantId: normalizeTenantId(meta.tenantId),
       role: normalizeDeviceRole(meta.role),
       version: 'unknown',
       lastSeen: Date.now(),
     });
-    if (meta.classCode) addToClassIndex(uid, meta.classCode);
+    if (meta.classCode) addToClassIndex(uid, meta.classCode, '', meta.tenantId);
     return;
   }
   if (meta.name !== undefined) known.name = meta.name ?? null;
   if (meta.classCode !== undefined) {
     known.classCode = meta.classCode ?? null;
-    if (meta.classCode) addToClassIndex(uid, meta.classCode);
+    if (meta.classCode) addToClassIndex(uid, meta.classCode, '', meta.tenantId ?? known.tenantId);
   }
+  // 租户也能改（管理端"这台挪到另一所学校"），但**只能由服务端决定** ——
+  // 传 undefined 表示"不动"，与 role 同口径。
+  if (meta.tenantId !== undefined) known.tenantId = normalizeTenantId(meta.tenantId);
   // 用途可改（管理端「这台改成广播机」）。改完不主动推：被控端下次 register
   // 的回执里会拿到权威值 —— 与 classCode 反向下发同一套机制，少一条推送路径。
   if (meta.role !== undefined) known.role = normalizeDeviceRole(meta.role);
@@ -583,58 +644,67 @@ export function isClassCodeValid(code) {
 /** 内部：保证 classCode 索引里有这台设备（注册带 classCode / 手动绑定 / 改名都走它）。
  *  name（2026-10-09）：被控端 register 带 className 时用作班级显示名（默认 = code）。
  *  只有非空才覆盖 —— 否则后继一条不带名的 register 会把已显示的真名打回 class_01。 */
-function addToClassIndex(uid, code, name = '') {
+function addToClassIndex(uid, code, name = '', tenantId = DEFAULT_TENANT) {
   if (!code) return;
+  const tn = normalizeTenantId(tenantId);
   // 2026-10-20（班级真源统一）：设备 register 自报的 classCode 也要进**班级目录**。
   // 只写内存 Map 的话，云端一重启这个班就从目录里消失 —— 那正是本次要修的洞。
   // 顺带把自报码也过一遍归一：如果它是某个已登记班的别名，就写回 canonical。
-  const r = resolveClassCode({ code, name, source: 'register' });
+  const r = resolveClassCode({ code, name, source: 'register', tenantId: tn });
   if (r.ok) {
     code = r.code;
     if (!name && r.name) name = r.name;
   }
-  let c = classes.get(code);
-  if (!c) { c = { code, name: name || code, devices: [] }; classes.set(code, c); }
+  const k = classKey(tn, code);
+  let c = classes.get(k);
+  if (!c) { c = { code, name: name || code, devices: [], tenantId: tn }; classes.set(k, c); }
   if (name) c.name = name;
   if (!c.devices.includes(uid)) c.devices.push(uid);
   let known = knownDevices.get(uid);
-  if (!known) { known = { uid, name: null, classCode: code, version: 'unknown', lastSeen: 0 }; knownDevices.set(uid, known); }
-  else {
+  if (!known) {
+    known = { uid, name: null, classCode: code, tenantId: tn, version: 'unknown', lastSeen: 0 };
+    knownDevices.set(uid, known);
+  } else {
     // G3（2026-10-24）：换班必须从**旧班**索引移除。只加不清的后果：设备从 A 班
     // 改绑 B 班后，A 班内存索引残留该 uid ⇒ /api/classes 的 A 班 devices/onlineCount
     // 虚高（管理端界面按 classCode 现算不受影响，但云端接口口径漂移本身就是
     // "第二真源"事故的苗头）。knownDevices.classCode 是归属唯一口径，以它为准倒推。
     const prev = known.classCode;
-    if (prev && prev !== code) {
-      const old = classes.get(prev);
+    const prevTn = normalizeTenantId(known.tenantId);
+    if (prev && (prev !== code || prevTn !== tn)) {
+      const old = classes.get(classKey(prevTn, prev));
       if (old) old.devices = old.devices.filter((x) => x !== uid);
     }
     known.classCode = code;
+    known.tenantId = tn;
   }
 }
 
-export function bindDeviceToClass(code, uid, className = '', source = 'cloud') {
+export function bindDeviceToClass(code, uid, className = '', source = 'cloud', tenantId = DEFAULT_TENANT) {
   if (!isClassCodeValid(code)) return { ok: false, error: '班级码格式不合法（需 6-16 位字母数字或 -_）' };
+  const tn = normalizeTenantId(tenantId);
   // ⚠️ 2026-10-20：**所有**绑班路径都要过解析器归一，否则同一个班会按入口不同长出不同的码。
   //   解析可能把本次的 code 合并成某个已登记班的 alias（返回 canonical），这是刻意的：
   //   身份唯一 > 保留某个入口自己那串码。
-  const r = resolveClassCode({ code, name: className, source });
+  const r = resolveClassCode({ code, name: className, source, tenantId: tn });
   if (!r.ok) return { ok: false, error: r.error };
   const key = r.code;
-  let c = classes.get(key);
-  if (!c) { c = { code: key, name: r.name || className || key, devices: [] }; classes.set(key, c); }
+  const k = classKey(tn, key);
+  let c = classes.get(k);
+  if (!c) { c = { code: key, name: r.name || className || key, devices: [], tenantId: tn }; classes.set(k, c); }
   if (r.name) c.name = r.name;             // 规范名以 class-dir 为准（它是真源）
-  addToClassIndex(uid, key, className);
-  pushEvent('info', '设备已绑定班级', { uid, classCode: key, className: c.name, mergedFrom: key === code ? undefined : code });
+  addToClassIndex(uid, key, className, tn);
+  pushEvent('info', '设备已绑定班级', { uid, classCode: key, className: c.name, tenantId: tn, mergedFrom: key === code ? undefined : code });
   broadcastDevices();
-  return { ok: true, class: c, classCode: key, merged: !!r.merged || key !== code };
+  return { ok: true, class: c, classCode: key, tenantId: tn, merged: !!r.merged || key !== code };
 }
 
-export function unbindDeviceFromClass(code, uid) {
-  const c = classes.get(code);
+export function unbindDeviceFromClass(code, uid, tenantId = DEFAULT_TENANT) {
+  const tn = normalizeTenantId(tenantId);
+  const c = classes.get(classKey(tn, code));
   if (c) c.devices = c.devices.filter((x) => x !== uid);
   const known = knownDevices.get(uid);
-  if (known && known.classCode === code) known.classCode = null;
+  if (known && known.classCode === code && normalizeTenantId(known.tenantId) === tn) known.classCode = null;
   broadcastDevices();
   return { ok: true };
 }
@@ -646,10 +716,11 @@ export function unbindDeviceFromClass(code, uid) {
  * devices 空、source 空的幽灵班）。unbindDeviceFromClass 只清设备不清条目，
  * 所以删班路径显式调这里（先 unbind 完设备，条目自然是空的）。
  */
-export function dropClassIndex(code) {
-  const c = classes.get(code);
+export function dropClassIndex(code, tenantId = DEFAULT_TENANT) {
+  const k = classKey(tenantId, code);
+  const c = classes.get(k);
   if (!c) return { ok: true, existed: false };
-  classes.delete(code);
+  classes.delete(k);
   return { ok: true, existed: true, devices: c.devices.length };
 }
 
@@ -674,40 +745,50 @@ export function notifyClassBoundIfOnline(uid, code, name) {
   }
 }
 
-export function listClasses() {
+export function listClasses(tenantId) {
   // 班级**身份**来自 class-dir（已落盘），设备**归属**来自 classes（运行时索引）。
   // 两边合起来才是"这个班的现状"：重启后班级仍在（只是 onlineCount=0），
   // 否则管理台一重启就"班级消失"，按班下发直接找不到目标。
+  //
+  // 2026-11-02 多租户：不传 tenantId = 列出**全部租户**（对账/兜底口径，与旧行为一致）；
+  // 传了 = 只列该租户（管理端界面必须传，否则看到别校的班）。
   const countOnline = (devs) => devs.filter((u) => {
     const d = devices.get(u);
     return !!d && d.ws && d.ws.readyState === 1;
   }).length;
+  const wantTn = tenantId === undefined ? null : normalizeTenantId(tenantId);
 
   const out = [];
   const seen = new Set();
-  for (const rec of listClassDir()) {
-    const c = classes.get(rec.code);
+  const dirRecords = wantTn === null ? listClassDirAll() : listClassDir(wantTn);
+  for (const rec of dirRecords) {
+    const tn = normalizeTenantId(rec.tenantId);
+    const k = classKey(tn, rec.code);
+    const c = classes.get(k);
     const devs = c ? c.devices.slice() : [];
     out.push({
       code: rec.code,
       name: rec.name || (c && c.name) || rec.code,
+      tenantId: tn,
       devices: devs,
       onlineCount: countOnline(devs),
       aliases: rec.aliases.slice(),
       source: rec.source,
     });
-    seen.add(rec.code);
+    seen.add(k);
   }
   // 极端兜底：运行时索引里有、目录里没有的班（理论上不该出现，出现了也不能吞掉）
-  for (const c of classes.values()) {
-    if (seen.has(c.code)) continue;
-    out.push({ code: c.code, name: c.name, devices: c.devices.slice(), onlineCount: countOnline(c.devices), aliases: [], source: '' });
+  for (const [k, c] of classes) {
+    if (seen.has(k)) continue;
+    const tn = normalizeTenantId(c.tenantId);
+    if (wantTn !== null && tn !== wantTn) continue;
+    out.push({ code: c.code, name: c.name, tenantId: tn, devices: c.devices.slice(), onlineCount: countOnline(c.devices), aliases: [], source: '' });
   }
   return out;
 }
 
-export function getDevicesOfClass(code) {
-  const c = classes.get(code);
+export function getDevicesOfClass(code, tenantId = DEFAULT_TENANT) {
+  const c = classes.get(classKey(tenantId, code));
   return c ? c.devices.slice() : [];
 }
 
@@ -1090,8 +1171,8 @@ export function rtcSignalToAgent(uid, type, payload = {}) {
  * 返回 {online, delivered}：online=班内设备总数（含离线），delivered=真送到的台数。
  * @returns {{online:number, delivered:number}}
  */
-export function sendToClassDevices(code, type, payload = {}) {
-  const uids = getDevicesOfClass(String(code ?? '').trim());
+export function sendToClassDevices(code, type, payload = {}, tenantId = DEFAULT_TENANT) {
+  const uids = getDevicesOfClass(String(code ?? '').trim(), tenantId);
   let delivered = 0;
   for (const uid of uids) {
     const r = sendToAgentMsg(uid, type, payload);

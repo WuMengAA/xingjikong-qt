@@ -44,6 +44,12 @@ ota-rc.json
 # 设备报修台账（运行时数据，由 scripts/backup.mjs 备份；不入库）
 repairs.json
 
+# 多租户租户表（2026-11-02）：**运行时数据**，路径由 CLOUD_TENANTS_FILE 指定，
+# 缺省落在仓库根的 tenants.json。内容是真实学校的 id / 显示名 / 启停状态 ⇒ 不入库。
+# 事由：跑单测时忘了给 CLOUD_TENANTS_FILE，它真往仓库根写了一份，status 当场脏。
+# 首次部署由 tenant.js 的 initTenants() 自动生成（含默认组织），不需要入库。
+tenants.json
+
 # 一次性调试脚本（非构建基础设施），不进版本库
 scripts/_*.mjs
 !scripts/_inspect-queue.mjs

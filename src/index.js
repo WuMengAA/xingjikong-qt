@@ -264,7 +264,7 @@ import {
   duplexActive, sendAudioToTeacher,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
   // 2026-10-08 分班制 + 已知设备表 + 云端存储信息
-  setDeviceMeta, getDeviceRole,
+  setDeviceMeta, getDeviceRole, getDeviceTenant,
   bindDeviceToClass, unbindDeviceFromClass, listClasses, getDevicesOfClass,
   notifyClassBoundIfOnline,
   getStorageInfo, isClassCodeValid, hydrateClassesFromDir,
@@ -288,6 +288,95 @@ import { REAUTH_INTERVAL_MS } from './config.js';
 import { loadRepairs, useRepairFile, listRepairs, createRepair, updateRepair, deleteRepair } from './repairs.js';
 // 权限消费层（2026-10-15 · 契约《多校多身份-scope契约草案》§4.3：云端是唯一权限入口）
 import { identityFromAuth, canAccess, filterDevices, maskDevices } from './perms.js';
+// 多租户（2026-11-02 · class_id 全链路隔离）：租户身份的唯一规范化入口。
+// 纪律：租户只从**票 / 设备记录 / 票里钉死的码**来，绝不接受请求参数指定。
+import { normalizeTenantId, DEFAULT_TENANT, initTenants } from './tenant.js';
+import { tenantOfClass } from './class-dir.js';
+
+/**
+ * `canAccess(ident, classCode, {tenantId})` 的「自动补租户」包装 —— 本项目**唯一**
+ * 该用的班级判权入口。
+ *
+ * 为什么非要有这一层：`canAccess` 的租户闸只在调用方**传了**目标租户时才生效
+ * （不传就退回只看 scope 的老逻辑，向后兼容）。全库 31 处调用点靠人肉逐处记得传，
+ * 漏一处就是一处跨校放行，而「漏没漏」在 review 时看不出来。
+ * 所以这里把「目标租户」的解析固化成一个函数，调用点只写 `canReach(ident, code)`。
+ *
+ * 目标租户怎么定（从强到弱）：
+ *   ① 班级目录里该码的归属（`tenantOfClass`，唯一确定时）
+ *   ② 没有 / 歧义 ⇒ 调用方自己的租户
+ *      —— 这一支是**安全默认**：票据身份能碰的只有自己租户内的班；
+ *         别校的班在这一支下必然判成「租户不同」而拒绝。
+ *
+ * ⚠️ 全权身份（静态令牌 / 旧票 / 平台超管）在这里依然全权：`canAccess` 内部先看
+ *    豁免再比租户，本函数不改那套语义（契约 §4.4-A：收紧会断掉现有老师机）。
+ *
+ * @param {object|null} ident identityFromAuth 的结果
+ * @param {string|null} classCode 目标班级码（null = 设备无班级归属）
+ * @returns {boolean}
+ */
+function canReach(ident, classCode) {
+  if (!ident) return false;
+  const c = classCode == null ? null : String(classCode);
+  if (!c) return canAccess(ident, null);
+  return canAccess(ident, c, { tenantId: classTenantFor(ident, c) });
+}
+
+/**
+ * 「这次操作到底在哪个租户的地盘上」—— **鉴权与取数共用的唯一口径**。
+ *
+ * ⚠️ 2026-11-02 血案（这就是本函数存在的理由）：
+ *   上方的 `canReach` 原本自己算一遍租户、数据层调用点各自再默认 `DEFAULT_TENANT`。
+ *   结果是「判权按 A 校通过，读写全落到默认组织」——
+ *   两所学校的同码班名单/考勤/课表在库里**根本就是同一份**，
+ *   A 校老师能看见并修改 B 校的学生。判权看起来是对的，所以才格外难查。
+ *
+ * 因此：**判权和取数必须走同一个函数**，物理上不给它们漂移的机会。
+ * 任何按班级读写的路由，都必须 `const tn = classTenantFor(ident, code)` 然后把 `tn`
+ * 透传给数据层；不许再把数据层留空默认。
+ *
+ * 规则（与 canReach 的历史口径完全一致，改动会同时影响两边，别单独改）：
+ *   ① 班级目录里该码归属唯一 ⇒ 就是那个租户（跨校运维令牌操作 B 校的班时也正确）
+ *   ② 查不到 / 重码歧义 ⇒ 调用方自己的租户（**新建班级**走这条：新班落建班人所在租户）
+ *
+ * @param {object|null} ident identityFromAuth 的结果
+ * @param {string|null} classCode 班级码（null/空 = 无班级归属）
+ * @returns {string} 租户 id，恒为合法值
+ */
+function classTenantFor(ident, classCode) {
+  const c = classCode == null ? '' : String(classCode).trim();
+  if (c) {
+    const fromDir = tenantOfClass(c);
+    if (fromDir) return fromDir;
+  }
+  return normalizeTenantId(ident && ident.tenantId);
+}
+
+/**
+ * 「列表按租户切」的统一判定 —— `/api/classes`、`/api/classes/dir`、`/api/me/classes`
+ * 三处共用，避免各写一份口径漂移。
+ *
+ * @param {object|null} auth 原始鉴权上下文（req.__auth / ws.__who）
+ * @param {object|null} ident identityFromAuth 的结果
+ * @returns {string|undefined} 租户 id；**undefined = 不切（全平台口径）**
+ *
+ * 返回 undefined 的两种情况，都必须是有意的：
+ *   ① 静态令牌（mode==='token'）：系统身份 / 运维，按设计要看全平台（与 2026-10-25 口径一致）；
+ *   ② 平台超管（schoolId=null 且 roles 含 platform_admin）：跨校管理是它的职责。
+ * 除此之外**一切身份都切租户** —— 包括"还没有任何 claims 的旧票"，它落默认组织，
+ * 只看得见默认组织那一批班（这正是升级后存量数据的落点，不会让老用户突然空列表）。
+ */
+function classListTenant(auth, ident) {
+  if (!ident) return DEFAULT_TENANT;               // 未鉴权：默认组织，不给全平台
+  if (auth && auth.mode === 'token') return undefined;
+  if (isPowerIdent(ident)) return undefined;
+  return normalizeTenantId(ident.tenantId);
+}
+
+/** 「全权」判定：平台超管 或 scopes===null（静态令牌 / 无 claims 旧票）。 */
+function isPowerIdent(ident) {
+  return !!ident && (ident.scopes === null || isPlatformIdent(ident));
+}
 // 班级域事件通道（2026-10-23 · #458 班级工作台地基）：按班订阅/推送/历史，
 // 与 devices 广播、pushEvent 流水、按设备订阅中继三条通道正交（见 class-events.js 头注）
 import {
@@ -348,6 +437,14 @@ loadRepairs();               // 打开设备报修表（repairs.json），重启
   const r = initClassDir();
   const hydrated = hydrateClassesFromDir();
   console.log(`[cloud] 班级目录：${r.codes} 个班已就绪（class-dir.db），运行时索引灌入 ${hydrated} 条`);
+}
+// 多租户（2026-11-02）：租户表必须在**任何按租户取数的模块之前**打开 ——
+// tenant.js 的 initTenants 会补齐默认组织（存量数据落点），而 perms.js 的
+// claimTenant 会去租户表里解析 schoolId；表没开就解析 ⇒ 老票全部掉默认组织。
+// 用 CLOUD_TENANTS_FILE 覆盖路径（隔离实例测试必备，否则会把假租户写进生产 tenants.json）。
+{
+  const r = initTenants(process.env.CLOUD_TENANTS_FILE || undefined);
+  console.log(`[cloud] 租户表：${r.tenants} 个租户（已加载 ${r.loaded} 条，默认组织 always-present）`);
 }
 // 班级房间（2026-10-24 持久房间）：消息历史 + 成员表落盘。
 // 在这之前两者一个是内存环形缓冲、一个根本不存在 ⇒ 重启即清空 / 加不进人。
@@ -468,7 +565,7 @@ const server = http.createServer((req, res) => {
     const m = /^(noise_evidence|noise_events)\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_.-]+\.(jpg|json))$/.exec(rel);
     if (!m) return send(404, { ok: false, error: '路径不合法' });
     const evUid = m[2];
-    if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(evUid))) {
+    if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(evUid), { tenantId: getDeviceTenant(evUid) })) {
       pushEvent('warn', '噪音存证下载越权（不在其 scopes 内）', { uid: evUid });
       return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权查看该设备的噪音存证' });
     }
@@ -512,7 +609,7 @@ const server = http.createServer((req, res) => {
       return send(404, { ok: false, error: '路径不合法' });
     }
     const recUid = rel.split('/')[0];
-    if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(recUid))) {
+    if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(recUid), { tenantId: getDeviceTenant(recUid) })) {
       pushEvent('warn', '录制回放下载被拒（越权：目标不在其 scopes 内）',
         { path: u.pathname, uid: recUid });
       return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权查看该设备的录制' });
@@ -960,7 +1057,11 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && u.pathname === '/api/devices') {
     // 2026-10-15（权限契约 §4.3）：列表按本请求 scopes 过滤，不吐全班/全校给没权限的人。
     const ident = identityFromAuth(req.__auth);
-    const visible = filterDevices(ident, listDevices());
+    // 2026-11-02 多租户：filterDevices 第四参是"取设备租户"的回调，缺省读 d.tenantId。
+    // listDevices() 已在每台上带 tenantId（registry 2026-11-02），所以默认路径正确；
+    // 这里显式写出来，是为了让"设备租户从哪来"在调用点上看得见，也守住回调被改成
+    // 读别处的回归。
+    const visible = filterDevices(ident, listDevices(), undefined, (d) => (d && d.tenantId) || null);
     // 2026-10-20（RBAC 第二批）：字段脱敏 —— 受限身份一律剥 ip/mac 系字段
     // （老师/助教不拿敏感字段；当前 listDevices 本就不含 ip/mac，此为防御性守卫）。
     return send(200, { ok: true, count: visible.length, devices: maskDevices(ident, visible) });
@@ -1144,27 +1245,42 @@ const server = http.createServer((req, res) => {
     return send(200, { ok: true, ...getStorageInfo() });
   }
   if (req.method === 'GET' && u.pathname === '/api/classes') {
-    const all = listClasses();
     const who = req.__auth || {};
+    // 2026-11-02 多租户：**先切租户，再谈成员过滤** —— 顺序不能反。
+    // 反过来的话，一个还没有任何 membership 的登录用户会落到"返回全量"那条兜底，
+    // 于是拿到整个平台所有学校的班级清单（含别校班名）。那不是安全，是把门焊死在开的位置。
+    const clsIdent = identityFromAuth(who);
+    const scoped = classListTenant(who, clsIdent);
+    const all = listClasses(scoped);
     // 2026-10-25（用户点单「接 my-classes 过滤」）：登录票据者只返回**自己带的班**。
-    // 静态令牌（系统身份 / 运维）与未登录 → 仍给全量（运维要看得见全校）。
-    // 兜底：该用户一条 membership 都没有时返回全量 + filtered:false ——
+    // 静态令牌（系统身份 / 运维）与未登录 → 仍给该租户全量（运维要看得见本校）。
+    // 兜底：该用户一条 membership 都没有时返回租户全量 + filtered:false ——
     //   照字面过滤会让"还没加成员"的部署看到空列表，那不是安全，是把人锁在门外。
     if (who.mode === 'ticket' && who.uid) {
-      const mine = adminMyClasses({ uid: who.uid });
+      const mine = adminMyClasses({ uid: who.uid, tenantId: scoped });
       if (mine.ok && mine.classes.length > 0) {
         const roleMap = new Map(mine.classes.map((x) => [x.classCode, x.role]));
         const own = all.filter((c) => roleMap.has(c.code))
                        .map((c) => ({ ...c, myRole: roleMap.get(c.code) }));
-        return send(200, { ok: true, classes: own, filtered: true });
+        return send(200, { ok: true, classes: own, filtered: true, tenantId: scoped ?? undefined });
       }
     }
-    return send(200, { ok: true, classes: all, filtered: false });
+    return send(200, { ok: true, classes: all, filtered: false, tenantId: scoped ?? undefined });
   }
   if (req.method === 'GET' && u.pathname === '/api/classes/dir') {
     // 班级目录（身份真源，2026-10-20）：每个班的 canonical 码 / 显示名 / 别名 / 来源。
     // 用途：① 排障「同一个班为什么长出两个码」；② 站点对账，确认它的 class_id 已作为别名登记。
-    return send(200, { ok: true, size: classDirSize(), classes: listClassDir() });
+    // 2026-11-02 多租户：目录里含**全平台的别名映射**（哪些站点 class_id 归到哪个班），
+    // 属于管理面信息 ⇒ 必须按租户切。`?all=1` 只给全权身份（运维对账用）。
+    const dirIdent = identityFromAuth(req.__auth);
+    const wantAll = String(u.searchParams.get('all') || '') === '1';
+    const dirTn = wantAll && isPowerIdent(dirIdent) ? undefined : classListTenant(req.__auth || {}, dirIdent);
+    return send(200, {
+      ok: true,
+      size: classDirSize(),
+      classes: dirTn === undefined ? listClassDir() : listClassDir(dirTn),
+      tenantId: dirTn ?? undefined,
+    });
   }
   if (req.method === 'GET' && u.pathname === '/api/me/classes') {
     // 管理端（登录账号）可见的班级列表。
@@ -1172,18 +1288,20 @@ const server = http.createServer((req, res) => {
     //   静态令牌（系统身份 / 运维）或该账号还没有任何成员记录时回全量 + filtered:false。
     //   两个端点各写一份过滤是下策，但它们的返回结构不同（这里要给 myRole 供界面显示身份），
     //   合并成公共函数反而要维护两套形状 —— 所以显式重复，并在两处注释里互相指向。
-    const allMine = listClasses();
     const whoMine = req.__auth || {};
+    const meIdent = identityFromAuth(whoMine);
+    const meTn = classListTenant(whoMine, meIdent);
+    const allMine = listClasses(meTn);
     if (whoMine.mode === 'ticket' && whoMine.uid) {
-      const mine = adminMyClasses({ uid: whoMine.uid });
+      const mine = adminMyClasses({ uid: whoMine.uid, tenantId: meTn });
       if (mine.ok && mine.classes.length > 0) {
         const roleMap = new Map(mine.classes.map((x) => [x.classCode, x.role]));
         const own = allMine.filter((c) => roleMap.has(c.code))
                            .map((c) => ({ ...c, myRole: roleMap.get(c.code) }));
-        return send(200, { ok: true, classes: own, filtered: true });
+        return send(200, { ok: true, classes: own, filtered: true, tenantId: meTn ?? undefined });
       }
     }
-    return send(200, { ok: true, classes: allMine, filtered: false });
+    return send(200, { ok: true, classes: allMine, filtered: false, tenantId: meTn ?? undefined });
   }
   if (u.pathname === '/api/env/test-whitelist') {
     // 环境白名单（2026-10-24）：谁是测试机由云端清单裁决，设备自报 env 一律忽略。
@@ -1235,14 +1353,17 @@ const server = http.createServer((req, res) => {
       if (!uid) return send(400, { ok: false, error: '缺 uid' });
       // 2026-10-20（班级真源统一）：允许**只给班级名**——管理台手里常常只有「高二(3)班」，
       // 没有内部码。统一解析器负责同码/同名/别名归一，管理台不必先查一遍码再下发。
-      const resolved = resolveClassCode({ code: classCode, name: className, source: 'admin' });
+      // ⚠️ 2026-11-02：解析**必须带租户**。不带的话两所学校都用「高二(3)班」这个名字时，
+      //   后绑的那台会并进先登记那个学校的班（lookup 是 (租户,码/名) 的复合键，不传就全落默认租户）。
+      const tn = classTenantFor(identityFromAuth(req.__auth), classCode || className);
+      const resolved = resolveClassCode({ code: classCode, name: className, source: 'admin', tenantId: tn });
       if (!resolved.ok) {
         const msg = (classCode || className)
           ? '班级码格式不合法（需 6-16 位字母数字或 -_）'
           : '缺班级（班级码或班级名至少给一个）';
         return send(400, { ok: false, error: msg });
       }
-      const r = bindDeviceToClass(resolved.code, uid, className);
+      const r = bindDeviceToClass(resolved.code, uid, className, 'cloud', tn);
       // G4（2026-10-24）：设备在线就立刻下发 class-bound，被控端更新 classcode.txt
       //   ⇒ 缩略图上报随即开工（它要求 classCode 非空）。否则要等设备重连才知道。
       if (r.ok) notifyClassBoundIfOnline(uid, r.classCode, r.class.name);
@@ -1261,7 +1382,7 @@ const server = http.createServer((req, res) => {
     if (req.method === 'GET') {
       const uid = String(u.searchParams.get('uid') || '').trim();
       if (!uid) return send(400, { ok: false, error: '缺 uid' });
-      if (!canAccess(ident, getDeviceClassCode(uid)))
+      if (!canAccess(ident, getDeviceClassCode(uid), { tenantId: getDeviceTenant(uid) }))
         return send(403, { ok: false, error: '无权限访问该设备' });
       return send(200, { ok: true, enabled: getVncAccess(uid).enabled });
     }
@@ -1274,7 +1395,7 @@ const server = http.createServer((req, res) => {
         const uid = String(body.uid ?? u.searchParams.get('uid') ?? '').trim();
         const password = String(body.password ?? u.searchParams.get('password') ?? '').valueOf();
         if (!uid) return send(400, { ok: false, error: '缺 uid' });
-        if (!canAccess(ident, getDeviceClassCode(uid)))
+        if (!canAccess(ident, getDeviceClassCode(uid), { tenantId: getDeviceTenant(uid) }))
           return send(403, { ok: false, error: '无权限访问该设备' });
         if (password.length > 64) return send(400, { ok: false, error: '密码过长（≤64 字符）' });
         const r = setVncAccess(uid, password);   // password 空 = 清除（关闭）
@@ -1310,9 +1431,10 @@ const server = http.createServer((req, res) => {
 
     if (req.method === 'GET' && action === 'students') {
       if (!qCode) return send(400, { ok: false, error: 'classCode 必填' });
-      if (!canAccess(ident, qCode))
+      if (!canReach(ident, qCode))
         return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权查看该班名单' });
-      const r = listStudents(qCode);
+      // 取数与判权同源（classTenantFor）：漏传即串权，注释见该函数头
+      const r = listStudents(qCode, classTenantFor(ident, qCode));
       if (!r.ok) return send(400, { ok: false, error: r.error || '查询失败' });
       return send(200, { ok: true, classCode: qCode, students: r.students || [], count: r.count || 0 });
     }
@@ -1325,29 +1447,31 @@ const server = http.createServer((req, res) => {
         try { body = JSON.parse(raw || '{}'); } catch { return send(400, { ok: false, error: '请求体不是合法 JSON' }); }
         const code = String(body.classCode || qCode || '').trim();
         if (!code) return send(400, { ok: false, error: 'classCode 必填' });
-        if (!canAccess(ident, code))
+        if (!canReach(ident, code))
           return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权修改该班名单' });
         const by = ident?.uid ? String(ident.uid) : 'system';
+        // ⚠️ 判权与取数同源：三个写操作都必须带 tn，否则写着写着就写到别校去了
+        const tn = classTenantFor(ident, code);
 
         if (action === 'students') {                       // 查询（viewer fetchJson 用 POST）
-          const r = listStudents(code);
+          const r = listStudents(code, tn);
           if (!r.ok) return send(400, { ok: false, error: r.error || '查询失败' });
           return send(200, { ok: true, classCode: code, students: r.students || [], count: r.count || 0 });
         }
         if (action === 'student-add') {
-          const r = addStudent(code, (body.student && typeof body.student === 'object') ? body.student : body, by);
+          const r = addStudent(code, (body.student && typeof body.student === 'object') ? body.student : body, by, tn);
           if (!r.ok) return send(400, { ok: false, error: r.error || '新增失败' });
           pushEvent('info', '班级名单：新增学生', { classCode: code, studentId: r.student?.id, by });
           return send(200, r);
         }
         if (action === 'student-update') {
-          const r = updateStudent(code, String(body.studentId || ''), body.patch || {}, by);
+          const r = updateStudent(code, String(body.studentId || ''), body.patch || {}, by, tn);
           if (!r.ok) return send(400, { ok: false, error: r.error || '更新失败' });
           pushEvent('info', '班级名单：修改学生', { classCode: code, studentId: body.studentId, by });
           return send(200, r);
         }
         if (action === 'student-remove') {
-          const r = removeStudent(code, String(body.studentId || ''));
+          const r = removeStudent(code, String(body.studentId || ''), tn);
           if (!r.ok) return send(400, { ok: false, error: r.error || '删除失败' });
           pushEvent('info', '班级名单：删除学生', { classCode: code, studentId: body.studentId, by });
           return send(200, r);
@@ -1373,13 +1497,14 @@ const server = http.createServer((req, res) => {
 
     if (req.method === 'GET') {
       if (!qCode) return send(400, { ok: false, error: 'classCode 必填' });
-      if (!canAccess(ident, qCode))
+      if (!canReach(ident, qCode))
         return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权查看该班考勤' });
       const date = String(u.searchParams.get('date') || '').trim() || new Date().toISOString().slice(0, 10);
       const session = String(u.searchParams.get('session') || '').trim();
-      const r = listByClassDate(qCode, date, session);
+      const tn = classTenantFor(ident, qCode);           // 判权与取数同源
+      const r = listByClassDate(qCode, date, session, tn);
       if (!r.ok) return send(400, { ok: false, error: r.error || '查询失败' });
-      const st = attendanceStats(qCode, date);
+      const st = attendanceStats(qCode, date, tn);
       return send(200, {
         ok: true, classCode: qCode, date, session,
         records: r.records || [], stats: st.ok ? { counts: st.counts, recorded: st.recorded, unrecorded: st.unrecorded, rosterSize: st.rosterSize } : null,
@@ -1394,7 +1519,7 @@ const server = http.createServer((req, res) => {
         try { body = JSON.parse(raw || '{}'); } catch { return send(400, { ok: false, error: '请求体不是合法 JSON' }); }
         const code = String(body.classCode || qCode || '').trim();
         if (!code) return send(400, { ok: false, error: 'classCode 必填' });
-        if (!canAccess(ident, code))
+        if (!canReach(ident, code))
           return send(403, { ok: false, ecode: 'PV4002', code: 'NO_CLASS_PERMISSION', error: '无权写入该班考勤' });
         const by = ident?.uid ? String(ident.uid) : 'system';
         // 批量写：rows=[{studentId|studentNo, status, session?}]；单条也走这里（body 自身即一条）
@@ -1403,12 +1528,13 @@ const server = http.createServer((req, res) => {
         if (!rows.length) return send(400, { ok: false, error: 'rows 不能为空' });
         const baseDate = String(body.date || '').trim() || new Date().toISOString().slice(0, 10);
         const baseSession = String(body.session || '').trim();
+        const tn = classTenantFor(ident, code);          // 判权与取数同源
         const r = batchRecord(code, rows.map((x) => ({
           studentId: x.studentId, studentNo: x.studentNo, studentName: x.studentName,
           status: x.status,
           date: String(x.date || baseDate).trim(),
           session: String(x.session ?? baseSession).trim(),
-        })), by);
+        })), by, tn);
         if (!r.ok) return send(400, { ok: false, error: r.error || '写入失败' });
         pushEvent('info', '班级考勤已记录', { classCode: code, succeeded: r.succeeded, failed: r.failed, by });
         return send(200, { ok: true, classCode: code, total: r.total, succeeded: r.succeeded, failed: r.failed, results: r.results });
@@ -1542,7 +1668,10 @@ const server = http.createServer((req, res) => {
       });
     }
     if (t.uid && t.uid !== uid) return send(409, { ok: false, error: '这个绑定码属于另一台设备' });
-    const bind = bindDeviceToClass(t.classCode, uid, t.className);
+    // 2026-11-02 多租户：租户从**票**里取（发码时已钉死），不再按 classCode 反查 ——
+    // 两校同码时反查是歧义的，反查不到就会把设备绑进默认组织（跨校串班）。
+    const bind = bindDeviceToClass(t.classCode, uid, t.className, 'cloud',
+                                     normalizeTenantId(t.tenantId));
     if (!bind.ok) return send(400, { ok: false, error: bind.error });
     markBound(code, { classCode: t.classCode, className: bind.class.name, uid });
     return send(200, { ok: true, classCode: t.classCode, className: bind.class.name || t.className || '' });
@@ -1576,6 +1705,12 @@ const server = http.createServer((req, res) => {
     if (t.state === 'bound') {
       return send(200, { ok: true, alreadyBound: true, classCode: t.classCode, className: t.className });
     }
+    // 2026-11-02 多租户：手机选班页**只能看到本租户的班**。
+    // 租户来源：管理员码（kind=class）看票自带的；设备自助码（kind=device）看设备当前归属，
+    // 设备还没绑过班 ⇒ 默认组织。绝不按匿名请求参数决定，否则等于匿名能枚举全平台班级清单。
+    const infoTenant = t.kind === 'class'
+      ? normalizeTenantId(t.tenantId)
+      : normalizeTenantId(getDeviceTenant(t.uid));
     return send(200, {
       ok: true,
       code: t.code,
@@ -1588,7 +1723,7 @@ const server = http.createServer((req, res) => {
       needsDeviceInput: t.kind === 'class',
       expiresAt: t.expireAt,
       // 只回老师点名要选的东西：班级名与在线数，不回设备清单
-      classes: listClasses().map((c) => ({ code: c.code, name: c.name, onlineCount: c.onlineCount })),
+      classes: listClasses(infoTenant).map((c) => ({ code: c.code, name: c.name, onlineCount: c.onlineCount })),
     });
   }
 
@@ -1616,15 +1751,18 @@ const server = http.createServer((req, res) => {
       // kind='device'：班级由老师在手机上选/填
       let classCode = String(body.classCode ?? '').trim();
       const className = String(body.className ?? '').trim();
+      // 2026-11-02 多租户：设备自助码绑定 —— 租户只能取**设备当前归属**，不取请求参数。
+      // 设备还没归属过 ⇒ 默认组织（存量数据的唯一落点）。
+      const devTenant = normalizeTenantId(getDeviceTenant(t.uid));
       // 统一解析（2026-10-20）：选了已有班 / 输了新班名 / 带了个外部码，都归一到同一个 canonical。
       // 不再有"派生码与站点 class_id 并行"的第二个发行方。
-      const resolved = resolveClassCode({ code: classCode, name: className, source: 'device' });
+      const resolved = resolveClassCode({ code: classCode, name: className, source: 'device', tenantId: devTenant });
       if (!resolved.ok) {
         const msg = (!classCode && !className) ? '请选择一个班级，或输入班级名称' : resolved.error;
         return send(400, { ok: false, error: msg });
       }
       classCode = resolved.code;
-      const bind = bindDeviceToClass(classCode, t.uid, className);
+      const bind = bindDeviceToClass(classCode, t.uid, className, 'cloud', devTenant);
       if (!bind.ok) return send(400, { ok: false, error: bind.error });
       const finalName = bind.class.name || className || classCode;
       markBound(code, { classCode, className: finalName });
@@ -1643,7 +1781,7 @@ const server = http.createServer((req, res) => {
     const items = listSongRequests({
       state: u.searchParams.get('state') || '',
       limit: Number(u.searchParams.get('limit') || 100),
-    }).filter((it) => canAccess(ident, it.classCode || null));
+    }).filter((it) => canReach(ident, it.classCode || null));
     return send(200, { ok: true, items });
   }
   if (req.method === 'GET' && u.pathname === '/api/interact/blessings') {
@@ -1651,14 +1789,14 @@ const server = http.createServer((req, res) => {
     const items = listBlessings({
       state: u.searchParams.get('state') || '',
       limit: Number(u.searchParams.get('limit') || 100),
-    }).filter((it) => canAccess(ident, it.classCode || null));
+    }).filter((it) => canReach(ident, it.classCode || null));
     return send(200, { ok: true, items });
   }
   if (req.method === 'GET' && u.pathname === '/api/interact/feedback/summary') {
     const ident = identityFromAuth(req.__auth);
     const s = feedbackSummary();
     if (ident && ident.scopes !== null && !isPlatformIdent(ident)) {
-      s.byClass = s.byClass.filter((c) => canAccess(ident, c.classCode || null));
+      s.byClass = s.byClass.filter((c) => canReach(ident, c.classCode || null));
     }
     return send(200, s);
   }
@@ -1682,7 +1820,7 @@ const server = http.createServer((req, res) => {
       if (!probe) {
         return send(404, { ok: false, error: `${kind === 'song' ? '点歌' : '祝福'} #${id} 不存在` });
       }
-      if (!canAccess(ident, probe.classCode || null)) {
+      if (!canReach(ident, probe.classCode || null)) {
         pushEvent('warn', '管理端越权：HTTP 审批被云端拒绝（目标不在其 scopes 内）',
           { kind, id, path: u.pathname });
         return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限处理该内容' });
@@ -1782,7 +1920,7 @@ const server = http.createServer((req, res) => {
       for (const uid of readdirSync(RECORDINGS_ROOT)) {
         const dir = join(RECORDINGS_ROOT, uid);
         if (!statSync(dir).isDirectory()) continue;
-        if (!canAccess(listIdent, getDeviceClassCode(uid))) continue;
+        if (!canAccess(listIdent, getDeviceClassCode(uid), { tenantId: getDeviceTenant(uid) })) continue;
         const files = readdirSync(dir)
           .filter((n) => n.endsWith('.mp4'))
           .map((n) => {
@@ -1803,7 +1941,7 @@ const server = http.createServer((req, res) => {
     const uid = u.searchParams.get('uid') || '';
     if (!uid) return send(400, { ok: false, error: 'uid 必填' });
     const ident = identityFromAuth(req.__auth);
-    if (!canAccess(ident, getDeviceClassCode(uid))) {
+    if (!canAccess(ident, getDeviceClassCode(uid), { tenantId: getDeviceTenant(uid) })) {
       pushEvent('warn', '噪音存证列表越权（不在其 scopes 内）', { uid });
       return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权查看该设备的噪音存证' });
     }
@@ -1823,7 +1961,7 @@ const server = http.createServer((req, res) => {
     // 无班级归属的设备（classCode=null）：受限身份一律不可见（与 recordings 同口径）。
     const st = u.searchParams.get('status') || '';
     const ident = identityFromAuth(req.__auth);
-    const repairs = listRepairs(st).filter((t) => canAccess(ident, getDeviceClassCode(t.uid)));
+    const repairs = listRepairs(st).filter((t) => canAccess(ident, getDeviceClassCode(t.uid), { tenantId: getDeviceTenant(t.uid) }));
     return send(200, { ok: true, repairs });
   }
   if (req.method === 'POST' && u.pathname === '/api/repairs') {
@@ -1848,7 +1986,7 @@ const server = http.createServer((req, res) => {
         const t = listRepairs().find((x) => x.id === rid);
         if (!t) return send(404, { ok: false, error: `报修单不存在：${rid}` });
         // 2026-10-26（副产物同批）：单条读取按目标设备班级过滤
-        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid))) {
+        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid), { tenantId: getDeviceTenant(t.uid) })) {
           return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限查看该报修单' });
         }
         return send(200, { ok: true, ticket: t });
@@ -1857,7 +1995,7 @@ const server = http.createServer((req, res) => {
         const t = listRepairs().find((x) => x.id === rid);
         if (!t) return send(404, { ok: false, error: `报修单不存在：${rid}` });
         // 2026-10-26（副产物同批）：状态变更按目标设备班级过滤
-        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid))) {
+        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid), { tenantId: getDeviceTenant(t.uid) })) {
           return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限处理该报修单' });
         }
         let body = '';
@@ -1877,7 +2015,7 @@ const server = http.createServer((req, res) => {
         const t = listRepairs().find((x) => x.id === rid);
         if (!t) return send(404, { ok: false, error: `报修单不存在：${rid}` });
         // 2026-10-26（副产物同批）：删除按目标设备班级过滤
-        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid))) {
+        if (!canAccess(identityFromAuth(req.__auth), getDeviceClassCode(t.uid), { tenantId: getDeviceTenant(t.uid) })) {
           return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限删除该报修单' });
         }
         const r = deleteRepair(rid);
@@ -1895,7 +2033,7 @@ const server = http.createServer((req, res) => {
     if (!d || !d.recentFrame) return send(404, { ok: false, error: '该设备没有可取的帧（可能没推过或已掉线）' });
     // 2026-10-15（权限契约 §4.3）：实时画面最敏感，读取同样过 can()
     const ident = identityFromAuth(req.__auth);
-    if (!canAccess(ident, d.classCode ?? null)) {
+    if (!canReach(ident, d.classCode ?? null)) {
       return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '无权限查看该设备画面' });
     }
     res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': d.recentFrame.length });
@@ -1920,7 +2058,7 @@ const server = http.createServer((req, res) => {
       // 2026-10-15（权限契约 §4.3）：下发指令前必须过 can()——REST 入口同样防越权
       const ident = identityFromAuth(req.__auth);
       const tgtClass = getDeviceClassCode(uid);   // 离线设备也在 knownDevices 里有归属
-      if (!canAccess(ident, tgtClass)) {
+      if (!canReach(ident, tgtClass)) {
         pushEvent('warn', 'HTTP 管理面越权：指令被云端拒绝（目标不在其 scopes 内）',
           { uid, action: String(action).slice(0, 48), who: req.__auth?.uid ?? req.__auth?.mode ?? '?' });
         return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: `无权限向设备 ${uid} 下发指令` });
@@ -2442,7 +2580,7 @@ viewerWss.on('connection', (ws) => {
           if (!uid) { pushEvent('warn', `${t} 帧缺 uid，已丢弃`, { bytes: buf.length }); return; }
           // 2026-10-24：远程控制 = 直接操纵教室机器（最高危），加重认证门。
           if (!reauthCheck(ws, t)) return;
-          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid))) {
+          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid), { tenantId: getDeviceTenant(uid) })) {
             pushEvent('warn', `${t} 被拒（无权限远控该设备）`, { uid });
             sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限远控设备 ${uid}`);
             return;
@@ -2552,7 +2690,7 @@ viewerWss.on('connection', (ws) => {
         const ident = identityFromAuth(ws.__who);
         const tgtUid = p.payload.uid;
         const tgtClass = getDeviceClassCode(tgtUid);   // 离线设备也在 knownDevices 里有归属
-        if (!canAccess(ident, tgtClass)) {
+        if (!canReach(ident, tgtClass)) {
           sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限订阅设备 ${tgtUid}`);
           return;
         }
@@ -2579,7 +2717,7 @@ viewerWss.on('connection', (ws) => {
         const password = String(p.payload?.password || '');
         if (!uid) { sndErr(ws, 'BAD_PAYLOAD', 'vnc-auth 缺 uid'); return; }
         const ident = identityFromAuth(ws.__who);
-        if (!canAccess(ident, getDeviceClassCode(uid))) {
+        if (!canAccess(ident, getDeviceClassCode(uid), { tenantId: getDeviceTenant(uid) })) {
           sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限访问设备 ${uid}`);
           return;
         }
@@ -2656,7 +2794,7 @@ viewerWss.on('connection', (ws) => {
         // 这是本轮「云端全权无阻止」的核心补位：此前任何持票者能对任何设备做任何动作。
         const ident = identityFromAuth(ws.__who);
         const tgtClass = getDeviceClassCode(uid);   // 离线设备也在 knownDevices 里有归属
-        if (!canAccess(ident, tgtClass)) {
+        if (!canReach(ident, tgtClass)) {
           pushEvent('warn', '管理端越权：指令被云端拒绝（目标不在其 scopes 内）',
             { uid, action: String(action).slice(0, 48), who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
           sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限向设备 ${uid} 下发指令`);
@@ -2700,14 +2838,14 @@ viewerWss.on('connection', (ws) => {
       case 'song-requests.list': {
         const ident = identityFromAuth(ws.__who);
         const items = listSongRequests({ state: p.payload?.state, limit: p.payload?.limit })
-          .filter((it) => canAccess(ident, it.classCode || null));
+          .filter((it) => canReach(ident, it.classCode || null));
         snd(ws, 'song-requests.list', { ok: true, items });
         return;
       }
       case 'blessings.list': {
         const ident = identityFromAuth(ws.__who);
         const items = listBlessings({ state: p.payload?.state, limit: p.payload?.limit })
-          .filter((it) => canAccess(ident, it.classCode || null));
+          .filter((it) => canReach(ident, it.classCode || null));
         snd(ws, 'blessings.list', { ok: true, items });
         return;
       }
@@ -2716,7 +2854,7 @@ viewerWss.on('connection', (ws) => {
         const s = feedbackSummary();
         // byClass 同样按 scope 过滤（班级计数也是数据，不漏给没权限的连接）
         if (ident && ident.scopes !== null && !isPlatformIdent(ident)) {
-          s.byClass = s.byClass.filter((c) => canAccess(ident, c.classCode || null));
+          s.byClass = s.byClass.filter((c) => canReach(ident, c.classCode || null));
         }
         snd(ws, 'feedback.summary', s);
         return;
@@ -2728,7 +2866,7 @@ viewerWss.on('connection', (ws) => {
         // 先按 id 探一次班级归属做权限判定（handle* 内部还会再校验状态机）
         const probe = listSongRequests({ limit: 500 }).find((it) => it.id === id);
         if (!probe) { snd(ws, 'song-request-handled', { ok: false, id, code: 'NOT_FOUND', message: `点歌 #${id} 不存在` }); return; }
-        if (!canAccess(ident, probe.classCode || null)) {
+        if (!canReach(ident, probe.classCode || null)) {
           pushEvent('warn', '管理端越权：点歌审批被云端拒绝（目标不在其 scopes 内）', { id, who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
           sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限处理点歌 #${id}`);
           return;
@@ -2745,7 +2883,7 @@ viewerWss.on('connection', (ws) => {
         const ident = identityFromAuth(ws.__who);
         const probe = listBlessings({ limit: 500 }).find((it) => it.id === id);
         if (!probe) { snd(ws, 'blessing-handled', { ok: false, id, code: 'NOT_FOUND', message: `祝福 #${id} 不存在` }); return; }
-        if (!canAccess(ident, probe.classCode || null)) {
+        if (!canReach(ident, probe.classCode || null)) {
           pushEvent('warn', '管理端越权：祝福审批被云端拒绝（目标不在其 scopes 内）', { id, who: ws.__who?.uid ?? ws.__who?.mode ?? '?' });
           sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限处理祝福 #${id}`);
           return;
@@ -2766,7 +2904,7 @@ viewerWss.on('connection', (ws) => {
         if (action === 'open') {
           const uid = String(p.payload?.uid || '').trim();
           if (!uid) { sndErr(ws, 'BAD_PARAMS', 'udp-session.open 缺 uid'); return; }
-          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid))) {
+          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid), { tenantId: getDeviceTenant(uid) })) {
             sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限与设备 ${uid} 建 UDP 会话`);
             pushEvent('warn', 'udp-session 被拒（无权限远控该设备）', { uid });
             return;
@@ -2812,7 +2950,7 @@ viewerWss.on('connection', (ws) => {
         if (action === 'open') {
           const uid = String(p.payload?.uid || '').trim();
           if (!uid) { sndErr(ws, 'BAD_PARAMS', 'tcp-session.open 缺 uid'); return; }
-          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid))) {
+          if (!canAccess(identityFromAuth(ws.__who), getDeviceClassCode(uid), { tenantId: getDeviceTenant(uid) })) {
             sndErr(ws, 'NO_DEVICE_PERMISSION', `无权限与设备 ${uid} 建 TCP 会话`);
             pushEvent('warn', 'tcp-session 被拒（无权限远控该设备）', { uid });
             return;

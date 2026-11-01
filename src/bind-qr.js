@@ -388,6 +388,10 @@ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_LEN = 6;
 const DEVICE_TTL_MS = 5 * 60 * 1000;        // 设备自助码：5 分钟（QML 轮询窗口）
 const CLASS_TTL_MS = 24 * 60 * 60 * 1000;   // 管理员班级码：24 小时（够贴一节课）
+
+// 2026-11-02 多租户：班级接入码必须记住"哪个学校的班"。
+// 只存 classCode 时，两校同码（站点 class_0102 两校都在用）的票在消费端无法归属。
+import { DEFAULT_TENANT, normalizeTenantId } from './tenant.js';
 const MAX_TICKETS = 5000;                   // 上限护栏：码表由匿名请求驱动，不设上限会被刷爆
 
 /** code -> { code, kind, uid, classCode, className, state, createdAt, expireAt, boundAt } */
@@ -443,10 +447,26 @@ export function issueDeviceBind(uid, { ttlMs = DEVICE_TTL_MS } = {}) {
   return { ok: true, ticket };
 }
 
-/** 管理员按班生成绑定码（码里带班级：老师输码即绑、或扫码点确认）。 */
-export function issueClassBind(classCode, className, { ttlMs = CLASS_TTL_MS } = {}) {
+/**
+ * 管理员按班生成绑定码（码里带班级：老师输码即绑、或扫码点确认）。
+ *
+ * 2026-11-02 多租户：**票里必须带 tenantId**。
+ * 设备拿到一个 6 位码时，只知道"某个班"，不知道"哪个学校的某个班"；两校都有
+ * `class_0102` 时，只凭 classCode 反查租户是歧义的（class-dir 的 tenantOfClass
+ * 对歧义回 null）。所以租户在**发码时**就钉死在票里，消费端直接读票，不再反查。
+ *
+ * @param {string} classCode
+ * @param {string} className
+ * @param {{ttlMs?:number, tenantId?:string}} [opts]
+ */
+export function issueClassBind(classCode, className, opts = {}) {
   const cc = String(classCode || '').trim();
   if (!cc) return { ok: false, error: '缺少班级码' };
+  // 兼容历史调用：第三参曾只接 ttlMs（数字）或 {ttlMs}；2026-11-02 起也接受裸租户 id 字符串。
+  const ttlMs = typeof opts === 'number' ? opts : (opts && opts.ttlMs) || CLASS_TTL_MS;
+  const tenantId = normalizeTenantId(
+    typeof opts === 'string' ? opts : (opts && opts.tenantId),
+  );
   sweep();
   let code = randomCode();
   let guard = 0;
@@ -454,7 +474,7 @@ export function issueClassBind(classCode, className, { ttlMs = CLASS_TTL_MS } = 
   const now = Date.now();
   const ticket = {
     code, kind: 'class', uid: '', classCode: cc, className: String(className || '').trim(),
-    state: 'pending', createdAt: now, expireAt: now + ttlMs, boundAt: 0,
+    tenantId, state: 'pending', createdAt: now, expireAt: now + ttlMs, boundAt: 0,
   };
   tickets.set(code, ticket);
   return { ok: true, ticket };
