@@ -123,8 +123,15 @@
 ```bash
 git -C <你的工程> status --short          # 有没有别人未提交的改动
 find <你的工程>/src -newermt '-15 minutes' -type f   # 最近 15 分钟有没有人在写
+node D:/DeepSeekHarness/workbuddy-deepseek-workbench/bin/wbds.mjs kickoff xingjikong   # 跨线便签：coordination 约定 + 待协商项
 ```
 两条任一有东西 → **先停，问清楚再动**。
+
+> 第三条（2026-11-01 加，双线共用）：`kickoff` 直接列出 `shared/project/xingjikong/coordination`
+> 的**正文**（超长按头+尾截断，尾段是最新增量）+ `projectNotes` + `counts`。
+> ⚠️ 它是**便签墙不是闸** —— 不查不会拦你，但会撞车；撞车成本远高于一条命令。
+> 边界：工作台只放跨线便签与待协商项，**状态真源仍是指挥台 + `.workbuddy/memory/`**，不得往那里复制状态表。
+> WorkBuddy 侧无 `wbds_*` 工具（那是 DSH 插件工具），只能用这条 CLI。
 
 ### 7.1 判断「某能力是否已实现」—— 必须 grep blob，不许读提交信息（2026-10-06 加）
 
