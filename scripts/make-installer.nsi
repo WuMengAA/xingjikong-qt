@@ -36,6 +36,8 @@ InstallDir "$PROGRAMFILES64\StelarithViewer"
 ;    重装永远沿用注册表里那条中文路径 ⇒ 用户看到的还是中文目录（这是"改了却没生效"的真因）。
 ;    改为在 .onInit 里手动裁决（见下）：非中文旧路径才沿用；命中旧中文默认则迁移。
 !define LEGACY_DEFAULT "$PROGRAMFILES64\Stelarith\星集控管理端"
+; 默认安装目录（ASCII）。.onInit 用它判断调用方是否用 /D= 指定过目录。
+!define INSTALL_DEFAULT "$PROGRAMFILES64\StelarithViewer"
 Var /GLOBAL LEGACYDIR
 
 RequestExecutionLevel admin
@@ -47,6 +49,16 @@ RequestExecutionLevel admin
 ;     · 其它（自定义 / 已 ASCII） → 沿用原处，正常覆盖升级（不做"装两份"）
 Function .onInit
   StrCpy $LEGACYDIR ""
+  ; ⚠️ 2026-11-01：只有**命令行没指定 /D=** 时才读注册表覆盖 $INSTDIR。
+  ;    NSIS 把 /D=xxx 直接写进 $INSTDIR（不写注册表），所以「$INSTDIR != 默认值」
+  ;    即表示调用方用 /D= 指定过目录 ⇒ 尊重它，别用注册表覆盖。
+  ;    原实现无条件读注册表 ⇒ /D= 被忽略 ⇒ 自动化装包装不到指定目录，
+  ;    还会把**注册表记录的那个目录**里的 exe Rename 掉（配合下面的 Rename 对策，
+  ;    会出现「旧 exe 改名了、新 exe 没落位」⇒ 目标目录 exe 消失）。
+  ;    （本轮「干净机模拟安装」实测踩到：/D=D:\Stelarith\_cleaninstall_test 被忽略。）
+  StrCmp $INSTDIR "${INSTALL_DEFAULT}" read_reg_instdir
+    Goto init_done
+  read_reg_instdir:
   ReadRegStr $0 HKLM "${REGKEY}" "InstallDir"
   StrCmp $0 "" init_done
   StrCmp $0 "${LEGACY_DEFAULT}" legacy_path
@@ -89,8 +101,18 @@ Section "Main" SEC_MAIN
   ; 首次安装时进程不存在，Get-Process -ErrorAction SilentlyContinue 静默跳过，安全。
   ; 用 PowerShell 的 Stop-Process，不用 taskkill（cmd 系语义模糊、返回难判断，
   ; 在这台机器上还容易被执行策略/路径转换绊住）。
+  ; ⚠️ 停旧实例必须用 **CIM/WMI 的 Terminate**，不能用 Stop-Process（2026-11-01 实测）：
+  ;    Stop-Process 在 Session 0（计划任务/服务/自动化拉起的安装器就在 Session 0）
+  ;    **看不到 Session 1 的进程** ⇒ 管道为空 ⇒ 什么也没杀 ⇒ 老师正开着管理端时
+  ;    exe 被占用 ⇒ 覆盖失败（且 /S 静默模式下不报错 ⇒ 安装器 rc=0 但 exe 是旧的）。
+  ;    Win32_Process.Terminate 能跨 Session 终止。两者都保留：Stop-Process 覆盖
+  ;    本 Session 的常规情况，Terminate 兜住跨 Session。
   nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process -Name viewer-qt -ErrorAction SilentlyContinue | Stop-Process -Force"'
-  Sleep 800
+  ;    跨 Session 终止用 **taskkill /F /IM**（系统 API，不受 Session 可见性限制）——
+  ;    不用 CIM|ForEach-Object{$_...}：NSIS 会把 PowerShell 的 $_ 当成自己的 $_ 变量
+  ;    （编译期 warning 6000 "unknown variable/constant _"，命令会被改坏）。
+  nsExec::ExecToLog 'taskkill /F /IM viewer-qt.exe'
+  Sleep 1200
 
   ; ⚠️ 跨 Session 的占用问题（2026-11-01 实测踩坑，第二次）：
   ;    上面的 Stop-Process **杀不掉别的 Session 的进程**（Get-Process 在 Session 0

@@ -321,12 +321,20 @@ Item {
         anchors.fill: parent
         ctx: shell.ctx
         backendRef: shell.backendRef
+        host: shell
         navItems: shell.navItems
         section: shell.section
+        sectionIndex: shell.sectionIndex
         accountTitle: backendRef ? backendRef.roleText : ""
         accountSub: backendRef ? backendRef.accountName : ""
         accountAvatarText: backendRef ? backendRef.accountAvatarText : ""
         currentClass: backendRef ? backendRef.currentClass : ""
+        devices: shell.classDevices()
+        stats: shell.stats()
+        portrait: shell.portrait
+        filterMode: shell.filterMode
+        openUid: shell.openUid
+        toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
         onNavActivated: function (key) { shell.navActivated(key) }
         onAvatarClicked: function () { shell.navActivated("account") }
         onDeviceActivated: function (uid) {
@@ -420,84 +428,27 @@ Item {
                     }
 
                     // ── 内容区（距操作区 spacing.md=16）──
-                    StackLayout {
+                    // ⚠️ 2026-11-01：六个业务页抽到 qml/shell/ShellContent.qml，
+                    //    **经典外壳与新版外壳预览共用同一份**（两份副本必然漂移，§9 单一真源）。
+                    //    搬动时语义逐字不变：ControlPage / MonitorPage 仍用
+                    //    setSource(url, {ctx}) 注入（实例化瞬间就求值 ctx.window.currentUid，
+                    //    onLoaded 补太晚 —— 历史踩坑 TypeError: Cannot read property 'window'）。
+                    ShellContent {
                         id: mainStack
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         Layout.topMargin: Theme.spacing.md
                         Layout.bottomMargin: Theme.spacing.md
-                        currentIndex: shell.sectionIndex
-
-
-                        // ① 仪表盘（S1/S2/S3/S4/S5/S7 全在 pages/dashboard/）
-                        // 抽件原因：本文件已到登记上限（710 行），内联 270 行不允许再长。
-                        DashPage {
-                            host: shell.ctx ? shell.ctx.window : null
-                            devices: shell.classDevices()
-                            stats: shell.stats()
-                            portrait: shell.portrait
-                            filterMode: shell.filterMode
-                            openUid: shell.openUid
-                            toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
-                            onFilterChanged: function (m) { shell.filterMode = m }
-                            onDeviceActivated: function (uid) {
-                                shell.openUid = uid
-                                // H1：同时写宿主「看哪台」真源（SideSheet 与危险动作都取它）
-                                if (uid !== "" && backendRef) backendRef.currentUid = uid
-                            }
-                        }
-
-                        // ② 班级中心（2026-10-28 模块一 · 用户裁决「取代」）
-                        //    原先这里是 ClassDashboard 单班三栏工作台（左身份/中网格/右动作），
-                        //    已按裁决整体下线；班级域数据仍走 backendRef.classService（未变）。
-                        //    本页是**纯声明式**：数据、几何、配色全在 C++ ClassCenterController
-                        //    （context property: classCenter），点击只调 classCenter.requestOp("名字")。
-                        Loader {
-                            source: "../pages/class/ClassCenterPage.qml"
-                        }
-
-                        // ③ 设备集控（旧界面迁移 2026-10-24 · 用户裁决 A「先搬后拆」）：
-                        //    ControlPage 原样内嵌，零重写。它自带左栏设备列表与多选，
-                        //    与本壳的班级导航并存（前者管"选哪台/多选"，后者管"看哪个班"）。
-                        // ⚠️ 必须用 setSource(url, {ctx}) 而不是 source + onLoaded 注入：
-                        //    ControlPage 里 `visible: ctx.window.currentUid !== ""` 这类绑定
-                        //    在**实例化瞬间**就求值，onLoaded 时补 ctx 已经晚了
-                        //    （实测 TypeError: Cannot read property 'window' of undefined）。
-                        Loader {
-                            id: controlLoader
-                            Component.onCompleted: {
-                                if (shell.ctx)
-                                    setSource("../pages/control/ControlPage.qml", { "ctx": shell.ctx })
-                            }
-                        }
-
-                        // ④ 运行监控（旧界面迁移 2026-10-24）：直接内嵌 MonitorPage，
-                        //    不再 goPage(3) 甩给旧壳。同一份 QML 在旧壳 page 3 仍可用，
-                        //    差别只在 backFn —— 注入了就切回仪表盘，不注入就跳 page 1。
-                        Loader {
-                            id: monitorLoader
-                            Component.onCompleted: {
-                                if (!shell.ctx) return
-                                setSource("../pages/control/MonitorPage.qml", {
-                                    "ctx": shell.ctx,
-                                    "backFn": function () { shell.section = "dash" }
-                                })
-                            }
-                        }
-
-                        // ⑤ 系统设置：只给管理员（navActivated 里的 system:settings 门禁）
-                        Loader {
-                            source: "../pages/settings/SettingsPage.qml"
-                            onLoaded: if (item) item.ctx = shell.ctx
-                        }
-
-                        // ⑥ 个人中心（2026-10-25）：头像的落点。**不受** system:settings 门禁 ——
-                        //    老师必须能看自己的账号、在册班级、提醒/外观偏好与退出登录。
-                        //    原来头像直接跳 ⑤，而 ⑤ 对 teacher 是关的 ⇒ 老师点自己头像被挡。
-                        Loader {
-                            source: "../pages/account/AccountCenterPage.qml"
-                            onLoaded: if (item) item.ctx = shell.ctx
-                        }
+                        sectionIndex: shell.sectionIndex
+                        ctx: shell.ctx
+                        host: shell
+                        backendRef: shell.backendRef
+                        devices: shell.classDevices()
+                        stats: shell.stats()
+                        portrait: shell.portrait
+                        filterMode: shell.filterMode
+                        openUid: shell.openUid
+                        toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
                     }
                 }
             }
