@@ -225,6 +225,16 @@ public:
     void setSkipHistoryForNext(bool on) { m_skipHistoryHint = on; }
     QString channel() const { return m_channel; }
 
+    // ── 通知「绝对结束时刻」（2026-11-01 · 灵动岛顶替 ClassIsland 第 1 步）────────
+    // 语义：这条内容应当**播到某个时刻为止**（"一直挂到上课/下课"），而不是"播 N 毫秒"。
+    //   给了 EndTime 就**以它为准**（覆盖 durationMs，不叠加）；showIsland 消费时
+    //   换算成剩余时长，因此自动继承 2026-11-01 那条"显式时长到点就收（含带按钮）"的行为。
+    // ⚠️ 一次性：照 m_channelHint 的模式，用完即清 —— 否则下一条会莫名继承上一条的结束时刻。
+    // ⚠️ 已过点：钳到 1s（闪一下再收）；不钳成 0，因为 0 在岛上代表"常驻不自动收"，语义相反。
+    // ⚠️ 上限 24h：防调用方把秒当毫秒传（写错一个量级不至于挂出"永不消失"）。
+    // 自有实现：语义参照 ClassIsland 的 NotificationContent.EndTime，代码独立编写。
+    void setEndTimeForNext(qint64 epochMs) { m_endHintMs = epochMs > 0 ? epochMs : 0; }
+
     // ── 岛组件面板（2026-10-27 · G4/G5/G6：日期 / 课表 / 倒计时）─────────────
     // 与通知的分工：通知是**事件**（来一条，看完就走）；面板是**看板**
     //   （今天第几节、还有多久下课 —— 要停下来看清、反复看）。
@@ -477,6 +487,8 @@ private:
     qint64 m_noticeHintMs = 0;
     QString m_channelHint;              // 下一条通知的渠道（一次性，见 setChannelForNext）
     bool    m_skipHistoryHint = false;  // 下一条通知是否不进历史（一次性）
+    // 2026-11-01：下一条通知的**绝对结束时刻**（epoch 毫秒，0=未注入）。见 setEndTimeForNext。
+    qint64  m_endHintMs = 0;
     QString m_channel;                  // 当前这条的渠道（空 = 不标）
     bool    m_skipHistory = false;      // 当前这条是否不进历史
     // 2026-10-27（G4/G5/G6）：岛面板（空 = 当前没有面板，展开区照旧画通知详情）。

@@ -47,6 +47,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -435,6 +436,7 @@ int main(int argc, char *argv[])
     //   停留 N 秒后归档，若 ts 仍是出现时刻，则 ts 比分文件写入时刻早约 N 秒。
     int holdSec = 0;
     int autocloseMs = 0;   // 2026-11-01：验「带按钮 + 显式时长 → 到点自动收起」（U盘 15s 修复）
+    int endAtMsArg = 0;    // 2026-11-01：验 EndTime（绝对结束时刻）覆盖 durationMs
     bool vhclear = false;   // #Win7 排障：vh 模块销毁清空路径验收（见文件头注释）
     bool automation = false; // 2026-10-27 Phase 3：注入真 AutomationEngine 验「自」面
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
@@ -491,6 +493,8 @@ int main(int argc, char *argv[])
             holdSec = QString::fromLocal8Bit(argv[++i]).toInt();
         if (a == QLatin1String("--autoclose") && i + 1 < argc)
             autocloseMs = QString::fromLocal8Bit(argv[++i]).toInt();
+        if (a == QLatin1String("--endat") && i + 1 < argc)
+            endAtMsArg = QString::fromLocal8Bit(argv[++i]).toInt();   // 从现在起多少毫秒后结束
         if (a == QLatin1String("--vhclear"))  vhclear = true;   // #Win7 排障
         if (a == QLatin1String("--automation")) automation = true; // 2026-10-27 Phase 3：注入真引擎验「自」面
         if (a == QLatin1String("--morph") && i + 1 < argc)
@@ -549,6 +553,45 @@ int main(int argc, char *argv[])
         return app.exec();
     }
 
+    if (endAtMsArg > 0) {
+        // 2026-11-01（顶替 ClassIsland 第 1 步）：验 **EndTime 覆盖 durationMs**。
+        // 做法：durationMs 只给 1500（本该 1.5s 就收），EndTime 给 now+endAtMsArg。
+        //   断言三条：
+        //     · t=500ms        仍在上屏
+        //     · t=2700ms       仍在上屏  ← 证明 durationMs=1500 被 EndTime 覆盖（反例保护）
+        //     · t=endAt+1200   已收起    ← 证明到**绝对时刻**才收
+        //   endAtMsArg 必须 > 2700 才有意义（否则第二条断言自然为假）。
+        isl->setEndTimeForNext(QDateTime::currentMSecsSinceEpoch() + endAtMsArg);
+        isl->showIsland(QStringLiteral("挂到这个时刻为止"),
+                        QStringLiteral("durationMs=1500 应被 EndTime 覆盖"),
+                        QStringLiteral("clock"), 1500, IslandOverlay::Form::Centered, false);
+        bool *shownEarly = new bool(false);
+        bool *shownPastDur = new bool(false);
+        QTimer::singleShot(500, [isl, shownEarly]() {
+            *shownEarly = !isl->isIdle();
+            fprintf(stdout, "[endat] t=500ms shown=%d (expect 1)\n", *shownEarly ? 1 : 0);
+            fflush(stdout);
+        });
+        QTimer::singleShot(2700, [isl, shownPastDur]() {
+            // durationMs 只给了 1500 —— 到 2700 还挂着，说明 EndTime 真的优先
+            *shownPastDur = !isl->isIdle();
+            fprintf(stdout, "[endat] t=2700ms shown=%d (expect 1, durationMs=1500 被 EndTime 覆盖)\n",
+                    *shownPastDur ? 1 : 0);
+            fflush(stdout);
+        });
+        QTimer::singleShot(endAtMsArg + 1200, [isl, shownEarly, shownPastDur, endAtMsArg]() {
+            const bool idleNow = isl->isIdle();
+            fprintf(stdout, "[endat] t=%dms idle=%d (expect 1, 到绝对时刻才收)\n",
+                    endAtMsArg + 1200, idleNow ? 1 : 0);
+            fflush(stdout);
+            const int rc = (*shownEarly && *shownPastDur && idleNow)
+                               ? 0 : ((*shownEarly && *shownPastDur) ? 1 : 2);
+            delete shownEarly;
+            delete shownPastDur;
+            QCoreApplication::exit(rc);
+        });
+        return app.exec();
+    }
     if (autocloseMs > 0) {
         // 2026-11-01：验「带按钮 + 显式时长 → 到点自动收起」（U盘 15s 修复的正面断言）。
         // 走真实 overlay + showWithActions（交互态），时长给 autocloseMs：

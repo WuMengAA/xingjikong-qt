@@ -245,6 +245,12 @@ QString notifyFromParams(const QJsonObject &params, const QString &id)
 
     const bool needsInteraction = needConfirm || emergency;
     if (!needsInteraction) {
+        // 2026-11-01（顶替 ClassIsland 第 1 步）：flags.endAt = 绝对结束时刻（epoch 毫秒）。
+        //   给了就"挂到那个时刻"而不是"播 durMs 毫秒"（岛内 EndTime 优先，见 setEndTimeForNext）。
+        //   ⚠️ 只对**纯展示**生效：需确认/紧急的要等学生点，不能到点自己跑掉。
+        //   ⚠️ 紧挨着展示调用设置：hint 是一次性的，中间任何一次 showIsland 都会把它吃掉。
+        IslandOverlay::instance()->setEndTimeForNext(
+            static_cast<qint64>(flags.value(QStringLiteral("endAt")).toDouble()));
         islandShow(title, content, QStringLiteral("bell"), durMs, false, QString(), f, true);
     } else {
         // 确认 / 紧急：按钮行（「确认」+ 快捷回复），点哪枚回哪句。

@@ -1032,6 +1032,15 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
                                const QString &icon, int durationMs, Form form,
                                bool fromAdmin)
 {
+    // 2026-11-01（灵动岛顶替 ClassIsland · 第 1 步）：EndTime（绝对结束时刻）优先于 durationMs。
+    //   ⚠️ 先取出并清零再判冻结 —— 冻结把这次展示丢掉时，hint 不能留给下一条
+    //      （否则下一条会莫名挂到上一条的结束时刻）。
+    //   ⚠️ 换算成剩余时长后走既有自动收起链，不新增计时器、不改 m_autoClose 语义。
+    if (m_endHintMs > 0) {
+        const qint64 left = m_endHintMs - QDateTime::currentMSecsSinceEpoch();
+        durationMs = int(qBound<qint64>(1000, left, 24LL * 3600 * 1000));
+        m_endHintMs = 0;
+    }
     // 2026-10-19：远控期冻结（见 setSuppressed）——任何写入都可能触发 Repeater 重算，
     // 而触发的那一刻正是 delegate 处于销毁窗口，必崩。
     if (s_islandSuppressed) return;
