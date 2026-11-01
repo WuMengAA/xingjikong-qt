@@ -19,6 +19,7 @@
 Unicode true
 SetCompressor /SOLID lzma
 
+
 !define APPNAME "星集控管理端"
 !define EXE "viewer-qt.exe"
 !define REGKEY "Software\Stelarith\Viewer"
@@ -124,9 +125,14 @@ Section "Main" SEC_MAIN
   ;    对策：Windows 允许**重命名运行中的 exe**（只是不能删除）⇒ 先把旧 exe 改名
   ;    让路，新的再解压进来；旧文件留在盘上（.old），下次启动即用新 exe。
   ;    正常场景（没有进程在跑）改名会失败并被忽略，不影响安装。
-  IfFileExists "$INSTDIR\viewer-qt.exe" 0 no_rename_exe
-    Rename "$INSTDIR\viewer-qt.exe" "$INSTDIR\viewer-qt.exe.old"
-  no_rename_exe:
+  ;    ⚠️ 2026-11-01 二次修正：原用 Rename 让路，实测**新 exe 没能落位**
+  ;       （目标目录 exe 直接消失、只剩 .old ⇒ 应用打不开）。推测 NSIS 内部按
+  ;       「该路径已存在过」记账，Rename 让开了路径但记账没清 ⇒ 解压时被跳过。
+  ;       改用 Delete：路径彻底腾空 ⇒ File 必然落位；仍被占用时 Delete 报错中止
+  ;       （可见失败，不再静默跳过）。配合上面的 taskkill（跨 Session 停占用者），
+  ;       实战应当删得掉。
+  Delete "$INSTDIR\viewer-qt.exe"
+  Delete "$INSTDIR\viewer-qt.exe.old"
 
   ; ── 旧版中文目录迁移：先把旧目录里的 viewer.env 抢出来（比新目录里可能存在的更"真"）──
   ;    仅在 .onInit 判定为"旧中文默认路径"（$LEGACYDIR 非空）时执行。
