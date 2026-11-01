@@ -33,6 +33,7 @@
 #include "smtc_monitor.h"
 #include "danmaku.h"             // 2026-10-15 组件5：祝福弹幕全屏浮层
 #include "panel_domain.h"        // 2026-11-01：菜单栏动态课表（barLessonText）
+#include "notify/provider_registry.h"   // 2026-11-01：提供方门控（顶替 ClassIsland 第 2 步）
 
 #include <QApplication>
 #include <QDebug>
@@ -1032,7 +1033,19 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
                                const QString &icon, int durationMs, Form form,
                                bool fromAdmin)
 {
-    // 2026-11-01（灵动岛顶替 ClassIsland · 第 1 步）：EndTime（绝对结束时刻）优先于 durationMs。
+    // 2026-11-01（灵动岛顶替 ClassIsland · 第 2 步）：提供方门控。
+    //   被关掉的提供方 ⇒ 整条丢弃（不弹 / 不响 / 不入历史 / 不进任务表）。
+    //   ⚠️ 一次性 hint（provider 与 EndTime）都在这里消费并清零 —— 这条不显示时，
+    //      它们绝不能留给下一条。
+    if (!m_providerHint.isEmpty()) {
+        const QString pid = m_providerHint;
+        m_providerHint.clear();
+        if (!notify::NotifyProviders::instance().allow(pid)) {
+            m_endHintMs = 0;
+            return;
+        }
+    }
+    // 2026-11-01（第 1 步）：EndTime（绝对结束时刻）优先于 durationMs。
     //   ⚠️ 先取出并清零再判冻结 —— 冻结把这次展示丢掉时，hint 不能留给下一条
     //      （否则下一条会莫名挂到上一条的结束时刻）。
     //   ⚠️ 换算成剩余时长后走既有自动收起链，不新增计时器、不改 m_autoClose 语义。

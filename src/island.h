@@ -235,6 +235,13 @@ public:
     // 自有实现：语义参照 ClassIsland 的 NotificationContent.EndTime，代码独立编写。
     void setEndTimeForNext(qint64 epochMs) { m_endHintMs = epochMs > 0 ? epochMs : 0; }
 
+    // ── 通知「提供方」（2026-11-01 · 顶替 ClassIsland 第 2 步）──────────────────
+    // 声明这条内容来自哪个**提供方**（"class"/"usb"/"file"/…，见 notify/provider_registry.h）。
+    // showIsland 消费时问注册表：该提供方被关掉 ⇒ **整条丢弃**（不弹、不响、不入历史）。
+    // ⚠️ 一次性：用完即清；不调用 = 不门控（与以前完全一致）。
+    // ⚠️ 未知名一律放行 —— 老调用方不该因为没跟上新枚举而静默丢通知。
+    void setProviderForNext(const QString &providerId) { m_providerHint = providerId; }
+
     // ── 岛组件面板（2026-10-27 · G4/G5/G6：日期 / 课表 / 倒计时）─────────────
     // 与通知的分工：通知是**事件**（来一条，看完就走）；面板是**看板**
     //   （今天第几节、还有多久下课 —— 要停下来看清、反复看）。
@@ -489,6 +496,8 @@ private:
     bool    m_skipHistoryHint = false;  // 下一条通知是否不进历史（一次性）
     // 2026-11-01：下一条通知的**绝对结束时刻**（epoch 毫秒，0=未注入）。见 setEndTimeForNext。
     qint64  m_endHintMs = 0;
+    // 2026-11-01：下一条通知的**提供方**（一次性，空=不门控）。见 setProviderForNext。
+    QString m_providerHint;
     QString m_channel;                  // 当前这条的渠道（空 = 不标）
     bool    m_skipHistory = false;      // 当前这条是否不进历史
     // 2026-10-27（G4/G5/G6）：岛面板（空 = 当前没有面板，展开区照旧画通知详情）。

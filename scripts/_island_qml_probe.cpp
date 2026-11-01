@@ -41,6 +41,7 @@
 // 2026-10-27（G4/G5/G6）：面板三面 —— 探针走**真实数据域**（PanelDomain::build），
 // 而不是在 QML 里塞假 JSON：课表数据/倒计时边界/周次都来自 C++，塞假数据等于没测。
 #include "panel_domain.h"
+#include "notify/provider_registry.h"   // 2026-11-01：--providers 验注册表
 #include "schedule_clock.h"
 #include "automation_engine.h"   // 2026-10-27 Phase 3：探针注入真引擎验「自动化」面（面 6）
 
@@ -48,6 +49,7 @@
 #include <QJsonObject>
 #include <QApplication>
 #include <QDateTime>
+#include <QSettings>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -437,6 +439,7 @@ int main(int argc, char *argv[])
     int holdSec = 0;
     int autocloseMs = 0;   // 2026-11-01：验「带按钮 + 显式时长 → 到点自动收起」（U盘 15s 修复）
     int endAtMsArg = 0;    // 2026-11-01：验 EndTime（绝对结束时刻）覆盖 durationMs
+    bool providersMode = false;   // 2026-11-01：验通知提供方注册表（纯逻辑，不开窗）
     bool vhclear = false;   // #Win7 排障：vh 模块销毁清空路径验收（见文件头注释）
     bool automation = false; // 2026-10-27 Phase 3：注入真 AutomationEngine 验「自」面
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
@@ -493,6 +496,7 @@ int main(int argc, char *argv[])
             holdSec = QString::fromLocal8Bit(argv[++i]).toInt();
         if (a == QLatin1String("--autoclose") && i + 1 < argc)
             autocloseMs = QString::fromLocal8Bit(argv[++i]).toInt();
+        if (a == QLatin1String("--providers")) providersMode = true;
         if (a == QLatin1String("--endat") && i + 1 < argc)
             endAtMsArg = QString::fromLocal8Bit(argv[++i]).toInt();   // 从现在起多少毫秒后结束
         if (a == QLatin1String("--vhclear"))  vhclear = true;   // #Win7 排障
@@ -629,6 +633,86 @@ int main(int argc, char *argv[])
             QCoreApplication::exit(rc);
         });
         return app.exec();
+    }
+    if (providersMode) {
+        // 2026-11-01（第 2 步）：通知提供方注册表 —— 纯逻辑断言，不建窗口、不看 QML。
+        // 跑完 **resetToDefaults()**：探针不许把状态留在机器上。
+        using notify::NotifyProviders;
+        // ⚠️ 探针必须给 QSettings 一个**落点**：生产在 main.cpp 设 org=Stelarith /
+        //    app="Stelarith Agent"；探针两者都没设 ⇒ 默认构造的 QSettings 无路径，
+        //    写入立刻丢失（表现为"写了读不回"的假失败，2026-11-01 实测踩过）。
+        //    这里用**专属 app 名**，能真落盘但绝不碰生产键。
+        QCoreApplication::setOrganizationName(QStringLiteral("Stelarith"));
+        QCoreApplication::setApplicationName(QStringLiteral("NotifyProvidersProbe"));
+        // ⚠️ 受限会话/沙箱下**注册表写不进去**（实测 QSettings::status() == AccessError，
+        //    裸写一个键都回不来）。这里把默认后端切到 ini + 临时目录：
+        //    验的仍是**同一套读写逻辑**，只是换个可写的落点 —— 生产照旧走注册表。
+        const QString probeIniDir =
+            QDir(QDir::tempPath()).filePath(QStringLiteral("stelarith_notify_provider_probe"));
+        QDir().mkpath(probeIniDir);
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, probeIniDir);
+        NotifyProviders &R = NotifyProviders::instance();
+        R.resetToDefaults();
+        int fail = 0;
+        auto chk = [&fail](const char *name, bool ok) {
+            fprintf(stdout, "[providers] %-44s %s\n", name, ok ? "PASS" : "FAIL");
+            if (!ok) ++fail;
+            fflush(stdout);
+        };
+        const QStringList def = R.order();
+        chk("默认序 = 管理端>课程>对讲>文件>U盘>自动化>插件>考试",
+            def == QStringList{ QStringLiteral("admin"), QStringLiteral("class"),
+                                QStringLiteral("voice"), QStringLiteral("file"),
+                                QStringLiteral("usb"), QStringLiteral("automation"),
+                                QStringLiteral("plugin"), QStringLiteral("exam") });
+        chk("settingsModel 8 行", R.settingsModel().size() == 8);
+        chk("默认 allow(class)=true", R.allow(QStringLiteral("class")));
+        chk("未知名放行（provider 与 channel 两层）",
+            R.allow(QStringLiteral("nope-not-exist")) &&
+            R.allow(QStringLiteral("nope-not-exist"), QStringLiteral("any")));
+        R.setEnabled(QStringLiteral("plugin"), false);
+        {
+            // 诊断（2026-11-01）：先裸写一个键作对照 —— 分清"注册表写不进去（环境）"
+            // 与"我的代码没走到（逻辑）"。
+            QSettings raw;
+            raw.setValue(QStringLiteral("probe/raw_roundtrip"), 7);
+            raw.sync();
+            fprintf(stdout, "[providers] dbg raw_write_status=%d raw_readback=%s\n",
+                    int(raw.status()), qPrintable(raw.value(QStringLiteral("probe/raw_roundtrip"),
+                                                            QStringLiteral("<unset>")).toString()));
+            QSettings probeSettings;
+            fprintf(stdout, "[providers] dbg file=%s status=%d readback=%s\n",
+                    qPrintable(probeSettings.fileName()), int(probeSettings.status()),
+                    qPrintable(probeSettings.value(QStringLiteral("notify/providers/plugin/enabled"),
+                                                   QStringLiteral("<unset>")).toString()));
+            fflush(stdout);
+        }
+        chk("关 plugin ⇒ allow(plugin)=false", !R.allow(QStringLiteral("plugin")));
+        chk("关 plugin 不影响 admin", R.allow(QStringLiteral("admin")));
+        R.setChannelEnabled(QStringLiteral("class"), QStringLiteral("class.ended"), false);
+        chk("关渠道 ⇒ class.ended 被拦",
+            !R.allow(QStringLiteral("class"), QStringLiteral("class.ended")));
+        chk("同提供方其它渠道仍放行",
+            R.allow(QStringLiteral("class"), QStringLiteral("class.started")));
+        chk("渠道名写错不静默丢弃",
+            R.allow(QStringLiteral("class"), QStringLiteral("class.nosuch")));
+        R.moveUp(QStringLiteral("plugin"));
+        chk("上移生效：plugin 抢到 automation 之前",
+            R.priorityIndex(QStringLiteral("plugin")) < R.priorityIndex(QStringLiteral("automation")));
+        const QVariantList model = R.settingsModel();
+        const QVariantMap firstRow = model.first().toMap();
+        const QVariantMap lastRow = model.last().toMap();
+        chk("首行 priority=1 且 canUp=false",
+            firstRow.value(QStringLiteral("priority")).toInt() == 1 &&
+            !firstRow.value(QStringLiteral("canUp")).toBool());
+        chk("末行 canDown=false", !lastRow.value(QStringLiteral("canDown")).toBool());
+        R.resetToDefaults();
+        chk("重置后 order 回默认", R.order() == def);
+        chk("重置后 plugin 恢复启用", R.allow(QStringLiteral("plugin")));
+        fprintf(stdout, "[providers] 汇总：%s（失败 %d）\n", fail == 0 ? "PASS" : "FAIL", fail);
+        fflush(stdout);
+        return fail == 0 ? 0 : 1;
     }
     if (idle) {
         isl->ensureIdle();

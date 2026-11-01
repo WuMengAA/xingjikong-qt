@@ -308,6 +308,12 @@ add_executable(stelarith-agent-qt
   #   提升文件作用域外部链接供本模块 extern 复用（同 g_uid/agentEnvPath 模式）。
   src/notify/notify_entry.cpp
   src/notify/notify_entry.h
+  # ── 通知提供方注册表（2026-11-01 · 顶替 ClassIsland 第 2 步）──
+  #   提供方→渠道两级 + QSettings 持久化 + 门控入口；设置页数据由 settingsModel() 出。
+  src/notify/provider_registry.cpp
+  src/notify/provider_registry.h
+  #   AgentUi 的「通知提供者」方法体（声明仍在 agent_ui.h；同 island_bridge_settings 范式）
+  src/notify/agent_ui_providers.cpp
   # ── P3 长期记录落盘内核（2026-10-30 main 拆分：#6a 迁出，原 main.cpp 4036-4113）──
   #   dataRoot/appendJsonl/logNoiseSample/logStudyStart/logStudyStop；零 main 全局依赖。
   src/p3log/p3_log.cpp

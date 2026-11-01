@@ -85,6 +85,10 @@ class AgentUi : public AgentRecordUi
     Q_PROPERTY(bool darkTheme       READ darkTheme                                NOTIFY infoChanged)
     // P0-0（2026-10-17）：允许第三方（插件）向灵动岛推送。默认 true（见 main.cpp AgentSettings 注释）。
     Q_PROPERTY(bool pluginIslandPush READ pluginIslandPush WRITE setPluginIslandPush NOTIFY infoChanged)
+    // 2026-11-01（顶替 ClassIsland 第 2 步）：通知提供方清单（含优先级/开关/渠道）。
+    //   一行一提供方的**结果值**由 notify::NotifyProviders::settingsModel() 算好，
+    //   QML 只画（禁在 QML 里算序号/拼字符串）。
+    Q_PROPERTY(QVariantList notifyProviders READ notifyProviders NOTIFY notifyProvidersChanged)
     Q_PROPERTY(bool autostart       READ autostart       WRITE setAutostart       NOTIFY infoChanged)
     Q_PROPERTY(bool desktopShortcut READ desktopShortcut WRITE setDesktopShortcut NOTIFY infoChanged)
 
@@ -214,6 +218,14 @@ public:
     bool lightMode() const { return m_lightMode; }
     bool darkTheme() const { return !m_lightMode; }
     bool pluginIslandPush() const { return m_pluginIslandPush; }
+
+    // 2026-11-01：通知提供方清单（见 Q_PROPERTY 说明）。改完立刻发 notifyProvidersChanged，
+    //   让设置页用 C++ 的结果值重画（不在 QML 里乐观更新，避免"勾了但没生效"）。
+    QVariantList notifyProviders() const;
+    Q_INVOKABLE void setNotifyProviderEnabled(const QString &id, bool on);
+    Q_INVOKABLE void setNotifyChannelEnabled(const QString &id, const QString &channelId, bool on);
+    Q_INVOKABLE void moveNotifyProvider(const QString &id, int delta);   // delta<0 上移 / >0 下移
+    Q_INVOKABLE void resetNotifyProviders();
     bool autostart() const { return m_autostart; }
     bool desktopShortcut() const { return m_desktopShortcut; }
     QString updateChannel() const { return m_updateChannel; }
@@ -398,6 +410,9 @@ signals:
     void infoChanged();
     void refreshRequested();
     void switchChanged(const QString &key, bool value);
+    // 2026-11-01：通知提供方清单变了（开关/渠道/优先级任一改动都发）——
+    //   设置页据此用 C++ 的结果值重画，避免"勾了但没生效"的假勾。
+    void notifyProvidersChanged();
     void openLogDirRequested();
     void openDataDirRequested();
     /** 打开配置目录（托盘右键同款动作，2026-10-28 移植进设置页）。 */
@@ -479,70 +494,6 @@ inline QVariantList AgentUi::channelOptionList(const QString &current)
     add(QStringLiteral("rc"),     QStringLiteral("测试"), QStringLiteral("候选测试版"));
     add(QStringLiteral("gray"),   QStringLiteral("灰度"), QStringLiteral("指定机型/班级灰度"));
     return out;
-}
-
-// 设置页分类清单（2026-10-28 模块三：界面按参考重做）。
-//   · 图标名必须是 resources/icons 里**真实存在**的文件名 —— 写不存在的名字会静默空白
-//     （项目踩过一次："grid"/"users" 在 viewer 那边根本不存在）。
-//   · active 由 C++ 定：QML 直接绑 `active`，不写 `key === current` 这种比较。
-//   · 分类与内容的一一对应关系见各 tabXxx 布尔 —— 七块内容只显示一块。
-inline QVariantList AgentUi::settingsSections() const
-{
-    QVariantList out;
-    auto add = [&out, this](const QString &key, const QString &label, const QString &icon) {
-        const bool on = (key == m_settingsTab);
-        QVariantMap m;
-        m.insert(QStringLiteral("key"), key);
-        m.insert(QStringLiteral("label"), label);
-        m.insert(QStringLiteral("icon"), icon);
-        m.insert(QStringLiteral("active"), on);
-        // 选中态样式也由 C++ 定 —— QML 里不能写 `active ? A : B`（那是三元配色判断）。
-        // 2026-10-30 用户点单「不要紫色」：原值取自 MD3 的 cSecondaryCont
-        // (#E8DEF8/#4A4458 —— 淡紫/紫灰)，现改为 shadcn 锌灰中性色：
-        //   rowBg 选中  = #E4E4E7 / #3F3F46（zinc-200 / zinc-700）
-        //   fg    选中  = #09090B / #FAFAFA（= Theme.color.textPrimary）
-        //   fg    未选  = #71717A / #A1A1AA（= Theme.color.textSecondary）
-        // ⚠️ 为什么 rowBg 不用 Theme.color.surfaceVariant(#F4F4F5/#27272A)：
-        //    侧栏自身底色就是 ash.muted(#27272A，深色) ⇒ 选中行会与底色**撞成一片**，
-        //    选中态肉眼消失（2026-10-30 截图实证）。故往亮处再提一档。
-        // ⚠️ 这几组 Hex 是共享库调色板的镜像，改 Theme/ash 色板时要同步（C++ 取不到 QML 单例）。
-        // ⚠️ 不要改回紫色：被控端主色一律中性，品牌紫只属于管理端。
-        m.insert(QStringLiteral("rowBg"),
-                 on ? (m_lightMode ? QStringLiteral("#E4E4E7") : QStringLiteral("#3F3F46"))
-                    : QStringLiteral("transparent"));
-        m.insert(QStringLiteral("fg"),
-                 on ? (m_lightMode ? QStringLiteral("#09090B") : QStringLiteral("#FAFAFA"))
-                    : (m_lightMode ? QStringLiteral("#71717A") : QStringLiteral("#A1A1AA")));
-        // QFont::Normal=50 / Medium=57，与 QML 的 Font.Normal/Font.Medium 同值
-        m.insert(QStringLiteral("weight"), on ? int(QFont::Medium) : int(QFont::Normal));
-        out.append(m);
-    };
-    // 七个分类对齐用户蓝图（通用/主界面/通知与音量/自动化/更新/插件/关于）。
-    // 「关于」并进「诊断」：配置自检、噪音记录、自习记录是原托盘右键的能力，
-    // 蓝图七类里没有独立位置，挂在「关于」下比新造第八类更贴近参考。
-    add(QStringLiteral("general"),    QStringLiteral("通用"),       QStringLiteral("sliders"));
-    add(QStringLiteral("interface"),  QStringLiteral("主界面"),     QStringLiteral("layout-grid"));
-    add(QStringLiteral("notify"),     QStringLiteral("通知与音量"), QStringLiteral("bell"));
-    add(QStringLiteral("automation"), QStringLiteral("自动化"),     QStringLiteral("clock"));
-    add(QStringLiteral("update"),     QStringLiteral("更新"),       QStringLiteral("download"));
-    add(QStringLiteral("plugin"),     QStringLiteral("插件"),       QStringLiteral("rocket"));
-    add(QStringLiteral("about"),      QStringLiteral("关于与诊断"), QStringLiteral("info"));
-    return out;
-}
-
-inline void AgentUi::setSettingsTab(const QString &key)
-{
-    // 只认上面那张表里的 key：乱传一律忽略，不留"点空"的假状态。
-    static const QStringList kKeys{
-        QStringLiteral("general"),    QStringLiteral("interface"),
-        QStringLiteral("notify"),     QStringLiteral("automation"),
-        QStringLiteral("update"),     QStringLiteral("plugin"),
-        QStringLiteral("about"),
-    };
-    if (!kKeys.contains(key)) return;
-    if (m_settingsTab == key) return;
-    m_settingsTab = key;
-    emit settingsTabChanged();
 }
 
 // 结果属性（2026-10-28 模块三）：色值与 Md3 令牌**同一组十六进制**，

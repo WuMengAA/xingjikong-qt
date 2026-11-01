@@ -4200,11 +4200,10 @@ int main(int argc, char *argv[])
         QObject::connect(clock, &ScheduleClock::periodStarted, &app,
             [](const QString& name, const QTime& at) {
                 const QString txt = QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm"));
-                // 2026-10-27（F · 产品笔记）：课程提醒走**独立渠道「课程提醒」**，
-                //   形态回到**岛上胶囊**（此前是 Centered 弹窗 —— 课表自己响的提示
-                //   不该用"管理端通知"那种抢屏幕的样式），且**不计入历史**
-                //   （一天十几次，会把老师真发的通知淹掉）。
-                //   ⚠️ 两个 hint 都是一次性：必须在 islandShow 之前设。
+                // 课程提醒：渠道「课程提醒」+ 岛上胶囊 + 不进历史（一天十几次会淹掉真通知）；
+                // provider=class ⇒ 设置页关掉「课程提醒」后整条不弹（门控见 provider_registry.h）。
+                // 三条 hint 都是一次性，必须在 islandShow 之前设。
+                IslandOverlay::instance()->setProviderForNext(QStringLiteral("class"));
                 IslandOverlay::instance()->setChannelForNext(QStringLiteral("课程提醒"));
                 IslandOverlay::instance()->setSkipHistoryForNext(true);
                 islandShow(QStringLiteral("上课啦"), txt, QStringLiteral("bell"),
@@ -4227,7 +4226,8 @@ int main(int argc, char *argv[])
         QObject::connect(clock, &ScheduleClock::periodEnded, &app,
             [](const QString& name, const QTime& at) {
                 const QString txt = QStringLiteral("%1 · %2").arg(name, at.toString("HH:mm"));
-                // 同上课提醒：渠道「课程提醒」+ 岛上胶囊 + 不进历史（见上方注释）
+                // 同上课提醒：provider=class + 渠道「课程提醒」+ 岛上胶囊 + 不进历史（见上方）
+                IslandOverlay::instance()->setProviderForNext(QStringLiteral("class"));
                 IslandOverlay::instance()->setChannelForNext(QStringLiteral("课程提醒"));
                 IslandOverlay::instance()->setSkipHistoryForNext(true);
                 islandShow(QStringLiteral("下课啦"), txt, QStringLiteral("bell"),

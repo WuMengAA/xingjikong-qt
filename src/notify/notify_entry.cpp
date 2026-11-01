@@ -14,6 +14,7 @@
 #include "../danmaku.h"
 #include "../loop_reminder.h"
 #include "../notification_gate.h"
+#include "provider_registry.h"   // 2026-11-01：提供方/渠道门控
 #include "../core/AgentSettings.h"
 #include "../tts/tts_speaker.h"
 #include <functional>     // std::function
@@ -244,6 +245,24 @@ QString notifyFromParams(const QJsonObject &params, const QString &id)
     IslandOverlay::instance()->setSeverity(severity);
 
     const bool needsInteraction = needConfirm || emergency;
+
+    // 2026-11-01（顶替 ClassIsland 第 2 步）：**提供方 / 渠道门控**。
+    //   provider 缺省 admin（管理端下发）；插件经本地接口推的由调用方带 provider=plugin，
+    //   这里再用 `from` 兜一层（老插件不带 provider 时也不会被当成管理端）。
+    //   ⚠️ 未知名一律放行（见 provider_registry.h「未知名策略」）—— 老版本云端不该因为
+    //      被控端升级而静默丢掉通知。
+    //   ⚠️ 这是"这台讲台机要不要看这类提示"的本地开关，与云端「通知总开关」互不替代。
+    {
+        const QString from = params.value(QStringLiteral("from")).toString().trimmed();
+        QString provider = params.value(QStringLiteral("provider")).toString().trimmed();
+        if (provider.isEmpty())
+            provider = from.startsWith(QLatin1String("plugin")) ? QStringLiteral("plugin")
+                                                                : QStringLiteral("admin");
+        const QString channel = params.value(QStringLiteral("channel")).toString().trimmed();
+        if (!notify::NotifyProviders::instance().allow(provider, channel))
+            return QStringLiteral("skipped:provider-disabled:") + provider;
+    }
+
     if (!needsInteraction) {
         // 2026-11-01（顶替 ClassIsland 第 1 步）：flags.endAt = 绝对结束时刻（epoch 毫秒）。
         //   给了就"挂到那个时刻"而不是"播 durMs 毫秒"（岛内 EndTime 优先，见 setEndTimeForNext）。

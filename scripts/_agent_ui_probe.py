@@ -29,6 +29,15 @@ MOC_OUT = os.path.join(OUT_DIR, "_agent_ui_moc.cpp")
 # 2026-10-31 拆分第一刀：AgentUi 的基类（记录/自检/插件/时段）也要 moc，理由见 main() 内注释
 AGENT_RECORD_UI_H = os.path.join(SRC, "agent_record_ui.h")
 MOC_RECORD_OUT = os.path.join(OUT_DIR, "_agent_record_ui_moc.cpp")
+# 2026-10-31：设置页「通知与音量」现在 import Stelarith.Mic（麦克风选择器，
+# C++ 单例）。QML import 未注册的模块 = 硬错误 ⇒ 整页不加载、探针整片 FAIL。
+# 所以探针必须链真 mic_selector + noise_monitor（后者提供枚举实现）。
+MIC_SEL = os.path.join(SRC, "noise", "mic_selector.cpp")
+MIC_SEL_H = os.path.join(SRC, "noise", "mic_selector.h")
+NOISE_MON = os.path.join(SRC, "noise_monitor.cpp")
+NOISE_MON_H = os.path.join(SRC, "noise_monitor.h")
+MOC_SEL_OUT = os.path.join(OUT_DIR, "_mic_selector_moc.cpp")
+MOC_MON_OUT = os.path.join(OUT_DIR, "_noise_monitor_moc.cpp")
 REPORT = os.path.join(OUT_DIR, "_agent_ui_probe_report.txt")
 # 2026-10-30：单张截图升级为逐屏截图（页 ×6 + 设置 7 分类 + 广播浮层 + 广播机 7 页），
 # 落 OUT_DIR/_shots/NN_<id>.png。为什么不覆盖旧图：换新核验要能左右比较。
@@ -64,7 +73,7 @@ LIBS = [SHADCN_LIB, QT + r"\lib\Qt6QuickWidgets.lib", QT + r"\lib\Qt6Quick.lib",
         os.path.join(BUILD, "_qtshadcn", "src", "QtShadcn.lib"),
         QT + r"\lib\Qt6Svg.lib", QT + r"\lib\Qt6Gui.lib", QT + r"\lib\Qt6Widgets.lib",
         QT + r"\lib\Qt6Network.lib", QT + r"\lib\Qt6Core.lib",
-        QT + r"\lib\Qt6OpenGL.lib", "user32.lib", "gdi32.lib"]
+        QT + r"\lib\Qt6OpenGL.lib", "user32.lib", "gdi32.lib", "winmm.lib"]
 
 
 def env():
@@ -128,7 +137,8 @@ def main():
     # ⚠️ 2026-10-31 拆分第一刀后必须**两个头都 moc**：AgentUi 继承 AgentRecordUi，
     #    基类的 Q_OBJECT 产物（staticMetaObject / 信号实现）不在 agent_ui.h 的 moc 里。
     #    只 moc 派生头 ⇒ 链接期 11 个 undefined（LNK2001/LNK2019），实测确认。
-    for hdr, out in ((AGENT_RECORD_UI_H, MOC_RECORD_OUT), (AGENT_UI_H, MOC_OUT)):
+    for hdr, out in ((AGENT_RECORD_UI_H, MOC_RECORD_OUT), (AGENT_UI_H, MOC_OUT),
+                     (MIC_SEL_H, MOC_SEL_OUT), (NOISE_MON_H, MOC_MON_OUT)):
         if run([MOC, hdr, "-o", out]) != 0:
             print("moc 失败：" + os.path.basename(hdr))
             return 2
@@ -139,12 +149,23 @@ def main():
         print("rcc 失败（resources/icons 缺失？）")
         return 2
     objs = []
-    for s in [PROBE_SRC, MOC_OUT, MOC_RECORD_OUT, qrc_cpp, SRC + r"\svgiconprovider.cpp"]:
+    for s in [PROBE_SRC, MOC_OUT, MOC_RECORD_OUT, qrc_cpp, SRC + r"\svgiconprovider.cpp",
+              MIC_SEL, NOISE_MON, MOC_SEL_OUT, MOC_MON_OUT]:
         o = os.path.join(OUT_DIR, os.path.basename(s) + ".obj")
         if run([CL] + FLAGS + DEFINES + INCLUDES + ["/c", "/Fo" + o, s]) != 0:
             print("编译失败：", s)
             return 2
         objs.append(o)
+
+    # 2026-11-01（顶替 ClassIsland 第 2 步）：AgentUi 的「通知提供者」方法体不在头文件里
+    # （拆到 src/notify/agent_ui_providers.cpp，守 agent_ui.h 不再胖化），它又依赖
+    # notify/provider_registry.cpp。两个 obj 都由主构建产出，探针直接链生产那份代码。
+    for _rel in ("notify/agent_ui_providers.cpp.obj", "notify/provider_registry.cpp.obj"):
+        _p = os.path.join(BUILD, "CMakeFiles", "stelarith-agent-qt.dir", "src", _rel)
+        if not os.path.exists(_p):
+            print("缺 obj（先跑 _build_agent.py）：", _p)
+            return 2
+        objs.append(_p)
 
     # 3) 链接（绝不带 /TP：会把 .lib 当源码编）
     exe = os.path.join(OUT_DIR, "_agent_ui_probe.exe")
