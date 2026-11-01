@@ -6,8 +6,9 @@
 // 本件只把**已实现**的那条做实（主题三档），其余逐条说明缺口 ——
 // 摆一排点了没反应的滑块，比明说"还没做"更让现场恼火。
 //
-// ⚠️ 主题选中态由 C++ 判（backend.themeOptions 的 strong 字段），
+// ⚠️ 主题选中态读 backend.themeMode（0 浅 / 1 深 / 2 跟随系统），
 //    QML 里不写 `themeMode === 0 ? filled : tonal` —— 那是三元配色判断。
+//    （旧的 backend.themeOptions/strong 那条路已随 Btn 一起退役，属性仍留在 C++ 侧未删。）
 import QtQuick
 
 import "../../components"
@@ -23,23 +24,26 @@ SettingsCard {
     property var ctx
 
     // ① 主题三档（浅色 / 深色 / 跟随系统）—— 这条是真实现的
+    // 2026-11-01（用户点单「外观按钮鼠标移上去会有两个选中效果」）：
+    //   原来这一排用遗留 `Btn`（Md3 令牌）：**未选中按钮的文字就是品牌紫**（= 选中按钮的
+    //   填充色），鼠标移上去再叠一层 8% 紫状态层 ⇒ 看上去"两个都是选中的"。
+    //   换共享标准件 AppSegmentedButton：选中段唯一实底 accentStrong + 反白字，
+    //   未选中段透明底 + 次级灰字 + 中性 hover 底（#F4F4F5）⇒ 任何时刻只有一个选中效果。
+    //   顺带把本页统一到 Theme 令牌（本卡其余部分早就是 Theme.color.*，只有这排是旧的）。
     Text {
         width: parent.width
         text: "主题"
         color: Theme.color.textSecondary
         font.pixelSize: 13
     }
-    Row {
-        spacing: 8
-        Repeater {
-            model: backend.themeOptions
-            Btn {
-                theme: Md3
-                text: modelData.label
-                strong: modelData.strong
-                onClicked: backend.themeMode = modelData.key
-            }
-        }
+    AppSegmentedButton {
+        model: [
+            { value: 0, label: "浅色" },
+            { value: 1, label: "深色" },
+            { value: 2, label: "跟随系统" }
+        ]
+        current: backend.themeMode
+        onActivated: function (v) { backend.themeMode = v }
     }
 
     // ② 分隔
