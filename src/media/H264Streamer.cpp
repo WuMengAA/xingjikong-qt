@@ -11,6 +11,7 @@
 
 #include "H264Streamer.h"
 #include "H264EncoderMf.h"
+#include "H264EncoderOh264.h"
 
 #ifdef _WIN32
 #include <QTimer>
@@ -44,6 +45,8 @@ std::vector<uint8_t> makeSyntheticBgrx(int w, int h)
 
 struct H264Streamer::Impl {
     H264EncoderMf enc;
+    H264EncoderOh264 encOh264;   // 软件编码兜底（MF 硬件编不出帧时接管）
+    bool useOh264 = false;
     QTimer *timer = nullptr;
     ScreenCapture *cap = nullptr;     // 真实抓屏（沙箱可能为 nullptr/抓空）
     bool ok = false;
@@ -64,9 +67,16 @@ bool H264Streamer::start(int w, int h, int fps, int bitrateKbps)
 {
     if (m_p->ok) stop();
     m_p->w = w; m_p->h = h;
-    if (!m_p->enc.init(w, h, fps, bitrateKbps)) {
-        // 本机 MF 不可用（Win7 / 沙箱管线不全）→ 回落 VNC，不报错不抛异常。
-        qInfo("[h264str] encoder init 失败 → 推流未启动（远控回落 VNC）");
+    // 编码器择优：先 MF 硬件（零依赖、教室机可 GPU 加速），
+    // 失败则回落 OpenH264 软件编码（2026-11-01 实测：本机 MF 协商成功却 0 产出，
+    // 软编 30/30 帧出帧且不依赖 GPU/DWM），两者都失败才回落 VNC。
+    if (m_p->enc.init(w, h, fps, bitrateKbps)) {
+        m_p->useOh264 = false;
+    } else if (m_p->encOh264.init(w, h, fps, bitrateKbps)) {
+        m_p->useOh264 = true;
+        qInfo("[h264str] MF 硬件编码不可用 → 已切到 OpenH264 软件编码");
+    } else {
+        qInfo("[h264str] 编码器 init 失败（MF 与软编都不可用）→ 推流未启动（远控回落 VNC）");
         return false;
     }
     // 真实抓屏（沙箱无桌面时 init 可能失败，不影响推流管线——用合成帧兜底）
@@ -89,11 +99,14 @@ bool H264Streamer::start(int w, int h, int fps, int bitrateKbps)
         if (!px) return;   // 两路都无像素 → 跳过本帧
 
         std::vector<uint8_t> nalu;
-        if (m_p->enc.encode(px, m_p->w, m_p->h, nalu) && !nalu.empty()) {
+        const bool got = m_p->useOh264
+            ? m_p->encOh264.encode(px, m_p->w, m_p->h, nalu)
+            : m_p->enc.encode(px, m_p->w, m_p->h, nalu);
+        if (got && !nalu.empty()) {
             emit h264FrameReady(QByteArray(reinterpret_cast<const char *>(nalu.data()),
                                           static_cast<int>(nalu.size())));
         }
-        // enc.encode 返回 false = 本帧未产出（沙箱 MF 0 产出 / 队列满）→ 静默跳过
+        // encode 返回 false = 本帧未产出（队列满 / MF 硬件 0 产出）→ 静默跳过
     });
     m_p->timer->start();
     m_p->ok = true;
@@ -105,7 +118,11 @@ void H264Streamer::stop()
 {
     if (m_p->timer) { m_p->timer->stop(); delete m_p->timer; m_p->timer = nullptr; }
     if (m_p->cap) { delete m_p->cap; m_p->cap = nullptr; }
-    if (m_p->ok) m_p->enc.shutdown();
+    if (m_p->ok) {
+        m_p->enc.shutdown();
+        m_p->encOh264.shutdown();
+    }
+    m_p->useOh264 = false;
     m_p->ok = false;
     m_p->synth.clear();
 }

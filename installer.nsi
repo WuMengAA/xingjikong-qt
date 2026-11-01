@@ -42,6 +42,8 @@ Section "安装星集控被控端" SEC01
   ; ── 运行时（build/：刚编出来的 exe + windeployqt 补全的 Qt）──
   File "build\stelarith-agent-qt.exe"
   File "build\Qt6*.dll"
+  ; ── OpenH264 软件编码 dll（2026-11-01；MF 硬件编码 0 产出时的兜底编码器）──
+  File "build\openh264.dll"
   ; ── OpenSSL 3 运行库（libdatachannel 的 DTLS 链了 PG17 的 OpenSSL，windeployqt 不认）──
   File "build\libssl-3-x64.dll"
   File "build\libcrypto-3-x64.dll"

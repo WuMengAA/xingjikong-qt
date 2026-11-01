@@ -13,6 +13,7 @@
 // Win7 上 MFStartup 或 MFTEnumEx 找不到 H264 编码器 → init 返回 false，调用方回落 VNC。
 
 #include "H264EncoderMf.h"
+#include "PixelConvert.h"   // BGRX→I420/NV12 转换的单一真源（软编编码器共用）
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -33,73 +34,8 @@
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "ole32.lib")
 
-// ── BGRX → I420（BT.601，无缩放；w/h 偶数；顶部在下 → I420 也是顶部在下）──
-// BGRX 是 4 字节/像素（字节0=B）。I420 = 整面 Y(1B/px) + 半分辨率 U 平面 + 半分辨率 V 平面
-// （三个独立平面，非交织）。
-// ⚠️ 关键坑（2026-10-31 实测）：Microsoft H264 Video Encoder MFT 的**输入类型协商只认
-//    MFVideoFormat_I420**，喂 NV12 会 SetInputType 失败（本机实测 FAIL SetInputType(NV12)）。
-//    这与 viewer 侧解码器输出 NV12 不对称——编码器吃 I420，解码器吐 NV12，二者都是 4:2:0、
-//    同字节量，只是 UV 排布不同。
-static void bgrxToI420(const uint8_t *bgrx, int w, int h, uint8_t *i420)
-{
-    const uint8_t *rgb = bgrx;                 // 顶部在下，逐行即屏幕顺序
-    uint8_t *Y = i420;
-    uint8_t *U = i420 + w * h;
-    uint8_t *V = U + (w / 2) * (h / 2);
-    for (int j = 0; j < h; ++j) {
-        for (int i = 0; i < w; ++i) {
-            const uint8_t *p = rgb + (j * w + i) * 4;
-            const int r = p[2], g = p[1], b = p[0];
-            Y[j * w + i] = static_cast<uint8_t>(
-                qBound(0, (int)(0.299 * r + 0.587 * g + 0.114 * b), 255));
-        }
-    }
-    for (int j = 0; j < h / 2; ++j) {
-        for (int i = 0; i < w / 2; ++i) {
-            // 2x2 区块取平均色（简单下采样，足够远控）
-            int r = 0, g = 0, b = 0;
-            for (int dj = 0; dj < 2; ++dj)
-                for (int di = 0; di < 2; ++di) {
-                    const uint8_t *p = rgb + ((j * 2 + dj) * w + (i * 2 + di)) * 4;
-                    r += p[2]; g += p[1]; b += p[0];
-                }
-            r /= 4; g /= 4; b /= 4;
-            const int u = static_cast<int>(-0.169 * r - 0.331 * g + 0.500 * b) + 128;
-            const int v = static_cast<int>( 0.500 * r - 0.419 * g - 0.081 * b) + 128;
-            U[j * (w / 2) + i] = static_cast<uint8_t>(qBound(0, u, 255));
-            V[j * (w / 2) + i] = static_cast<uint8_t>(qBound(0, v, 255));
-        }
-    }
-}
-
-// ── BGRX → NV12（Y 平面 + 交织 UV，半分辨率 2B/2px）── 供部分硬件 MFT 的输入。
-static void bgrxToNv12(const uint8_t *bgrx, int w, int h, uint8_t *nv12)
-{
-    const uint8_t *rgb = bgrx;
-    uint8_t *Y  = nv12;
-    uint8_t *UV = nv12 + w * h;
-    for (int j = 0; j < h; ++j)
-        for (int i = 0; i < w; ++i) {
-            const uint8_t *p = rgb + (j * w + i) * 4;
-            Y[j * w + i] = static_cast<uint8_t>(
-                qBound(0, (int)(0.299 * p[2] + 0.587 * p[1] + 0.114 * p[0]), 255));
-        }
-    for (int j = 0; j < h / 2; ++j)
-        for (int i = 0; i < w / 2; ++i) {
-            int r = 0, g = 0, b = 0;
-            for (int dj = 0; dj < 2; ++dj)
-                for (int di = 0; di < 2; ++di) {
-                    const uint8_t *p = rgb + ((j * 2 + dj) * w + (i * 2 + di)) * 4;
-                    r += p[2]; g += p[1]; b += p[0];
-                }
-            r /= 4; g /= 4; b /= 4;
-            const int u = static_cast<int>(-0.169 * r - 0.331 * g + 0.500 * b) + 128;
-            const int v = static_cast<int>( 0.500 * r - 0.419 * g - 0.081 * b) + 128;
-            const int idx = (j * (w / 2) + i) * 2;
-            UV[idx + 0] = static_cast<uint8_t>(qBound(0, u, 255));
-            UV[idx + 1] = static_cast<uint8_t>(qBound(0, v, 255));
-        }
-}
+// BGRX→I420 / BGRX→NV12 的实现已移入 PixelConvert.cpp（2026-11-01），
+// 供 MF 硬件编码与 OpenH264 软件编码共用同一份，避免两处实现漂移。
 
 struct H264EncoderMf::Impl {
     IMFTransform *mft = nullptr;
@@ -202,10 +138,10 @@ struct H264EncoderMf::Impl {
         if (!ready || !mft || !bgrx) return false;
         // 按实际协商到的输入子类型转：I420/IYUV（字节布局相同，均走 bgrxToI420）/ NV12（交织）
         if (inSubtype == MFVideoFormat_NV12) {
-            bgrxToNv12(bgrx, w, h, i420.data());   // i420 缓冲复用为 NV12 布局（同字节量）
+            ste::bgrxToNv12(bgrx, w, h, i420.data());   // i420 缓冲复用为 NV12 布局（同字节量）
         } else {
             // I420 / IYUV 都是 YUV420P 三平面，布局一致 → 统一走 bgrxToI420
-            bgrxToI420(bgrx, w, h, i420.data());
+            ste::bgrxToI420(bgrx, w, h, i420.data());
         }
 
         IMFSample *s = nullptr; IMFMediaBuffer *buf = nullptr; BYTE *pb = nullptr;

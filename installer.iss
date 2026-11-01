@@ -1,4 +1,4 @@
-﻿; 星集控被控端 · 安装程序（Inno Setup 6）
+; 星集控被控端 · 安装程序（Inno Setup 6）
 ; 迁移自 installer.nsi（NSIS 3）→ Inno Setup，2026-10-10。
 ;
 ; 三个设计要点（与 NSIS 版一致）：
@@ -81,6 +81,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ;    与 NSIS 版一样点名取件。
 Source: "build\stelarith-agent-qt.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\Qt6*.dll"; DestDir: "{app}"; Flags: ignoreversion
+; ── OpenH264 软件编码 dll（2026-11-01 新增）────────────────────────────────
+; 被控端 H264 推流在「MF 硬件编码协商成功但 0 产出」的机器上（本机实测：AMD APU +
+; 虚拟显示器环境）自动回落 OpenH264 软件编码。dll 是运行时动态加载的，
+; 缺失时软编跳过、回落 VNC（不致命），但带上它才能真正出 H264 画面。
+Source: "build\openh264.dll"; DestDir: "{app}"; Flags: ignoreversion
 ; ── OpenSSL 3 运行库（2026-10-10 补）────────────────────────────────────────
 ; 被控端静态链 libdatachannel（WebRTC），其 DTLS 走 PG17 自带的 OpenSSL，
 ; exe 导入表直接写 libssl-3-x64.dll / libcrypto-3-x64.dll；windeployqt 不认它们，

@@ -55,7 +55,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus ${CMAKE_BINARY_
 # 命名同为 DeepSeek Harness 同款：正式 X.Y.Z / 内测 X.Y.Z-alpha.N / 候选 X.Y.Z-rc.N
 # （阶段序 alpha < rc < 正式；号同核心递增、换核心归零、转正即剥离后缀）。
 # 成熟度标记不进版本号，归 ota.json 的 mandatory / notes 管。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
-set(AGENT_VERSION "0.6.51-rc.2")
+set(AGENT_VERSION "0.6.51-rc.3")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" _agent_src)
 if(_agent_src MATCHES "kAppVersion[ \t\r\n]*=[ \t\r\n]*\"([^\"]+)\"")
   set(_src_agent_version "${CMAKE_MATCH_1}")
@@ -272,6 +272,10 @@ add_executable(stelarith-agent-qt
   # ── 远控 H264 推流（A 档第②步，2026-10-31）：MediaFoundation H264 硬编 + 定时抓帧/合成帧推流 ──
   src/media/H264EncoderMf.cpp
   src/media/H264Streamer.cpp
+  # ── 远控 H264 推流 · 软件编码兜底（2026-11-01）：OpenH264 软编（MF 硬件协商成功却 0 产出时接管）
+  #   + PixelConvert（BGRX→I420/NV12 转换单一真源，硬编/软编共用）
+  src/media/H264EncoderOh264.cpp
+  src/media/PixelConvert.cpp
   # ── 录像/班级监控上传（2026-10-30 main 拆分：#2/#3 上传簇迁出，原 main.cpp 7118-7161）──
   #   record_stop 后把本地 rec-*.mp4 POST 云端 /api/recordings/upload（Bearer 设备令牌）。
   #   g_uid 沿用 MediaSession.cpp 既有的「跨 TU 共享全局」约定（extern）。
@@ -390,6 +394,24 @@ add_executable(stelarith-agent-qt
 # Qt-free 的纯 C++（shared/audio），只依赖 libopus。放仓库根保证两端算法绝对一致。
 target_sources(stelarith-agent-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio/opus_codec.cpp")
 target_include_directories(stelarith-agent-qt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/audio")
+
+# ── OpenH264 软件编码兜底（2026-11-01）────────────────────────────────────
+# 头文件只给 H264EncoderOh264.cpp 用（第三方头不进工程头文件，遵守 §10.4 前向声明纪律）；
+# dll 在**运行时**动态加载（LoadLibrary+GetProcAddress），因此这里既不链接 .lib 也不拷贝到
+# 链接期——POST_BUILD 会把 dll 拷到 exe 旁边，缺 dll 时软编自动跳过、回落 VNC。
+set(STE_OPENH264_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/openh264")
+target_include_directories(stelarith-agent-qt PRIVATE "${STE_OPENH264_DIR}")
+if(EXISTS "${STE_OPENH264_DIR}/codec_api.h")
+  add_custom_command(TARGET stelarith-agent-qt POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${STE_OPENH264_DIR}/openh264-2.7.0-win64.dll"
+            "$<TARGET_FILE_DIR:stelarith-agent-qt>/openh264.dll"
+    COMMENT "[agent] 拷贝 OpenH264 软件编码 dll（MF 硬件 0 产出时的兜底编码器）"
+    VERBATIM)
+else()
+  message(WARNING
+    "[agent] third_party/openh264 缺失或无 codec_api.h：软件编码兜底不可用（不影响 MF 硬编路径）。")
+endif()
 
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets Qt6::Network Qt6::Concurrent Qt6::Svg opus)
 # 2026-10-09：edge_tts（waveOut 朗读）/ microphone（waveIn 采集）走 winmm
