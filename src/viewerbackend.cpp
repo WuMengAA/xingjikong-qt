@@ -183,11 +183,6 @@ ViewerBackend::ViewerBackend(QObject *parent)
         QSettings s;
         m_themeMode = qBound(0, s.value(QStringLiteral("ui/themeMode"), 0).toInt(), 2);
     }
-    // 新版外壳预览闸（2026-11-01）：默认**关**（经典外壳照旧）。读自 QSettings ui/previewShell。
-    {
-        QSettings s;
-        m_previewShell = s.value(QStringLiteral("ui/previewShell"), false).toBool();
-    }
     // 跟随系统：取 OS 配色并监听变化（Qt::ColorScheme::Dark 一档）
     if (QStyleHints *sh = QGuiApplication::styleHints()) {
         m_systemDark = (sh->colorScheme() == Qt::ColorScheme::Dark);
@@ -630,14 +625,6 @@ void ViewerBackend::setThemeMode(int m)
     emit themeModeChanged(m);
 }
 
-void ViewerBackend::setPreviewShell(bool on)
-{
-    if (on == m_previewShell) return;
-    m_previewShell = on;
-    QSettings s;
-    s.setValue(QStringLiteral("ui/previewShell"), on);
-    emit previewShellChanged(on);
-}
 
 QStringList ViewerBackend::procBlacklist() const { return m_procBlacklist; }
 

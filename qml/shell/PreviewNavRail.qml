@@ -115,7 +115,7 @@ Rectangle {
         }
     }
 
-    // 底部用户卡
+    // 底部用户卡（贴着轨道底边；轨道本身不覆盖状态条——那是宿主的事）
     Rectangle {
         anchors.bottom: parent.bottom
         anchors.left: parent.left

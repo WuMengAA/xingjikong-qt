@@ -43,7 +43,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../shell"              // Sidebar / TopBar / ActionBar / DeviceCard / SideSheet（同目录骨架件）
+import "../shell"              // PreviewConsole（唯一外壳）/ SideSheet / ToastLayer / ReauthDialog（同目录件）
 import "../pages/dashboard"     // DashPage（仪表盘三件）
 // 2026-10-28 用户裁决「取代」：不再 import "../pages/class" ——
 //   旧的单班三栏工作台（ClassDashboard 及其 20 余个子件）已下线，班级中心改为
@@ -309,15 +309,14 @@ Item {
     // 2026-10-29：骨架全屏底迁 Theme.color.background（页面最底，内容面板用 surface 分层）
     Rectangle { anchors.fill: parent; color: Theme.color.background }
 
-    // ══ 新版外壳预览（2026-11-01）══
-    // 背景：qml/layout/DesktopConsole.qml 是 2026-10-14 起的新版外壳**设计稿**（假数据），
-    // 一直没接生产；生产跑的是 qml/shell/{Sidebar,TopBar,ActionBar}.qml 这套手绘外壳。
-    // 本件 = 设计稿的**真数据**版（PreviewConsole.qml），由设置页「主界面外观 →
-    // 新版外观预览」开关切（backendRef.previewShell，QSettings ui/previewShell，默认关）。
-    // **这是预览闸，不是切换上线**：设计稿尚未逐页验收，确认满意后才考虑替换经典外壳。
+    // ══ 唯一应用外壳（2026-11-01 转正）══════════════════════════════
+    // 用户看过五个栏目全部真实业务内容后点单转正 ⇒ PreviewConsole 成为**唯一**外壳，
+    // 经典外壳（shell/{Sidebar,TopBar,ActionBar,BottomNav,StatusBar}.qml）已退役删除。
+    // 版面来自设计稿 qml/layout/DesktopConsole.qml；真功能（班级下拉双写 / 登录 /
+    // 头像进个人中心 / 状态条 / 竖屏底栏）全部在 PreviewConsole 里接住。
+    // 上层浮层（SideSheet / ToastLayer / ReauthDialog）与本件无关，仍在根节点上。
     PreviewConsole {
-        id: preview
-        visible: backendRef && backendRef.previewShell === true
+        id: shellUI
         anchors.fill: parent
         ctx: shell.ctx
         backendRef: shell.backendRef
@@ -325,6 +324,8 @@ Item {
         navItems: shell.navItems
         section: shell.section
         sectionIndex: shell.sectionIndex
+        sectionTitle: shell.sectionTitle
+        sectionSubtitle: shell.stats().total + " 台 · " + shell.stats().on + " 台在线"
         accountTitle: backendRef ? backendRef.roleText : ""
         accountSub: backendRef ? backendRef.accountName : ""
         accountAvatarText: backendRef ? backendRef.accountAvatarText : ""
@@ -334,142 +335,25 @@ Item {
         portrait: shell.portrait
         filterMode: shell.filterMode
         openUid: shell.openUid
+        statusLine: shell._statusText()
+        statusBarH: shell.statusBarH
+        navBarH: shell.navBarH
         toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
         onNavActivated: function (key) { shell.navActivated(key) }
+        // 头像 = 账户入口，落点**个人中心**（2026-10-25 裁决：系统设置受 system:settings
+        // 门禁，teacher 点自己头像会被挡回来，等于个人中心根本进不去）。
         onAvatarClicked: function () { shell.navActivated("account") }
+        // 未登录态「登录」（H8）→ 走站点 OAuth 授权换票。
+        onLoginRequested: function () {
+            shell.toast("正在打开站点登录…")
+            if (backendRef) backendRef.loginWithSite()
+        }
+        // 班级切换：**双写唯一入口** shell.pickClass（2026-10-23 #472 裁决：
+        // 旧筛选 setCurrentClass + 新班级域 subscribeClass，别处不许再写第二份）。
+        onClassPicked: function (code) { shell.pickClass(code) }
         onDeviceActivated: function (uid) {
             shell.openUid = uid
             if (uid !== "" && backendRef) backendRef.currentUid = uid
-        }
-    }
-
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
-        // 新版外壳预览开启时，经典外壳整块让位（预览版自带导航/顶栏/统计/网格）。
-        visible: !(backendRef && backendRef.previewShell === true)
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 0
-
-            // ══ 左侧全局导航（240px · 2026-10-28 蓝图还原）══
-            // 蓝图的手写稿里，左侧是**功能菜单**：品牌「星集控」+ 账号卡 + 栏目列表。
-            // 原来这里挂的是 ClassNav（"以班为单位"的入口，班级列表在上、系统组在下）——
-            // 按用户裁决「取代」，班级选择已收进班级中心的网格阵列（点卡片开抽屉），
-            // 左栏不再重复一份班级列表，改回蓝图的菜单形态（Sidebar，之前零引用）。
-            // 竖屏让位给 BottomNav（visible:false 的项不占布局空间）。
-            Sidebar {
-                id: nav
-                visible: !shell.portrait
-                ctx: shell.ctx
-                items: shell.navItems
-                current: shell.section
-                // 账号卡文案全部取自后端（取首字 / 角色→中文都在 C++，QML 不做映射）：
-                //   avatarText  = 账号名首字，没登录时回落到角色首字（管/师）
-                //   accountTitle= 角色中文名（管理员 / 老师）
-                //   accountSub  = 账号名（没登录就是空串，不编一个假学校名出来）
-                avatarText: backendRef ? backendRef.accountAvatarText : ""
-                accountTitle: backendRef ? backendRef.roleText : ""
-                accountSub: backendRef ? backendRef.accountName : ""
-                onActivated: function (key) { shell.navActivated(key) }
-            }
-
-            // ══ 主内容区（Surface）══
-            Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    id: mainCol
-                    // 内容区边缘内边距 = spacing.lg(24)（AGENTS.md §9.2）
-                    anchors.leftMargin: Theme.spacing.lg
-                    anchors.rightMargin: Theme.spacing.lg
-                    spacing: 0
-
-                    // ── 顶部导航栏（64px）──
-                    TopBar {
-                        id: topBar
-                        ctx: shell.ctx
-                        title: shell.sectionTitle
-                        // ⚠️ 班级列表与当前班**不在这里传参** —— TopBar 内部直接读
-                        //    backendRef.classes / backendRef.currentClass。曾经多传不存在的属性，
-                        //    结果 `Type Md3Shell unavailable` 整页起不来（qmllint 0 Error）。
-                        // 2026-10-23 #472：班级选择必须**双写**（旧筛选 setCurrentClass +
-                        // 新班级域 subscribeClass）。2026-10-28 裁决「取代」后，双写收进
-                        // shell.pickClass() 这个唯一入口，ClassDashboard 已下线。
-                        onClassPicked: function (code) { shell.pickClass(code) }
-                        // 头像 = 账户入口。2026-10-25：落点从「系统设置」改成「个人中心」——
-                        //   系统设置受 system:settings 门禁（teacher 无此权限），老师点自己头像
-                        //   会被一句"当前身份不能进系统设置"挡回来，等于个人中心根本进不去。
-                        //   个人中心不设门禁（任何人都该能看自己的账号与退出登录）。
-                        onAvatarClicked: function () { shell.navActivated("account") }
-                        onLoginRequested: {
-                            shell.toast("正在打开站点登录…")
-                            if (backendRef) backendRef.loginWithSite()
-                        }
-                    }
-
-                    // ── 操作区（距顶部 spacing.lg=24）──
-                    ActionBar {
-                        Layout.fillWidth: true
-                        Layout.topMargin: Theme.spacing.lg
-                        ctx: shell.ctx
-                        portrait: shell.portrait     // 竖屏：多一个「返回经典界面」出口
-                        onLockRequested: shell.runBulk("pick-lock")
-                        onRebootRequested: shell.runBulk("pick-shutdown")
-                        onClassicRequested: {
-                            // H7：竖屏侧栏被底栏取代，出口随 ActionBar 可见
-                            // （横屏该出口在 Sidebar 底部，两条路都通向 page 1）。
-                            if (shell.ctx) shell.ctx.window.goPage(1)
-                        }
-                    }
-
-                    // ── 内容区（距操作区 spacing.md=16）──
-                    // ⚠️ 2026-11-01：六个业务页抽到 qml/shell/ShellContent.qml，
-                    //    **经典外壳与新版外壳预览共用同一份**（两份副本必然漂移，§9 单一真源）。
-                    //    搬动时语义逐字不变：ControlPage / MonitorPage 仍用
-                    //    setSource(url, {ctx}) 注入（实例化瞬间就求值 ctx.window.currentUid，
-                    //    onLoaded 补太晚 —— 历史踩坑 TypeError: Cannot read property 'window'）。
-                    ShellContent {
-                        id: mainStack
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.topMargin: Theme.spacing.md
-                        Layout.bottomMargin: Theme.spacing.md
-                        sectionIndex: shell.sectionIndex
-                        ctx: shell.ctx
-                        host: shell
-                        backendRef: shell.backendRef
-                        devices: shell.classDevices()
-                        stats: shell.stats()
-                        portrait: shell.portrait
-                        filterMode: shell.filterMode
-                        openUid: shell.openUid
-                        toastFn: function (msg, isErr) { shell.toast(msg, isErr) }
-                    }
-                }
-            }
-        }
-
-        // ══ 竖屏：底部导航（与 Sidebar 同一份 navItems 的横排形态）══
-        // 放在状态条**上方**：状态条是全局信息带，朝向无关，两种模式都在最底。
-        BottomNav {
-            Layout.fillWidth: true
-            Layout.preferredHeight: shell.navBarH
-            visible: shell.portrait
-            items: shell.navItems
-            current: shell.section
-            onActivated: function (key) { shell.navActivated(key) }
-        }
-
-        // ── H4 状态条（全宽贴底）──────────────────────────────────
-        StatusBar {
-            Layout.fillWidth: true
-            barHeight: shell.statusBarH
-            text: shell._statusText()
         }
     }
 
