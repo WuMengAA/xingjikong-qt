@@ -281,12 +281,14 @@ Item {
     }
 
     // ── 多界面（#330，2026-10-17 · 用户点单「灵动岛多界面」1+3）──────────
-    // 展开态从"一屏堆叠"升级为**多面切换**（概览/媒体/历史/状态）：
+    // 展开态从"一屏堆叠"升级为**多面切换**（今天/媒体/批注/设置/自动化）：
     //   · 面只作用展开态；收起/空闲、搜索/投稿页、有动作按钮时**不开面**
     //     （§七 一次只展开一件事——动作按钮要能点，不能被面板盖住）。
     //   · 概览面 = 现有布局，零改动（面面板只在 face≠0 时满盖内容区）。
     //   · 面的可用性：媒体面要有本机媒体或 VoiceHub 广播；历史面要有历史；
-    //     状态面恒在；概览面恒在 ⇒ 至少 2 面才显示切换器。
+    //     今天/批注/设置恒在；概览面恒在 ⇒ 至少 2 面才显示切换器。
+    //     2026-11-01 用户裁决「状态完全不需要」⇒ 「态」面（id 3）连同 compState /
+    //     faceStatusRows 一并删除（不是隐藏，是不存在）。
     //   · faceNow 是**有效面**：选中的面失效（媒体停了/历史清了）自动回概览，
     //     不倒扣 face 本身（用户切换意图保留）。
     property int face: 0
@@ -310,9 +312,7 @@ Item {
         // 2026-10-31 · 苹果式极简：历史不再作为可滑动面 —— 统一收进「⋯」弹层，
         // 走完整 historyPanel（facePanel 里的 IslandHistoryFace 紧凑预览一并退役，
         // 历史要看就开完整列表，概览上不再有"史"面签、左右滑也不再滑到历史）。
-        fs.push({ id: 3, label: "态" });
-        // 2026-10-27（H 批）：批注面常驻。用户裁决「这些功能大多是加入到被控端，
-        // 而且大部分和灵动岛有关」—— 老师上课点不到管理端，岛才是他的手。
+        // 2026-11-01 用户裁决「状态完全不需要」—— 移除「态」面（face id 3）
         fs.push({ id: 4, label: "笔" });
         // 2026-10-27（C 批）：设置面常驻（音量双滑块 + 通知黑名单）。
         // 用户裁决「这些功能大多在被控端、且和岛有关」—— 音量/黑名单老师上课当场要调，岛才是他的手。
@@ -378,13 +378,12 @@ Item {
     property bool historyOpen: false
     property bool moreMenuOn: false
     // ⋯弹层的入口：显式组装（不再从 faceModel 派生，历史已独立出去走完整面板）。
-    // 历史：有历史才出现；媒体：有媒体才出现；状态/批注/设置恒在；自动化：规则面开时。
+    // 历史：有历史才出现；媒体：有媒体才出现；批注/设置恒在；自动化：规则面开时。
     readonly property var moreEntries: {
         var out = [];
         out.push({ id: 7, label: "今天" });   // 2026-11-01：今天看板入口
         if (root.mediaFaceOn) out.push({ id: 1, label: "媒体" });
         if (root.histFaceOn)  out.push({ id: 2, label: "历史" });
-        out.push({ id: 3, label: "状态" });
         out.push({ id: 4, label: "批注" });
         out.push({ id: 5, label: "设置" });
         if (root.automationFaceOn) out.push({ id: 6, label: "自动化" });
@@ -405,32 +404,6 @@ Item {
     function faceTimeText() {
         const mm = s => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60); };
         return root.faceDur > 0 ? mm(root.facePos) + " / " + mm(root.faceDur) : mm(root.facePos);
-    }
-    // 状态面的行（岛桥只暴露展示态字段 —— 这里只用桥与模块**已给**的数据，
-    // 不新造数据源；版本/连接态在控制面板里看）。
-    readonly property var faceStatusRows: {
-        const formKey = bridgeRef ? (bridgeRef.form || "Capsule") : "Capsule";
-        const formName = formKey === "Centered" ? "居中卡片"
-                        : (formKey === "Fullscreen" ? "全屏浮层" : "顶部胶囊");
-        const rows = [
-            { k: "当前形态", v: formName },
-            { k: "媒体", v: root.facePhaseText() },
-            { k: "VoiceHub", v: !root.vhRef ? "模块未注入"
-                                     : (root.vhRef.active ? "在播：" + root.vhRef.title
-                                                          : root.vhRef.statusText) },
-            { k: "历史通知", v: root._history.length + " 条" }
-        ];
-        return rows;
-    }
-    function facePhaseText() {
-        switch (root._mediaPhase) {
-        case "starting": return "即将播放";
-        case "playing":  return "播放中";
-        case "ending":   return "快结束";
-        case "ended":    return "已播完";
-        case "blocked":  return "被播放时段拦";
-        default:         return "无";
-        }
     }
 
     // ── 组件7 播放四态（2026-10-15，用户点单）─────────────────────
@@ -2798,7 +2771,6 @@ Item {
                                         switch (modelData.id) {
                                         case 7: return compToday
                                         case 1: return compMedia
-                                        case 3: return compState
                                         case 4: return compAnnotate
                                         case 5: return compSettings
                                         case 6: return compAutomation
@@ -2812,11 +2784,15 @@ Item {
 
                     // 松手吸附：**每次手势只切一页** —— 以手势起点页为基准，位移 >8% 就 ±1，绝不跳页。
                     property int _dragStartPage: 0
+                    property bool _userDrag: false   // 只有真正用户拖动才吸附（程序化定位不触发，防误回写 face）
                     onMovementStarted: {
                         if (width <= 0) return
+                        _userDrag = true
                         _dragStartPage = Math.max(0, Math.min(pageCount - 1, Math.round(contentX / width)))
                     }
                     onMovementEnded: {
+                        if (!_userDrag) return          // 非用户拖动（初始化/外部定位）⇒ 不吸附、不改 face
+                        _userDrag = false
                         if (width <= 0) return
                         const d = contentX / width - _dragStartPage
                         let target = _dragStartPage
@@ -2825,9 +2801,9 @@ Item {
                         fpSnap.to = target * width
                         fpSnap.start()
                     }
-                    // 拖动期把位移夹在起点页 ±1 页内 —— 保证手拖也不会越过一页（视觉上不出现"滑过头再弹回"）。
+                    // 拖动期把位移夹在起点页 ±1 页内 —— 保证手拖也不会越过一页。
                     onContentXChanged: {
-                        if (!moving || width <= 0) return
+                        if (!_userDrag || width <= 0) return
                         const lo = (_dragStartPage - 1) * width
                         const hi = (_dragStartPage + 1) * width
                         if (contentX < lo) contentX = lo
@@ -2875,7 +2851,6 @@ Item {
                 // ── 面内容 Component（供分页 delegate 按 id 取）──────────
                 Component { id: compToday; IslandTodayPage { th: root.th; dash: root.bridgeRef ? root.bridgeRef.todayDash : ({}) } }
                 Component { id: compMedia; IslandMediaFace { th: root.th; useLocal: root.faceUseLocal; title: root.faceTitle; artist: root.faceArtist; dur: root.faceDur; pos: root.facePos; timeText: root.faceTimeText(); next: root.faceNext } }
-                Component { id: compState; IslandStateFace { th: root.th; rows: root.faceStatusRows } }
                 Component { id: compAnnotate; IslandAnnotateFace { th: root.th; bridge: root.bridgeRef } }
                 Component { id: compSettings; IslandSettingsFace { th: root.th; bridge: root.bridgeRef } }
                 Component { id: compAutomation; IslandAutomationFace { th: root.th; automationRef: root.automationRef; bridgeRef: root.bridgeRef } }

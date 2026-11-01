@@ -5,12 +5,15 @@ import "."
 //
 // ── 为什么这一面必须在岛上（用户 07:36 裁决）────────────────────────
 //   「这些功能大多是加入到被控端，而且大部分和灵动岛有关」。
-//   系统音量 / 通知音量 / 通知黑名单是老师上课当场要调的，管理端不在手边，岛才是他的手。
+//   系统音量 / 通知音量是老师上课当场要调的，管理端不在手边，岛才是他的手。
 //
 // ── 数据从哪来 ──────────────────────────────────────────────────
-//   全部来自 IslandBridge 的属性（systemVolume / notifyVolume / notifyBlacklist），
+//   全部来自 IslandBridge 的属性（systemVolume / notifyVolume），
 //   按钮走 bridge.settingsAction(cmd)。本面**不存权威状态**：真值在 C++ 域 / QSettings，
 //   QML 只做显示 + 拖动时即时跟手 + 转发。
+//   2026-11-01 用户裁决：通知黑名单不是设计需求（通知按「提供者」建模，见 ClassIsland
+//   通知模型，将另行重做）⇒ 黑名单 UI 移除；C++ 侧 notify/blacklist 过滤仍保留（在
+//   提供者模型落地前，它仍是入站通知的真实过滤器，不在本批删除）。
 //
 // ── 为什么滑块只推不拉 ──────────────────────────────────────────
 //   滑块 value 不绑回 bridge 属性：系统音量 TTS 前后会被抬到 75%/恢复到 50%，若把
@@ -32,12 +35,9 @@ Item {
     // 仍是 undefined 时，原式会把 undefined 赋给 int（日志实锤 Unable to assign [undefined] to int）。
     property int sysVol:    (face.bridge && face.bridge.systemVolume !== undefined) ? face.bridge.systemVolume : -1
     property int notifyVol: (face.bridge && face.bridge.notifyVolume !== undefined) ? face.bridge.notifyVolume : 75
-    property var blacklist: (face.bridge && face.bridge.notifyBlacklist !== undefined) ? face.bridge.notifyBlacklist : []
 
     function act(cmd) {
         if (face.bridge && face.bridge.settingsAction) face.bridge.settingsAction(cmd)
-        // 黑名单会因增删而变 ⇒ 拉一次最新（滑块值由本地维护，不在这里回写）
-        face.blacklist = face.bridge.notifyBlacklist
     }
 
     Column {
@@ -117,87 +117,8 @@ Item {
             }
         }
 
-        // ── 通知黑名单 ─────────────────────────────────────────
-        Column {
-            width: parent.width
-            spacing: 6
-
-            Text {
-                text: "通知黑名单（来源名）"
-                color: face.th ? face.th.fg : "#FFFFFF"
-                font.pixelSize: 12
-            }
-
-            Repeater {
-                model: face.blacklist
-                Item {
-                    required property var modelData
-                    width: parent.width
-                    height: 24
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.rightMargin: 56
-                        height: 24
-                        radius: 4
-                        color: (face.th && face.th.light) ? "#F0F0F0" : "#2A2A2A"
-                        Text {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData
-                            color: face.th ? face.th.fg : "#FFFFFF"
-                            font.pixelSize: 12
-                            elide: Text.ElideRight
-                            width: parent.width - 16
-                        }
-                    }
-                    ActionButton {
-                        anchors.right: parent.right
-                        height: 24
-                        label: "移除"
-                        onClicked: face.act("blacklist:remove:" + modelData)
-                    }
-                }
-            }
-
-            Item {
-                width: parent.width
-                height: 24
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.rightMargin: 56
-                    height: 24
-                    radius: 4
-                    border.width: 1
-                    border.color: (face.th && face.th.light) ? "#D0D0D0" : "#3C3C3C"
-                    TextInput {
-                        id: blInput
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        verticalAlignment: TextInput.AlignVCenter
-                        color: face.th ? face.th.fg : "#FFFFFF"
-                        font.pixelSize: 12
-                        clip: true
-                    }
-                }
-                ActionButton {
-                    anchors.right: parent.right
-                    height: 24
-                    label: "添加"
-                    onClicked: {
-                        const t = blInput.text.trim()
-                        if (t !== "") { face.act("blacklist:add:" + t); blInput.text = "" }
-                    }
-                }
-            }
-
-            ActionButton {
-                label: "清空黑名单"
-                onClicked: face.act("blacklist:clear")
-            }
-        }
+        // 2026-11-01 用户裁决：通知黑名单不是设计需求。真正的概念是「通知提供者」——
+        //   课程/天气/自动化等提醒**来源**（生产者），见 ClassIsland 的通知模型。
+        //   黑名单 UI 已移除；提供者视图将按 ClassIsland 模型重做（不是简单的来源名黑白名单）。
     }
 }
