@@ -151,6 +151,7 @@ Item {
             AppButton {
                 text: "退出考试"
                 variant: "secondary"
+                // 模板占位：真实实现见被控端 exam_mode.cpp（监考密码校验 + 退出指令）
                 onClicked: {}
             }
             Text { text: "退出需监考密码；异常情况点「求助」通知监考老师"; font.pixelSize: 12; color: Theme.color.textSecondary }
@@ -162,6 +163,7 @@ Item {
             AppButton {
                 text: "🖐 求助"
                 variant: "secondary"
+                // 模板占位：真实实现见被控端求助上报指令（管理端收到后转告监考老师）
                 onClicked: {}
             }
         }

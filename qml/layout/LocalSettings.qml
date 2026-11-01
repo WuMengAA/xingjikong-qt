@@ -76,8 +76,8 @@ Item {
             Row {
                 anchors.right: parent.right
                 spacing: 12
-                AppButton { text: "恢复默认"; variant: "ghost" }
-                AppButton { text: "保存"; variant: "primary"; onClicked: {} }
+                AppButton { text: "恢复默认"; variant: "ghost" } // 模板占位：真实实现见被控端 main.cpp QSettings 默认值落盘路径
+                AppButton { text: "保存"; variant: "primary"; onClicked: {} } // 模板占位：真实实现见被控端 main.cpp QSettings 持久化路径
             }
         }
     }

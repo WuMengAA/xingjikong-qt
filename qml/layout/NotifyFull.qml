@@ -120,6 +120,7 @@ Item {
             AppButton {
                 text: "知道了"
                 variant: "primary"
+                // 模板占位：真实实现见被控端通知域（Esc / 超时 / 点击关闭三条通路）
                 onClicked: {}
             }
         }
