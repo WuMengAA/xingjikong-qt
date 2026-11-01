@@ -1,20 +1,20 @@
 {
-  "updated": "2026-10-28",
+  "updated": "2026-11-01",
   "note": "历史超限台账：白名单内未变胖=允许；再长 1 行=判红；拆完一项就删一项。plan 前缀 P1/P2/P3 是拆分优先级。增量归属写进 plan（哪一批 +多少行、是否已提交），回写不等于批准变胖——P 级计划仍然有效。 | 2026-10-24 注册 ClassMemberPane（班级工作台方案B 成员管理 tab，两段结构，待拆为人员/设备两子件） | 2026-10-28 回写（模块一~三批次）：班级中心控制器/QML 与两侧设置页首次登记；同时把 island.cpp/island.h/PlaybackMiniWindow 的**并行线**增量据实回写（不代其提交）。",
   "files": {
     "Stelarith-control-qt/src/island.cpp": {
-      "lines": 2680,
+      "lines": 2806,
       "limit": 600,
       "qInvokable": 0,
-      "topLevel": 67,
-      "plan": "[P2] 灵动岛逻辑按状态机/动画/数据三段拆 | 2026-10-25 回写 2446→2453：+7 为 a13b507 vhRef 清空写 null QObject* + 守卫注释（Win7 三连 TypeError 修复，已提交） | 2026-10-27 回写（+8）：通知渠道（m_channel/m_skipHistory 一次性注入 + 归档处 skipHistory 拦截） | 2026-10-27 回写（+11）：F 收尾第 2 项 —— geometryForContent 把渠道标签算进胶囊宽度（12px DemiBold 度量 + 14 padding + 6 间距 + 描述宽），否则描述被标签挤成省略号 | 2026-10-27 回写（+9）：生产截图实证后的宽度修正 —— 标签行改按「48 左内缩 + 标签 + 6 + 描述 + 42 右内缩」算，描述改用 12px 字体度量（与原 48+iconW 估算式并存取大）。旧式在 209px 宽下把「数学 · 08:00」截成「数学 · 0…」 | 2026-10-27 回写 2481→2545（+64）：G4/G5/G6 组件面板 —— showPanel/closePanel（复用 showIsland 链 + 面板标志，修正「常驻面板 5 秒自灭」「20 秒硬回收提前压回」两条兜底定时器语义）、geometryForContent 面板定宽 640（面板与媒体互斥，面板优先）、showIsland/enterIdle 两处清面板 | 2026-10-28 回写 2545→2649（+104）：**非本批**（并行线在途，据实回写使门禁可读，不代其提交） | 2026-10-28 再回写 2649→2650（+1）：**非本批**（并行线继续在改，据实回写）"
+      "topLevel": 75,
+      "plan": "[P2] 灵动岛逻辑按状态机/动画/数据三段拆 | 2026-10-25 回写 2446→2453：+7 为 a13b507 vhRef 清空写 null QObject* + 守卫注释（Win7 三连 TypeError 修复，已提交） | 2026-10-27 回写（+8）：通知渠道（m_channel/m_skipHistory 一次性注入 + 归档处 skipHistory 拦截） | 2026-10-27 回写（+11）：F 收尾第 2 项 —— geometryForContent 把渠道标签算进胶囊宽度（12px DemiBold 度量 + 14 padding + 6 间距 + 描述宽），否则描述被标签挤成省略号 | 2026-10-27 回写（+9）：生产截图实证后的宽度修正 —— 标签行改按「48 左内缩 + 标签 + 6 + 描述 + 42 右内缩」算，描述改用 12px 字体度量（与原 48+iconW 估算式并存取大）。旧式在 209px 宽下把「数学 · 08:00」截成「数学 · 0…」 | 2026-10-27 回写 2481→2545（+64）：G4/G5/G6 组件面板 —— showPanel/closePanel（复用 showIsland 链 + 面板标志，修正「常驻面板 5 秒自灭」「20 秒硬回收提前压回」两条兜底定时器语义）、geometryForContent 面板定宽 640（面板与媒体互斥，面板优先）、showIsland/enterIdle 两处清面板 | 2026-10-28 回写 2545→2649（+104）：**非本批**（并行线在途，据实回写使门禁可读，不代其提交） | 2026-10-28 再回写 2649→2650（+1）：**非本批**（并行线继续在改，据实回写） | 2026-11-01 回写 2680→2806（+126）：顶替 ClassIsland 第 3 步 排队与仲裁 —— showIsland 入口排队分支（当前内容优先更高时本条入队，队列上限 4、超限淘汰最差）+ Task.durationMs + currentTitle() 只读 getter + 私有 m_curPriority/m_queueSeq/kMaxQueue + enterIdle 出口 drainQueuedTask（补播）+ 回落扫描跳过 state==4（排队项不归回落管）；顶层定义 67→75"
     },
     "Stelarith-control-qt/src/island.h": {
-      "lines": 619,
+      "lines": 664,
       "limit": 300,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P2] 随 island.cpp 拆，接口按段分文件 | 2026-10-27 回写（+16）：渠道能力声明与 4 个成员（channelHint/skipHistoryHint/channel/skipHistory） | 2026-10-27 回写 579→598（+19）：G4/G5/G6 —— showPanel/closePanel/panelFace()/panelData() 公开接口 + 设计注释（通知=事件 / 面板=看板）+ m_panelFace/m_panelData 成员 | 2026-10-28 回写 598→618（+20）：**非本批**（同上） | 2026-10-28 再回写 618→619（+1）：**非本批**（同上）"
+      "plan": "[P2] 随 island.cpp 拆，接口按段分文件 | 2026-10-27 回写（+16）：渠道能力声明与 4 个成员（channelHint/skipHistoryHint/channel/skipHistory） | 2026-10-27 回写 579→598（+19）：G4/G5/G6 —— showPanel/closePanel/panelFace()/panelData() 公开接口 + 设计注释（通知=事件 / 面板=看板）+ m_panelFace/m_panelData 成员 | 2026-10-28 回写 598→618（+20）：**非本批**（同上） | 2026-10-28 再回写 618→619（+1）：**非本批**（同上） | 2026-11-01 回写 619→664（+45）：同上批 —— setProviderForNext/setEndTimeForNext 声明、currentTitle()、Task.durationMs、排队三成员"
     },
     "Stelarith-control-qt/src/main.cpp": {
       "lines": 8059,
