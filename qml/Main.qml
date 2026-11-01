@@ -395,7 +395,8 @@ ApplicationWindow {
             // + 底部 32 状态条。旧壳 1-5 页保留作下钻目标（侧栏「运行监控」跳 3、
             // SideSheet「在集控页打开」跳 1、「返回经典界面」回 1），功能不丢。
             // ⚠️ 新页面一律长在本骨架里（AGENTS.md §9），禁止自绘第二个外壳。
-            MainWindow { ctx: root._pageCtx }
+            // backendRef = 后端转发名（不叫 backend，避免同名遮蔽 ⇒ 自绑定，2026-10-10 坑）
+            MainWindow { ctx: root._pageCtx; backendRef: root.backendRef }
         }
 
     }

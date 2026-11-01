@@ -118,6 +118,12 @@ class ViewerBackend : public QObject
     Q_PROPERTY(QString currentUid READ currentUid WRITE setCurrentUid NOTIFY currentUidChanged)
     // 主题三档（E4，2026-10-11）：0 浅色 / 1 深色 / 2 跟随系统。持久化在 QSettings ui/themeMode。
     Q_PROPERTY(int themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
+    /** 新版外壳预览开关（2026-11-01）：true = 用 qml/shell/PreviewConsole.qml
+     *  （新版外壳设计稿 qml/layout/DesktopConsole.qml 的真数据版），
+     *  false = 经典外壳（Sidebar/TopBar/ActionBar）。
+     *  持久化在 QSettings ui/previewShell。**这是预览闸**：设计稿尚未切生产，
+     *  默认关；确认满意后才把默认值改成开并删掉经典分支（§10.8 需点单）。 */
+    Q_PROPERTY(bool previewShell READ previewShell WRITE setPreviewShell NOTIFY previewShellChanged)
     /** 主题三档的选项 [{key,label,strong}]（2026-10-28 模块三 · 纯增量）：
      *  strong = 当前选中，由 C++ 判 —— QML 里不能写 `themeMode === 0 ? filled : tonal`。 */
     Q_PROPERTY(QVariantList themeOptions READ themeOptions NOTIFY themeModeChanged)
@@ -390,6 +396,9 @@ public:
     /** 主题三档（E4）：0 浅色 / 1 深色 / 2 跟随系统。读来自 QSettings，写回即持久化。 */
     int themeMode() const { return m_themeMode; }
     void setThemeMode(int m);
+    /** 新版外壳预览闸（2026-11-01）：读来自 QSettings ui/previewShell。 */
+    bool previewShell() const { return m_previewShell; }
+    void setPreviewShell(bool on);
     /** 跟随系统档用的 OS 深色判定（监听 QStyleHints::colorSchemeChanged）。 */
     bool systemDark() const { return m_systemDark; }
 
@@ -793,6 +802,8 @@ signals:
     void terminalClosed(const QString &sid, const QString &reason);
     /** 主题三档变化（E4，UI 据此切深 / 浅）。 */
     void themeModeChanged(int);
+    /** 新版外壳预览闸变化（2026-11-01）：UI 据此切经典外壳 / 新版外壳。 */
+    void previewShellChanged(bool);
     /** OS 配色变化（跟随系统档用）。 */
     void systemDarkChanged(bool);
 
@@ -962,6 +973,7 @@ private:
     // ── 主题三档（E4）──
     int m_themeMode = 0;       // 0 浅色 / 1 深色 / 2 跟随系统，持久化在 QSettings ui/themeMode
     bool m_systemDark = false; // 跟随系统档的 OS 深色判定
+    bool m_previewShell = false; // 新版外壳预览闸（2026-11-01），持久化在 QSettings ui/previewShell
 
     QString m_statusText;
     bool m_statusWarn = false;

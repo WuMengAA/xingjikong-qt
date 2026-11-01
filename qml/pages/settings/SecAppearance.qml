@@ -54,6 +54,40 @@ SettingsCard {
         opacity: 0.6
     }
 
+    // ②b 新版外壳预览（2026-11-01）
+    //   背景：新版外壳设计稿（qml/layout/DesktopConsole.qml，2026-10-14 起）一直没接生产，
+    //   生产跑的是经典外壳（Sidebar/TopBar/ActionBar）。本开关切到设计稿的真数据版
+    //   （qml/shell/PreviewConsole.qml）—— **预览闸**，确认满意后才考虑替换经典外壳。
+    //   状态在 backend.previewShell（QSettings ui/previewShell），默认关。
+    Text {
+        width: parent.width
+        text: "新版外观预览"
+        color: Theme.color.textSecondary
+        font.pixelSize: 13
+    }
+    Row {
+        spacing: Theme.spacing.md
+        Rectangle {
+            width: 44; height: 26; radius: 13
+            color: backend.previewShell ? Theme.color.primary : Theme.color.surfaceVariant
+            Behavior on color { ColorAnimation { duration: Theme.motion.short } }
+            Rectangle {
+                x: backend.previewShell ? 22 : 3
+                y: 3
+                width: 20; height: 20; radius: 10
+                color: Theme.color.surface
+                Behavior on x { NumberAnimation { duration: Theme.motion.short } }
+            }
+            TapHandler { onTapped: backend.previewShell = !backend.previewShell }
+        }
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: backend.previewShell ? "已开启（新版外壳）" : "已关闭（经典外壳）"
+            font.pixelSize: 13
+            color: Theme.color.textSecondary
+        }
+    }
+
     // ③ 蓝图里还没实现的那些
     Text {
         width: parent.width

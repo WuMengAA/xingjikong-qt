@@ -21,19 +21,19 @@
 //
 // 本页承载（对应《骨架迁移缺口清单》S 系列，2026-10-22 补齐）：
 //   S1 三张统计卡（在线 / 待办 / 离线）
-//   S2 云端存储概况（backend.storage）
-//   S3 动作排行 · 近 7 天（backend.actionRanking）
+//   S2 云端存储概况（backendRef.storage）
+//   S3 动作排行 · 近 7 天（backendRef.actionRanking）
 //   S4 最近回执流水（宿主 root.results，最新 8 条）
 //   S5 设备筛选 chip（全部 / 在线 / 离线）
 //   S6 远控出口 → SideSheet 里「在集控页打开」
 //   S7 响应式列数（4 / 3 / 2 列，随内容区宽度）
 //
 // ── 数据真源（全部沿用，绝不另存一份）───────────────────────────────────
-//   班级目录   backend.classes   [{code,name}]
-//   当前班     backend.currentClass / backend.setCurrentClass(code)
-//   设备表     backend.devices     [{uid,name,classCode,online,version,lastSeenAgoSec}]
+//   班级目录   backendRef.classes   [{code,name}]
+//   当前班     backendRef.currentClass / backendRef.setCurrentClass(code)
+//   设备表     backendRef.devices     [{uid,name,classCode,online,version,lastSeenAgoSec}]
 //   单台帧     image://frames/<uid>?t<tick>（FrameImageProvider）
-//   帧订阅     backend.subscribeThumbnails(uids) + 信号 thumbnailChanged()
+//   帧订阅     backendRef.subscribeThumbnails(uids) + 信号 thumbnailChanged()
 //   动作执行   ctx.window.runActionById(actionId)（权限/能力/二次确认全在宿主）
 //
 // ⚠️ 刻意**不用** ctx.window.filteredDevices：它叠加了集控页左栏 chip 的状态，
@@ -71,6 +71,15 @@ Item {
     Binding { target: ThemeManager; property: "primary"; value: Theme.dark ? "#D0BCFF" : "#6750A4" }
 
     property var ctx
+    // ── 后端转发（2026-11-01）──
+    // ⚠️ 为什么不能直接写 `backendRef`：Main.qml 里 `backendRef` 是**全局 context property**，
+    //    但 MainWindow 是 Main.qml 的子项 —— 若 MainWindow 自己（或其子件）声明了同名
+    //    `backendRef` 属性，QML 非限定名会先查自身 ⇒ 自绑定 ⇒ "Binding loop detected for
+    //    property backendRef"，随后该子树里所有 backendRef.xxx 全变 undefined（2026-10-10 实测，
+    //    Main.qml:227-231 留了转发名 backendRef 就是为这个）。
+    //    本轮加的 PreviewConsole 声明了后端属性 ⇒ 必须走转发名，不能用裸 backendRef。
+    //    （顺带修正：MainWindow 里既有的裸 `backendRef` 引用实测为 null，故一并改走 backendRef。）
+    property var backendRef: null
 
     readonly property var th: (ctx && ctx.window && ctx.window.th) ? ctx.window.th : null
 
@@ -98,8 +107,8 @@ Item {
      *  2026-10-26 裁决：本地手动选的身份**不挡**。它表达的是"我此刻用什么视角看这台机器"，
      *    拿它砍页面入口会出现"切个身份功能就没了"的困惑；真正的权限事实是服务端下发的那个。
      *  未登录 / 全权令牌 ⇒ roleLocked 恒假 ⇒ 运维视角不受影响。 */
-    readonly property bool canControlPage: !backend
-        || !(backend.roleLocked === true && backend.role === "teacher")
+    readonly property bool canControlPage: !backendRef
+        || !(backendRef.roleLocked === true && backendRef.role === "teacher")
 
     /** 身份在停留期间变了（例如在集控页上登录了一个老师账号）⇒ 立刻退回仪表盘。
      *  只隐藏菜单不够：section 已经是 control 的话页面还挂在那儿。 */
@@ -151,9 +160,9 @@ Item {
      */
     function pickClass(code) {
         shell.section = "classes"
-        if (typeof backend !== "undefined" && backend) {
-            backend.setCurrentClass(code)
-            if (backend.classService) backend.classService.subscribeClass(code)
+        if (typeof backendRef !== "undefined" && backendRef) {
+            backendRef.setCurrentClass(code)
+            if (backendRef.classService) backendRef.classService.subscribeClass(code)
         }
         if (typeof classCenter !== "undefined" && classCenter) classCenter.openClass(code)
     }
@@ -162,7 +171,7 @@ Item {
      *  蓝图原话：「提取管理员中的"班级面板"，作为班主任/老师登录后的独立主页；
      *  不再从多班级列表中新建或跳转，直接沉浸式展示本班面板，省去老师的筛选成本。」
      *
-     *  落哪一栏由 C++ 的 `backend.homeSection` 给（teacher⇒classes / admin⇒dash），
+     *  落哪一栏由 C++ 的 `backendRef.homeSection` 给（teacher⇒classes / admin⇒dash），
      *  QML 里不写 `role === "teacher"` 这种身份判断。
      *
      *  只种一次：用户手动切走之后不再抢回来 —— 否则每次数据刷新都把老师弹回首页。
@@ -170,8 +179,8 @@ Item {
     property bool __homeSeeded: false
     function seedHomeSection() {
         if (__homeSeeded) return
-        if (typeof backend === "undefined" || !backend) return
-        const home = backend.homeSection
+        if (typeof backendRef === "undefined" || !backendRef) return
+        const home = backendRef.homeSection
         if (!home || home.length === 0) return
         __homeSeeded = true
         shell.section = home
@@ -179,8 +188,8 @@ Item {
 
     /** 本班设备：按班级码过滤；currentClass 为空 = 「全部班级」⇒ 不过滤（理由见文件头）。 */
     function classDevices() {
-        const ds = (backend && backend.devices) ? backend.devices : []
-        const cc = backend.currentClass || ""
+        const ds = (backendRef && backendRef.devices) ? backendRef.devices : []
+        const cc = backendRef.currentClass || ""
         if (cc === "") return ds.slice()        // 全部班级：显示全部设备，不是"什么都没"
         var out = []
         for (var i = 0; i < ds.length; ++i) {
@@ -190,12 +199,12 @@ Item {
         return out
     }
 
-    /** S1：计数（读 backend.storage 的待办；未拉到前显示 ——，不假装是 0）。 */
+    /** S1：计数（读 backendRef.storage 的待办；未拉到前显示 ——，不假装是 0）。 */
     function stats() {
         const ds = shell.classDevices()
         var on = 0
         for (var i = 0; i < ds.length; ++i) if (ds[i].online !== false) on++
-        const st = (backend && backend.storage) ? backend.storage : ({})
+        const st = (backendRef && backendRef.storage) ? backendRef.storage : ({})
         const pend = (st.pendingInstructions === undefined) ? "—" : st.pendingInstructions
         return { total: ds.length, on: on, off: ds.length - on, pending: pend }
     }
@@ -254,7 +263,7 @@ Item {
     }
     /** 批量动作：把"当前班全部在线设备"塞进宿主的 picked，再走唯一执行入口。
      *  ⚠️ actionId 必须是 **pick 系列批量 id**（pick-lock / pick-shutdown / pick-volume-* …）：
-     *    单台 id（lock/reboot）在 runActionById 的 danger 分支只看 backend.currentUid，
+     *    单台 id（lock/reboot）在 runActionById 的 danger 分支只看 backendRef.currentUid，
      *    批量会被「先在控制页选中一台设备」拦截，或只锁那一台。
      *  2026-10-25：label 改问宿主要（pickActionLabel）—— 原来是
      *  `(actionId === "pick-lock") ? "锁定桌面" : "远程重启"`，两个动作时恰好蒙对，
@@ -282,11 +291,11 @@ Item {
     function _statusText() {
         const s = shell.stats()
         let cls = "全部班级"
-        if (backend.currentClass) {
-            cls = backend.currentClass
-            const cs = (backend.classes) ? backend.classes : []
+        if (backendRef.currentClass) {
+            cls = backendRef.currentClass
+            const cs = (backendRef.classes) ? backendRef.classes : []
             for (var c = 0; c < cs.length; ++c)
-                if (cs[c] && cs[c].code === backend.currentClass) { cls = cs[c].name || cs[c].code; break }
+                if (cs[c] && cs[c].code === backendRef.currentClass) { cls = cs[c].name || cs[c].code; break }
         }
         var txt = "班级 " + cls + " · " + s.total + " 台 · " + s.on + " 台在线"
         if (shell.openUid !== "") {
@@ -300,9 +309,37 @@ Item {
     // 2026-10-29：骨架全屏底迁 Theme.color.background（页面最底，内容面板用 surface 分层）
     Rectangle { anchors.fill: parent; color: Theme.color.background }
 
+    // ══ 新版外壳预览（2026-11-01）══
+    // 背景：qml/layout/DesktopConsole.qml 是 2026-10-14 起的新版外壳**设计稿**（假数据），
+    // 一直没接生产；生产跑的是 qml/shell/{Sidebar,TopBar,ActionBar}.qml 这套手绘外壳。
+    // 本件 = 设计稿的**真数据**版（PreviewConsole.qml），由设置页「主界面外观 →
+    // 新版外观预览」开关切（backendRef.previewShell，QSettings ui/previewShell，默认关）。
+    // **这是预览闸，不是切换上线**：设计稿尚未逐页验收，确认满意后才考虑替换经典外壳。
+    PreviewConsole {
+        id: preview
+        visible: backendRef && backendRef.previewShell === true
+        anchors.fill: parent
+        ctx: shell.ctx
+        backendRef: shell.backendRef
+        navItems: shell.navItems
+        section: shell.section
+        accountTitle: backendRef ? backendRef.roleText : ""
+        accountSub: backendRef ? backendRef.accountName : ""
+        accountAvatarText: backendRef ? backendRef.accountAvatarText : ""
+        currentClass: backendRef ? backendRef.currentClass : ""
+        onNavActivated: function (key) { shell.navActivated(key) }
+        onAvatarClicked: function () { shell.navActivated("account") }
+        onDeviceActivated: function (uid) {
+            shell.openUid = uid
+            if (uid !== "" && backendRef) backendRef.currentUid = uid
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
+        // 新版外壳预览开启时，经典外壳整块让位（预览版自带导航/顶栏/统计/网格）。
+        visible: !(backendRef && backendRef.previewShell === true)
 
         RowLayout {
             Layout.fillWidth: true
@@ -325,9 +362,9 @@ Item {
                 //   avatarText  = 账号名首字，没登录时回落到角色首字（管/师）
                 //   accountTitle= 角色中文名（管理员 / 老师）
                 //   accountSub  = 账号名（没登录就是空串，不编一个假学校名出来）
-                avatarText: backend ? backend.accountAvatarText : ""
-                accountTitle: backend ? backend.roleText : ""
-                accountSub: backend ? backend.accountName : ""
+                avatarText: backendRef ? backendRef.accountAvatarText : ""
+                accountTitle: backendRef ? backendRef.roleText : ""
+                accountSub: backendRef ? backendRef.accountName : ""
                 onActivated: function (key) { shell.navActivated(key) }
             }
 
@@ -350,7 +387,7 @@ Item {
                         ctx: shell.ctx
                         title: shell.sectionTitle
                         // ⚠️ 班级列表与当前班**不在这里传参** —— TopBar 内部直接读
-                        //    backend.classes / backend.currentClass。曾经多传不存在的属性，
+                        //    backendRef.classes / backendRef.currentClass。曾经多传不存在的属性，
                         //    结果 `Type Md3Shell unavailable` 整页起不来（qmllint 0 Error）。
                         // 2026-10-23 #472：班级选择必须**双写**（旧筛选 setCurrentClass +
                         // 新班级域 subscribeClass）。2026-10-28 裁决「取代」后，双写收进
@@ -363,7 +400,7 @@ Item {
                         onAvatarClicked: function () { shell.navActivated("account") }
                         onLoginRequested: {
                             shell.toast("正在打开站点登录…")
-                            if (backend) backend.loginWithSite()
+                            if (backendRef) backendRef.loginWithSite()
                         }
                     }
 
@@ -406,13 +443,13 @@ Item {
                             onDeviceActivated: function (uid) {
                                 shell.openUid = uid
                                 // H1：同时写宿主「看哪台」真源（SideSheet 与危险动作都取它）
-                                if (uid !== "" && backend) backend.currentUid = uid
+                                if (uid !== "" && backendRef) backendRef.currentUid = uid
                             }
                         }
 
                         // ② 班级中心（2026-10-28 模块一 · 用户裁决「取代」）
                         //    原先这里是 ClassDashboard 单班三栏工作台（左身份/中网格/右动作），
-                        //    已按裁决整体下线；班级域数据仍走 backend.classService（未变）。
+                        //    已按裁决整体下线；班级域数据仍走 backendRef.classService（未变）。
                         //    本页是**纯声明式**：数据、几何、配色全在 C++ ClassCenterController
                         //    （context property: classCenter），点击只调 classCenter.requestOp("名字")。
                         Loader {
@@ -509,16 +546,16 @@ Item {
 
     // ── 重认证弹窗（2026-10-24 安全门）──────────────────────────────────
     // 敏感操作被云端 REAUTH_REQUIRED 拦（长时间未验证密码）：连接**不断**，
-    // 只提示"该再验一次密码了"→ 点「重新验证」走 backend.loginWithSite()
+    // 只提示"该再验一次密码了"→ 点「重新验证」走 backendRef.loginWithSite()
     // （OAuth 授权流程 = 站点验证密码）→ 新票据到位后一切自动恢复。
     // 2026-10-29：视觉抽到 shell/ReauthDialog.qml（Theme 令牌 + AppButton），
-    //    backend 信号在组件内部连，宿主无需再写 Connections。
+    //    backendRef 信号在组件内部连，宿主无需再写 Connections。
     ReauthDialog {}
 
     // 模块二（2026-10-28）：身份变了（站点登录换票 / 服务端下发锁定身份）⇒ 重新按身份落点。
     // 这里**允许重种**：登录是显著事件，「登录完直接看到本班」正是蓝图要的效果。
     Connections {
-        target: backend
+        target: backendRef
         function onRoleChanged() {
             shell.__homeSeeded = false
             shell.seedHomeSection()
@@ -532,11 +569,11 @@ Item {
         var u = []
         for (var i = 0; i < ds.length && u.length < shell.thumbLimit; ++i)
             if (ds[i].online !== false && ds[i].uid !== shell.openUid) u.push(ds[i].uid)
-        backend.subscribeThumbnails(u)
+        backendRef.subscribeThumbnails(u)
     }
 
     Connections {
-        target: backend
+        target: backendRef
         function onDevicesChanged() {
             shell.syncThumbs()
         }
@@ -550,8 +587,8 @@ Item {
      *  其余栏目不看。原先这个开关写在 Main.qml 的 syncPageLive 里按 page 判定，
      *  但 page 已收敛为 6，只有本件知道当前栏目 ⇒ 责任搬到这里。 */
     onSectionChanged: {
-        if (backend)
-            backend.setScreenActive(shell.section === "control" || shell.section === "monitor")
+        if (backendRef)
+            backendRef.setScreenActive(shell.section === "control" || shell.section === "monitor")
     }
 
     Component.onCompleted: {
@@ -560,14 +597,14 @@ Item {
         shell.seedHomeSection()
         shell.syncThumbs()
         // S3：进页面拉一次排行（云端 instructions 近 7 天；失败静默，界面自己会显示空态）
-        if (backend) backend.fetchActionRanking()
+        if (backendRef) backendRef.fetchActionRanking()
         // 把栏目跳转通道交给宿主的 goPage（老页号兼容层）：Main.qml 的 goPage(idx)
         // 与各处 `ctx.window.goPage(1)` 最终都落到这里，RBAC 也只在这里判一次。
         if (shell.ctx && shell.ctx.window) {
             shell.ctx.window.sectionHook = function (key) { shell.navActivated(key) }
         }
-        if (backend)
-            backend.setScreenActive(shell.section === "control" || shell.section === "monitor")
+        if (backendRef)
+            backendRef.setScreenActive(shell.section === "control" || shell.section === "monitor")
     }
-    Component.onDestruction: backend.subscribeThumbnails([])
+    Component.onDestruction: backendRef.subscribeThumbnails([])
 }

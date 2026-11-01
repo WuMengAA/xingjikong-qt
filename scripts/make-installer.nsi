@@ -72,6 +72,16 @@ FunctionEnd
 Section "Main" SEC_MAIN
   SetOutPath "$INSTDIR"
 
+  ; ⚠️ 必须开覆盖（2026-11-01 踩坑）：NSIS3 的 SetOverwrite 默认是 **off**，
+  ;    已存在的文件会被**静默跳过** ⇒ 升级安装时 viewer-qt.exe / Qt6*.dll 全部保持旧版，
+  ;    但安装器照样 rc=0 退出 ⇒ 装完还是旧程序（用户看到「装了新版却没变化」）。
+  ;    现象实证：rc.8 安装器 rc=0，但 C:\Program Files\StelarithViewer\viewer-qt.exe
+  ;    的时间戳仍是上一版（12:22），而 QML 文件却是新的（12:38）——
+  ;    因为 QML 是目录复制（File /r 走 copy_directory 语义，总是覆盖），
+  ;    而单文件 File 走 overwrite 开关。
+  ;    升级安装的前提就是「盖掉旧文件」，故必须 on。
+  SetOverwrite on
+
   ; ── 升级时先停掉正在跑的旧实例 ────────────────────────────────────────
   ; 为什么必须有：被控端 installer.nsi 在 136 行已经有同样处理，管理端原先**只在卸载段**
   ; 停实例（131 行），安装/升级段漏了。后果：老师正开着管理端时点升级安装，
@@ -81,6 +91,20 @@ Section "Main" SEC_MAIN
   ; 在这台机器上还容易被执行策略/路径转换绊住）。
   nsExec::ExecToLog 'powershell -NoProfile -Command "Get-Process -Name viewer-qt -ErrorAction SilentlyContinue | Stop-Process -Force"'
   Sleep 800
+
+  ; ⚠️ 跨 Session 的占用问题（2026-11-01 实测踩坑，第二次）：
+  ;    上面的 Stop-Process **杀不掉别的 Session 的进程**（Get-Process 在 Session 0
+  ;    看不到 Session 1 的进程 ⇒ 管道为空 ⇒ 什么也没杀）。
+  ;    场景：安装包由计划任务 / 服务 / 自动化（Session 0）拉起，而老师正开着管理端
+  ;    （Session 1）⇒ viewer-qt.exe 被占用 ⇒ NSIS 解压时跳过该文件（/S 静默模式
+  ;    不报错）⇒ **安装器 rc=0，但 exe 还是旧版**（QML 走目录复制所以更新了，
+  ;    只有 exe 没换）⇒ 用户看到「装了新版却没变化」。
+  ;    对策：Windows 允许**重命名运行中的 exe**（只是不能删除）⇒ 先把旧 exe 改名
+  ;    让路，新的再解压进来；旧文件留在盘上（.old），下次启动即用新 exe。
+  ;    正常场景（没有进程在跑）改名会失败并被忽略，不影响安装。
+  IfFileExists "$INSTDIR\viewer-qt.exe" 0 no_rename_exe
+    Rename "$INSTDIR\viewer-qt.exe" "$INSTDIR\viewer-qt.exe.old"
+  no_rename_exe:
 
   ; ── 旧版中文目录迁移：先把旧目录里的 viewer.env 抢出来（比新目录里可能存在的更"真"）──
   ;    仅在 .onInit 判定为"旧中文默认路径"（$LEGACYDIR 非空）时执行。
