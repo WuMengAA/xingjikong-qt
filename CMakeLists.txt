@@ -32,7 +32,7 @@ endif()
 # 完整标准见 docs/版本号命名规范-2026-10-07.md。
 # 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
 # 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
-set(VIEWER_VERSION "0.6.50-rc.6")
+set(VIEWER_VERSION "0.6.50-rc.7")
 add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
 
 # 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补；2026-10-07 正则收严到 X.Y.Z[-rc.N]）。
@@ -162,6 +162,30 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus ${CMAKE_BINARY_
 #    QQC 的 background/contentItem 实现的，宿主风格（Fluent/Windows）会吃掉这些
 #    覆写，表现为"组件渲染出来了但样式完全不对"这类静默故障。
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/qtshadcn ${CMAKE_BINARY_DIR}/_qtshadcn)
+
+# ── QtShadcn 的 QML plugin 必须显式构建（2026-11-01 · 生产事故修复）──────
+# 【事故现象】viewer 装完双击打不开，窗口不出现；日志只有一行
+#   "module \"QtShadcn\" plugin \"QtShadcnplugin\" not found"
+#   → MainWindow.qml 加载失败 → "FAIL QML 未能加载 qml/Main.qml（致命）"。
+# 【根因】qt_add_qml_module 会自动生成两个 target：
+#   · QtShadcn      → 类型库（build/QtShadcn.dll）
+#   · QtShadcnplugin→ **QML plugin dll**（_qtshadcn/src/QtShadcn/QtShadcnplugin.dll）
+#   但 **QtShadcnplugin 默认不在构建图里**（没有 target 依赖它就不编），
+#   而 qmldir 里写的是 "optional plugin QtShadcnplugin" ⇒ 运行时找不到 plugin。
+#   另：模块目录（qmldir + qml/）本身也**从没被打包**（安装清单只带 build/qml）。
+# 【修法】① 显式依赖 plugin target（让它进构建图）；
+#         ② 把模块目录整个拷到 qml/Stelarith/QtShadcn/（import path 内，见下面的 sync 规则）；
+#         ③ 类型库 QtShadcn.dll 拷到 exe 旁（安装清单显式带，见 make-installer.nsi）。
+if(TARGET QtShadcnplugin)
+  # ⚠️ 依赖要挂在 viewer-qt 定义**之后**（下面 add_executable 之后才有这个 target）。
+  # 这里只做存在性校验，依赖关系见 viewer-qt 定义之后的 add_dependencies。
+else()
+  message(FATAL_ERROR
+    "[viewer] 找不到 QtShadcnplugin target：QtShadcn 的 QML plugin 无法部署，\n"
+    "  viewer 会以 \"module QtShadcn plugin QtShadcnplugin not found\" 启动失败。\n"
+    "  检查 third_party/qtshadcn/src/CMakeLists.txt 的 qt_add_qml_module 是否被改动。")
+endif()
+set(STE_QTSHADCN_MODULE_DIR "${CMAKE_BINARY_DIR}/_qtshadcn/src/QtShadcn")
 
 # 界面与逻辑分开：viewerbackend.* 只管 连接/协议/数据，main.cpp 只管界面
 # 2026-10-11：Android target 手机 App 并入 —— 桌面临时专属件（app.rc / winmm 采集 /
@@ -300,7 +324,12 @@ qt_add_qml_module(viewer-qt
 
 # 2026-10-08 引入 lucide（morphicons 同款 24×24 stroke 风格，ISC）SVG 图标，
 # 编译进 exe（qrc 前缀 /icons），部署不带额外文件、颜色运行时按主题染。
-file(GLOB VIEWER_ICON_SVGS "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/*.svg")
+# ⚠️ CONFIGURE_DEPENDS 不可省（2026-11-01 踩坑）：普通 GLOB 只在 configure 期求值一次，
+#   之后增删 svg 不会触发重新 configure ⇒ ninja 认为 exe 无变化、图标进不了 exe
+#   （实测：资源目录被恢复后 build 出的 exe 尺寸不变，运行时报
+#   "SvgIcon: Failed to get image from provider: image://svgicon/xxx"）。
+#   加 CONFIGURE_DEPENDS 后，文件集变化会自动触发 re-configure。
+file(GLOB VIEWER_ICON_SVGS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/*.svg")
 qt_add_resources(viewer-qt "viewericons" PREFIX "/icons" BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons" FILES ${VIEWER_ICON_SVGS})
 
 # 2026-10-11（F4）：鲸鱼娘素材编进 exe（qrc 前缀 /whale）。
@@ -388,10 +417,26 @@ add_custom_target(viewer_qml_sync ALL
           "${STE_SHARED_ISLAND_DIR}" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/island"
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           "${STE_SHARED_UI_DIR}" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/components"
-  COMMENT "[viewer] 同步 qml/ + 共享 island/ + 共享 ui/（每次构建，防「改了 QML 不生效」）"
+  # ── QtShadcn 模块（2026-11-01 · 生产事故修复）────────────────────────
+  # 整个模块目录（qmldir + qml/ + qmltypes + **QtShadcnplugin.dll**）拷进
+  # import path（qml/Stelarith/）下的 QtShadcn/ 子目录 —— QML 引擎按
+  # 「import path/<模块名>/qmldir」找模块，插件 dll 与 qmldir 同目录。
+  # ⚠️ 用 copy_directory 而不是逐文件：模块目录里 plugin dll 是**构建产物**，
+  #    名字随 Qt 版本变（QtShadcnplugin.dll），逐文件点名迟早漏。
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${STE_QTSHADCN_MODULE_DIR}" "$<TARGET_FILE_DIR:viewer-qt>/qml/Stelarith/QtShadcn"
+  # 类型库 QtShadcn.dll（C++ 侧注册的类型）放 exe 旁。
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_BINARY_DIR}/QtShadcn.dll" "$<TARGET_FILE_DIR:viewer-qt>/QtShadcn.dll"
+  COMMENT "[viewer] 同步 qml/ + 共享 island/ + 共享 ui/ + QtShadcn 模块（每次构建，防「改了不生效」）"
   VERBATIM)
 # 让 exe 依赖它：保证任何一次构建（包括 ninja 默认目标）都先同步过 QML。
 add_dependencies(viewer-qt viewer_qml_sync)
+# QtShadcn 的 QML plugin dll 必须进构建图（2026-11-01 · 生产事故修复）：
+# qt_add_qml_module 生成的 QtShadcnplugin target **默认不被任何 target 依赖**，
+# 于是它从没被编译过，而 qmldir 里写着 "optional plugin QtShadcnplugin"
+# ⇒ 运行时找不到 plugin → MainWindow 加载失败 → viewer 打不开。
+add_dependencies(viewer-qt QtShadcnplugin)
 
 # ── 共享语音算法（P1，2026-10-21）：OpusCodec 一份实现，agent/viewer 同源 ──
 # Qt-free 的纯 C++（shared/audio），Windows 与 Android 同一份代码。

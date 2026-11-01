@@ -118,6 +118,13 @@ Section "Main" SEC_MAIN
   ; `Qt6*.dll` 通配匹配不到、windeployqt 也不拷 ⇒ 装完启动即「找不到 libssl-3-x64.dll」。
   File "..\build\libssl-3-x64.dll"
   File "..\build\libcrypto-3-x64.dll"
+  ; ── QtShadcn 类型库（2026-11-01 · 生产事故修复）──────────────────────────────
+  ; QtShadcn 模块的 C++ 类型注册库。名字**不匹配** Qt6*.dll 通配，windeployqt 也不认
+  ; （它只认 Qt 官方模块）⇒ 必须显式点名，否则装完启动即
+  ; "module QtShadcn plugin QtShadcnplugin not found" → QML 加载失败 → viewer 打不开。
+  ; ⚠️ 模块本体（qmldir + qml/ + QtShadcnplugin.dll）在 qml\Stelarith\QtShadcn\ 下，
+  ;    由上面的 File /r "..\build\qml" 整目录带走，不用在这里再点一次。
+  File "..\build\QtShadcn.dll"
 
   File /r "..\build\platforms"
   ; 2026-10-26 P4：媒体后端插件（ffmpeg / windowsmediaplugin）。没有它，
