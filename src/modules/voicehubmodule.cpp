@@ -2,6 +2,7 @@
 // 设计说明、数据契约与状态机口径见 voicehubmodule.h 顶部。
 
 #include "voicehubmodule.h"
+#include "../notify/provider_registry.h"   // 2026-11-01：提供方门控
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -738,6 +739,10 @@ void VoiceHubModule::notifyNewBroadcast() const
     const ModuleAgentApi &a = api();
     if (!m_autoNotify || !a.islandShow) return;
     if (a.examActive && a.examActive()) return;   // 考试模式静默
+    // 2026-11-01（第 2 步 · 提供方接线）：「对讲」提供方被关 ⇒ 不弹。
+    //   模块直接问注册表：providers 是纯 C++ 表、无 UI 依赖，不必绕 ModuleAgentApi 多灌一个回调。
+    if (!notify::NotifyProviders::instance().allow(QStringLiteral("voice"), QStringLiteral("voice.talk")))
+        return;
     QString desc = m_artist.isEmpty() ? m_title : (m_title + QStringLiteral(" · ") + m_artist);
     if (!m_nextTitle.isEmpty())
         desc += QStringLiteral("\n接下来：") + m_nextTitle;

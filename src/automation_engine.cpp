@@ -266,6 +266,8 @@ QJsonObject AutomationEngine::buildAction(const Rule &r) const
         out.insert(QStringLiteral("content"), a.value(QStringLiteral("content")).toString());
         out.insert(QStringLiteral("seconds"), a.value(QStringLiteral("seconds")).toInt(5));
         out.insert(QStringLiteral("from"), QStringLiteral("automation"));
+        // 2026-11-01（第 2 步 · 提供方接线）：显式声明来源，设置页关掉「自动化」后不再弹。
+        out.insert(QStringLiteral("provider"), QStringLiteral("automation"));
     } else if (kind == QStringLiteral("set_volume")) {
         out.insert(QStringLiteral("action"), QStringLiteral("set_volume"));
         out.insert(QStringLiteral("value"), qBound(0, a.value(QStringLiteral("value")).toInt(50), 100));

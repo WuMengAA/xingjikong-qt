@@ -30,3 +30,9 @@ void trayNotify(const QString &title, const QString &body,
 // 解析 params（kind/title/content/seconds/notice_id/flags）并弹窗。
 // 返回 "" = 成功；非空 = 错误（"skipped:" 前缀 = 门控静默丢弃）。
 QString notifyFromParams(const QJsonObject &params, const QString &id = QString());
+
+// 考试模式开始/结束的岛提示（2026-11-01 · 顶替 ClassIsland 第 2 步）。
+// 归属「考试」提供方（provider=exam / channel exam.start|exam.end）——关掉后不弹。
+// 为什么放在这里：考试模式本身不弹任何东西，没有这条「考试」提供方就没有可门控的内容
+//   （摆一个点了没反应的开关比不摆更糟）。
+void notifyExamMode(bool entering, const QString &detail);

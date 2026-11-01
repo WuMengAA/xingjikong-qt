@@ -295,3 +295,24 @@ QString notifyFromParams(const QJsonObject &params, const QString &id)
     }
     return QString();   // 成功
 }
+// ── 考试模式提示（2026-11-01 · 顶替 ClassIsland 第 2 步）──────────────────────
+// 归属「考试」提供方：设置页关掉「考试」⇒ 进出考试模式都不弹。
+// 形态用 Capsule（不抢屏、不挡课件）——考试模式本身已经全屏拦截，提示只需"告知一声"。
+// ⚠️ 与考试门控（NotificationGate::ExamActive）的分工：那个拦**别人**的通知，
+//    这个是**考试自己**的告知；两者互不替代。
+void notifyExamMode(bool entering, const QString &detail)
+{
+    const QString channel = entering ? QStringLiteral("exam.start") : QStringLiteral("exam.end");
+    if (!notify::NotifyProviders::instance().allow(QStringLiteral("exam"), channel))
+        return;
+    const QString title = entering ? QStringLiteral("考试模式已开始") : QStringLiteral("考试模式已结束");
+    QString desc = detail.trimmed();
+    if (desc.isEmpty())
+        desc = entering ? QStringLiteral("请勿切换窗口，完成后会自动结束")
+                        : QStringLiteral("已恢复平常状态");
+    IslandOverlay::instance()->setProviderForNext(QStringLiteral("exam"));
+    IslandOverlay::instance()->setChannelForNext(QStringLiteral("考试"));
+    IslandOverlay::instance()->setSkipHistoryForNext(true);
+    islandShow(title, desc, entering ? QStringLiteral("ban") : QStringLiteral("circle-check"),
+               entering ? 8000 : 6000, false, QString(), IslandOverlay::Form::Capsule, false);
+}

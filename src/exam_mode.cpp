@@ -1,5 +1,6 @@
 // 考试模式实现（见 exam_mode.h 头注释）。
 #include "exam_mode.h"
+#include "notify/notify_entry.h"   // 2026-11-01：考试模式提示（提供方 exam）
 #include "proc_guard.h"   // 内核闸门（与 main.cpp 的 process_stop 共用，2026-10-13 抽出）
 
 #include <QWidget>
@@ -111,6 +112,7 @@ bool ExamMode::start(int minutes, const QStringList &blacklist)
     m_clock.restart();
     m_ticker->start();
     m_watchdog->start();
+    notifyExamMode(true, m_reason);   // 2026-11-01：考试开始提示（关掉「考试」提供方后不弹）
     emit stateChanged(true, remainingSec(), false);
     qInfo("[exam] 考试模式开始：%s，黑名单 %d 条%s",
           m_durationSec ? qPrintable(QStringLiteral("%1 分钟").arg(minutes)) : "不自动结束",
@@ -127,6 +129,7 @@ bool ExamMode::stop(const QString &reason)
     m_watchdog->stop();
     destroyWindow();
     qInfo("[exam] 考试模式结束（%s）", reason.isEmpty() ? qPrintable(reason) : "手动");
+    notifyExamMode(false, reason);   // 2026-11-01：考试结束提示（同上）
     emit stateChanged(false, -1, reason == QLatin1String("timeout"));
     return true;
 }

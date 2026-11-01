@@ -1217,6 +1217,12 @@ void IslandOverlay::showWithActions(const QString &title, const QString &desc, c
 // 之后只更新进度；file_done 字节比对通过后由调用方 clearFileTransfer()。
 void IslandOverlay::setFileTransfer(const QString &name, qint64 bytes, qint64 total)
 {
+    // 2026-11-01（第 2 步 · 提供方接线）：文件传输卡归属「文件」提供方。
+    //   关掉后进度卡根本不出现（后续分片调用同样被拦，不会"回到默认又弹出来"）。
+    //   ⚠️ 归在这里而不是各调用点：文件卡只有这一个入口，调用点有 3 处（含取消/字节不符）——
+    //      在入口拦比在每个调用点加判断更不容易漏。
+    if (!notify::NotifyProviders::instance().allow(QStringLiteral("file"), QStringLiteral("file.recv")))
+        return;
     const bool first = !m_ftActive;
     m_ftActive = true;          // 先置位：showIsland 的归档守卫看到 true ⇒ 不归档上一条内容
     m_ftName = name;

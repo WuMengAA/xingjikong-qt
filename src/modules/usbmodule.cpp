@@ -2,6 +2,7 @@
 // 设计说明与安全口径见 usbmodule.h 顶部。
 
 #include "usbmodule.h"
+#include "../notify/provider_registry.h"   // 2026-11-01：提供方门控
 
 #include <QApplication>
 #include <QJsonArray>
@@ -155,6 +156,10 @@ void UsbModule::onDriveArrived(const QString &drive)
     if (!setting(QStringLiteral("prompt"), true)) return;
 
     // 询问：Centered（胶囊那档太矮放不下按钮）+ 15s 兜底超时（不给超时会一直占着岛）。
+    // 2026-11-01（第 2 步 · 提供方接线）：「U盘助手」提供方被关 ⇒ 插盘不询问（静默）。
+    //   注意与 setting("prompt") 的分工：那个是模块自己的设置，这个是**设备级来源开关**。
+    if (!notify::NotifyProviders::instance().allow(QStringLiteral("usb"), QStringLiteral("usb.insert")))
+        return;
     api().islandAsk(QStringLiteral("U 盘已插入"), human, QStringLiteral("folder"),
                     1 /* Centered */,
                     QStringList{ QStringLiteral("打开"), QStringLiteral("忽略") },
@@ -179,6 +184,8 @@ void UsbModule::onDriveRemoved(const QString &drive)
     }
     if (!setting(QStringLiteral("notifyRemove"), false)) return;
     if (api().examActive && api().examActive() && setting(QStringLiteral("quietInExam"), true))
+        return;
+    if (!notify::NotifyProviders::instance().allow(QStringLiteral("usb"), QStringLiteral("usb.remove")))
         return;
     api().islandShow(QStringLiteral("U 盘已拔出"), QStringLiteral("可移动磁盘 (%1)").arg(drive),
                      QStringLiteral("folder"), 0 /* Capsule */, 3000);
