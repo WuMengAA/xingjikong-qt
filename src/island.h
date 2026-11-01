@@ -147,6 +147,9 @@ public:
         int     state = 0;      // 0=running 1=paused 2=done 3=failed
         bool    fromAdmin = false;
         qint64  shownTs = 0;    // 发生时刻（秒）
+        // 2026-11-01（第 3 步 · 排队）：被排队时的"原定时长"——补播时要按它的值播，
+        // 不能当 sticky(0) 处理，否则补播出来就永远不走了。
+        int     durationMs = 0;
 
         // 便捷构造：本工程是 C++17，不支持指派初始化器（.field=）——
         // 实测用 .tag=... 会报 C7555/C7560。这里按位置给出最常用的那些字段，
@@ -301,6 +304,8 @@ public:
     void setIdleEnabled(bool on);
     bool idleEnabled() const { return m_idleEnabled; }
     bool isIdle() const { return m_idle; }
+    // 2026-11-01：当前显示内容的标题（只读，探针断言"有没有被顶掉"用）。
+    QString currentTitle() const { return m_title; }
     // 开机就让空闲胶囊常驻（不等第一条通知先出现过）
     void ensureIdle();
 
@@ -498,6 +503,17 @@ private:
     qint64  m_endHintMs = 0;
     // 2026-11-01：下一条通知的**提供方**（一次性，空=不门控）。见 setProviderForNext。
     QString m_providerHint;
+
+    // ── 2026-11-01（第 3 步 · 排队与仲裁）──────────────────────────────────
+    //   占着屏时，新来的若**优先更低**，不再硬顶掉当前内容，改为排队等它结束。
+    //   （此前 showIsland 无条件覆盖 ⇒ 一条插件提示能把"正在接收课件"的进度卡冲掉。）
+    //   ⚠️ 只做"排队 + 结束后补播"，暂不做"高优先抢占在播内容"——抢占需要暂停栈与计时续播，
+    //      属独立一轮，别和这里混（把两件事塞一起最容易把计时搞坏）。
+    int     m_curPriority = -1;          // 当前内容的提供方优先级序号（0=最优先；-1=无内容）
+    qint64  m_queueSeq = 0;              // 排队序号：给排队任务造唯一 tag（否则被 upsertTask 按 tag 合并掉）
+    static constexpr int kMaxQueue = 4;  // 排队上限；满了丢"优先级最低且最早入队"的那条
+    void drainQueuedTask();              // 从排队里取最优一条补播（enterIdle 出口调用）
+
     QString m_channel;                  // 当前这条的渠道（空 = 不标）
     bool    m_skipHistory = false;      // 当前这条是否不进历史
     // 2026-10-27（G4/G5/G6）：岛面板（空 = 当前没有面板，展开区照旧画通知详情）。

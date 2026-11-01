@@ -1037,10 +1037,11 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     //   被关掉的提供方 ⇒ 整条丢弃（不弹 / 不响 / 不入历史 / 不进任务表）。
     //   ⚠️ 一次性 hint（provider 与 EndTime）都在这里消费并清零 —— 这条不显示时，
     //      它们绝不能留给下一条。
+    QString gatePid;   // 2026-11-01（第 3 步）：留下来供排队仲裁算优先级
     if (!m_providerHint.isEmpty()) {
-        const QString pid = m_providerHint;
+        gatePid = m_providerHint;
         m_providerHint.clear();
-        if (!notify::NotifyProviders::instance().allow(pid)) {
+        if (!notify::NotifyProviders::instance().allow(gatePid)) {
             m_endHintMs = 0;
             return;
         }
@@ -1057,6 +1058,55 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     // 2026-10-19：远控期冻结（见 setSuppressed）——任何写入都可能触发 Repeater 重算，
     // 而触发的那一刻正是 delegate 处于销毁窗口，必崩。
     if (s_islandSuppressed) return;
+
+    // ══ 2026-11-01（第 3 步 · 排队与仲裁）══════════════════════════════
+    // 问题：showIsland 以前**无条件覆盖** ⇒ 一条低优先提示（插件/通知）会把正在
+    //   显示的高优先内容（文件传输进度卡、管理端通知）直接冲掉。实测症状：
+    //   "正在接收课件"的进度卡被一条插件提示顶没。
+    // 做法（本步只做"排队 + 结束后补播"，**不做抢占在播内容**）：
+    //   · 当前有内容 且 我这条优先更低（序号更大）⇒ 我入队，屏幕不动；
+    //   · 当前内容结束时由 enterIdle → drainQueuedTask() 取最优一条补播。
+    // 优先级来源：提供方在注册表里的序号（0=最优先）；没有 provider 的调用方给 5（中性）。
+    {
+        int myPri = 5;
+        if (!gatePid.isEmpty()) {
+            const int idx = notify::NotifyProviders::instance().priorityIndex(gatePid);
+            if (idx >= 0) myPri = idx;
+        }
+        const bool occupied = m_contentActive && !m_idle;
+        if (occupied && m_curPriority >= 0 && myPri > m_curPriority) {
+            // 排队（不显示）。tag 必须唯一：upsertTask 按 tag 合并，用 "notice" 会互相顶掉。
+            Task q(QStringLiteral("queued-%1").arg(++m_queueSeq), QStringLiteral("notice"),
+                   gatePid.isEmpty() ? QStringLiteral("self") : gatePid, title, icon,
+                   10 - qBound(0, myPri, 9), false, -1.0);
+            q.desc = desc;
+            q.form = form;
+            q.fromAdmin = fromAdmin;
+            q.durationMs = durationMs;          // 补播要按时长播，不能当 sticky
+            q.shownTs = QDateTime::currentSecsSinceEpoch();
+            q.state = 4;                        // 4 = 排队待播（0/1/2/3 已占用）
+            q.expireAtMs = 0;                   // 排队期间不算过期（否则还没播就被扫掉）
+            upsertTask(q);
+            // 上限保护：满了丢"优先最低（priority 数字最小）且最早"的那条
+            int queuedCount = 0;
+            for (const Task &t : m_tasks) if (t.state == 4) ++queuedCount;
+            if (queuedCount > kMaxQueue) {
+                int worst = -1;
+                for (int i = 0; i < m_tasks.size(); ++i) {
+                    const Task &t = m_tasks.at(i);
+                    if (t.state != 4) continue;
+                    if (worst < 0 || t.priority < m_tasks.at(worst).priority
+                        || (t.priority == m_tasks.at(worst).priority && t.shownTs < m_tasks.at(worst).shownTs))
+                        worst = i;
+                }
+                if (worst >= 0) m_tasks.removeAt(worst);
+            }
+            qInfo("[island] 排队（当前优先 %d，本条 %d，队列 %d）: %s",
+                  m_curPriority, myPri, queuedCount, qPrintable(title));
+            return;
+        }
+        m_curPriority = myPri;   // 这条上屏 ⇒ 记下它的优先级，供后续比较
+    }
     // ── 历史归档：上一条有内容的通知在被顶掉时进历史 ──
     // 判据：m_contentActive && m_title 非空（活动中的真通知被顶掉）
     // 2026-10-15 组件1：再加 !m_mediaPresenting —— 上一条是"正在播放"时不归档
@@ -1646,6 +1696,7 @@ void IslandOverlay::enterIdle()
         setInteractive(false);
         m_closing = true;                 // 这次是淡出，finished 到了才 hide
         m_dismissGuard->start(600);       // 淡出没发 finished 也得收掉
+        m_curPriority = -1;               // 2026-11-01（第 3 步）：内容撤了，仲裁基准归零
         auto *eff = qobject_cast<QGraphicsOpacityEffect *>(m_fadeAnim->targetObject());
         if (eff) m_fadeAnim->setStartValue(eff->opacity());
         m_fadeAnim->setEndValue(0.0);
@@ -1669,6 +1720,10 @@ void IslandOverlay::enterIdle()
         const Task *best = nullptr;
         for (const auto &t : m_tasks) {
             if (t.state == 2 || t.tag == QStringLiteral("notice")) continue;
+            // 2026-11-01（第 3 步）：state==4 = 排队待播，**不归回落管** ——
+            //   回落是"常驻任务重显"，排队的是"等着播的一次性通知"，由 drainQueuedTask 处理。
+            //   不排除的话，排队项会被回落当成常驻任务抢先重显（且 duration 当 0 ⇒ 永不自动收）。
+            if (t.state == 4) continue;
             if (!t.sticky && t.expireAtMs > 0 && QDateTime::currentMSecsSinceEpoch() > t.expireAtMs) continue;
             if (!best || t.priority > best->priority
                 || (t.priority == best->priority && t.shownTs > best->shownTs)) best = &t;
@@ -1734,6 +1789,39 @@ void IslandOverlay::enterIdle()
     // 最后一次信号还是 true"的自相矛盾。
     if (wasExpanded) emit expandedChanged(false);
     if (m_bridge) m_bridge->sync();
+
+    // 2026-11-01（第 3 步 · 排队仲裁）：内容真的收了、也没有常驻任务可回落 ⇒ 才补播排队的。
+    //   ⚠️ 必须排在"回落"之后、且此刻 m_contentActive 已为 false —— 否则 drain 里再走
+    //      showIsland 会看到"还占着屏"，把补播的那条又排回队里，形成死循环。
+    m_curPriority = -1;
+    drainQueuedTask();
+}
+
+// 从排队里取最优一条补播（2026-11-01 · 第 3 步）。
+// 选取口径：Task.priority 大者优先（= 提供方序号小），同优先取最早入队（shownTs 小者）。
+// ⚠️ 补播走既有 showIsland：几何/动画/历史/自动收起全部复用，不另造一套显示路径。
+// ⚠️ 排队项用完即从任务表删掉，避免下次 enterIdle 又把它捡起来。
+void IslandOverlay::drainQueuedTask()
+{
+    if (s_islandSuppressed) return;
+    if (!m_idleEnabled) return;          // 关掉空闲态=彻底隐藏，没有"补播"这回事
+    int best = -1;
+    for (int i = 0; i < m_tasks.size(); ++i) {
+        const Task &t = m_tasks.at(i);
+        if (t.state != 4) continue;
+        if (best < 0 || t.priority > m_tasks.at(best).priority
+            || (t.priority == m_tasks.at(best).priority && t.shownTs < m_tasks.at(best).shownTs))
+            best = i;
+    }
+    if (best < 0) return;
+    const Task t = m_tasks.at(best);
+    m_tasks.removeAt(best);
+    // source 存的就是排队时的提供方 id ⇒ 补播时优先级口径与当初一致；
+    // 无提供方的（source="self"）在注册表里是未知名 ⇒ 放行、按中性 5 处理，与排队时相同。
+    m_providerHint = t.source;
+    qInfo("[island] 补播排队项: %s（priority=%d, %d ms）",
+          qPrintable(t.title), t.priority, t.durationMs);
+    showIsland(t.title, t.desc, t.icon, t.durationMs, t.form, t.fromAdmin);
 }
 
 // ── 岛组件面板（2026-10-27 · G4/G5/G6：日期 / 课表 / 倒计时）────────────────

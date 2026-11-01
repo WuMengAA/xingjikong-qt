@@ -440,6 +440,7 @@ int main(int argc, char *argv[])
     int autocloseMs = 0;   // 2026-11-01：验「带按钮 + 显式时长 → 到点自动收起」（U盘 15s 修复）
     int endAtMsArg = 0;    // 2026-11-01：验 EndTime（绝对结束时刻）覆盖 durationMs
     bool providersMode = false;   // 2026-11-01：验通知提供方注册表（纯逻辑，不开窗）
+    bool queueMode = false;       // 2026-11-01：验排队与仲裁（低优先不顶掉 + 补播）
     bool vhclear = false;   // #Win7 排障：vh 模块销毁清空路径验收（见文件头注释）
     bool automation = false; // 2026-10-27 Phase 3：注入真 AutomationEngine 验「自」面
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
@@ -497,6 +498,7 @@ int main(int argc, char *argv[])
         if (a == QLatin1String("--autoclose") && i + 1 < argc)
             autocloseMs = QString::fromLocal8Bit(argv[++i]).toInt();
         if (a == QLatin1String("--providers")) providersMode = true;
+        if (a == QLatin1String("--queue")) queueMode = true;
         if (a == QLatin1String("--endat") && i + 1 < argc)
             endAtMsArg = QString::fromLocal8Bit(argv[++i]).toInt();   // 从现在起多少毫秒后结束
         if (a == QLatin1String("--vhclear"))  vhclear = true;   // #Win7 排障
@@ -557,6 +559,48 @@ int main(int argc, char *argv[])
         return app.exec();
     }
 
+    if (queueMode) {
+        // 2026-11-01（第 3 步 · 排队与仲裁）：验「占屏时低优先不硬顶 + 高优先结束后补播」。
+        //   A = 管理端(priorityIndex 0) 2000ms；400ms 后 B = 插件(index 6) 600ms。
+        //   三条断言：
+        //     t=800ms  标题仍是 A  ⇒ 低优先**没顶掉**当前内容（改动前这里会变成 B）
+        //     t=1300ms 标题是 B    ⇒ A 收掉后 B **补播**了（证明它是排队、不是被丢弃）
+        //     t=2800ms 已空闲      ⇒ B 按**自己的 600ms** 收（不是被当成 sticky 永久挂着）
+        isl->setProviderForNext(QStringLiteral("admin"));
+        isl->showIsland(QStringLiteral("A·管理端通知"), QStringLiteral("高优先，先上屏"),
+                        QStringLiteral("bell"), 2000, IslandOverlay::Form::Capsule, false);
+        QTimer::singleShot(400, [isl]() {
+            isl->setProviderForNext(QStringLiteral("plugin"));
+            isl->showIsland(QStringLiteral("B·插件提示"), QStringLiteral("低优先，应排队"),
+                            QStringLiteral("rocket"), 600, IslandOverlay::Form::Capsule, false);
+        });
+        bool *notClobbered = new bool(false);
+        bool *replayed = new bool(false);
+        QTimer::singleShot(800, [isl, notClobbered]() {
+            *notClobbered = (isl->currentTitle() == QStringLiteral("A·管理端通知"));
+            fprintf(stdout, "[queue] t=800ms title=\"%s\" %s (expect A·低优先不顶掉)\n",
+                    qPrintable(isl->currentTitle()), *notClobbered ? "PASS" : "FAIL");
+            fflush(stdout);
+        });
+        QTimer::singleShot(1000, [isl]() { isl->dismiss(); });   // 收掉 A ⇒ 触发补播
+        QTimer::singleShot(1500, [isl, replayed]() {
+            *replayed = (isl->currentTitle() == QStringLiteral("B·插件提示"));
+            fprintf(stdout, "[queue] t=1500ms title=\"%s\" %s (expect B·补播)\n",
+                    qPrintable(isl->currentTitle()), *replayed ? "PASS" : "FAIL");
+            fflush(stdout);
+        });
+        QTimer::singleShot(3000, [isl, notClobbered, replayed]() {
+            const bool idleNow = isl->isIdle();
+            fprintf(stdout, "[queue] t=3000ms idle=%d %s (expect 1·按自己的时长收)\n",
+                    idleNow ? 1 : 0, idleNow ? "PASS" : "FAIL");
+            fflush(stdout);
+            const int rc = (*notClobbered && *replayed && idleNow) ? 0 : 1;
+            delete notClobbered;
+            delete replayed;
+            QCoreApplication::exit(rc);
+        });
+        return app.exec();
+    }
     if (endAtMsArg > 0) {
         // 2026-11-01（顶替 ClassIsland 第 1 步）：验 **EndTime 覆盖 durationMs**。
         // 做法：durationMs 只给 1500（本该 1.5s 就收），EndTime 给 now+endAtMsArg。
