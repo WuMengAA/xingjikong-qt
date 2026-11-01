@@ -211,7 +211,11 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     m_autoClose = new QTimer(this);
     m_autoClose->setSingleShot(true);
     connect(m_autoClose, &QTimer::timeout, this, [this]() {
-        if (m_interactive && m_expanded) return;   // 交互态展开不自动收（见下 expandGuard 的硬超时兜底）
+        // 交互态展开不自动收 —— 但调用方**显式给了时长**的（U盘 15s / OTA 20s）到点
+        // 一律收，含展开态（"到点就收、不打扰太久"是那条契约，见 showWithActions 注释）。
+        // 常驻交互通知（durationMs<=0）本就不排期，走不到这里；此守卫只兜未来可能出现的
+        // "显式时长 + 要停留"调用（现在不存在）。
+        if (m_interactive && m_expanded && m_durationMs <= 0) return;
         dismiss();
     });
 
@@ -1123,13 +1127,16 @@ void IslandOverlay::showIsland(const QString &title, const QString &desc,
     m_fadeAnim->start();
 
     // 自动收起。
-    // ⚠️ 交互态（interactive）**一律不自动关**：这里原来写的是
+    // ⚠️ 交互态（interactive）原一律不自动关：这里原来写的是
     //   `durationMs>0 && !(m_interactive && m_expanded)` —— 交互态但还收着的时候
     //   倒计时照样走，6 秒后胶囊自己消失，用户压根没机会点（点了才展开，
     //   可人还没来得及伸手呢）。可点的东西不能自己跑掉，交给 setInteractive(false)
     //   或下次 showIsland 顶掉时收。
+    // 2026-11-01（U盘提示 15s 关闭）：**显式时长**是调用方"到点就收"的契约
+    //   （U盘询问 15000 / OTA 20000，见 usbmodule / ota_update）——即使带按钮、
+    //   交互态也照排。常驻交互（管理端确认/快捷回复）调用方传 0，走不到这里。
     m_autoClose->stop();
-    if (durationMs > 0 && !m_interactive)
+    if (durationMs > 0)
         m_autoClose->start(durationMs);
 
     // 新内容把上一条的展开态压平了 —— 状态变了就得发信号（见 enterIdle 里的同款说明）
@@ -1170,7 +1177,10 @@ void IslandOverlay::showWithActions(const QString &title, const QString &desc, c
     if (inter && (form == Form::Banner || form == Form::Mini))
         form = Form::Centered;
     if (inter) setInteractive(true);
-    showIsland(title, desc, icon, inter ? 0 : durationMs, form, fromAdmin);
+    // 2026-11-01（U盘提示 15s 关闭）：原来 `inter ? 0 : durationMs` 会把**带按钮**提示的
+    //   显式时长清零 ⇒ U盘询问(15000)/OTA(20000) 变成"永不自动收"，违背调用方"到点就收"
+    //   的契约。显式时长是调用方意图（管理端确认/快捷回复传 0 表示常驻，不受影响）。
+    showIsland(title, desc, icon, durationMs, form, fromAdmin);
     m_actions = actions;
     m_onAction = onAction;
     // ⚠️ showIsland 里已经 sync 过一次，但那时 m_actions 还是空的（第 303 行才回填）。

@@ -393,6 +393,8 @@ int main(int argc, char *argv[])
     bool submit = false;
     int sphase = 0;        // 投稿态 0 空编辑/1 有内容/2 超限/3 提交中/4 成功/5 失败
     QString clickName;     // 合成点击目标 objectName（danmakuPillMa/danmakuSendMa/abtn_*）
+    QString classArg;      // 2026-10-31：--class 注入班级名（验证菜单栏中间显示）
+    QString setPropStr;    // 2026-10-31：--set name=value 通用属性注入（苹果式极简验证用）
     // 组件5（2026-10-15）：--warm 预热 30s 冷却（投稿钮禁用+倒计时演示）；
     // --draft <文字> 覆写投稿页草稿（敏感词/真实结果码路径演示）。
     bool warm = false;
@@ -432,6 +434,7 @@ int main(int argc, char *argv[])
     // 用途：分辨历史 ts 取的是"通知出现时刻"还是"归档时刻"——
     //   停留 N 秒后归档，若 ts 仍是出现时刻，则 ts 比分文件写入时刻早约 N 秒。
     int holdSec = 0;
+    int autocloseMs = 0;   // 2026-11-01：验「带按钮 + 显式时长 → 到点自动收起」（U盘 15s 修复）
     bool vhclear = false;   // #Win7 排障：vh 模块销毁清空路径验收（见文件头注释）
     bool automation = false; // 2026-10-27 Phase 3：注入真 AutomationEngine 验「自」面
     QString outPath = QStringLiteral("D:/Stelarith/_probe/shots/island-agent.png");
@@ -451,6 +454,12 @@ int main(int argc, char *argv[])
             sphase = QString::fromLocal8Bit(argv[++i]).toInt();
         if (a == QLatin1String("--click") && i + 1 < argc)
             clickName = QString::fromLocal8Bit(argv[++i]);
+        // 2026-10-31 · 苹果式极简：通用属性注入（--set name=value），供探针直接
+        //   设 historyOpen/moreMenuOn 等布尔，验证「⋯弹层 → 历史面板」链路。
+        if (a == QLatin1String("--set") && i + 1 < argc)
+            setPropStr = QString::fromLocal8Bit(argv[++i]);
+        if (a == QLatin1String("--class") && i + 1 < argc)   // 2026-10-31：班级名（菜单栏）
+            classArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--likefly"))   likefly = true;    // 组件4：飘心中途态
         if (a == QLatin1String("--warm"))      warm = true;       // 组件5：预热 30s 冷却
         if (a == QLatin1String("--media-phase") && i + 1 < argc) {  // 组件7：播放四态
@@ -480,6 +489,8 @@ int main(int argc, char *argv[])
             outPath = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--hold") && i + 1 < argc)
             holdSec = QString::fromLocal8Bit(argv[++i]).toInt();
+        if (a == QLatin1String("--autoclose") && i + 1 < argc)
+            autocloseMs = QString::fromLocal8Bit(argv[++i]).toInt();
         if (a == QLatin1String("--vhclear"))  vhclear = true;   // #Win7 排障
         if (a == QLatin1String("--automation")) automation = true; // 2026-10-27 Phase 3：注入真引擎验「自」面
         if (a == QLatin1String("--morph") && i + 1 < argc)
@@ -489,6 +500,7 @@ int main(int argc, char *argv[])
     qInstallMessageHandler(vhclearMsgHandler);   // 必须在岛（QML）创建前装
 
     IslandOverlay *isl = IslandOverlay::instance();
+    if (!classArg.isEmpty()) isl->setClassName(classArg);   // 2026-10-31：注入班级名供菜单栏验证
     isl->setIdleEnabled(true);
     if (light) isl->setLightMode(true);
 
@@ -537,6 +549,44 @@ int main(int argc, char *argv[])
         return app.exec();
     }
 
+    if (autocloseMs > 0) {
+        // 2026-11-01：验「带按钮 + 显式时长 → 到点自动收起」（U盘 15s 修复的正面断言）。
+        // 走真实 overlay + showWithActions（交互态），时长给 autocloseMs：
+        //   · t≈500ms 应仍可见（提示在上屏、未到点）
+        //   · t=autocloseMs+1200 应收起（到点自动 dismiss，含交互态）
+        isl->showWithActions(QStringLiteral("U 盘已插入"),
+                             QStringLiteral("可移动磁盘 (X:)"),
+                             QStringLiteral("folder"),
+                             IslandOverlay::Form::Centered,
+                             { QStringLiteral("打开"), QStringLiteral("忽略") },
+                             [](const QString &s) {
+                                 QFile f(QStringLiteral("D:/Stelarith/_probe/shots/_autoclose_hit.txt"));
+                                 if (f.open(QIODevice::Append | QIODevice::Text))
+                                     QTextStream(&f) << "fireAction: " << s << "\n";
+                             },
+                             autocloseMs);
+        bool *earlyShown = new bool(false);
+        QTimer::singleShot(500, [isl, earlyShown]() {
+            // ⚠️ 岛默认开空闲半胶囊：到点自动收起后**窗口仍可见**（变回空闲胶囊），
+            //    所以断言用 isIdle()（内容是否已关），不是 isVisible()。
+            // ⚠️ 用 fprintf 而非 qInfo：本探针全局装了 vhclearMsgHandler，
+            //    它**吞掉所有 Qt 消息**（只统计 TypeError），qInfo 出不来。
+            *earlyShown = !isl->isIdle();
+            fprintf(stdout, "[autoclose] t=500ms shown=%d (expect 1, 提示在上屏)\n",
+                    *earlyShown ? 1 : 0);
+            fflush(stdout);
+        });
+        QTimer::singleShot(autocloseMs + 1200, [isl, earlyShown, autocloseMs]() {
+            const bool idleNow = isl->isIdle();
+            fprintf(stdout, "[autoclose] t=%dms idle=%d (expect 1, 已自动收起)\n",
+                    autocloseMs + 1200, idleNow ? 1 : 0);
+            fflush(stdout);
+            const int rc = (*earlyShown && idleNow) ? 0 : ((*earlyShown) ? 1 : 2);
+            delete earlyShown;
+            QCoreApplication::exit(rc);
+        });
+        return app.exec();
+    }
     if (idle) {
         isl->ensureIdle();
     } else if (!morphModeArg.isEmpty()) {
@@ -742,7 +792,7 @@ int main(int argc, char *argv[])
     // 采样：等 QML 起来 + 几何动画走完（380ms）再抓
     // 组件3：本段只做「注入 + 合成点击」；dump/tree/截图提为 captureAndSave
     // （点击后可能还要等 400ms 提交 Timer 落 2/3 态 ⇒ 两段式 singleShot）。
-    QTimer::singleShot(2500 + holdSec * 1000, [isl, outPath, search, searchPhase, submit, sphase, clickName, warm, draftOverride, likefly, mediaPhaseArg, faceArg]() {
+    QTimer::singleShot(2500 + holdSec * 1000, [isl, outPath, search, searchPhase, submit, sphase, clickName, warm, draftOverride, likefly, mediaPhaseArg, faceArg, setPropStr]() {
         QQuickWidget *q = findQuick(isl);
         if (!q) { qApp->quit(); return; }
 
@@ -864,13 +914,23 @@ int main(int argc, char *argv[])
                     ri->setProperty("submitText", cdraft);
                 }
             }
+            // 2026-10-31 · 苹果式极简：--set name=value（只设布尔真值，验证历史面板链路）
+            if (!setPropStr.isEmpty()) {
+                const int eq = setPropStr.indexOf(QLatin1Char('='));
+                if (eq > 0) {
+                    const QString pn = setPropStr.left(eq);
+                    const QString pv = setPropStr.mid(eq + 1);
+                    const bool bv = (pv == QLatin1String("1") || pv == QLatin1String("true"));
+                    ri->setProperty(pn.toUtf8().constData(), bv);
+                }
+            }
         }
 
         // ⚠️ 注入与点击之间必须让布局 polish 一帧（+100ms 再点）：setProperty
         //    是同步的，但锚链重算/visible 传导要等事件循环。同步块内立即点击
         //    拿到的是未重算坐标 ⇒ 落空，甚至被根 gestureArea（anchors.fill 全岛、
         //    onClicked 切 expanded）吞掉把岛点成收起态（2026-10-15 实测）。
-        QTimer::singleShot(100, [isl, q, outPath, clickName]() {
+        QTimer::singleShot(100, [isl, q, outPath, clickName, setPropStr]() {
             // 组件6：先 Item 树找（覆盖 Repeater delegate），找不到再退回 QObject 树
             //（顶层声明控件的常规路径，保持既有用例零回归）。
             QQuickItem *target = clickName.isEmpty() ? nullptr
