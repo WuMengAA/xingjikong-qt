@@ -232,6 +232,18 @@ qt_add_executable(viewer-qt
   src/viewerbackend_voice.cpp
   # 2026-10-13 架构拆分：站点账号域（OAuth + 接入票 + 凭据）独立编译单元
   src/viewerbackend_account.cpp
+  # ── 2026-11-02 屎山整理 #6：viewerbackend.cpp 2995→2327，按叶子域拆五个编译单元 ──
+  # 挑的都是「不参与设备表、不参与下发指令」的独立链：C++ 允许同一类成员函数
+  # 分布在不同 TU（private 照访，无需 friend / 无需改头文件可见性）。
+  # 跨 TU 共享助手（frameFingerprint / makeVncFrame / viewerDesktopLnk 的实现，
+  # 拆域时由内部链接升为外部链接；只有一份真源，不各域各抄一份）
+  src/viewerbackend_shared.cpp
+  src/viewerbackend_shared.h
+  src/viewerbackend_vnc.cpp        # 远控 VNC：建立/鉴权/帧注入/断开
+  src/viewerbackend_terminal.cpp   # 远程终端：开/输/关 + 状态机
+  src/viewerbackend_qmlpatch.cpp   # QML 热更：检查 + store 模式 zip 解压（纯文件操作）
+  src/viewerbackend_proc.cpp       # 系统集成：进程黑名单 / 注册表自启 / 快捷方式
+  src/viewerbackend_diag.cpp       # 诊断与反馈：日志尾部 / 系统信息 / 事件与排行拉取
   # ── 班级域（2026-10-23 #460 · viewerbackend P1 拆分第一刀 ClassService）──
   # 班级工作台数据面：ClassService + typed Models（设备网格/Timeline）+ 缩略图 provider。
   # viewerbackend_class.cpp 只放入站分发；协议状态与模型全在 src/class/。
