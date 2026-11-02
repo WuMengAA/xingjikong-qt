@@ -206,6 +206,9 @@ add_executable(stelarith-agent-qt
   src/island/island_bridge.h
   # 2026-10-27（C 批）：岛「设」面方法（系统音量 / 通知音量 / 黑名单），从 bridge 拆出守 600 行红线
   src/island/island_bridge_settings.cpp
+  # 2026-11-02：历史通知域（排序/筛选/已读/删除）与批注域（岛上的笔），再切两刀守 600 行红线
+  src/island/island_bridge_history.cpp
+  src/island/island_bridge_annotate.cpp
   # ── SVG 图标 provider（QML Image 的 image://svgicon 协议；与 viewer 同份实现）──
   src/ui/svgiconprovider.cpp
   src/ui/svgiconprovider.h
@@ -343,8 +346,13 @@ add_executable(stelarith-agent-qt
   #   buildSelfCheckItems/buildPluginList/pluginRegistryUrl/s_storeEntries/
   #   agentUiFill（AgentUi 的 friend）/agentUiWire；依赖 main 匿名域函数经
   #   g_panelDeps 注入（方案 B），状态全局按既有 extern 模式复用。
+  # 2026-11-02 拆「产出数据 / 接信号」二分（原单文件 646 行超红线 600）：
+  #   agent_panel_data.cpp — 三个 builder + 插件商店缓存 + agentUiFill
+  #   agent_panel_internal.h — 两边共享的 include/extern（同一份，防两处漂移）
   src/ui/agent_panel.cpp
+  src/ui/agent_panel_data.cpp
   src/ui/agent_panel.h
+  src/ui/agent_panel_internal.h
   # ── 播放时段管理/调度/软控/文件接收（2026-10-30 main 拆分：#10 迁出，原 main.cpp 3777-5715）──
   #   executeAction（1938 行单函数）；依赖 main 匿名域符号经 g_actionDeps 注入（方案 B），
   #   状态全局（g_currentFps/g_logPath/g_mediaDir/…）按既有 extern 模式复用。
