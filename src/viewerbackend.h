@@ -612,6 +612,13 @@ public:
     Q_INVOKABLE void openLogFolder() const;
     /** 托盘「诊断与反馈」入口 → 通知 QML 打开对话框。 */
     Q_INVOKABLE void requestDiagFeedback();
+    /** 托盘「今日课表」入口 → 通知 QML 打开大屏课表窗口（2026-11-02）。
+     *
+     *  为什么走信号而不是在 main.cpp 里 new 一个窗口：原来的 QWidget 版就是
+     *  `new ScheduleViewWindow()` 直接开的，于是窗口是 QWidget 顶层，与 QML 外壳
+     *  各管一套渲染 —— 那正是 2026-11-01 裁决要消灭的形态。现在 C++ 只发一个
+     *  请求，窗口由 Main.qml 里的 TodayScheduleWindow 负责，边界干净。 */
+    Q_INVOKABLE void requestTodaySchedule();
     QJsonArray events() const { return m_events; }
     QJsonArray actionRanking() const { return m_actionRanking; }
     /** 录制列表（QML 读，QJsonObject：uid → 文件数组）。 */
@@ -754,6 +761,8 @@ signals:
     void frameDropped(const QString &reason);
     /** 托盘「诊断与反馈」入口触发的开对话框请求（QML Main.qml 连接它开弹窗）。 */
     void diagFeedbackRequested();
+    /** 托盘「今日课表」入口触发的开大屏窗口请求（2026-11-02，QML Main.qml 连接）。 */
+    void todayScheduleRequested();
     /** 鉴权被拒：界面应停止重连并把原因显示出来。 */
     void authFailed(const QString &reason);
     /** 2026-10-24 重认证门：云端对敏感操作回 REAUTH_REQUIRED（验证超时）。

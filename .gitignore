@@ -39,6 +39,9 @@ scripts/_*.ps1
 # 2026-10-23 #460：班级域探针构建脚本——与 _interact_probe.py 同款"可复跑前提"，
 # 放行（不放行 = 探针只能存在于某台机器上， CI/复验全都抓瞎）
 !scripts/_class_probe.py
+# 2026-11-02：今日课表探针（TodaySchedule 三件套运行时断言 + QtShadcn dll 自愈），
+# 可复跑验证器，同上放行。
+!scripts/_todayschedule_probe.py
 
 # ── 调试残留（2026-10-24 补：AI 代跑构建/探针的一次性产出，非入库物）──
 /_tools/

@@ -2056,6 +2056,11 @@ void ViewerBackend::requestDiagFeedback()
     emit diagFeedbackRequested();
 }
 
+void ViewerBackend::requestTodaySchedule()
+{
+    emit todayScheduleRequested();
+}
+
 void ViewerBackend::checkQmlPatch()
 {
 #if defined(Q_OS_ANDROID)

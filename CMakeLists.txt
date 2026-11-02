@@ -32,7 +32,7 @@ endif()
 # 完整标准见 docs/版本号命名规范-2026-10-07.md。
 # 界面「关于」那张卡以前写死一个「—」，用户看版本得去翻日志 —— 这里编进二进制，
 # 界面直接读 backend.version。**这是管理端版本号的唯一真源**，改版本只改这一行数。
-set(VIEWER_VERSION "0.6.50-rc.9")
+set(VIEWER_VERSION "0.6.50-rc.10")
 add_compile_definitions(STELARITH_VIEWER_VERSION_STRING="${VIEWER_VERSION}")
 
 # 构建期卡死"源码里那份版本"和这里漂移（2026-10-06 补；2026-10-07 正则收严到 X.Y.Z[-rc.N]）。
@@ -280,12 +280,17 @@ qt_add_executable(viewer-qt
   src/schedule/subject_model.cpp
   src/schedule/cses_importer.cpp
   src/schedule/undo_manager.cpp
-  # ── 大屏今日课表窗口（2026-10-06 与被控端对称）──
-  src/schedule_view.cpp
-  src/schedule_view.h
-  # ── 概览页今日课表数据（2026-10-06 补上概览页的课表卡）──
-  src/schedule_today_provider.cpp
-  src/schedule_today_provider.h
+  # ── 今日课表：强类型模型（2026-11-02 取代 schedule_view 的 QWidget 手绘窗口）──
+  # 原 src/schedule_view.{h,cpp} 是 `class ScheduleViewWindow : public QWidget`，
+  # 在 paintEvent() 里 QPainter 手绘整屏 —— 违反 2026-11-01 裁决
+  # 「qtshadcn 唯一图形库，不许 QWidget CPU 渲染」，已删除（渲染改到
+  # qml/panels/TodayScheduleWindow.qml + TodayScheduleRow.qml）。
+  # 本模型只算数、不认识 QML（AGENTS §10 分层），可离屏单测。
+  src/schedule/TodayScheduleModel.cpp
+  src/schedule/TodayScheduleModel.h
+  # 2026-11-02：`src/schedule_view.{h,cpp}`（QWidget + QPainter 手绘大屏）与
+  # `src/schedule_today_provider.{h,cpp}`（QJsonArray 直喂 QML，违反 §10.7）已删除，
+  # 由上面 TodayScheduleModel（QAbstractListModel）+ qml/panels/TodaySchedule* 取代。
   # ── 课表编辑器文件选择（2026-10-06）──
   src/file_dialogs.cpp
   src/file_dialogs.h
@@ -366,11 +371,16 @@ endif()
 #   ⚠️ 落点必须与既有相对导入逐字对齐（本工程用 `import "components"` 与
 #   `import "../components/md3"`）⇒ 消费方 QML **零改动**，与岛同一套路。
 set(STE_SHARED_UI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/ui")
-if(NOT EXISTS "${STE_SHARED_UI_DIR}/theme/Md3.qml")
+# 2026-11-02：判据从 `theme/Md3.qml` 改为 `theme/Theme.qml`。
+# Md3.qml 已退场（全库 QML/JS 对 `Md3.` 的引用实测 0 处，主题真源只剩 Theme 单例，
+# qmldir 也只声明 `singleton Theme 1.0 Theme.qml`）。旧判据指向一个已删除文件，
+# 结果目录明明齐全、构建却 FATAL_ERROR —— 门禁比现实落后一轮，先于代码把构建卡死。
+# 判据应盯「构建真正需要的东西」：copy_directory 拷的是整个 ui/ 目录，而消费方
+# 解析 `import "../components/theme"` 依赖 qmldir + Theme.qml 这一对，故校验这一对。
+if(NOT EXISTS "${STE_SHARED_UI_DIR}/theme/Theme.qml" OR NOT EXISTS "${STE_SHARED_UI_DIR}/theme/qmldir")
   message(FATAL_ERROR
     "[viewer] 共享 UI 基座目录缺失：${STE_SHARED_UI_DIR}\n"
-    "  Md3 设计系统真源在 Stelarith-shared-qml/ui/theme/（两端共用，2026-10-25 起\n"
-    "  移入 theme/ 子目录并配 qmldir 成为 pragma Singleton：`import \"../components/theme\"`）。\n"
+    "  主题真源在 Stelarith-shared-qml/ui/theme/（两端共用，pragma Singleton，qmldir 声明 Theme）。\n"
     "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
 endif()
 

@@ -21,8 +21,7 @@
 #include "schedule/timeslot_model.h"
 #include "schedule/subject_model.h"
 #include "schedule/undo_manager.h"
-#include "schedule_view.h"          // 2026-10-06：大屏今日课表窗口
-#include "schedule_today_provider.h" // 2026-10-06：概览页今日课表数据
+#include "schedule/TodayScheduleModel.h"  // 2026-11-02：今日课表（强类型模型，替代 QWidget 大屏窗口）
 #include "file_dialogs.h"            // 2026-10-06：课表编辑器文件选择
 
 #include <QApplication>   // 2026-10-06：要托盘必须 QApplication（QSystemTrayIcon 属 QtWidgets）。
@@ -326,7 +325,7 @@ void stelarithNotifyTray(const QString &title, const QString &msg)
 // ⚠️ 命名标准为 DeepSeek Harness 同款：正式 X.Y.Z / 候选 X.Y.Z-rc.N（rc 号同核心递增、
 //    换核心归零、转正剥离后缀）。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
 //    这一行是 CMake 校验用的回落值 —— 正常构建下由 CMakeLists.txt 的真源强制对齐。
-static constexpr const char *kViewerVersion = "0.6.50-rc.9";
+static constexpr const char *kViewerVersion = "0.6.50-rc.10";
 
 /**
  * 把窗口拉回屏幕内（2026-10-08）。
@@ -515,9 +514,13 @@ int main(int argc, char *argv[])
     schedSubjectModel.setProfileRef(&schedProfile);
     UndoManager schedUndo(&schedModel, &schedTimeSlotModel, &schedSubjectModel);
 
-    // 概览页「今日课表」数据提供者（读真机 ClassIsland 档案）
-    ScheduleTodayProvider schedToday;
-    schedToday.setProfilePath(schedRepo.defaultProfilePath());
+    // 今日课表（2026-11-02：`ScheduleTodayProvider` 的 QJsonArray 直喂 → 强类型 Model，
+    // AGENTS §10.7。档案路径同步收成一处真源：原先托盘 lambda 与 provider 各算一遍
+    // STE_VIEWER_PROFILE，只对托盘生效、对概览卡不生效）
+    const QString schedProfilePath = qEnvironmentVariable(
+        "STE_VIEWER_PROFILE", schedRepo.defaultProfilePath());
+    TodayScheduleModel schedToday;
+    schedToday.setProfilePath(schedProfilePath);
 
     // 2026-10-15 组件6 配套：互动审批桥（审批数据面 + 共享灵动岛的桥面）。
     // ⚠️ 必须声明在 engine **之前**：注册给 QML 的上下文属性是裸指针，QML 全程要用；
@@ -575,7 +578,10 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("subjectModel"), &schedSubjectModel);
     engine.rootContext()->setContextProperty(QStringLiteral("undoManager"), &schedUndo);
     engine.rootContext()->setContextProperty(QStringLiteral("profilePath"), schedRepo.defaultProfilePath());
-    engine.rootContext()->setContextProperty(QStringLiteral("scheduleToday"), &schedToday);
+    // 2026-11-02：课表数据源（原 `scheduleToday` 是 ScheduleTodayProvider 的 QJsonArray，
+    // 在 QML 里零引用 ⇒ 死线，随旧 provider 一并删除）。概览卡的「今日课表」与大屏窗口
+    // 共用这一个对象，两份数据必然漂移。
+    engine.rootContext()->setContextProperty(QStringLiteral("todayScheduleModel"), &schedToday);
     // 2026-10-28 B0：班级中心控制器（声明在上面 engine **之前**，见该处注释）。
     // 这里只做接线，不再声明 —— 声明在 engine 之后会先于 engine 析构，
     // QML 的 classCenter.* 绑定将指向已释放内存（关窗 0xC0000005，2026-10-28 实证）。
@@ -776,18 +782,16 @@ int main(int argc, char *argv[])
             backend.forgetAccount();
         });
         menu->addSeparator();
-        // 今日课表（2026-10-06）：老师机也能看全天课程，与被控端同一窗口；
+        // 今日课表（2026-10-06 立；2026-11-02 改接线）：老师机也能看全天课程。
         // 读 ClassIsland 档案（可配 STE_VIEWER_PROFILE，默认 %LOCALAPPDATA%/ClassIsland/...）
+        //
+        // ⚠️ 2026-11-02 变更：原来是 `new ScheduleViewWindow()`（QWidget + paintEvent 手绘）。
+        // 那是全库唯一「用 QWidget 画整屏」的地方，违反 2026-11-01 裁决
+        // 「qtshadcn 是唯一图形库，不许 QWidget CPU 渲染」。现在只发一个请求信号，
+        // 窗口由 Main.qml 里的 TodayScheduleWindow（QML + QtShadcn）负责开。
         auto *actSched = menu->addAction(QStringLiteral("今日课表…"));
-        QObject::connect(actSched, &QAction::triggered, &app, [] {
-            const QString profilePath = qEnvironmentVariable(
-                "STE_VIEWER_PROFILE",
-                QStringLiteral("%1/ClassIsland/data/Profiles/Default.json")
-                    .arg(qEnvironmentVariable("LOCALAPPDATA")));
-            auto *win = new ScheduleViewWindow();
-            win->setAttribute(Qt::WA_DeleteOnClose);
-            win->setProfilePath(profilePath);
-            win->show();
+        QObject::connect(actSched, &QAction::triggered, &backend, [&backend] {
+            backend.requestTodaySchedule();   // → todayScheduleRequested() → Main.qml 开窗口
         });
         menu->addSeparator();
         auto *actLog = menu->addAction(QStringLiteral("打开日志目录"));
