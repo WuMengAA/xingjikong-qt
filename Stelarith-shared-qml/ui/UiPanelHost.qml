@@ -20,7 +20,7 @@ Item {
     id: host
 
     property var registry                    // UiRegistry 实例
-    property var theme                       // 设计令牌（Md3 实例），透传给 entry
+    property var theme
     property string scope: "viewer"
     // 主窗口引用，作为 ctx.window 透传给 entry。
     // ⚠️ 存在的理由：面板从 Main.qml 抽出成独立文件后，就没法再靠 id 直接够到主窗口了

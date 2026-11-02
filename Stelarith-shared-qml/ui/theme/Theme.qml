@@ -20,9 +20,6 @@ pragma Singleton
 //   浅色：页面 极浅灰 / 卡片 纯白      深色：页面 近黑 / 卡片 深灰
 // 这样去掉边框后区域依然分得开。
 //
-// ── 关于 Md3.qml ────────────────────────────────────────────────────────
-// `ui/theme/Md3.qml` 是上一代（Material 3）令牌，存量页面仍在引用；
-// 本文件是**取代它的新真源**。新代码只用 Theme，不得再用 Md3；P4 迁移完成后 Md3 退役。
 
 import QtQuick
 
@@ -64,10 +61,11 @@ QtObject {
         readonly property color textPrimary: root.dark ? "#FAFAFA" : "#09090B"
         /** 次文字。 */
         readonly property color textSecondary: root.dark ? "#A1A1AA" : "#71717A"
-        /** 主色（主按钮、激活态）—— 沿用项目品牌紫，非 shadcn 中性灰，保持品牌识别。 */
-        readonly property color primary: root.dark ? "#D0BCFF" : "#6750A4"
-        /** 主色上的文字（深色模式主色浅，故配深字）。 */
-        readonly property color primaryForeground: root.dark ? "#381E72" : "#FFFFFF"
+        /** 主色（主按钮、激活态）—— 2026-11-01 用户裁决：改中性主色，彻底去紫。
+         *  shadcn 原生范式：亮色模式近黑底白字，暗色模式近白底黑字。 */
+        readonly property color primary: root.dark ? "#FAFAFA" : "#18181B"
+        /** 主色上的文字（随主色反转）。 */
+        readonly property color primaryForeground: root.dark ? "#18181B" : "#FAFAFA"
         /** 危险色（亮红）。 */
         readonly property color destructive: root.dark ? "#F87171" : "#EF4444"
         /** 危险色上的文字。 */
@@ -92,8 +90,10 @@ QtObject {
         readonly property int md: 10
         readonly property int lg: 14
         readonly property int xl: 20
-        /** 药丸（FAB / 开关）。 */
-        readonly property int full: 999
+        /** 药丸（FAB / 开关）。
+         *  2026-11-01 外科手术：原 999 会让所有调用处变胶囊，与 shadcn「大圆角 lg」冲突
+         *  （截图里成排的椭圆柱就是它）。收敛到 lg，保留"比其他控件更圆"的语义。 */
+        readonly property int full: 14
     }
 
     // ═══ 间距（规范：严格 8 的倍数）═══
@@ -125,4 +125,72 @@ QtObject {
         readonly property int blur: 20
         readonly property int yOffset: 4
     }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // ---------------------------------------------------------------------
+    // 背景：历史页面/组件里有大量 `th.xxx`（th = ctx.window.th）。原先 th 指向
+    // 处置：不逐个改 70+ 处 border + 48 个键，而是**在令牌层一次性补齐别名**，
+    //         · `th.stroke` 等自动失效（透明），无边框规范立刻全局生效；
+    //         · 品牌紫 primary 不再泄漏到次要控件（映射到中性 accent）；
+    //         · 页面代码零改动，不会改坏 900 行的业务布局。
+    // 边界：这是**过渡兼容层**，新代码一律直接写 Theme.color.* / Theme.spacing.*，
+    //       不要再用这些别名；每日新增页面若需要新别名，先评估能否直接用 Theme。
+    // ═════════════════════════════════════════════════════════════════════
+
+    readonly property color cBackground: color.background
+    readonly property color cSurface: color.surface
+    readonly property color cSurfaceVar: color.surfaceVariant
+    readonly property color cOnSurface: color.textPrimary
+    readonly property color cOnSurfaceVar: color.textSecondary
+    readonly property color cPrimary: color.textPrimary
+    readonly property color cOnPrimary: color.background
+    readonly property color cSecondary: color.surfaceVariant
+    readonly property color cSecondaryCont: color.surfaceVariant
+    readonly property color cOnSecondaryCont: color.textPrimary
+    readonly property color cContLow: color.surfaceVariant
+    readonly property color cError: color.destructive
+    readonly property color cOnError: color.destructiveForeground
+    readonly property color cOutline: "transparent"
+    readonly property color cOutlineVar: "transparent"
+    readonly property color stroke: "transparent"
+    readonly property color stroke2: "transparent"
+    readonly property color line: "transparent"
+    readonly property color sepline: color.surfaceVariant
+
+    // ── 浅色语义（工具面板 / 悬浮层）──
+    readonly property color canvas: color.background
+    readonly property color card: color.surface
+    readonly property color panel: color.surface
+    readonly property color win: color.surface
+    readonly property color hover: color.accent
+    readonly property color hover2: color.surfaceVariant
+    readonly property color inv: color.textPrimary
+    readonly property color fg: color.textPrimary
+    readonly property color fg3: color.textSecondary
+    readonly property color fg4: color.textSecondary
+    readonly property color ph: color.textSecondary
+    readonly property color op: color.textSecondary
+    readonly property color acc: color.textPrimary
+    readonly property color ok: color.success
+    readonly property color err: color.destructive
+    readonly property color cream: color.surface
+
+    // ── 排版别名 ──
+    readonly property int headlineS: 24
+    readonly property int titleM: 18
+    readonly property int bodyM: 14
+    readonly property int body: 14
+    readonly property int labelL: 13
+
+    // ── 圆角别名 ──
+    readonly property int rXS: radius.sm
+    readonly property int rL: radius.lg
+    readonly property int rWin: radius.xl
+    readonly property int rCard: radius.lg
+    readonly property int rCtrl: radius.md
+    /** 药丸：shadcn 不再用 +∞ 圆角，收敛到 lg（避免按钮变胶囊） */
+    readonly property int rFull: radius.lg
+
+    // ── 动效别名 ──
+    readonly property int durShort: motion.fast
 }

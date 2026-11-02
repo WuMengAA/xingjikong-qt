@@ -24,7 +24,6 @@ import QtQuick
 // 用法（各端）：
 //   UiPageHost {
 //       registry: reg                 // UiRegistry 实例
-//       theme: th                     // Md3 令牌
 //       scope: "viewer"               // viewer | agent
 //       window: root                  // 主窗口（ctx.window，页面够不到 id 时用）
 //       panelHost: panelHostRef       // 选填：页里的 open() 往这儿转发

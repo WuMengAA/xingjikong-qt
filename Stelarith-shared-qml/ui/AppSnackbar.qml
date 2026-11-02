@@ -1,12 +1,9 @@
 // 星集控 · 轻提示（AppSnackbar）—— 2026-10-29 QtShadcn 规范
 //
 // ── 定位 ────────────────────────────────────────────────────────────────
-// 取代共享库 `md3/Md3Snackbar`（共享库 App 系补齐第 4 件）。
 // **API 不变**：text / actionText / opened / actionClicked() / show(t, act) / hide()，
 // 4s 自动消失也照旧 —— 手机端壳 `toast(s) { snack.show(s) }` 零改动。
 //
-// ── 与 Md3Snackbar 的差异 ───────────────────────────────────────────────
-// 1. **反色底改用 Theme 令牌**：旧件用 Md3.cInverseSurf / cInverseOn；Theme 无 inverse 语义
 //    （shadcn 也没有）⇒ 底取 `Theme.color.textPrimary`（浅色＝近黑）、字取 `background`，
 //    等价于原来的反色效果，且不新造令牌。
 // 2. **圆角**：旧件 rXS(4) → 规范统一 `Theme.radius.md`(10)，与其它浮层同语言。

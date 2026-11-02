@@ -1,6 +1,6 @@
 import QtQuick
 import ".."          // 共享 ui 目录（UiRegistry / UiContract 等）
-import "../theme"    // Md3 令牌（pragma Singleton，2026-10-25）
+import "../theme"
 
 // 示例界面插件（U2 参考实现）
 // ───────────────────────────────────────────────────────────────────────────
@@ -23,8 +23,7 @@ Item {
     property var ctx
     property var args
 
-    // ctx.theme 是宿主透传的设计令牌；单独跑（无宿主）时退回全局单例 Md3。
-    readonly property var th: (ctx && ctx.theme) ? ctx.theme : Md3
+    readonly property var th: (ctx && ctx.theme) ? ctx.theme : Theme
 
     function open() { visible = true }
     function close() { visible = false }

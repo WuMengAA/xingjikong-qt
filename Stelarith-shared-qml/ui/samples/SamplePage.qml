@@ -1,6 +1,6 @@
 import QtQuick
 import ".."          // 共享 ui 目录（UiRegistry / UiContract 等）
-import "../theme"    // Md3 令牌（pragma Singleton，2026-10-25）
+import "../theme"
 
 // 示例**整屏页**（U5 参考实现）
 // ───────────────────────────────────────────────────────────────────────────
@@ -20,8 +20,7 @@ Item {
 
     property var ctx
 
-    // ctx.theme 是宿主透传的令牌；单独跑（无宿主）时退回全局单例 Md3。
-    readonly property var th: (ctx && ctx.theme) ? ctx.theme : Md3
+    readonly property var th: (ctx && ctx.theme) ? ctx.theme : Theme
 
     // 本页对应的声明（宿主把"现在是第几页"也放在 ctx.host 上）
     readonly property var decl: (ctx && ctx.host && ctx.host.currentPage) ? ctx.host.currentPage : null

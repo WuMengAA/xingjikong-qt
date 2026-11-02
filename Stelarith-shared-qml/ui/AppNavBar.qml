@@ -1,12 +1,10 @@
 // 星集控 · 底部导航（AppNavBar）—— 2026-10-29 QtShadcn 规范
 //
 // ── 定位 ────────────────────────────────────────────────────────────────
-// 取代共享库 `md3/Md3NavBar`（共享库 App 系补齐第 3 件）。手机端壳（mobile/Main.qml、
 // mobile/MobileShell.qml）底部导航用。**API 不变**：items / currentIndex / activated(index)。
 //
 // ── ⚠️ 与旧件最大的行为差异：icon 从 emoji 改成 lucide 图标名 ─────────────
 // 旧件 items[].icon 直接放 emoji 字符（"📊"），而项目早有结论：**本机 emoji 渲染成方块
-// （tofu）**（Sidebar.qml 对 Md3ListItem 的注释、SvgIcon.qml 文件头都写着）。
 // ⇒ 新件改用 SvgIcon（lucide 实体，见 resources/icons/），调用方把 emoji 换成图标名：
 //     📊→"layout-grid"、💻→"monitor"、📹→"video"、⚙️→"settings"
 // 这不是"顺手改别处"，是新建件必须自带的能力：否则等于把已知缺陷复制一份。
