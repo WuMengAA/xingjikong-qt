@@ -350,6 +350,17 @@ add_executable(stelarith-agent-qt
   #   状态全局（g_currentFps/g_logPath/g_mediaDir/…）按既有 extern 模式复用。
   src/action/execute_action.cpp
   src/action/execute_action.h
+  # ── executeAction 按指令域拆分 #1（2026-11-02 · 屎山整理）：原 2029 行单函数 → 主分发 307 行 + 6 域 ──
+  #   只搬家不改逻辑：54 个 `if (action == ...)` 块体逐字保留，唯一改动是每块首行插入
+  #   `handled = true;`（告诉调用方这条指令归本域）。公共 include / extern 全局 / 各域声明
+  #   集中到 execute_action_shared.h，避免"漏一个 include = 某域编不过"的拆分期专属故障。
+  src/action/execute_action_shared.h
+  src/action/execute_device.cpp
+  src/action/execute_app.cpp
+  src/action/execute_schedule.cpp
+  src/action/execute_notice.cpp
+  src/action/execute_media.cpp
+  src/action/execute_file.cpp
   # ── 协议 v1 信封打包（2026-10-31 main 拆分 #12）：makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes ──
   #   kProtocolVersion 与上行序号计数器（g_vncUpSeq/g_audioUpSeq）随函数迁出；
   #   g_uid 按既有 extern 模式复用（main.cpp 文件作用域外部链接）。
