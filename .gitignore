@@ -98,3 +98,10 @@ scripts/_*.mjs
 !scripts/_dev_run.py
 !scripts/_mic_probe.py
 !scripts/_mic_pump_probe.py
+# 例外（2026-11-03）：两个「口径类」探针的驱动脚本 —— 不入库则探针无法复跑。
+# · _schedule_clock_probe.py：喂真机形态档案 + `--real <path>` 读真机落盘档案，
+#   断言「云端下发 59 节 = 逐日算出来 59 节」。守的是「下发数 ≠ 能显示的数」这个静默丢课。
+# · _storage_probe.py：造可控目录断言三栏互斥且之和等于真实占用，
+#   守的是「配置/数据/日志各 532.5 MB、合计三倍」那个截图 bug。
+!scripts/_schedule_clock_probe.py
+!scripts/_storage_probe.py

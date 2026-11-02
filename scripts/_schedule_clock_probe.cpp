@@ -18,6 +18,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTextStream>
+#include <QFile>
 #include "schedule/profile.h"
 #include "schedule/schedule_clock.h"
 
@@ -139,6 +140,43 @@ int main(int argc, char** argv)
     QTextStream out(stdout);
 
     out << "=== 课表构造探针 ===\n";
+
+    // ── 可选：--real <path> 直接读真机落盘档案，逐日打印节数 ──────────────
+    // 构造档案能证明算法，但证明不了「云端下发的这份档案」也会算对 ——
+    // 现场真正踩的是后者（云端 6 天 59 节，教室机只显示 3 节）。
+    if (argc >= 3 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--real")) {
+        const QString path = QString::fromLocal8Bit(argv[2]);
+        QFile f(path);
+        if (!f.open(QIODevice::ReadOnly)) {
+            out << "读不到 " << path << "\n";
+            return 1;
+        }
+        const Profile rp = Profile::fromJson(QJsonDocument::fromJson(f.readAll()).object());
+        out << "档案：" << path << "\n";
+        int totalLessons = 0;
+        for (int dow = 1; dow <= 7; ++dow) {
+            // 2026-11-02 是周一，往后推到周日
+            const QDate d(2026, 11, 1 + dow);
+            const auto list = ScheduleClock::buildTodayLessons(rp, d, 10);
+            totalLessons += list.size();
+            out << "  周" << dow << " (" << d.toString("MM-dd") << ")  " << list.size() << " 节";
+            if (!list.isEmpty())
+                out << "  " << list.first().startTime.toString("HH:mm") << "→"
+                    << list.last().endTime.toString("HH:mm");
+            out << "\n";
+            // ⚠️ 不逐日断言"有课"：云端本来就可能只下发 5 天 / 6 天（周六没课是正常假期），
+            //    真机档案就是 6 天 59 节、周六 0 节 —— 断言"每天非空"会把正确结果判红。
+            Q_UNUSED(dow);
+        }
+        out << "  七天合计 " << totalLessons << " 节（应与云端下发数一致）\n";
+        // 2026-11-02 落盘的这份档案：云端下发 6 天 / 59 节，逐日算出来必须也是 59 节。
+        // 少于这个数就说明「下发数 ≠ 能显示的数」—— 正是本次要消灭的静默丢课。
+        check(totalLessons == 59, QStringLiteral("逐日合计 = 59 节（云端下发数）"),
+              QStringLiteral("实际 %1").arg(totalLessons));
+        out << (g_fail == 0 ? "全部通过" : "有失败") << "：PASS " << g_pass << " / FAIL " << g_fail
+            << "\n";
+        return g_fail == 0 ? 0 : 1;
+    }
 
     // ── 真机档案 ────────────────────────────────────────────────
     const QJsonObject root = makeRealProfile();
