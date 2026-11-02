@@ -200,7 +200,7 @@ import { initInteract, interactReady, sweepInteract,
   submitSongRequest, submitFeedback, submitBlessing,
   listSongRequests, listBlessings, feedbackSummary,
   handleSongRequest, handleBlessing } from './interact.js';
-import { latestFor, cmpVersion, manifestFileFor, assetHealthCheck } from './ota.js';
+import { latestFor, cmpVersion, manifestFileFor, assetHealthCheck, promotionStatus, registerBuild } from './ota.js';
 // 2026-10-18 · VoiceHub「正在播放」桥：云端集中轮询一次、缓存在内存、经既有 WS 下发。
 // 为什么在云端而不是被控端：60 台教室机各连 VoiceHub = 60 条外网长连接，且教室断网就全瞎。
 // 只读（绝不下发写指令），数据源是公开接口 /api/music/broadcast。
@@ -853,6 +853,12 @@ const server = http.createServer((req, res) => {
         sha256: ota.sha256,
         notes: ota.notes,
         mandatory: ota.mandatory,
+        // 2026-11-02 渠道自动晋升：把"这个构建当前处于哪一档"一并告诉客户端。
+        // 用户点单语义 —— 构建不变、版本号不变，**只是渠道状态改变**；端侧据此可以
+        // 显示"当前渠道 alpha，5 小时后自动进 beta"，而不是让用户以为又发了新版。
+        channel: ota.channel || null,
+        publishedAt: ota.publishedAt || null,
+        promotion: ota.publishedAt ? promotionStatus(product, channel) : null,
       },
     });
   }
@@ -2238,6 +2244,13 @@ const server = http.createServer((req, res) => {
         // 显式 Buffer ⇒ 绝不带 BOM（与脚本侧同一条硬要求）
         const text = JSON.stringify(manifest, null, 2) + '\n';
         writeFileSync(targetFile, Buffer.from(text, 'utf8'));
+        // 2026-11-02 渠道自动晋升：管理台发布同样要登记构建（与 publish-release.mjs 同一真源），
+        // 否则从这里发的版本永远只有 alpha 可见、5h/24h 后不会自己进 beta/stable。
+        try {
+          registerBuild(product, manifest.products[product]);
+        } catch (e) {
+          console.error(`[cloud] FAIL 构建登记失败（该版本不会自动晋升渠道）：${e.message}`);
+        }
         JSON.parse(readFileSync(targetFile, 'utf8')); // 写完回读，坏 JSON 当场炸
         pushEvent('info', '管理面板发布了 OTA', { product, version, channel: ch });
         return send(200, {

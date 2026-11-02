@@ -1,0 +1,66 @@
+{
+  "builds": {
+    "agent:0.6.51-rc.1:15bd0a2ef1e7a247": {
+      "product": "agent",
+      "version": "0.6.51-rc.1",
+      "url": "https://gh.245959623.xyz/WuMengAA/xingjikong-qt/releases/download/v0.6.51-rc.1/stelarith-agent-setup-0.6.51-rc.1.exe",
+      "sha256": "15bd0a2ef1e7a247c93ca03c30630896037e4612412447a5cc5e5754726cb269",
+      "size": 38919698,
+      "notes": "【重要·强制更新】修复被控端「设置页整页空白」致命问题（此前完全无法进入设置，所有配置入口失效）；同步修正灵动岛相关设置项与若干稳定性问题。建议所有教室机立即升级。",
+      "mandatory": true,
+      "publishedAt": "2026-11-01T02:49:16.021000Z",
+      "grandfathered": true,
+      "migratedFrom": "gray"
+    },
+    "agent:0.6.51-rc.3:bafdb74fb7d1213d": {
+      "product": "agent",
+      "version": "0.6.51-rc.3",
+      "url": "https://gh.245959623.xyz/WuMengAA/xingjikong-qt/releases/download/v0.6.51-rc.1/stelarith-agent-setup-0.6.51-rc.3.exe",
+      "sha256": "bafdb74fb7d1213d384b1e1945ac28f75d69110e7d42a90bf95ec146999aeabb",
+      "size": 39375996,
+      "notes": "✨新增 OpenH264 软件编码兜底（MF 硬件编码「协商成功但 0 产出」的机器上自动接管，2026-11-01 实测 30/30 帧出码、ffmpeg 验证码流合规）\n🔧修复 远控 H264 在无独显编码环境（虚拟化/AMD APU）出不了画面的问题\n⚡优化 BGRX→I420 转换抽为单一真源，硬编/软编共用\n—— 代号「软硬双路」· 编码器不再看机器脸色 🔵",
+      "mandatory": false,
+      "publishedAt": "2026-11-01T03:49:16.021000Z",
+      "grandfathered": true,
+      "migratedFrom": "rc"
+    },
+    "agent:0.6.61:ea44c18881660f51": {
+      "product": "agent",
+      "version": "0.6.61",
+      "url": "https://gh.245959623.xyz/WuMengAA/xingjikong-qt/releases/download/v0.6.51-rc.1/stelarith-agent-setup-0.6.61.exe",
+      "sha256": "ea44c18881660f51915d903dc65c7bfe3684a10924b2e3240a8de8f49577840a",
+      "size": 38203154,
+      "notes": "v0.6.61 正式版 · 全量更新：灵动岛排队与仲裁（低优先不再顶掉当前内容）；班级事件模型强类型化；QML 令牌与注释体系收敛；多端稳定性修复",
+      "mandatory": true,
+      "publishedAt": "2026-11-01T04:49:16.021000Z",
+      "grandfathered": true,
+      "migratedFrom": "stable"
+    },
+    "viewer:0.6.50-rc.10:1511f38db87abf1d": {
+      "product": "viewer",
+      "version": "0.6.50-rc.10",
+      "url": "https://gh.245959623.xyz/WuMengAA/xingjikong-qt/releases/download/v0.6.51-rc.1/stelarith-viewer-setup-0.6.50-rc.10.exe",
+      "sha256": "1511f38db87abf1dca3706fe2ee070cb2467ece9dfc51f84c58d95c59718f52d",
+      "size": 44359205,
+      "notes": "✨新增 新版外壳**转正** —— PreviewConsole 成为唯一外壳：左导航轨 + 顶栏（班级切换/登录/头像）+ 统计行 + 业务页 + 状态条 + 竖屏底栏\n🔧修复 顶栏班级切换补回真功能（ClassSort 排序 + 双写 pickClass；实测 全部班级→12班→5班 四处同步变化）\n🔧修复 状态条 / 竖屏底栏随转正补齐；头像落点仍是个人中心（不受 system:settings 门禁）\n⚡优化 MainWindow 561→445 行；5 个经典外壳件退役（Sidebar/TopBar/ActionBar/BottomNav/StatusBar）；预览开关随转正删除\n—— 代号「壳定于一」· 一套外壳到底 🔵",
+      "mandatory": false,
+      "publishedAt": "2026-11-01T03:49:16.021000Z",
+      "grandfathered": true,
+      "migratedFrom": "rc"
+    },
+    "viewer:0.6.61:a902b11a01dc96a4": {
+      "product": "viewer",
+      "version": "0.6.61",
+      "url": "https://gh.245959623.xyz/WuMengAA/xingjikong-qt/releases/download/v0.6.51-rc.1/stelarith-viewer-setup-0.6.61.exe",
+      "sha256": "a902b11a01dc96a4b63ae5e4b3a074ac0c7fc313d3a840e7c2ef0d3a77fb09f5",
+      "size": 44356911,
+      "notes": "v0.6.61 正式版 · 全量更新：今日课表全新 QML 窗口（QtShadcn，全屏可投教室大屏）；班级看板事件流增强；QML 令牌与注释体系收敛；多端稳定性修复",
+      "mandatory": true,
+      "publishedAt": "2026-11-01T04:49:16.021000Z",
+      "grandfathered": true,
+      "migratedFrom": "stable"
+    }
+  },
+  "generatedBy": "scripts/_migrate_ota_builds.py",
+  "generatedAt": "2026-11-02T07:49:16.027840Z"
+}

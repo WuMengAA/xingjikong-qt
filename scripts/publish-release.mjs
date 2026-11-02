@@ -44,6 +44,10 @@ import { fileURLToPath } from 'node:url';
 // 被控端 C++ 侧是同语义的另一份（Stelarith-control-qt/src/main.cpp 的 compareVersion），
 // 两边靠 scripts/test-version-naming.mjs 的断言对齐。
 import { cmpVersion } from '../../scripts/version-compare.mjs';
+// 2026-11-02 渠道自动晋升：发布即登记构建（幂等，重复发布不重置 publishedAt）。
+// 登记之后渠道可见性由 src/ota-promote.js 按发布时间算 —— alpha 立即 / beta 满 5h / stable 满 24h，
+// **构建（version/url/sha256）一个字都不变**，变的只是"哪个渠道看得到它"。
+import { recordBuild } from '../src/ota-promote.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // ⚠️ 必须 path.resolve 而不是 path.join：join 不把第二参当绝对路径，
@@ -489,6 +493,19 @@ async function cmdPublish() {
 
 	const len = writeManifest(m);
 	log(`\n已写入 ${path.relative(ROOT, MANIFEST)}（UTF-8 无 BOM，${len} 字节，回读解析通过）`);
+
+	// 2026-11-02 渠道自动晋升：把这次发布登记进构建注册表（ota-builds.json）。
+	// 这是**晋升计时的起点**（alpha 发出时刻）。幂等：同一 version+sha 重复发布不会重置它，
+	// 否则每次重发都把时间往后推 ⇒ 永远凑不满 5h/24h，stable 永远等不到（最阴的一条）。
+	try {
+		const reg = recordBuild(MANIFEST, product, m.products[product]);
+		log(reg.created
+			? `已登记构建 ${product} v${version} → 渠道晋升计时开始（+5h 进 beta，+24h 进 stable）`
+			: `构建 ${product} v${version} 已登记过 → 保留原发布时间（晋升计时不被重置）`);
+	} catch (e) {
+		// 登记失败不阻断发布（清单已经写好了），但必须吵出来：没登记 = 该构建永远不进 beta/stable
+		console.error(`[publish] FAIL 构建登记失败（渠道晋升会失效）：${e.message}`);
+	}
 
 	// ── 发布后自验（2026-10-20 加）：清单写完了不算完，要能真的取到 ──────────
 	// 为什么：ota.json 只是"权威声明"，从声明到生效还有一层 —— 云端进程**每请求现读磁盘**。

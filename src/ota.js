@@ -26,6 +26,10 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { OTA_MANIFEST_FILE } from './config.js';
+import {
+  loadBuilds, pickBuildFor, hasBuilds, recordBuild, normalizeChannelName, thresholdFor,
+  visibleInChannel, PROMOTE_BETA_MS, PROMOTE_STABLE_MS,
+} from './ota-promote.js';
 
 /**
  * 通道 → 清单文件路径（2026-10-20 抽为单一真源）。
@@ -116,9 +120,41 @@ export function cmpVersion(a, b) {
 }
 
 /** 某产品的最新版本条目；没有清单/没有该产品 → null。
- *  @param {string} product  产品名（'agent' / 'viewer'）
- *  @param {string} [channel] 更新通道（'stable' 读 ota.json；'gray' 读 ota-gray.json 等） */
-export function latestFor(product, channel) {
+ *
+ * 2026-11-02 渠道自动晋升（用户点单）：**构建不变、只变渠道可见性**。
+ * 判定顺序：
+ *   ① 构建注册表 ota-builds.json 里若有该产品的登记构建 → 按「发布时间 + 渠道档位」
+ *      算此刻该渠道能拿到哪个构建（alpha 立即可见 / beta 满 5h / stable 满 24h）。
+ *   ② 注册表没有该产品（老部署、从未走过新发布链）→ 回落旧逻辑：读 ota-<channel>.json。
+ * 两条路返回同一形状，调用方无从分辨 —— 平滑升级，不需要一次性数据迁移。
+ *
+ * @param {string} product  产品名（'agent' / 'viewer'）
+ * @param {string} [channel] 设备渠道（alpha/gray/beta/rc/stable/空/未知）
+ *  @param {number} [now]   当前毫秒时间戳（注入以便单测；省略即 Date.now()） */
+export function latestFor(product, channel, now = Date.now()) {
+  // ① 新链路：构建注册表 + 时间晋升
+  const reg = loadBuilds(OTA_MANIFEST_FILE);
+  if (hasBuilds(reg, product)) {
+    const pick = pickBuildFor(reg, product, channel, now);
+    if (pick) {
+      return {
+        version: String(pick.version || ''),
+        url: String(pick.url || ''),
+        sha256: String(pick.sha256 || ''),
+        size: Number(pick.size || 0),
+        notes: String(pick.notes || ''),
+        mandatory: !!pick.mandatory,
+        // 附带给客户端/管理台看的信息，不影响既有字段消费方
+        channel: normalizeChannelName(channel),
+        publishedAt: String(pick.publishedAt || ''),
+        appearAfterMs: thresholdFor(channel),
+      };
+    }
+    // 该渠道此刻还没有任何构建可见（比如刚发 alpha 5 分钟内问 beta）→ 如实回 null，
+    // **不要**回落到旧清单：那会把某个历史版本当成"该渠道最新"，反而更乱。
+    return null;
+  }
+  // ② 兼容链路：旧的多清单文件
   const m = loadManifest(channel);
   if (!m || !m.products || typeof m.products !== 'object') return null;
   const p = m.products[product];
@@ -130,6 +166,34 @@ export function latestFor(product, channel) {
     size: Number(p.size || 0),
     notes: String(p.notes || ''),
     mandatory: !!p.mandatory,
+  };
+}
+
+/** 发布时登记构建（供 publish-release.mjs 与管理台发布端点调用）。
+ *  幂等：同一 version+sha 重复发布不重置 publishedAt（否则永远晋升不了）。 */
+export function registerBuild(product, entry, now = Date.now()) {
+  return recordBuild(OTA_MANIFEST_FILE, product, entry, now);
+}
+
+/** 某渠道此刻的晋升进度（管理台展示「还有多久进 beta/stable」用）。 */
+export function promotionStatus(product, channel, now = Date.now()) {
+  const reg = loadBuilds(OTA_MANIFEST_FILE);
+  const builds = Object.values((reg && reg.builds) || {})
+    .filter((r) => r && r.product === product)
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  const latest = builds[0] || null;
+  if (!latest) return null;
+  const at = Date.parse(latest.publishedAt);
+  const ageMs = now - at;
+  return {
+    version: latest.version,
+    publishedAt: latest.publishedAt,
+    ageMs,
+    inAlpha: visibleInChannel('alpha', ageMs),
+    inBeta: visibleInChannel('beta', ageMs),
+    inStable: visibleInChannel('stable', ageMs),
+    betaAt: new Date(at + PROMOTE_BETA_MS).toISOString(),
+    stableAt: new Date(at + PROMOTE_STABLE_MS).toISOString(),
   };
 }
 
