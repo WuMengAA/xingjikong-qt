@@ -70,4 +70,11 @@ Column {
             }
         }
     }
+
+    // ── 岛组件：开关 / 拖动排序 / 缩放（2026-11-03 用户点单「可配置可拖动组件」）──
+    // 拆成独立件（本文件保持骨架职责）：Card 管拖拽状态，Row 管单行渲染。
+    IslandLayoutCard {
+        anchors.left: parent.left
+        anchors.right: parent.right
+    }
 }

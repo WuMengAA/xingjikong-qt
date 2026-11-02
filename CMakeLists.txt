@@ -225,6 +225,10 @@ add_executable(stelarith-agent-qt
   # 2026-11-02：按住/松手（有触摸就等到无触摸才收起）——island.cpp 已超行数红线，
   # 新功能进自己的域，不给白名单开口子（开一次就有第二次）。
   src/island/island_touch.cpp
+  # 2026-11-03：岛「组件」布局域（顺序 / 启用 / 缩放，落 QSettings）。
+  # faceModel 原本写死在 IslandRoot.qml:308，用户要"可配置可拖动"就必须有个
+  # 跨重启的状态真源；QML 里存数组重启即丢，且违反 §10.9（QML 不存业务状态）。
+  src/island/island_layout.cpp
   src/island/island.h
   # ── 灵动岛 QML 桥（2026-10-11 加：视觉层改 QML，本桥把状态推给 QML / 接 QML 回调）──
   src/island/island_bridge.cpp

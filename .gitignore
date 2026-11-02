@@ -105,3 +105,7 @@ scripts/_*.mjs
 #   守的是「配置/数据/日志各 532.5 MB、合计三倍」那个截图 bug。
 !scripts/_schedule_clock_probe.py
 !scripts/_storage_probe.py
+# 例外（2026-11-03）：`_island_layout_probe.py` 守的是岛组件布局模型的**双真源**——
+# C++ `builtinRows()` 与 IslandRoot.qml 里的回落默认序必须逐项一致，漂移不报错、
+# 只表现为「预览顺序与真机不同」，现场无法复现。A 断言就是那条对账。
+!scripts/_island_layout_probe.py

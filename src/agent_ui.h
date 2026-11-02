@@ -29,6 +29,7 @@
 #pragma once
 
 #include "agent_record_ui.h"   // 记录/自检/插件/时段快照（2026-10-31 第一刀）
+#include "island/island_layout.h"   // 岛的组件布局模型（设置页与岛壳共用同一实例）
 
 #include <QObject>
 #include <QQuickWidget>
@@ -639,6 +640,9 @@ private:
         setResizeMode(QQuickWidget::SizeRootObjectToView);
         registerIconProvider();   // ⚠️ 必须在 setSource 之前：否则首次加载图标就解析失败
         engine()->rootContext()->setContextProperty(QStringLiteral("agentUi"), &m_ui);
+        // 2026-11-03：岛组件布局模型（设置页「灵动岛」分类要用同一份实例，否则
+        // 在设置页拖完顺序岛那边还是老序 —— 而且看起来"保存成功"了）。
+        engine()->rootContext()->setContextProperty(QStringLiteral("islandLayout"), islandLayoutInstance());
         // VoiceHub 模块（#329）：main.cpp 注册后调 setVoicehub；懒创建保证这里拿得到。
         if (s_voicehub)
             engine()->rootContext()->setContextProperty(QStringLiteral("voicehub"), s_voicehub);

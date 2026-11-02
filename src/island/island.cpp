@@ -27,6 +27,7 @@
 
 #include "island.h"
 #include "island_bridge.h"       // P0-0：historySnapshotJson() 复用桥的 history() 组装口径
+#include "island_layout.h"       // 岛组件布局（顺序/启用/缩放），设置页与岛壳共用同一实例
 #include "../ui/svgiconprovider.h"
 #include "../media/whale_audio.h"
 // 2026-10-22：系统媒体识别实例，注入 QML 给岛面/排期中心读「本机正在放什么」。
@@ -297,6 +298,9 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     m_quick->setAttribute(Qt::WA_TranslucentBackground);
     m_quick->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_quick->rootContext()->setContextProperty(QStringLiteral("bridge"), m_bridge);
+    // 2026-11-03：岛组件布局（顺序 / 启用 / 缩放）。用 context property 而不是 QML 单例模块 ——
+    // IslandRoot.qml 与 viewer 共用，管理端没有该模块，import 未注册模块是硬错误（整页空白）。
+    m_quick->rootContext()->setContextProperty(QStringLiteral("islandLayout"), islandLayoutInstance());
     // 小鲸鱼音效实例（QML 侧 WhaleMascot 通过 bridgeRef.whaleClicked/whaleLongPressed 触发，
     // 不直接用 whaleAudio，但留这个 context property 以备将来 QML 直接调 playByName）。
     m_quick->rootContext()->setContextProperty(QStringLiteral("whaleAudio"), WhaleAudio::instance());
