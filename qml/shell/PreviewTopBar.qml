@@ -40,6 +40,8 @@ Item {
     /** 副标题（本班台数等，宿主给；空则不显示）。 */
     property string subtitle: ""
     property string accountAvatarText: ""
+    /** 窄屏紧凑模式（2026-11-03 加）：手机竖屏下标题/副标题与右侧控件必然撞车。 */
+    property bool compact: false
 
     signal classPicked(string code)
     signal avatarClicked()
@@ -70,6 +72,15 @@ Item {
 
     height: 64
 
+    // ── 2026-11-03 窄屏（390pt 竖屏）实算的撞车点 ─────────────────────
+    // 改前：左标题「班级中心」约 64px 从 x=24 起，右组 = 班级下拉(约 100) +
+    //   spacing 16 + 头像 32，从 x≈218 起 ⇒ 标题区剩 194px 够，但副标题
+    //   （「12 台 · 9 台在线」这类）一长就被右侧压住；未登录时多一个「登录」
+    //   按钮（约 56px）⇒ 右组起点前移到 ≈162，标题直接重叠。
+    // compact 下：标题只留一行、副标题隐藏（内容区第一屏已有统计行，信息不丢），
+    //   右组间距收紧到 xs。**不隐藏班级下拉** —— 手机上切班是主操作之一。
+    readonly property bool _c: root.compact
+
     ShadcnSeparator {
         anchors.bottom: parent.bottom
         anchors.left: parent.left
@@ -79,31 +90,40 @@ Item {
 
     // ── 左：标题（栏目名 + 副标题）────────────────────────────────
     ColumnLayout {
+        objectName: "topTitle"      // 探针锚点（_narrow_probe.qml 量重叠用）
         anchors.left: parent.left
-        anchors.leftMargin: Theme.spacing.lg
+        anchors.leftMargin: root._c ? Theme.spacing.md : Theme.spacing.lg
+        anchors.right: rightGroup.left
+        anchors.rightMargin: Theme.spacing.sm
         anchors.verticalCenter: parent.verticalCenter
         spacing: 2
         Text {
+            Layout.fillWidth: true
             visible: root.title !== ""
             text: root.title
             font.pixelSize: 16
             font.weight: Font.Medium
             color: Theme.color.textPrimary
+            elide: Text.ElideRight
         }
         Text {
-            visible: root.subtitle !== ""
+            Layout.fillWidth: true
+            visible: root.subtitle !== "" && !root._c
             text: root.subtitle
             font.pixelSize: 13
             color: Theme.color.textSecondary
+            elide: Text.ElideRight
         }
     }
 
     // ── 右：班级下拉 + 登录 + 头像 ───────────────────────────────
     RowLayout {
+        id: rightGroup
+        objectName: "topRight"      // 探针锚点
         anchors.right: parent.right
-        anchors.rightMargin: Theme.spacing.lg
+        anchors.rightMargin: root._c ? Theme.spacing.md : Theme.spacing.lg
         anchors.verticalCenter: parent.verticalCenter
-        spacing: Theme.spacing.md
+        spacing: root._c ? Theme.spacing.xs : Theme.spacing.md
 
         // 班级切换下拉（shadcn DropdownMenu：Overlay 层，自带外部点击/ESC 关闭）
         ShadcnDropdownMenu {
@@ -113,7 +133,9 @@ Item {
 
             ShadcnDropdownMenuTrigger {
                 id: classTrigger
-                text: root.currentClassName + " 切换"
+                // 窄屏去掉「 切换」二字：下拉按钮本身就是可点的样子，
+                // 这两个字在 390pt 下挤掉的是设备名。
+                text: root.currentClassName + (root._c ? "" : " 切换")
                 variant: ShadcnButton.Variant.Secondary
                 size: ShadcnButton.Size.Small
                 // ⚠️ Trigger 是 ShadcnButton 子类，用 onClicked 驱动 open（没有 onTriggered）

@@ -47,6 +47,7 @@ Window {
         property bool linkBusy: false
         property string currentUid: "u1"
         property bool devOpen: true
+        property bool actOpen: true   // 2026-11-03：窄窗动作栏开合（ControlPage 已绑）
         property string deviceFilter: "all"
         property bool compact: false
         property var picked: []

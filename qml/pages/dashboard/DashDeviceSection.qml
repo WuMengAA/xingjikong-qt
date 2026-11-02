@@ -45,9 +45,14 @@ ColumnLayout {
         return 2
     }
 
-    RowLayout {
+    // 三张统计卡：桌面横排一行；竖屏改成单列堆叠。
+    // 390pt 上横排 = 每张 (390-32-32)/3 ≈ 108 宽，"在线设备" 四个字 + 数字 + 副标题
+    // 三行挤在 108 里必然折字或被裁 —— 数字本身是这一页最该看清的东西。
+    GridLayout {
         Layout.fillWidth: true
-        spacing: Theme.spacing.md
+        columns: sec.portrait ? 1 : 3
+        columnSpacing: Theme.spacing.md
+        rowSpacing: Theme.spacing.sm
 
         Repeater {
             model: [

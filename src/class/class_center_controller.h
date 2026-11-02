@@ -1,28 +1,18 @@
 // 班级中心控制器（2026-10-28 · B0 重构移植 / B1 真数据接线）
-//
 // ⚠️ 存在理由（用户 2026-10-28 00:31 点名铁律）：**QML 永远不写逻辑与通信代码，全部交给 C++**。
-//    本类承载原先散在 ClassCenterPage/ClassDeviceDrawer/RemoteDesktopStage/OpHeroButton/
-//    OpActionButton 里的全部计算与判断：在线率与圆饼弧端点、网格列宽、远程桌面 4:3/9:16
-//    比例与缩放、操作面板主题色板（树叶绿/浅蓝/明黄/亮红/中性）与装饰件偏转角度、
-//    抽屉开合与选中态、面包屑与异常行文案、指针归一化坐标、长按 3 秒进度。
-//    QML 侧退化为纯声明式：只绑定这些属性、只转发信号。
-//
-// 迁移后的 QML 侧自查目标：Math.* = 0、三元 = 0、function = 0、console.log = 0、通信 = 0。
-//
+//    本类承载原先散在 ClassCenterPage/ClassDeviceDrawer/RemoteDesktopStage/OpHeroButton 等
+//    里的全部计算：在线率与圆饼弧端点、网格列宽、远程桌面 4:3/9:16 比例与缩放、操作面板色板与
+//    装饰件偏转角、抽屉开合与选中态、面包屑与异常行文案、指针归一化、长按 3 秒进度；QML 退化为纯声明式。
 // ── 数据来源（2026-10-28 B1：占位数据已全部换成云端真数据）────────────────
-//   · setClasses()  ← GET /api/classes（ViewerBackend::classes，含每班 devices/onlineCount）
-//   · setDevices()  ← GET /api/devices（设备名/在线/用途；与班级 devices 的 uid 求交）
-//   · setEvents()   ← GET /api/events（最近 50 条，取 warn/error 当「最近异常」）
-//   · setThumb()    ← ClassService::thumbnailChanged（缩略图修订号，拼 image://classthumb）
-//   ⚠️ 本类**不认识 ViewerBackend**（刻意）：入站数据由宿主 main.cpp 灌进来，出站指令走
-//      actionOut 信号由宿主转发 backend->sendActionTo。好处是探针能单独链它跑断言，
-//      不依赖网络/音频/托盘那一整条运行期。
+//   setClasses ← /api/classes（含每班 devices/onlineCount）｜ setDevices ← /api/devices（与班级
+//   devices 求交）｜ setEvents ← /api/events（近 50 条取 warn/error）｜ setThumb ← 缩略图修订号。
+//   ⚠️ 本类**不认识 ViewerBackend**（刻意）：入站由宿主灌入、出站走 actionOut 由宿主转发 ——
+//      好处是探针能单独链它跑断言，不依赖网络/音频/托盘那一整条。
 //
-// ── 操作名 → 指令的运行关系（B1 铁律：只转发既有词表、零新攻击面）──────────
-//   notify / lock / reboot / shutdown / list_schedules / process_list / media_list
-//   全部逐条核对过被控端 src/main.cpp 的 executeAction 分支与 kActionNames 能力表。
-//   「监控」不造假动作：回放能力在管理端（MonitorPage 的 24H 回放入口），
-//   故走 navigateRequested("monitor") —— 界面跳转，不下发不存在的设备指令。
+// ── 操作名 → 指令（B1 铁律：只转发既有词表、零新攻击面）──────────────────
+//   notify/lock/reboot/shutdown/list_schedules/process_list/media_list 逐条核对过被控端
+//   executeAction 分支与 kActionNames。「监控」不造假动作：回放能力在管理端（MonitorPage），
+//   故走 navigateRequested("monitor") —— 跳转不下发指令。
 #pragma once
 
 #include <QObject>
@@ -38,6 +28,7 @@
 class ClassCenterController : public QObject
 {
     Q_OBJECT
+    static constexpr qreal kStatCardH = 128.0;   // 统计卡高：QML 两张卡共用，避免 128 写两遍
 
     // ── 视口尺寸（QML 写入，驱动一切依赖尺寸的计算）─────────────────
     Q_PROPERTY(qreal viewWidth  READ viewWidth  WRITE setViewWidth  NOTIFY geometryChanged)
@@ -84,6 +75,11 @@ class ClassCenterController : public QObject
     // 统计卡宽度（窄 1/3、宽 2/3）：QML 里不再写 (w-24)/3 这种算式
     Q_PROPERTY(qreal statCardNarrowW READ statCardNarrowW NOTIFY geometryChanged)
     Q_PROPERTY(qreal statCardWideW   READ statCardWideW   NOTIFY geometryChanged)
+    // 窄屏（手机竖屏 ≤640）：边距减半、阵列单列、统计卡堆叠 —— QML 里不写 `width<640 ?`，避免漂移。
+    Q_PROPERTY(bool  narrow       READ narrow       NOTIFY geometryChanged)
+    Q_PROPERTY(qreal pageMargin   READ pageMargin   NOTIFY geometryChanged)
+    Q_PROPERTY(int   statsColumns READ statsColumns NOTIFY geometryChanged)
+    Q_PROPERTY(qreal statCardH    READ statCardH    NOTIFY geometryChanged)
 
     // ── 远程桌面舞台比例（4:3 容器 + 9:16 面板 + 统一缩放）──────────
     Q_PROPERTY(qreal stageViewW READ stageViewW WRITE setStageViewW NOTIFY geometryChanged)
@@ -202,6 +198,8 @@ public:
     qreal gridCellWidth() const { return m_cellW; }
     qreal statCardNarrowW() const { return m_statNarrowW; }
     qreal statCardWideW() const { return m_statWideW; }
+    bool narrow() const { return m_narrow; }            qreal pageMargin() const { return m_pageMargin; }
+    int  statsColumns() const { return m_statsCols; }   qreal statCardH() const { return kStatCardH; }
 
     qreal stageViewW() const { return m_stageW; }
     qreal stageViewH() const { return m_stageH; }
@@ -401,6 +399,7 @@ private:
     qreal m_cellW = 260.0;
     qreal m_statNarrowW = 200.0;
     qreal m_statWideW = 400.0;
+    bool m_narrow = false; qreal m_pageMargin = 32.0; int m_statsCols = 2;   // 窄屏几何（recomputeGeometry 算）
 
     qreal m_stageLeftW = 0.0;
     qreal m_stageRightW = 0.0;

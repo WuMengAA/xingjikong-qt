@@ -50,6 +50,9 @@ ApplicationWindow {
     // （监控画面吃满宽度），由中栏「设备列表」按钮按需展开。完整三栏重排属 dsh S2 Main.qml 重构。
     readonly property bool compact: root.width < 1040
     property bool devOpen: false
+    // 2026-11-03：手机竖屏（390pt）下三栏并排 = 左 0 + 中 82 + 右 280，画面只剩 21% 宽。
+    // 动作栏与设备栏同一套开合：窄屏默认收起，按需展开。
+    property bool actOpen: false
     // 字体兜底：没显式写 font.pixelSize 的文字走这一档（"正"）。
     // 页面里该显式写还是要显式写 —— 这里只是保证"漏写"不会掉回系统默认的小字。
     font.pixelSize: 13

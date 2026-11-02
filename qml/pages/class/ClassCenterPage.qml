@@ -31,7 +31,7 @@ Item {
         anchors.top: parent.top
         height: 76
         Column {
-            anchors.left: parent.left; anchors.leftMargin: 32
+            anchors.left: parent.left; anchors.leftMargin: classCenter.pageMargin
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
             Text {
@@ -53,7 +53,7 @@ Item {
         // 本件只报按下/松手、只显示进度比例。
         Rectangle {
             id: emergencyBtn
-            anchors.right: parent.right; anchors.rightMargin: 32
+            anchors.right: parent.right; anchors.rightMargin: classCenter.pageMargin
             anchors.verticalCenter: parent.verticalCenter
             width: 176; height: 40
             radius: 20
@@ -97,18 +97,19 @@ Item {
     }
 
     // ── 顶部统计区 ───────────────────────────────────────────────
-    Row {
+    // 列数与卡宽由 C++ 给；不写 height —— Grid 按行自适应，横排/堆叠共用一份声明
+    Grid {
         id: stats
         anchors.left: parent.left; anchors.right: parent.right
-        anchors.leftMargin: 32; anchors.rightMargin: 32
+        anchors.leftMargin: classCenter.pageMargin; anchors.rightMargin: classCenter.pageMargin
         anchors.top: header.bottom
-        height: 128
+        columns: classCenter.statsColumns
         spacing: 24
 
         // ① 在线率圆饼（1/3）：宽度由 C++ 算（QML 不写 (w-24)/3）
         Rectangle {
             width: classCenter.statCardNarrowW
-            height: 128
+            height: classCenter.statCardH
             radius: 24
             color: Theme.color.surface
             border.width: 0
@@ -182,7 +183,7 @@ Item {
         // ② 最近异常面板（2/3）
         Rectangle {
             width: classCenter.statCardWideW
-            height: 128
+            height: classCenter.statCardH
             radius: 24
             color: Theme.color.surface
             border.width: 0
@@ -222,7 +223,7 @@ Item {
     // ── 班级阵列 ─────────────────────────────────────────────────
     Text {
         id: gridTitle
-        anchors.left: parent.left; anchors.leftMargin: 32
+        anchors.left: parent.left; anchors.leftMargin: classCenter.pageMargin
         anchors.top: stats.bottom; anchors.topMargin: 24
         text: "班级阵列"
         color: Theme.color.textPrimary
@@ -233,7 +234,7 @@ Item {
     GridView {
         id: grid
         anchors.left: parent.left; anchors.right: parent.right
-        anchors.leftMargin: 32; anchors.rightMargin: 32
+        anchors.leftMargin: classCenter.pageMargin; anchors.rightMargin: classCenter.pageMargin
         anchors.top: gridTitle.bottom; anchors.topMargin: 12
         anchors.bottom: parent.bottom; anchors.bottomMargin: 24
         clip: true
@@ -369,8 +370,8 @@ Item {
     // ⚠️ 不用 `visible` 硬切（关闭时看不到淡出），也不用三元（铁律），改用 State。
     Rectangle {
         id: resultBar
-        anchors.left: parent.left; anchors.leftMargin: 32
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 32
+        anchors.left: parent.left; anchors.leftMargin: classCenter.pageMargin
+        anchors.bottom: parent.bottom; anchors.bottomMargin: classCenter.pageMargin
         height: 32
         width: resultText.implicitWidth + 28
         radius: 16

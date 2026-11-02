@@ -321,6 +321,17 @@ ColumnLayout {
         MouseArea { id: devToggleMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: ctx.window.devOpen = !ctx.window.devOpen }
     }
 
+    // 窄窗时动作栏默认收起（否则 240 宽把画面压没），这里是它的开合入口 ——
+    // 与上面「设备列表」同一行，因为两者是同一类问题（配角占地），不该分两处找。
+    Rectangle {
+        visible: ctx.window.compact
+        width: 96; height: 30; radius: th.rCtrl
+        color: actToggleMa.containsMouse ? th.hover2 : th.panel
+
+        Text { anchors.centerIn: parent; text: ctx.window.actOpen ? "收起动作" : "动作面板"; color: th.fg; font.pixelSize: 13 }
+        MouseArea { id: actToggleMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: ctx.window.actOpen = !ctx.window.actOpen }
+    }
+
     RowLayout {
         Layout.fillWidth: true
         spacing: 12
@@ -663,8 +674,11 @@ ColumnLayout {
 //    内层 ColumnLayout 的 Layout.* 一律失效（它现在的父是 Flickable，不是定位器），
 //    所以宽高都写在它自己身上 —— 别再往它身上加 Layout.xxx。
 Flickable {
-    Layout.preferredWidth: 280
-    Layout.maximumWidth: 300
+    // 2026-11-03：与左「设备」栏同一套开合。窄窗（手机竖屏）三栏并排时这 280 会把画面
+    // 压到 82 宽 —— 那已经不是"配角占地方"，是主体没了。展开时给 240 仍够放动作按钮。
+    Layout.preferredWidth: ctx.window.compact ? (ctx.window.actOpen ? 240 : 0) : 280
+    Layout.maximumWidth: ctx.window.compact ? (ctx.window.actOpen ? 260 : 0) : 300
+    visible: !(ctx.window.compact && !ctx.window.actOpen)
     Layout.fillHeight: true
     contentWidth: width
     contentHeight: rightCol.implicitHeight

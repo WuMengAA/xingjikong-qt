@@ -56,14 +56,19 @@ Item {
 
     Rectangle { anchors.fill: parent; color: th ? th.body : "#FFFBFE" }
 
+    // 2026-11-03：窄屏（手机竖屏）边距 18→8、分类栏 0.24→0.30 但封顶 132。
+    // 桌面 196 宽的导航在 390pt 上会吃掉一半屏，剩给内容的 226 宽放不下表单。
+    readonly property bool narrow: width < 640
     RowLayout {
         anchors.fill: parent
-        anchors.margins: 18
-        spacing: 16
+        anchors.margins: page.narrow ? 8 : 18
+        spacing: page.narrow ? 8 : 16
 
         // ── 左：分类列表（导航真源就是 page.cats，不另写一份）──
         Rectangle {
-            Layout.preferredWidth: Math.min(196, Math.max(124, page.width * 0.24))
+            Layout.preferredWidth: page.narrow
+                                   ? Math.min(132, Math.max(96, page.width * 0.30))
+                                   : Math.min(196, Math.max(124, page.width * 0.24))
             Layout.fillHeight: true
             radius: 12
             color: page.th ? page.th.cContLow : "#F7F2FA"

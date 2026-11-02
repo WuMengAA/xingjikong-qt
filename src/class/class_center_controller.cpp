@@ -1,12 +1,7 @@
-// 班级中心控制器实现（2026-10-28 · B0 重构移植 / B1 真数据接线）
-// 设计意图与铁律见 class_center_controller.h 头部注释。
-//
-// 分层原则（为什么数据入口是"推"而不是"拉"）：
-//   本类不持有 ViewerBackend，也不发 HTTP —— 数据由宿主 main.cpp 从 backend 的属性
-//   （classes / devices / events）灌进来，出站指令走 actionOut 信号。这样：
-//     ① 控制器可以脱离网络单独构造 ⇒ 探针能跑真断言（B3 验收就是这么做的）；
-//     ② 数据来源换（/api/classes → 别的接口）只改宿主一行，QML 与控制器零改动；
-//     ③ 不会出现"QML 里偷偷 fetch"这种越界（本类根本没有网络能力）。
+// 班级中心控制器实现（2026-10-28 · B0 重构移植 / B1 真数据接线）；设计意图见 .h 头部注释。
+// 分层原则（为什么数据入口是"推"而不是"拉"）：本类不持有 ViewerBackend、不发 HTTP —— 数据由宿主
+// main.cpp 从 backend 属性（classes/devices/events）灌入，出站走 actionOut 信号。这样 ① 控制器可
+// 脱离网络单独构造 ⇒ 探针能跑真断言；② 换数据源只改宿主一行；③ 结构上不可能出现 QML 偷偷 fetch。
 #include "class_center_controller.h"
 
 #include <QDateTime>
@@ -22,7 +17,12 @@ namespace {
 constexpr qreal kDonutR  = 32.0;
 constexpr qreal kDonutCx = 40.0;
 constexpr qreal kDonutCy = 40.0;
-// 网格：格子最小 260 宽，至少 2 列（与原型卡片观感一致）
+// 窄屏阈值与边距（2026-11-03）：640 = 手机竖屏上限（390/412/430 都在内，平板 ≥768 不受影响）；
+// 16 与 Theme.spacing.md 同值但必须写死 —— Theme 是 QML 单例，C++ 取不到。
+constexpr qreal kNarrowViewW = 640.0;
+constexpr qreal kPageMarginWide   = 32.0;
+constexpr qreal kPageMarginNarrow = 16.0;
+// 网格：格子最小 260 宽，至少 2 列（与原型卡片观感一致；窄屏单列，见 recomputeGeometry）
 constexpr qreal kGridMinCell = 260.0;
 // 远程桌面：4:3 画面容器 + 9:16 操作面板 + 24 间距
 constexpr qreal kStageGap = 24.0;
@@ -145,14 +145,22 @@ void ClassCenterController::recomputeStats()
 
 void ClassCenterController::recomputeGeometry()
 {
-    // 左右各 32 边距（与页面 QML 的 anchors.margins 一致）
-    const qreal content = qMax(0.0, m_viewW - 64.0);
-    m_cols  = qMax(2, int(qFloor(content / kGridMinCell)));
+    // ── 窄屏（手机竖屏）先判，三件事一起变（2026-11-03）─────────────
+    // 桌面那套数字在 390pt 上连出三个"看得见但没法用"：①边距 32×2 吃掉 16% 宽；
+    // ②最小格 260 + 至少 2 列 ⇒ (390-64)/2 = 163 宽，"班名+设备数+在线点"必然逐行折字；
+    // ③统计区 1/3+2/3 横排 ⇒ 窄卡 ~100、"最近异常"的时间·班级·事件整行塞不下。
+    // 故窄屏：边距 16、单列、统计卡堆叠。
+    m_narrow     = m_viewW > 0.0 && m_viewW <= kNarrowViewW;
+    m_pageMargin = m_narrow ? kPageMarginNarrow : kPageMarginWide;
+    m_statsCols  = m_narrow ? 1 : 2;
+    const qreal content = qMax(0.0, m_viewW - m_pageMargin * 2.0);
+    // 列数下限：桌面 2 列是产品观感，窄屏不适用（单列才放得下班名+设备数+在线点）
+    m_cols  = qMax(m_narrow ? 1 : 2, int(qFloor(content / kGridMinCell)));
     m_cellW = (m_cols > 0) ? (content / m_cols) : content;
-    // 统计区：两张卡 + 24 间距 ⇒ 窄 1/3、宽 2/3
-    const qreal statsW = qMax(0.0, content - 24.0);
-    m_statNarrowW = statsW / 3.0;
-    m_statWideW = statsW * 2.0 / 3.0;
+    // 统计区：横排 = 两卡 + 24 间距 ⇒ 窄 1/3、宽 2/3；堆叠 = 各占满宽
+    const qreal statsW = m_narrow ? content : qMax(0.0, content - 24.0);
+    m_statNarrowW = m_narrow ? content : statsW / 3.0;
+    m_statWideW   = m_narrow ? content : statsW * 2.0 / 3.0;
 }
 
 // ── 几何：远程桌面 4:3 + 9:16（原先在 QML 里算，属违规）───────────
@@ -272,12 +280,9 @@ void ClassCenterController::setClasses(const QJsonArray &classes)
 }
 
 // ── 模块二（2026-10-28 蓝图）：老师/班主任的"独立主页"────────────────
-// 蓝图原话：「不再从多班级列表中新建或跳转，直接沉浸式展示本班面板，
-//           省去老师的筛选成本。」
-//
-// 数据侧不需要新端点：云端 /api/classes 带登录票据时本来就只回"自己的班"
-// （viewerbackend 的 classesFiltered 注释记着这件事，2026-10-25 已生效）。
-// 所以这里只做一件事：**老师身份 + 恰好一个班 + 用户还没选过 ⇒ 自动打开该班抽屉**。
+// 蓝图原话：「不再从多班级列表中新建或跳转，直接沉浸式展示本班面板，省去筛选成本。」
+// 不需要新端点：/api/classes 带登录票据时本来就只回"自己的班"（2026-10-25 已生效）。
+// 所以这里只做一件事：**老师身份 + 恰好一个班 + 还没选过 ⇒ 自动打开该班抽屉**。
 void ClassCenterController::setTeacherScope(bool on)
 {
     if (m_teacherScope == on) return;
@@ -595,10 +600,9 @@ void ClassCenterController::openClass(const QString &code)
     emit selectionChanged();
 }
 
-// ── 抽屉「班级编辑」：把这个设备改绑到另一个班（真实云端写操作）────────
-// 为什么只做「班级」这一维：云端 knownDevices 只有 classCode / role / name 三个字段，
-// 没有"学校"维度，也不接受设备改名 ⇒ 只有班级改绑是真能落库的动作（POST /api/class/bind）。
-// 学校/设备名在抽屉里只读展示，并在文案里说清原因 —— 不做一个点了没用的假下拉。
+// ── 抽屉「班级编辑」：把设备改绑到另一个班（真实云端写操作）─────────────
+// 只做「班级」这一维：knownDevices 只有 classCode/role/name 三字段，无"学校"维度、不改名
+// ⇒ 只有班级改绑真能落库（POST /api/class/bind）。其余只读展示并说明原因，不做假下拉。
 void ClassCenterController::rebindSelectedTo(const QString &code)
 {
     if (m_targetUid.isEmpty()) {
@@ -786,13 +790,9 @@ void ClassCenterController::stagePointer(const QString &kind, qreal x, qreal y,
 }
 
 // ── 操作请求 → 既有指令词表（B1 接线）─────────────────────────────
-//
-// 铁律：绝不新造动作名。右侧这张表的每个动作都必须在被控端
-// Stelarith-control-qt/src/main.cpp 的 executeAction 里真实存在（2026-10-28 逐个核对：
-// kActionNames 与分支两处都在），否则就是"界面能点、设备无反应"的假动作。
-//
-// 落到 sendActionTo 而不是 sendAction：班级中心是**指定设备**下发，
-// 不能用 backend 的 currentUid（那是"主画面正在看哪台"，两回事）。
+// 铁律：绝不新造动作名。下表每个动作都必须在被控端 main.cpp 的 executeAction 里真实存在
+// （2026-10-28 逐个核对 kActionNames 与分支两处），否则就是"能点、无反应"的假动作。
+// 走 sendActionTo 而非 sendAction：班级中心是**指定设备**下发，currentUid 是"主画面看哪台"。
 bool ClassCenterController::mapOpToAction(const QString &name, QString *action, QJsonObject *params) const
 {
     if (name == QStringLiteral("notify")) {

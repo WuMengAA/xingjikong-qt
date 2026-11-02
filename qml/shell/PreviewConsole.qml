@@ -70,6 +70,10 @@ Item {
         return n
     }
 
+    // 2026-11-03：窄屏（手机竖屏）边距收紧。桌面 24 的留白在 390pt 上等于吃掉
+    // 12% 的内容宽度；手机是"宽度稀缺"，必须把钱花在内容上。
+    readonly property int edgeMargin: root.portrait ? Theme.spacing.md : Theme.spacing.lg
+
     Rectangle {
         anchors.fill: parent
         color: Theme.color.background
@@ -104,6 +108,7 @@ Item {
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
+            compact: root.portrait
             ctx: root.ctx
             backendRef: root.backendRef
             currentClass: root.currentClass
@@ -118,11 +123,12 @@ Item {
         PreviewStatsRow {
             id: statsRow
             anchors.top: topBar.bottom
-            anchors.topMargin: Theme.spacing.lg
+            anchors.topMargin: root.edgeMargin === Theme.spacing.md ? Theme.spacing.sm : Theme.spacing.lg
             anchors.left: parent.left
-            anchors.leftMargin: Theme.spacing.lg
+            anchors.leftMargin: root.edgeMargin
             anchors.right: parent.right
-            anchors.rightMargin: Theme.spacing.lg
+            anchors.rightMargin: root.edgeMargin
+            compact: root.portrait
             deviceTotal: root.devices.length
             onlineCount: root.onlineCount
             offlineCount: root.devices.length - root.onlineCount
@@ -132,11 +138,11 @@ Item {
         ShellContent {
             id: content
             anchors.top: statsRow.bottom
-            anchors.topMargin: Theme.spacing.lg
+            anchors.topMargin: root.edgeMargin === Theme.spacing.md ? Theme.spacing.sm : Theme.spacing.lg
             anchors.left: parent.left
-            anchors.leftMargin: Theme.spacing.lg
+            anchors.leftMargin: root.edgeMargin
             anchors.right: parent.right
-            anchors.rightMargin: Theme.spacing.lg
+            anchors.rightMargin: root.edgeMargin
             anchors.bottom: parent.bottom
             anchors.bottomMargin: Theme.spacing.md
             sectionIndex: root.sectionIndex

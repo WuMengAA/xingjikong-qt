@@ -19,12 +19,75 @@ Item {
     property int deviceTotal: 0
     property int onlineCount: 0
     property int offlineCount: 0
+    /** 窄屏（2026-11-03）：手机竖屏下 4 张卡各 ~85px，塞不下 44px 圆 + 两列文字。 */
+    property bool compact: false
+
     /** 今日指令数：暂无真源，显示「—」（不假装是 0）。 */
     property string todayCount: "—"
 
-    height: 88
+    // 2026-11-03 窄屏布局：4 张卡横排是桌面观感，390pt 下每张 85px ——
+    // 44px 圆图标 + 右侧两列文字，"设备总数"四个字必然折行或被裁。
+    // compact 时改成**单行统计带**：`●12 在线 · 8 离线 · 共 20`，高度从 88 降到 40，
+    // 省下的 48px 直接给内容区（手机屏幕高度比宽度更稀缺）。
+    height: root.compact ? 40 : 88
+
+    // 窄屏单行统计带。**不用内联 component**：Qt 要求 `component` 只能声明在
+    // 根元素下（嵌套在 Row 里会报 "Inline components must be declared …"），
+    // 这里直接 Repeater 铺三组，比为了复用去调结构划算。
+    Row {
+        visible: root.compact
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Theme.spacing.sm
+
+        Repeater {
+            model: [
+                { value: String(root.deviceTotal),  label: "台",   dot: ShadcnStatusDot.Status.None },
+                { value: String(root.onlineCount),  label: "在线", dot: ShadcnStatusDot.Status.Online },
+                { value: String(root.offlineCount), label: "离线", dot: ShadcnStatusDot.Status.Offline }
+            ]
+            delegate: Row {
+                required property var modelData
+                required property int index
+                spacing: Theme.spacing.sm
+
+                // 分隔竖线（第 0 项之前不画）
+                Rectangle {
+                    visible: parent.index > 0
+                    width: 1; height: 14
+                    color: Theme.color.surfaceVariant
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Row {
+                    spacing: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    ShadcnStatusDot {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: parent.parent.modelData.dot !== ShadcnStatusDot.Status.None
+                        status: parent.parent.modelData.dot
+                        size: 6
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: parent.parent.modelData.value
+                        font.pixelSize: 15
+                        font.weight: Font.Medium
+                        color: Theme.color.textPrimary
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: parent.parent.modelData.label
+                        font.pixelSize: 12
+                        color: Theme.color.textSecondary
+                    }
+                }
+            }
+        }
+    }
 
     Row {
+        visible: !root.compact
         anchors.fill: parent
         spacing: Theme.spacing.md
 
