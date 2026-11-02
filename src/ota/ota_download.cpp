@@ -18,6 +18,7 @@
 
 #include "ota_state.h"              // 路径 / 健康上报 / 退避账
 #include "ota_update.h"             // applyUpdateInfo / otaBackupExe / otaWritePending
+#include "ota_channel_state.h"      // 渠道自动晋升：remember latest.channel/promotion
 #include "../winlauncher.h"         // stelarithStartHiddenDetached（重启助手静默拉起）
 
 // ── main.cpp 文件作用域外部链接符号（按既有 extern 模式复用）──
@@ -126,6 +127,10 @@ void otaSelfCheck()
         pay.insert(QStringLiteral("updateSha256"), latest.value(QStringLiteral("sha256")));
         pay.insert(QStringLiteral("updateNotes"), latest.value(QStringLiteral("notes")));
         pay.insert(QStringLiteral("updateMandatory"), latest.value(QStringLiteral("mandatory")));
+        // 2026-11-02 渠道自动晋升：把 latest.channel / publishedAt / promotion 交给展示模块。
+        // 放在这里（而不是 applyUpdateInfo 里）的理由：这个函数是**唯一**解析公开清单的
+        // 网络回包处；注册回执那条路（云端 register 分支）没有 promotion 字段，不该清空它。
+        otaChannelRemember(latest);
         applyUpdateInfo(pay);
     });
 }

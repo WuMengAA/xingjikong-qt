@@ -17,6 +17,7 @@
 //    所有值都来自 agentUi（C++）的结果属性。本拆分是**纯结构移动，零行为变化**。
 import QtQuick
 import QtQuick.Layouts
+import Stelarith.Ota 1.0          // OtaChannelState 单例（渠道晋升进度；C++ 静态注册）
 
 import "../../../components"
 import "../../../components/theme"
@@ -110,6 +111,14 @@ Column {
                 Item { Layout.fillWidth: true }
             }
             AppInfoRow { label: "当前渠道"; value: agentUi.updateChannel }
+            // 渠道自动晋升进度（2026-11-02）：构建与版本号都不变，变的只是"此刻在哪一档"。
+            // 文案整句由 C++ 拼（ota_channel_state.cpp），QML 零计算；旧云端没这字段时
+            // promotionText 为空串 ⇒ 整行自动隐藏，不留一个"--"吓唬现场。
+            AppInfoRow {
+                visible: OtaChannelState.promotionText.length > 0
+                label: "晋升进度"
+                value: OtaChannelState.promotionText
+            }
             RowLayout {
                 spacing: 8
                 Repeater {

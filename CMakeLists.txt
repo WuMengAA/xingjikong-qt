@@ -298,6 +298,12 @@ add_executable(stelarith-agent-qt
   #   护栏 → 拉包（含 Range 断点续传）→ 成品校验 → 回滚三件套 → 派重启助手 → 启安装包。
   src/ota/ota_download.cpp
   src/ota/ota_download.h
+  # ── OTA 渠道自动晋升 · 端侧展示（2026-11-02 新建，非拆分产物）──
+  #   把云端 latest.channel/publishedAt/promotion 翻译成人话 + 注册 QML 单例 Stelarith.Ota。
+  #   独立成模块的两个理由：①它只管"展示"，不参与版本比较；②agent_ui.h / agent_panel.cpp
+  #   都在超线白名单内（加一行即门禁 error），故入口做成零调用点的 QML 单例。
+  src/ota/ota_channel_state.cpp
+  src/ota/ota_channel_state.h
   # ── 自习模式（2026-10-30 main 拆分：#5 迁出，原 main.cpp 4261-4370）──
   #   sendNoiseAlert/studyOnSample/studyTriggerRecord + 自动录制计时器；状态全局（g_study*）
   #   仍驻 main，按既有 extern 模式（g_uid/agentEnvPath 同款）复用，纯搬迁零行为变化。
