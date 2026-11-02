@@ -27,6 +27,19 @@ import { dropClassAttendance } from './class-attendance.js';
 import { issueClassBind, getTicket, revokeTicket } from './bind-qr.js';
 import { tenantOf, findClass, crossTenantHint, canManageMembers, canReadClass } from './class-admin-shared.js';
 
+/* 发布卡片类型白名单（2026-11-02 拆分回归修复）。
+ *
+ * ⚠️ 这个常量原在 class-admin.js 顶部，拆文件时被漏掉 —— 拆分脚本只搬函数，
+ * 没搬同文件里的顶层常量。后果：adminPublish 引用未定义标识符，接口 500，
+ * 而模块 import 照样成功、导出面一个不少（ESM 不做标识符静态检查）。
+ * 是 regression-class-publish 的 7 条失败把它揪出来的 —— 这正说明
+ * 「拆完必须跑真回归」，审计再全也替代不了发一次真请求。
+ *
+ * 四类（原注释照搬）：student-notice 学生公告 / class-notice 班级公告 /
+ * fullscreen-notice 全屏通知 / homework 课后作业（全屏文字窗 + Timeline 留痕）。
+ */
+const PUBLISH_TYPES = ['student-notice', 'class-notice', 'fullscreen-notice', 'homework'];
+
 /** 建班：只建班级身份，不碰任何设备。已存在（同码/同名）→ 幂等返回既有班。 */
 export function adminCreateClass({ code = '', name = '' } = {}, ident = null) {
   const tn = tenantOf(ident);
