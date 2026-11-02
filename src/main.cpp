@@ -346,7 +346,7 @@ void sendActionReceipt(const QString &id, const QString &action, const QString &
 
 
 // ── OTA 全局：文件作用域（namespace 外），供 src/ota/ota_state 模块 extern 复用 ──
-extern const char *kAppVersion = "0.6.51-rc.3";
+extern const char *kAppVersion = "0.6.61";
 QString g_channel = QStringLiteral("stable");   // 供 register 上报；main 启动即解析覆盖
 QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
 bool g_updateMandatory = false;     // 云端 ota.json 的 mandatory（true=强制自动升级）
