@@ -8,10 +8,6 @@ import "../../components/theme"
 // 判据与状态文案照 Widgets 版；安装 = 下载 zip → 解压 → installAndLaunch（C++ 侧执行）。
 //
 // 2026-10-30 用户点单「全部换新」：
-//   · `tok`（ctx.theme / Md3 令牌）→ 共享库 `Theme` 单例，Hex 兜底全删；
-//   · 两处 `M.Md3Card` delegate → `AppCard`（outlined→default、filled→muted），
-//     `import md3 as M` 也随之去掉 —— 被控端 QML 至此不再引用 md3 组件库；
-//   · Md3Card 内层是普通 Item（子项 anchors），AppCard 内层是 ColumnLayout ⇒
 //     卡内一律改 Layout 附加属性，`height` 必须写 `Layout.preferredHeight`（Layout 忽略 height）；
 //   · `Row { topPadding }` → `RowLayout { Layout.topMargin }`（Row 没有 padding 属性）。
 Item {

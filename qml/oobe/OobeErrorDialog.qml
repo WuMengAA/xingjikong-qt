@@ -2,8 +2,6 @@
 // 用户明确要求：绑定失败必须在**当前页**弹一个友好的提示，不能崩、不能白屏。
 // 这里包一层共享 AppDialog（不自造对话框外观），只统一「一个按钮 + 一句能照着做的话」口径。
 //
-// 2026-10-30 用户点单「全部换新」：内层 `M.Md3Dialog` → 共享库 `AppDialog`。
-// 两件接口不同（Md3Dialog 吃 `actions[]` 数组 + onActionClicked(index, role)；
 // AppDialog 是"内容容器 + 受控 opened + closed() 信号"），故标题/正文/按钮改为显式摆。
 // ⚠️ 对外 API 一字未动（opened / title / text / buttonText / dismissed），调用方零改动。
 //

@@ -11,7 +11,6 @@
 //   deviceRole / classCode（广播端里它是**站码**）/ connState / appVersion
 //
 // 2026-10-30 用户点单「全部换新」：
-//   · `tok`（ctx.theme / Md3）→ 共享库 `Theme`；`import md3 as M` 本件无引用，删除；
 //   · 两个入口按钮原来是品牌蓝 `#2F6BFF` / `#1F57E8` 硬编码 + 浅色 Hex 兜底 ——
 //     全页按规范改为中性：主入口 `Theme.accentStrong`（被控端已置中性反白），
 //     次入口 `Theme.color.surface`，hover 用一层低透明度覆盖（不再写死第二个蓝）；

@@ -2,8 +2,6 @@
 // 四项检查由 C++ buildSelfCheckItems() 判据生成（与 Widgets 版一字不差）；
 // 「一键修复」发 selfCheckFixRequested → main.cpp 执行（配置缺→配置向导；否则立即重连）。
 //
-// 2026-10-30 用户点单「全部换新」：`tok`（= ctx.theme，Md3 令牌）→ 共享库 `Theme` 单例，
-// 同时清掉 5 处 `tok ? tok.cX : "#hex"` 三元兜底（Hex 全删）。`import md3 as M` 本件早已无用，一并去掉。
 //
 // 2026-10-31 「组件显示雏形」批次：
 //   · 补汇总行（C++ selfCheckSummaryText 给"共 N 项 · 通过 X · 需处理 Y"），

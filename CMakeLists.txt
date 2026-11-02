@@ -518,11 +518,13 @@ endif()
 #   存量界面后续迁移要 import 它 ⇒ 仍按同模式拷回 qml/components/，让 `import "components"`
 #   / `import "../components/md3"` 之类的既有写法在将来搬过来时不需要改路径。
 set(STE_SHARED_UI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Stelarith-shared-qml/ui")
-if(NOT EXISTS "${STE_SHARED_UI_DIR}/theme/Md3.qml")
+# 2026-11-02：判据从 `theme/Md3.qml` 改为 `theme/{Theme.qml,qmldir}` 这一对。
+# Md3.qml 已退场（全库对 `Md3.` 的引用实测 0 处；qmldir 只声明 `singleton Theme 1.0`）。
+# 旧判据盯的是已删除文件 ⇒ 目录齐全也 FATAL_ERROR，门禁先于代码把构建卡死。
+if(NOT EXISTS "${STE_SHARED_UI_DIR}/theme/Theme.qml" OR NOT EXISTS "${STE_SHARED_UI_DIR}/theme/qmldir")
   message(FATAL_ERROR
     "[agent] 共享 UI 基座目录缺失：${STE_SHARED_UI_DIR}\n"
-    "  Md3 设计系统真源在 Stelarith-shared-qml/ui/theme/（两端共用，2026-10-25 起\n"
-    "  移入 theme/ 子目录并配 qmldir 成为 pragma Singleton：`import \"../components/theme\"`）。\n"
+    "  主题真源在 Stelarith-shared-qml/ui/theme/（pragma Singleton，qmldir 声明 Theme）。\n"
     "  请整体 clone 根仓库 Stelarith-xingjikong-qt，不要单独 clone 本子工程。")
 endif()
 

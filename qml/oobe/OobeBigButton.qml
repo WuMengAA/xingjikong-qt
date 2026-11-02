@@ -1,7 +1,4 @@
 // 首次启动引导 · 主按钮（2026-10-20）
-// 为什么不用 Md3Btn：MD3 规范的按钮高 40，而触屏/教室机场景要求**主操作至少 48**，
-// 且本向导的主按钮是「整行通栏」——Md3Btn 是药丸自适宽，撑不出通栏效果。
-// 自绘一个（不用 Qt Button，遵项目纪律），尺寸/状态层按 MD3 取。
 import QtQuick
 import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 
@@ -27,7 +24,6 @@ Rectangle {
         color: root.primary ? Theme.accentStrongForeground : Theme.color.textPrimary
     }
 
-    // MD3 状态层：hover 8% / press 10%
     Rectangle {
         anchors.fill: parent
         radius: parent.radius

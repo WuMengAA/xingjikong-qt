@@ -8,7 +8,6 @@
 //     QML 自己不猜绑定结果（扫码页/输码页共用同一处跳转判断）。
 //   · 失败一律弹 OobeErrorDialog（薄包装共享 AppDialog，友好文案来自 C++），**绝不白屏/不动死**。
 //
-// ⚠️ 命名纪律：令牌实例 id 用 `tok`（`md3` 与子组件属性同名会自引用，项目已踩过）。
 // ⚠️ 依赖：QtQuick.Controls 的 StackView。被控端自 0.6.46 起由 windeployqt 部署
 //    QtQuick/Controls + Qt6QuickControls2.dll（见 CMakeLists 的模块完整性断言）。
 import QtQuick

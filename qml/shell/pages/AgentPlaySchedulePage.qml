@@ -32,7 +32,6 @@ Item {
             anchors.topMargin: 16
             spacing: 14
 
-            // 档② 换布局（2026-10-30）：Md3Card 的默认容器是普通 Item（子项用 anchors 定位），
             // 而 AppCard 的默认容器是 ColumnLayout ⇒ 卡内一律改用 Layout 附加属性、
             // 且 height 必须写成 Layout.preferredHeight（Layout 会忽略 height）。
             // variant: filled → muted（AppCard.muted = surfaceVariant 底、不叠阴影）。

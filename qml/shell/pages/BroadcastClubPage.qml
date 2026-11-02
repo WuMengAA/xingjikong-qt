@@ -5,7 +5,6 @@ import "../../components/theme"   // 设计令牌单例 Theme（2026-10-30 起�
 //
 // 设计约定：
 //   · 纯 QML 实现（被控端部署不含 QtQuick.Controls 运行库，不复用 Controls）。
-//     2026-10-30 用户点单「全部换新」：原「现代蓝白 MD3 flavor」与本地 `st` 令牌对象已删除，
 //     改为共享库 `Theme` 单一真源（品牌蓝取消、边框删除、状态层用前景色叠透明度）。
 //   · 数据来自上下文属性 `broadcastClub`（AgentShell::setBroadcastClub 注入）：
 //       broadcastClub.loggedIn / station / token

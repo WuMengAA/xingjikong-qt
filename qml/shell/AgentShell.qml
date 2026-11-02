@@ -8,12 +8,9 @@ import "AgentPages.js" as AgentPages
 // 由 C++ `AgentShell`（src/agent_ui.h）加载：QQuickWidget 顶格承载本文件，
 // 上下文属性 `agentUi` 提供数据（版本/连接/升级状态 + 各功能开关）。
 //
-// 结构：顶栏（标题 + 连接状态）→ 页宿主（UiPageHost）→ 底导航（Md3NavBar）。
 // 页清单从 `AgentPages.js` 声明派生；底导航从页宿主的 navModel() 派生 ——
 // 加页只改 AgentPages.js，本文件零改动（与 viewer 的 Main.qml 同一思路）。
 //
-// ⚠️ 命名纪律：Md3 令牌实例的 id 用 `tok`，**不用 `md3`** —— 子组件的属性也叫 md3，
-//    写 `md3: md3` 会得到自引用绑定环（`theme: theme` 同款坑，U3 实证）。
 Rectangle {
     id: shellRoot
     color: Theme.color.background
@@ -32,13 +29,9 @@ Rectangle {
     // ⇒ 三处一起删，视觉零变化，但壳从「加载不出来」恢复为可加载。
     //    （若将来真要接入 QtShadcn 的 C++ 单例，前提是先把 QtShadcnplugin 编出 DLL。）
 
-    // 2026-10-30「全部换新」收口：`tok`（Md3 令牌别名）与 `Binding { target: Md3 … }` 一并删除。
-    // 被控端 QML 至此**不再引用 Md3 令牌，也不再引用 md3 组件库**（末尾 3 处 Md3Card/Md3Dialog 已换）。
 
     // Theme = 新一代令牌单例（pragma Singleton，共享库 ui/theme/Theme.qml）。
-    // ⚠️ 2026-10-30 实测坑：`Theme.dark` 与 `Md3.dark` 是**两个独立布尔**，
     //    Theme 默认 false（浅色）。迁到 Theme 的组件若不跟着绑，会在深色外壳里
-    //    渲染成浅色块 —— 静默错、不报错。故两个单例必须同时写，直到 Md3 退役。
     Binding { target: Theme; property: "dark"; value: !agentUi.lightMode }
 
     // 被控端「不要品牌紫」（2026-10-30 用户点单）：开关轨道 / 选中段 / 当前导航 / primary 按钮
@@ -132,7 +125,6 @@ Rectangle {
     }
 
     // ── 底导航（模型从页宿主派生；⚠️ 函数调用无依赖追踪 ⇒ 先触达 count/currentIndex）──
-    // 2026-10-28 模块三：换掉共享 Md3NavBar（图标是 `Text{text: icon}` ⇒ 渲染成
     // 方块/英文串）。本件同目录兄弟组件（SvgIcon 版），接口不变。
     AgentBottomNav {
         id: nav

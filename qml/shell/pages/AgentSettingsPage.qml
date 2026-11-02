@@ -18,7 +18,6 @@
 //   ② 九个 Sec* 不再接收 `ash:` 注入（各件已自带 Theme 依赖）。
 //   ③ 重置确认由 AshDialog 重写为 AppDialog（新件是"内容容器 + 受控 opened"，
 //      不再吃 `actions[]` 数组与 onActionClicked(index, role) 那套约定）。
-//   ④ 滚动条颜色 `#938F99`（MD3 outline 遗留 Hex）→ `Theme.color.textSecondary`。
 //   ⑤ 顺带修正 `contentCol` 只写了 `anchors.topMargin` 却没写 `anchors.top`
 //      ⇒ topMargin 一直无效、内容贴顶。补 `anchors.top: parent.top` 让 16 的上边距真正生效。
 //

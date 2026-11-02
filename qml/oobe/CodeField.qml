@@ -1,9 +1,7 @@
 // 首次启动引导 · 绑定码输入框（2026-10-20）
-// 为什么不用共享 Md3TextField：那是 68 高的表单行，字号 14；本页要求「正中间一个**大尺寸**
 // 输入框」，字号 32、字符间距拉开。
 // 收云端发的 6 位一次性码（2026-10-25 班级接入码收归我方后，旧站点 XJK-XXXX-XXX 已废止）。
 // ⇒ 上限 6 位；格式合法性由 C++ 的 isCodeFormatValid 单点判定。
-// ⚠️ 不用 Qt TextField（项目纪律）；TextInput 是 QtQuick 核心项，Md3TextField 内部也用它。
 import QtQuick
 import "../components/theme"   // 设计令牌单例 Theme（2026-10-30 起唯一）
 
