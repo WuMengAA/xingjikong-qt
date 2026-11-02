@@ -24,9 +24,16 @@ const F = {
   gateH:   'Stelarith-control-qt/src/plugin/pluginhost.h',
   gateCpp: 'Stelarith-control-qt/src/plugin/pluginhost.cpp',
   main:    'Stelarith-control-qt/src/main.cpp',
+  // 2026-11-02：被控端 src 文件夹化 + 插件能力注入搬出 main。
+  //   这些接线点原来全在 main.cpp，现在分散到下面几个文件里。
+  //   ⚠️ 别再把断言指回 main.cpp：那会让「真源还在、只是换了住处」红成一片，
+  //   而人一旦习惯性认为这条门禁"本来就有几条红的"，它就再也不拦东西了。
+  bridge:  'Stelarith-control-qt/src/plugin/plugin_api_bridge.cpp',
+  panel:   'Stelarith-control-qt/src/ui/agent_panel.cpp',
+  panelData: 'Stelarith-control-qt/src/ui/agent_panel_data.cpp',
   agentUi: 'Stelarith-control-qt/src/agent_ui.h',
-  page:    'Stelarith-control-qt/qml/shell/pages/AgentSettingsPage.qml',
-  islandH: 'Stelarith-control-qt/src/island.h',
+  page:    'Stelarith-control-qt/qml/shell/pages/settings/SecAppearance.qml',
+  islandH: 'Stelarith-control-qt/src/island/island.h',
   agentSettings: 'Stelarith-control-qt/src/core/AgentSettings.h',
 };
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -71,6 +78,10 @@ function check(cond, msg, detail) { cond ? ok(msg) : bad(msg, detail); }
 const gateH   = strip(read(F.gateH));
 const gateCpp = strip(read(F.gateCpp));
 const mainCpp = strip(read(F.main));
+// 接线真源：能力注入在 plugin_api_bridge.cpp，islandShowAt 实现在 notify_entry.cpp。
+// 三处拼成一份"接线面"，断言查这个面，不查某个具体文件 —— 搬家不该让断言失明。
+const notifyEntry = strip(read('Stelarith-control-qt/src/notify/notify_entry.cpp'));
+const wireSrc = [strip(read(F.bridge)), strip(read(F.panel)), strip(read(F.panelData)), notifyEntry].join('\n');
 const agentUi = strip(read(F.agentUi));
 const pageQml = strip(read(F.page));
 const islandH = strip(read(F.islandH));
@@ -169,18 +180,20 @@ check(/tokens\s*<\s*1\.0\s*\)\s*return\s+false/.test(gateCpp), '令牌桶不足�
 check(/tokens\s*\+\s*dt\s*\*\s*PluginIslandGate::kRatePerSec/.test(gateCpp), '令牌桶按 kRatePerSec 补充');
 
 // ── 三、接线（main.cpp）：漏一处 = 设置页开关形同虚设 / 时间戳不变 ─────────────
-console.log('── 三、接线（main.cpp / island.h）──');
-check(/api\.islandShowAt\s*=/.test(mainCpp), 'PluginAgentApi::islandShowAt 已接线');
-check(/islandShowAt\s*\(\s*title\s*,\s*desc\s*,\s*icon\s*,\s*durationMs\s*,\s*f\s*,\s*fromAdmin\s*,\s*noticeAtMs\s*\)/
-        .test(mainCpp), 'islandShowAt 把通知发生时刻透传进岛');
-check(/api\.senderPriorityLimit\s*=\s*\[\]\(\)\s*\{\s*return\s+AgentSettings::pluginIslandPush\(\)/.test(mainCpp),
+console.log('── 三、接线（plugin_api_bridge / notify_entry / island.h）──');
+check(/api\.islandShowAt\s*=/.test(wireSrc), 'PluginAgentApi::islandShowAt 已接线');
+// ⚠️ 参数名不做硬约束（搬家后局部变量从 f 变成 sanitizeForm(form)），
+//    要断言的是**语义**：实参顺序 title/desc/icon/时长/形态/fromAdmin/noticeAtMs 齐全。
+check(/islandShowAt\s*\(\s*title\s*,\s*desc\s*,\s*icon\s*,\s*\w+(?:\(\w+\))?\s*,\s*[\w()]+\s*,\s*fromAdmin\s*,\s*noticeAtMs\s*\)/
+        .test(wireSrc), 'islandShowAt 把通知发生时刻透传进岛');
+check(/api\.senderPriorityLimit\s*=\s*\[\]\(\)\s*\{\s*return\s+AgentSettings::pluginIslandPush\(\)/.test(wireSrc),
       'senderPriorityLimit → AgentSettings::pluginIslandPush()（开关真生效）');
-check(/static\s+void\s+islandShowAt\s*\(/.test(mainCpp), 'main.cpp 有 islandShowAt() 包装');
-check(/setNoticeTimeForNext\s*\(\s*noticeAtMs\s*\)/.test(mainCpp), 'islandShowAt 走 setNoticeTimeForNext 注入');
+check(/void\s+islandShowAt\s*\(/.test(wireSrc), '有 islandShowAt() 实现（notify_entry.cpp）');
+check(/setNoticeTimeForNext\s*\(\s*noticeAtMs\s*\)/.test(wireSrc), 'islandShowAt 走 setNoticeTimeForNext 注入');
 check(/setNoticeTimeForNext\s*\(qint64\s+atMs\)/.test(islandH), 'IslandOverlay::setNoticeTimeForNext 公开存在');
-check(/\?\s*\(m_noticeHintMs\s*\/\s*1000\)/.test(strip(read('Stelarith-control-qt/src/island.cpp'))),
+check(/\?\s*\(m_noticeHintMs\s*\/\s*1000\)/.test(strip(read('Stelarith-control-qt/src/island/island.cpp'))),
       'showIsland 消费一次性提示位（island.cpp）');
-check(/m_noticeHintMs\s*=\s*0;\s*\n/.test(strip(read('Stelarith-control-qt/src/island.cpp'))),
+check(/m_noticeHintMs\s*=\s*0;\s*\n/.test(strip(read('Stelarith-control-qt/src/island/island.cpp'))),
       '提示位消费后清零（否则下一条通知继承上一条的时间）');
 
 // ── 四、开关三处一致：键名 / 默认值 / Q_PROPERTY / QML ───────────────────────
@@ -193,9 +206,9 @@ check(/Q_PROPERTY\(bool\s+pluginIslandPush\s+READ\s+pluginIslandPush\s+WRITE\s+s
         .test(agentUi), 'agent_ui.h 暴露 Q_PROPERTY pluginIslandPush');
 check(/switchChanged\(QStringLiteral\("pluginIslandPush"\)/.test(agentUi),
       'agent_ui setter 发 switchChanged("pluginIslandPush")');
-check(/key\s*==\s*QLatin1String\("pluginIslandPush"\)/.test(mainCpp),
-      'main.cpp switchChanged 接住 pluginIslandPush 并落盘');
-check(/m_pluginIslandPush\s*=\s*AgentSettings::pluginIslandPush\(\)/.test(mainCpp),
+check(/key\s*==\s*QLatin1String\("pluginIslandPush"\)/.test(wireSrc),
+      'switchChanged 接住 pluginIslandPush 并落盘（agent_panel.cpp）');
+check(/m_pluginIslandPush\s*=\s*AgentSettings::pluginIslandPush\(\)/.test(wireSrc),
       'agentUiFill 回填快照（开关状态以真实存储为准）');
 check(/bool\s+m_pluginIslandPush\s*=\s*true/.test(agentUi),
       'agent_ui 成员默认值与 AgentSettings 同值（true）');

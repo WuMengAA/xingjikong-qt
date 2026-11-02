@@ -60,7 +60,11 @@ Item {
     }
 
     // 弹性过渡：形态切换 / 展开收起都走 OutBack，呼应灵动岛「果冻感」。
-    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+    // 时长走令牌（2026-11-02 门禁收口）：原来写死 200，值等于 durMid，
+    // 但写死就意味着以后调令牌它不跟，形态淡入会比全岛其它过渡慢半拍。
+    Behavior on opacity {
+        NumberAnimation { duration: morph.th ? morph.th.durMid : 200; easing.type: Easing.OutCubic }
+    }
 
     // 声波竖线动画节拍：仅在 audio 形态推进，驱动竖线高度重算
     Timer {

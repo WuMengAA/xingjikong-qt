@@ -753,6 +753,13 @@ Item {
         enabled: root._interactive || !root._idle
         acceptedButtons: Qt.LeftButton
         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        // 2026-11-02（用户：「有触摸就等到无触摸才收起」）：按下即冻结自动收起，松手才重新起表。
+        //   为什么必须由 QML 上报：QQuickWidget 是子 QWidget，事件在 QML 覆盖区域里被这里吃掉，
+        //   岛体 C++ 的 mousePressEvent 收不到 —— 只靠 C++ 侧接是断的。
+        onPressed: if (root.bridgeRef && root.bridgeRef.notifyTouching) root.bridgeRef.notifyTouching(true)
+        onReleased: if (root.bridgeRef && root.bridgeRef.notifyTouching) root.bridgeRef.notifyTouching(false)
+        // canceled：手势被别的 Item 抢走 / 窗口失焦，没有 released 可等 —— 不放松就会永久冻住。
+        onCanceled: if (root.bridgeRef && root.bridgeRef.notifyTouching) root.bridgeRef.notifyTouching(false)
         // 函数式签名（qmllint 建议）：mouse 形参显式传入，不靠隐式参数名
         onClicked: function(mouse) {
             // 有动作按钮时不做展开/收起（避免点按钮周围误触展开）
@@ -2813,6 +2820,9 @@ Item {
                         id: fpSnap
                         target: fpFlick
                         property: "contentX"
+                        // 320ms 是**刻意**不在令牌阶梯上（durMid=200 偏短、durLong=380 偏拖沓）：
+                        // 这是手指甩动后"吸附到整页"的收尾手感，短了像瞬移、长了像黏住。
+                        // 已登记进 test-island-tasks.mjs 的硬编码白名单，那里有同样的理由。
                         duration: 320
                         easing.type: Easing.OutCubic
                         onStopped: {
@@ -2844,7 +2854,11 @@ Item {
                             color: index === fpFlick.curPage
                                    ? (root.th ? root.th.accent : "#6750A4")
                                    : (root.th ? (root.th.light ? Qt.rgba(0, 0, 0, 0.18) : Qt.rgba(1, 1, 1, 0.22)) : "#888888")
-                            Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                            // 指示条宽度跟随（2026-11-02）：原来写死 220，全岛令牌化时漏了这处。
+                            // 220 本来就不在阶梯上，就近落到 durMid(200)，观感几乎无差。
+                            Behavior on width {
+                                NumberAnimation { duration: root.th ? root.th.durMid : 200; easing.type: Easing.OutCubic }
+                            }
                         }
                     }
                 }

@@ -26,10 +26,18 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.join(ROOT, "..");
-const ISLAND_H = path.join(REPO, "Stelarith-control-qt", "src", "island.h");
-const ISLAND_CPP = path.join(REPO, "Stelarith-control-qt", "src", "island.cpp");
-const BRIDGE_CPP = path.join(REPO, "Stelarith-control-qt", "src", "island_bridge.cpp");
+// ⚠️ 2026-11-02：被控端 src 已按职能文件夹化，这三个文件现在都在 src/island/ 下。
+//    改前这里写的是旧的平铺路径 —— 文件搬家后这三个 const 指到了不存在的路径，
+//    脚本**一启动就 throw**（ENOENT），而不是报"断言失败"。
+//    危险在于它退出码非 0，很容易被当成"环境问题"随手跳过：门禁于是整整一段时间
+//    什么都没查，却看起来还在拦。
+const ISLAND_H = path.join(REPO, "Stelarith-control-qt", "src", "island", "island.h");
+const ISLAND_CPP = path.join(REPO, "Stelarith-control-qt", "src", "island", "island.cpp");
+const BRIDGE_CPP = path.join(REPO, "Stelarith-control-qt", "src", "island", "island_bridge.cpp");
 const MAIN_CPP = path.join(REPO, "Stelarith-control-qt", "src", "main.cpp");
+// 2026-11-02：kind → Form 的分流随通知链路一起搬进了 src/notify/notify_entry.cpp。
+// 原来只盯 main.cpp，搬走后这条断言必然假红（真源还在，只是换了住处）。
+const NOTIFY_ENTRY_CPP = path.join(REPO, "Stelarith-control-qt", "src", "notify", "notify_entry.cpp");
 const ROOT_QML = path.join(ROOT, "island", "IslandRoot.qml");
 const BANNER_QML = path.join(ROOT, "island", "IslandBannerFace.qml");
 const MINI_QML = path.join(ROOT, "island", "IslandMiniFace.qml");
@@ -69,6 +77,8 @@ const hSrc = stripComments(read(ISLAND_H));
 const cppSrc = stripComments(read(ISLAND_CPP));
 const bridgeSrc = stripComments(read(BRIDGE_CPP));
 const mainSrc = stripComments(read(MAIN_CPP));
+// kind 分流的真源现在在 notify/notify_entry.cpp；两处合并查，避免搬家后门禁假红/假绿。
+const kindSrc = stripComments(read(NOTIFY_ENTRY_CPP)) + "\n" + mainSrc;
 const rootQml = stripComments(read(ROOT_QML));
 
 const enumMatch = hSrc.match(/enum class Form\s*\{([^}]*)\}/);
@@ -242,11 +252,11 @@ t("showWithActions：紧凑形态 + 按钮必须降级 Centered（否则按钮�
 t("线上 kind → Form 映射覆盖 banner/mini（管理端可下发这两档）", () => {
 	for (const [kind, cls] of [["banner", "Banner"], ["mini", "Mini"]]) {
 		const re = new RegExp(`kind\\s*==\\s*QLatin1String\\("${kind}"\\)\\s*\\)\\s*f\\s*=\\s*IslandOverlay::Form::${cls}`);
-		ok(re.test(mainSrc), `main.cpp 的 kind 分流没把 "${kind}" 映射到 Form::${cls}`);
+		ok(re.test(kindSrc), `kind 分流（notify_entry.cpp / main.cpp）没把 "${kind}" 映射到 Form::${cls}`);
 	}
 	// 未知 kind 仍必须落 Centered（安全默认不能被新分支带偏）
 	ok(
-		/IslandOverlay::Form\s+f\s*=\s*IslandOverlay::Form::Centered/.test(mainSrc),
+		/IslandOverlay::Form\s+f\s*=\s*IslandOverlay::Form::Centered/.test(kindSrc),
 		"kind 分流的默认值不是 Centered —— 未知 kind 会落错形态"
 	);
 });

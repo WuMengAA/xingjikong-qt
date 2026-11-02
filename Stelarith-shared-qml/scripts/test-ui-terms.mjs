@@ -44,8 +44,8 @@ const SCAN_ROOTS = [
 /** 单文件目标（HTML 单独处理：注释语法不同） */
 const SCAN_FILES = ["Stelarith-cloud/src/admin.html", "Stelarith-cloud/src/bind.html"];
 /** 被控端 C++ 里的用户可见文案（托盘菜单 / 对话框 / 提示） */
-const SCAN_CPP = ["Stelarith-control-qt/src/main.cpp", "Stelarith-control-qt/src/island.cpp",
-	"Stelarith-control-qt/src/oobe_wizard.cpp"];
+const SCAN_CPP = ["Stelarith-control-qt/src/main.cpp", "Stelarith-control-qt/src/island/island.cpp",
+	"Stelarith-control-qt/src/oobe/oobe_wizard.cpp"];
 
 const SKIP = T.scanSkipPaths();
 

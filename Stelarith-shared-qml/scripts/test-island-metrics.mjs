@@ -28,8 +28,11 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.join(ROOT, "..");
-const ISLAND_H = path.join(REPO, "Stelarith-control-qt", "src", "island.h");
-const ISLAND_CPP = path.join(REPO, "Stelarith-control-qt", "src", "island.cpp");
+// ⚠️ 2026-11-02：被控端 src 文件夹化后，island.h / island.cpp 已搬到 src/island/。
+//    旧路径让脚本启动即 ENOENT throw（不是断言失败、是根本没跑），
+//    退出码非 0 却看着像"环境问题"，门禁等于空转。别再改回平铺路径。
+const ISLAND_H = path.join(REPO, "Stelarith-control-qt", "src", "island", "island.h");
+const ISLAND_CPP = path.join(REPO, "Stelarith-control-qt", "src", "island", "island.cpp");
 const THEME = path.join(ROOT, "island", "IslandTheme.qml");
 const ROOT_QML = path.join(ROOT, "island", "IslandRoot.qml");
 

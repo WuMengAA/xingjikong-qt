@@ -17,9 +17,9 @@ import process from 'node:process';
 
 const ROOT = process.cwd();
 const F = {
-  islandH: 'Stelarith-control-qt/src/island.h',
-  islandCpp: 'Stelarith-control-qt/src/island.cpp',
-  bridgeCpp: 'Stelarith-control-qt/src/island_bridge.cpp',
+  islandH: 'Stelarith-control-qt/src/island/island.h',
+  islandCpp: 'Stelarith-control-qt/src/island/island.cpp',
+  bridgeCpp: 'Stelarith-control-qt/src/island/island_bridge.cpp',
 };
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
@@ -203,7 +203,7 @@ check(/t\.tag == QStringLiteral\("media"\)\s*\)\s*\{\s*t\.progress = p/.test(adv
 // ── 八、VoiceHub 广播任务（2026-10-18）────────────────────────────────────
 console.log('── 八、VoiceHub 广播链路 ──');
 const MAIN_CPP = strip(read('Stelarith-control-qt/src/main.cpp'));
-const BRIDGE_H = strip(read('Stelarith-control-qt/src/island.h'));
+const BRIDGE_H = strip(read('Stelarith-control-qt/src/island/island.h'));
 const BRIDGE_CPP_JS = fs.readFileSync(path.join(ROOT, 'Stelarith-cloud/src/voicehub-bridge.js'), 'utf8');
 // 被控端：消息分支 + 岛侧接口
 check(/voicehub_nowplaying/.test(MAIN_CPP), 'main.cpp 处理 voicehub_nowplaying 消息');
@@ -301,6 +301,9 @@ console.log('── 十二、动效时长令牌化 ──');
   const ALLOW = [
     { file: 'IslandRoot.qml', value: 60,   why: '频谱条高频刷新，60ms 是防拖影的调优点' },
     { file: 'IslandRoot.qml', value: 75,   why: '点赞回弹 75+75 对称弹性，阶梯无此档' },
+    // 2026-11-02：面分页甩动后的吸附收尾。durMid=200 短了像瞬移、durLong=380 长了像黏住，
+    // 这一档是跟手感，不在令牌阶梯上（理由已同步写进 IslandRoot.qml 对应行注释）。
+    { file: 'IslandRoot.qml', value: 320,  why: '面分页吸附收尾：阶梯无 320 档，短了像瞬移、长了像黏住' },
     { file: 'WhaleMascot.qml', value: 1600, why: '鲸鱼呼吸循环动画，非过渡' },
     { file: 'WhaleMascot.qml', value: 260,  why: 'OutBack 过冲落地时长' },
   ];
@@ -327,7 +330,7 @@ console.log('── 十二、动效时长令牌化 ──');
 // 桥是 C++ 侧唯一的对外面（island_bridge.h），改名/删除后 QML 不会自动跟着改。
 console.log('── 十三、QML↔C++ 接口对齐 ──');
 {
-  const BRIDGE_H_PATH = path.join(ROOT, 'Stelarith-control-qt/src/island_bridge.h');
+  const BRIDGE_H_PATH = path.join(ROOT, 'Stelarith-control-qt/src/island/island_bridge.h');
   // C++ 侧对外暴露的名字：Q_PROPERTY 的属性名 + Q_INVOKABLE/信号的函数名。
   // ⚠️ 用宽口径（任何 `名字(` 形声明 + Q_PROPERTY 名）而非严格解析：
   //    目的是抓"完全不存在"，不追求区分属性与方法（QML 里两者都是 bridgeRef.x）。
