@@ -61,8 +61,7 @@ Item {
     function pickToday(p) {
         if (!p || !p.days || p.days.length === 0) return 0
         const dow = new Date().getDay()
-        for (var i = 0; i < p.days.length; ++i)
-            if (p.days[i].dow === dow) return i
+        for (var i = 0; i < p.days.length; ++i) if (p.days[i].dow === dow) return i
         return 0
     }
 
@@ -136,6 +135,8 @@ Item {
             canImport: pane.subscribed && pane.classCode !== ""
             groups: pane.groups
             nameInferred: pane.groupsInferred
+            classCode: pane.classCode
+            adminRef: pane.admin()
             onImportRequested: pane.pickProfile()
             onRefreshRequested: pane.reload()
             onGroupPicked: function (id) { pane.doImport(id) }

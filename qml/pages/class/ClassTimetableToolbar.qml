@@ -22,10 +22,35 @@ Column {
     property var groups: []
     /** true = 班名是按档案顺序推的（12 群同名），界面必须提示人工核对。 */
     property bool nameInferred: false
+    /** 下发目标班级 + ClassAdmin 引用（2026-11-02 课表下发）。
+     *  为什么由父级传引用而不是自己 `backend`：MainWindow 作用域里裸 backend 恒为 null，
+     *  本项目统一用 backendRef 显式传入（见 PreviewTopBar 的同款注释）。 */
+    property string classCode: ""
+    property var adminRef: null
+    /** 送达视图：{total, delivered:[{uid,ok,days,error,at}], pending:[uid]}。
+     *  一次下发后自动拉一次 —— 「已发送」和「已落盘」是两件事，老师要能看见差别。 */
+    property var delivery: null
 
     signal importRequested()
     signal refreshRequested()
     signal groupPicked(string groupId)
+
+    /** 下发 + 立刻回读送达情况（等设备回执要时间，先给当前快照，用户可再点刷新）。 */
+    function pushAndPoll() {
+        if (!bar.adminRef || bar.classCode === "") return
+        bar.adminRef.pushTimetable(bar.classCode)
+        bar.adminRef.timetableDelivery(bar.classCode)
+    }
+
+    Connections {
+        target: bar.adminRef
+        ignoreUnknownSignals: true
+        function onTimetableDeliveryList(code, delivered, pending) {
+            if (code !== bar.classCode) return
+            bar.delivery = { total: delivered.length + pending.length,
+                             delivered: delivered, pending: pending }
+        }
+    }
 
     width: parent ? parent.width : 0
     spacing: 6
@@ -72,6 +97,39 @@ Column {
                 enabled: bar.canImport
                 onClicked: bar.refreshRequested()
             }
+            // 下发到教室机（2026-11-02）：改造前课表只到云端库，教室机读的是它本机档案。
+            FreshBtn {
+                text: "下发到设备"; icon: "send"; variant: "filled"
+                enabled: bar.canImport && bar.classCode !== ""
+                tip: "把这份课表推给本班所有在线设备（离线设备联网后自动收到）"
+                onClicked: bar.pushAndPoll()
+            }
+        }
+    }
+
+    // ── 送达条：只说「已下发」等于没说，送达 0 和送达 30 长得一样 ──
+    Text {
+        width: parent.width
+        visible: bar.delivery !== null
+        wrapMode: Text.WordWrap
+        text: {
+            const d = bar.delivery
+            if (!d) return ""
+            const ok = (d.delivered || []).filter(function (x) { return x.ok })
+            const bad = (d.delivered || []).filter(function (x) { return !x.ok })
+            let s = "送达：" + ok.length + " 台已落盘"
+            if (bad.length > 0) s += " · " + bad.length + " 台失败（" + (bad[0].error || "未说明原因") + "）"
+            if ((d.pending || []).length > 0) s += " · " + d.pending.length + " 台未回执（离线或未装新版）"
+            return s
+        }
+        font.pixelSize: 12
+        color: {
+            const d = bar.delivery
+            if (!d) return Theme.color.textSecondary || "#6B7280"
+            const bad = (d.delivered || []).filter(function (x) { return !x.ok })
+            return (bad.length > 0 || (d.delivered || []).length === 0)
+                   ? (Theme.color.warning || "#D97706")
+                   : (Theme.color.textSecondary || "#6B7280")
         }
     }
 

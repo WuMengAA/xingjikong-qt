@@ -181,3 +181,49 @@ QString ClassAdmin::readTextFile(const QString &path, int maxBytes)
     return QString::fromUtf8(raw);
 }
 
+
+/* ── 课表下发到教室机（2026-11-02）────────────────────────────────────────
+ * 为什么必须单独一件：改造前这条路**整体不存在** —— 课表只进云端库、只广播给
+ * 管理端浏览器，教室机读的仍是它本机那份 ClassIsland 档案。老师「导入成功」，
+ * 教室里却照旧上老课表，而且没有任何报错。这是本项目最隐蔽的一类缺陷：
+ * 两端各自正确、中间从未接线。
+ * 成功回执必须带台数（送达 N / 在线 M）——只说「已下发」等于没说：
+ * 送达 0 和送达 30 在界面上长得一模一样，老师没法判断要不要去教室看看。
+ */
+void ClassAdmin::pushTimetable(const QString &code)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    postJson(QStringLiteral("timetable-push"), b, [this](const QJsonObject &o) {
+        const int delivered = o.value(QStringLiteral("delivered")).toInt();
+        const int online = o.value(QStringLiteral("online")).toInt();
+        // 送达 0 但有人在线 = 设备收到了却没回执，属于要盯的情况；文案不能与"没人"混淆。
+        const QString note = online == 0
+            ? QStringLiteral("该班当前没有在线设备，联网后会自动收到")
+            : (delivered == 0
+                ? QStringLiteral("已发给 %1 台在线设备，尚未收到落地回执").arg(online)
+                : QStringLiteral("送达 %1 / 在线 %2").arg(delivered).arg(online));
+        emit opFinished(QStringLiteral("timetable-push"), true,
+                        QStringLiteral("课表已下发（%1 天 / %2 节）：%3")
+                            .arg(o.value(QStringLiteral("days")).toInt())
+                            .arg(o.value(QStringLiteral("lessons")).toInt())
+                            .arg(note));
+    });
+}
+
+void ClassAdmin::timetableDelivery(const QString &code)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("classCode"), code);
+    postJson(QStringLiteral("timetable-delivery"), b, [this, code](const QJsonObject &o) {
+        QVariantList delivered;
+        const QJsonArray ds = o.value(QStringLiteral("delivered")).toArray();
+        delivered.reserve(ds.size());
+        for (const QJsonValue &v : ds) delivered.append(v.toObject().toVariantMap());
+        QVariantList pending;
+        const QJsonArray ps = o.value(QStringLiteral("pending")).toArray();
+        pending.reserve(ps.size());
+        for (const QJsonValue &v : ps) pending.append(v.toString());
+        emit timetableDeliveryList(code, delivered, pending);
+    });
+}

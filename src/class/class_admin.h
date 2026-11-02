@@ -74,6 +74,14 @@ public:
     /** 只预览档案里的课表群（不落库），结果走 timetableGroupsList。 */
     Q_INVOKABLE void timetableGroups(const QString &profileJson);
 
+    // ── 课表下发到教室机（2026-11-02）──
+    // 改造前课表只进云端库、只广播给管理端浏览器，**教室机一无所知**（它读本机
+    // ClassIsland 档案）——两端各自正确、中间从未接线。这两件把下发与送达视图补上：
+    //   pushTimetable → opFinished("timetable-push", …)，文案带「送达 N / 在线 M」
+    //   timetableDelivery → timetableDeliveryList（已落盘 / 离线没回执必须分开显示）
+    Q_INVOKABLE void pushTimetable(const QString &code);
+    Q_INVOKABLE void timetableDelivery(const QString &code);
+
     // ── 学生名单批量导入（CSV 在 QML 侧解析成 rows；云端按学号幂等 upsert）──
     Q_INVOKABLE void importStudents(const QString &code, const QVariantList &rows);
     /** 考勤（2026-10-31）：拉某班某日的考勤记录 + 四档统计（GET /api/class/attendance）。 */
@@ -132,6 +140,12 @@ signals:
     /** 档案里的课表群清单（importTimetable/timetableGroups 的答复）。
      *  item = { id, name, days }；空列表 = 档案里没有可用日课表。 */
     void timetableGroupsList(const QVariantList &groups);
+    /** 课表送达视图（timetableDelivery 的答复）。
+     *  delivered = [{uid, ok, changed, days, lessons, error, at, classCode}]，
+     *  pending = [uid…]（**从没回过执**）。
+     *  两者必须分开显示：「没收到」要人去现场，「收到但失败」是另一条处置路径。 */
+    void timetableDeliveryList(const QString &classCode, const QVariantList &delivered,
+                               const QVariantList &pending);
 
 private:
     /** okText 非空时用作成功回执文案（学生操作要能说清"加了谁"，不能说"高二3班"）。 */
