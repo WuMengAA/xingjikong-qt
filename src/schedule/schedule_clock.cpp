@@ -1,5 +1,5 @@
 #include "schedule_clock.h"
-#include "schedule/profile_repository.h"
+#include "profile_repository.h"
 #include <QDateTime>
 #include <QDebug>
 #include <algorithm>

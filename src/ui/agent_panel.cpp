@@ -16,15 +16,15 @@
 #include "../agent_ui.h"          // AgentUi（friend 声明在 agent_ui.h）+ AgentShell
 #include "../core/AgentSettings.h" // AgentSettings（本地功能开关）
 #include "../modules/modulehost.h" // ModuleHost（内置模块层）
-#include "../island.h"            // IslandOverlay（岛联动）
+#include "../island/island.h"            // IslandOverlay（岛联动）
 #include "../media/MediaSession.h" // MediaSession（播放时段判定）
-#include "../settings_domain.h"   // SettingsDomain（存储/备份/重置）
-#include "../timesync_domain.h"   // TimesyncDomain（时间配置）
+#include "../domain/settings_domain.h"   // SettingsDomain（存储/备份/重置）
+#include "../domain/timesync_domain.h"   // TimesyncDomain（时间配置）
 #include "../ota/ota_state.h"     // otaPaused/otaLoadState（升级状态快照）
 #include "../ota/channel_persistence.h" // channelFilePath/persistChannel（更新渠道）
 #include "../p3log/p3_reader.h"   // buildNoiseLogText/buildStudyLogText/openFolder
 #include "../p3log/p3_record_view.h" // buildNoiseRecordView/buildStudyRecordView（记录页行）
-#include "../winlauncher.h"       // stelarithHideChildConsole（插件解压静默）
+#include "../system/winlauncher.h"       // stelarithHideChildConsole（插件解压静默）
 #include "../plugin/pluginhost.h" // PluginHost（g_pluginHost 类型）
 
 #include <QWebSocket>

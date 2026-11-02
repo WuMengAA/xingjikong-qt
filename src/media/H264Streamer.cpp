@@ -17,7 +17,7 @@
 #include <QTimer>
 #include <QDebug>
 #include <vector>
-#include "../screen_capture.h"   // ScreenCapture（BGRX 抓屏，与 ThumbnailReporter 同口径）
+#include "../capture/screen_capture.h"   // ScreenCapture（BGRX 抓屏，与 ThumbnailReporter 同口径）
 
 namespace {
 // 合成彩条 BGRX 帧（与 A 档第①步探针同款）：8 竖条 + 横坡，确定性强、可复现。

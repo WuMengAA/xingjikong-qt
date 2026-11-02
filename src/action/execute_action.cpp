@@ -23,26 +23,26 @@
 #include "../core/AgentSettings.h"  // AgentSettings（本地功能开关）
 #include "../modules/modulehost.h"  // ModuleHost（内置模块层）
 #include "../plugin/pluginhost.h"   // PluginHost（g_pluginHost 类型）+ PluginResult
-#include "../island.h"              // IslandOverlay（岛联动）
-#include "../vnc_server.h"          // VncServer（远控服务端）
-#include "../vnc_bridge.h"          // VncBridge（键鼠桥接）
-#include "../annotate_domain.h"     // Overlay（批注/白板）
-#include "../alarm_domain.h"        // AlarmDomain（闹钟域）
-#include "../notify_domain.h"       // NotifyDomain（定时通知域）
-#include "../timesync_domain.h"     // TimesyncDomain（时间同步域）
-#include "../ppt_domain.h"          // PptDomain（PPT 放映控制）
-#include "../automation_engine.h"   // AutomationEngine（规则引擎）
-#include "../noise_monitor.h"       // NoiseMonitor（噪音采集器）
+#include "../island/island.h"              // IslandOverlay（岛联动）
+#include "../remote/vnc_server.h"          // VncServer（远控服务端）
+#include "../remote/vnc_bridge.h"          // VncBridge（键鼠桥接）
+#include "../annotate/annotate_domain.h"     // Overlay（批注/白板）
+#include "../domain/alarm_domain.h"        // AlarmDomain（闹钟域）
+#include "../domain/notify_domain.h"       // NotifyDomain（定时通知域）
+#include "../domain/timesync_domain.h"     // TimesyncDomain（时间同步域）
+#include "../ppt/ppt_domain.h"          // PptDomain（PPT 放映控制）
+#include "../automation/automation_engine.h"   // AutomationEngine（规则引擎）
+#include "../noise/noise_monitor.h"       // NoiseMonitor（噪音采集器）
 #include "../p3log/p3_log.h"        // logStudyStart/logStudyStop（自习长期记录）
 #include "../remote/remote_control.h" // stopRemoteControlSession（远控收口）
 #include "../media/H264Streamer.h"    // A档（2026-10-31）：远控期间并起 H264 推流（与 VNC 同生命周期）
 #include "../notify/notify_entry.h" // islandShow（岛气泡）
 #include "../media/MediaSession.h"  // MediaSession（播放时段判定）
-#include "../panel_domain.h"        // PanelDomain（岛组件面板）
+#include "../domain/panel_domain.h"        // PanelDomain（岛组件面板）
 #include "../media/CameraActions.h" // CameraActions（相机六件套）
 #include "../study_mode/study_mode.h" // StudyMode（自习模式）
-#include "../system_volume.h"       // setSystemMasterVolume（系统音量）
-#include "../proc_guard.h"          // terminateBlockedReason（进程终止护栏）
+#include "../media/system_volume.h"       // setSystemMasterVolume（系统音量）
+#include "../system/proc_guard.h"          // terminateBlockedReason（进程终止护栏）
 
 #include <QDateTime>
 #include <QDir>

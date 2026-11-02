@@ -19,7 +19,7 @@
 #include "ota_state.h"              // 路径 / 健康上报 / 退避账
 #include "ota_update.h"             // applyUpdateInfo / otaBackupExe / otaWritePending
 #include "ota_channel_state.h"      // 渠道自动晋升：remember latest.channel/promotion
-#include "../winlauncher.h"         // stelarithStartHiddenDetached（重启助手静默拉起）
+#include "../system/winlauncher.h"         // stelarithStartHiddenDetached（重启助手静默拉起）
 
 // ── main.cpp 文件作用域外部链接符号（按既有 extern 模式复用）──
 extern const char *kAppVersion;

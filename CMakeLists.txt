@@ -114,44 +114,44 @@ add_executable(stelarith-agent-qt
   src/main.cpp
   # 2026-10-27 第五刀：闹钟域从 main.cpp 拆出（自带 3 个 g_alarm* 变量、零隐式依赖，
   # TTS 由 init() 注入回调）。main.cpp 8432 → 8247 行。
-  src/alarm_domain.cpp
-  src/alarm_domain.h
-  src/notify_domain.cpp
-  src/notify_domain.h
-  src/annotate_domain.cpp
-  src/annotate_domain.h
+  src/domain/alarm_domain.cpp
+  src/domain/alarm_domain.h
+  src/domain/notify_domain.cpp
+  src/domain/notify_domain.h
+  src/annotate/annotate_domain.cpp
+  src/annotate/annotate_domain.h
   # 2026-10-27 H2：墨迹渲染/页模型从 annotate_domain.cpp 拆出（撞 600 行红线），
   # 拆口 = Canvas(纯 Qt) / Overlay(Win32) 之间，两边零共享状态。
-  src/annotate_canvas.cpp
+  src/annotate/annotate_canvas.cpp
   # 2026-10-27 G3：时间同步域（SNTP + 人工偏移），独立文件，不进 main.cpp。
-  src/timesync_domain.cpp
-  src/settings_domain.cpp     # 2026-10-28 模块三：安全模式/存储统计/备份/重置
-  src/timesync_domain.h
-  src/panel_domain.cpp
-  src/panel_domain.h
+  src/domain/timesync_domain.cpp
+  src/domain/settings_domain.cpp     # 2026-10-28 模块三：安全模式/存储统计/备份/重置
+  src/domain/timesync_domain.h
+  src/domain/panel_domain.cpp
+  src/domain/panel_domain.h
   # 2026-10-27 Phase 3：定时自动化规则引擎（纯模型 + 1s 调度；Q_OBJECT 头须显式列入让 AUTOMOC 必扫）
-  src/automation_engine.cpp
-  src/automation_engine.h
+  src/automation/automation_engine.cpp
+  src/automation/automation_engine.h
   # 2026-10-27 I（第七刀）：PPT 放映控制域（Win32 COM + IDispatch，PowerPoint / WPS 演示）。
   # 只用 GetActiveObject 连已在运行的实例，绝不 CoCreateInstance 拉起程序。
-  src/ppt_domain.cpp
-  src/ppt_domain.h
-  src/ppt_com.cpp
-  src/ppt_com.h
+  src/ppt/ppt_domain.cpp
+  src/ppt/ppt_domain.h
+  src/ppt/ppt_com.cpp
+  src/ppt/ppt_com.h
   src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
-  src/agent_shell_reload.cpp  # 2026-10-31 QML 热重载（单独 .cpp：agent_ui.h 已卡 707 行白名单）
+  src/island/agent_shell_reload.cpp  # 2026-10-31 QML 热重载（单独 .cpp：agent_ui.h 已卡 707 行白名单）
   src/agent_record_ui.h  # 2026-10-31 拆分第一刀：记录/自检/插件/时段的 Q_OBJECT 基类。
                          # ⚠️ 必须显式列入（同 agent_ui.h 的理由）：AUTOMOC 对「只被别的头 include
                          # 的头文件」解析缓存不可靠，漏列 ⇒ moc 产物不生成 ⇒ 链接期 LNK2001
                          # （staticMetaObject / metaObject / infoChanged 全 undefined，2026-10-31 实测）。
-  src/singleinstance.cpp
-  src/singleinstance.h
+  src/system/singleinstance.cpp
+  src/system/singleinstance.h
   # ── 课表时钟模块（2026-10-06 加：上下课提醒）──
-  src/schedule_clock.cpp
-  src/schedule_clock.h
+  src/schedule/schedule_clock.cpp
+  src/schedule/schedule_clock.h
   # ── 大屏课表窗口（2026-10-06 加：今日课表展示）──
-  src/schedule_view.cpp
-  src/schedule_view.h
+  src/schedule/schedule_view.cpp
+  src/schedule/schedule_view.h
   src/schedule/profile_repository.cpp
   src/schedule/profile_repository.h
   # ── 插件宿主（P2 · 2026-10-14：进程外插件 ABI）──
@@ -173,49 +173,49 @@ add_executable(stelarith-agent-qt
   #    也不走 registerModule —— 是 main.cpp 直接 new 出来挂给 AgentShell 的业务对象。
   #    放在 src/modules/ 里会被 module-registry 门禁按「插件模块」扫描，恒报
   #    「manifest 缺 id / 没 registerModule」（7 通过 3 失败的既有红）。
-  src/broadcastclub.cpp
-  src/broadcastclub.h
+  src/system/broadcastclub.cpp
+  src/system/broadcastclub.h
   src/schedule/profile.h
   # ── 远程终端（2026-10-06 加：REPL 命令行，需确认 + 单会话）──
-  src/terminal_console.cpp
-  src/terminal_console.h
+  src/terminal/terminal_console.cpp
+  src/terminal/terminal_console.h
   # ── 星璃账号绑定（2026-10-06 加：OAuth + 设备票，零手填接入）──
-  src/oauthbind.cpp
-  src/oauthbind.h
+  src/oobe/oauthbind.cpp
+  src/oobe/oauthbind.h
   # 2026-10-20：首次启动引导（OOBE Wizard）数据面。界面在 qml/oobe/（StackView 四步）。
   # Q_OBJECT 类必须显式列入源列表，AUTOMOC 才会为它生成 moc（只被 main.cpp include 不可靠）。
-  src/oobe_wizard.cpp
-  src/oobe_wizard.h
+  src/oobe/oobe_wizard.cpp
+  src/oobe/oobe_wizard.h
   # ── 考试模式（2026-10-06 加：全屏拦截 + 白名单轮询 + 计时，设计文档 3.7 第一版）──
-  src/exam_mode.cpp
-  src/exam_mode.h
+  src/system/exam_mode.cpp
+  src/system/exam_mode.h
 
-  src/proc_guard.cpp
-  src/proc_guard.h
+  src/system/proc_guard.cpp
+  src/system/proc_guard.h
   # ── 语音对讲（2026-10-07 加：waveOut 播放，设计文档 3.3 第一版）──
-  src/audio_player.cpp
-  src/audio_player.h
+  src/media/audio_player.cpp
+  src/media/audio_player.h
   # ── 屏幕广播（2026-10-07 加：全屏显示老师屏幕，设计文档《屏幕广播》第一版）──
-  src/broadcast_view.cpp
-  src/broadcast_view.h
+  src/ui/broadcast_view.cpp
+  src/ui/broadcast_view.h
   # ── 被控端灵动岛（2026-10-07 加：活动统一经过灵动岛，形状/位置转变 + 缓动 + 深浅色 + 交互穿透）──
-  src/island.cpp
-  src/island.h
+  src/island/island.cpp
+  src/island/island.h
   # ── 灵动岛 QML 桥（2026-10-11 加：视觉层改 QML，本桥把状态推给 QML / 接 QML 回调）──
-  src/island_bridge.cpp
-  src/island_bridge.h
+  src/island/island_bridge.cpp
+  src/island/island_bridge.h
   # 2026-10-27（C 批）：岛「设」面方法（系统音量 / 通知音量 / 黑名单），从 bridge 拆出守 600 行红线
-  src/island_bridge_settings.cpp
+  src/island/island_bridge_settings.cpp
   # ── SVG 图标 provider（QML Image 的 image://svgicon 协议；与 viewer 同份实现）──
-  src/svgiconprovider.cpp
-  src/svgiconprovider.h
+  src/ui/svgiconprovider.cpp
+  src/ui/svgiconprovider.h
   # ── 通知体系新组件（2026-10-09 接线：通知规格 §6 全部独立组件，DeepSeek Harness 造）──
-  src/danmaku.cpp
-  src/danmaku.h
-  src/loop_reminder.cpp
-  src/loop_reminder.h
-  src/noise_monitor.cpp
-  src/noise_monitor.h
+  src/system/danmaku.cpp
+  src/system/danmaku.h
+  src/automation/loop_reminder.cpp
+  src/automation/loop_reminder.h
+  src/noise/noise_monitor.cpp
+  src/noise/noise_monitor.h
   # P0-2 分层（2026-10-30）：噪音事件策略与「采集」解耦，纯逻辑可单测
   src/noise/noise_incident.h
   src/noise/noise_incident_service.cpp
@@ -247,16 +247,16 @@ add_executable(stelarith-agent-qt
   src/noise/noise_announcer.cpp
   src/noise/noise_announcer.h
   src/cloud_event_bridge.h
-  src/notification_gate.cpp
-  src/notification_gate.h
-  src/edge_tts.cpp
-  src/edge_tts.h
+  src/automation/notification_gate.cpp
+  src/automation/notification_gate.h
+  src/system/edge_tts.cpp
+  src/system/edge_tts.h
   # 2026-10-30 main 拆分第一刀：TTS 统一播报（SAPI 兜底 + 音量序列 + token 去重 + 超时兜底）
   # 从 src/main.cpp 整块迁出。main 只留 speakText() 调用点；本模块零 main 全局依赖。
   src/tts/tts_speaker.cpp
   src/tts/tts_speaker.h
-  src/microphone.cpp
-  src/microphone.h
+  src/media/microphone.cpp
+  src/media/microphone.h
   # ── 媒体工具层（2026-10-22 · AGENTS.md §10 第 1 刀）：ffmpeg 定位 / 摄像头绑定 / 设备解析 / 错误归类 ──
   src/media/MediaTools.cpp
   src/media/MediaTools.h
@@ -386,22 +386,22 @@ add_executable(stelarith-agent-qt
   src/core/BlackboardCard.cpp
   src/core/BlackboardCard.h
   # ── 远控隧道（2026-10-18 · RFB over WS）：agent 第二条 WS + 本地 VNC 纯字节桥 ──
-  src/vnc_bridge.cpp
-  src/vnc_bridge.h
+  src/remote/vnc_bridge.cpp
+  src/remote/vnc_bridge.h
   # ── in-agent VNC Server 底层（2026-10-18）：抓屏 + 输入注入（不依赖 libvncserver，常编）──
-  src/screen_capture.cpp
-  src/screen_capture.h
+  src/capture/screen_capture.cpp
+  src/capture/screen_capture.h
   # ── DXGI Desktop Duplication 抓屏（2026-10-19）：主后端，init 失败回落 GDI ──
-  src/screen_capture_dxgi.cpp
-  src/screen_capture_dxgi.h
-  src/input_inject.cpp
-  src/input_inject.h
+  src/capture/screen_capture_dxgi.cpp
+  src/capture/screen_capture_dxgi.h
+  src/remote/input_inject.cpp
+  src/remote/input_inject.h
   # ── 系统主音量（2026-10-11 Core Audio/WASAPI，独立编译单元隔离 SDK 头）──
-  src/system_volume.cpp
-  src/system_volume.h
+  src/media/system_volume.cpp
+  src/media/system_volume.h
   # ── 小鲸鱼音效（2026-10-11 · dsh-whale-widget 移植：winmm PlaySound 播 wav）──
-  src/whale_audio.cpp
-  src/whale_audio.h
+  src/media/whale_audio.cpp
+  src/media/whale_audio.h
   # ── 本地 API 鉴权网关（2026-10-31 · 三条已知地基缺口之一）──
   #   服务本机 127.0.0.1:8080（仅回环），token 头鉴权 + 限流 + 失败审计。
   #   localapi_auth 只依赖 QtCore（可单测）；localapi_server 用 QTcpServer 手写最小 HTTP。
@@ -456,7 +456,7 @@ endif()
 #   SDK 的 cppwinrt 头目录已由 scripts/_build_agent.py 的 INCLUDE 提供；
 #   用 VS 生成器时由 WindowsTargetPlatform 自动带上，不需要额外 include 路径。
 if(WIN32)
-  target_sources(stelarith-agent-qt PRIVATE src/smtc_monitor.cpp src/smtc_monitor.h)
+  target_sources(stelarith-agent-qt PRIVATE src/system/smtc_monitor.cpp src/system/smtc_monitor.h)
   target_link_libraries(stelarith-agent-qt PRIVATE windowsapp)
   # ⚠️ 本文件必须按 C++20 编：工程级是 C++17，而 C++/WinRT 在 C++17 下会
   #    落到 <experimental/coroutine>（需要 /await），MSVC 14.51 直接硬失败
@@ -464,7 +464,7 @@ if(WIN32)
   #    只给这一个文件提标准：全工程提 C++20 会让 270+ 个既有编译单元一起变行为，
   #    /std 覆盖）警告。注意：源文件级 COMPILE_FEATURES cxx_std_20 在 MSVC 上
   #    **不会**真的改写命令行（实测仍留 -std:c++17），必须用 COMPILE_OPTIONS 硬给。
-  set_source_files_properties(src/smtc_monitor.cpp PROPERTIES COMPILE_OPTIONS "/std:c++20")
+  set_source_files_properties(src/system/smtc_monitor.cpp PROPERTIES COMPILE_OPTIONS "/std:c++20")
 endif()
 # 2026-10-11：灵动岛 QML（QQuickWidget 承载 qml/island/IslandRoot.qml）
 target_link_libraries(stelarith-agent-qt PRIVATE Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::QuickWidgets QtShadcn)
@@ -488,7 +488,7 @@ if(STE_USE_LIBVNCSERVER)
   # 但库是独立静态件，依赖不靠 Qt 的传递性保证 —— 显式链上，避免 LNK2019。
   target_link_libraries(stelarith-agent-qt PRIVATE "${_lvncs}/lib/LibVNCServer.lib" ws2_32)
   target_compile_definitions(stelarith-agent-qt PRIVATE STE_USE_LIBVNCSERVER)
-  target_sources(stelarith-agent-qt PRIVATE src/vnc_server.cpp) # 依赖 rfb.h，仅开启时编入
+  target_sources(stelarith-agent-qt PRIVATE src/remote/vnc_server.cpp) # 依赖 rfb.h，仅开启时编入
 endif()
 
 # 2026-10-08 引入 lucide（morphicons 同款 24×24 stroke 风格，ISC）SVG 图标，

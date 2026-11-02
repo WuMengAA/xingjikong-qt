@@ -14,9 +14,9 @@
 
 #pragma comment(lib, "sapi.lib")     // ISpVoice（通知 TTS）—— 从 src/main.cpp 随模块迁出
 
-#include "../edge_tts.h"            // EdgeTts 单例（finished / failed 信号）
+#include "../system/edge_tts.h"            // EdgeTts 单例（finished / failed 信号）
 #include "../core/AgentSettings.h"  // voiceEnabled() / notifyVolume()
-#include "../system_volume.h"       // setSystemMasterVolume()
+#include "../media/system_volume.h"       // setSystemMasterVolume()
 
 namespace {
 

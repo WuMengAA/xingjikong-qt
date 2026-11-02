@@ -11,9 +11,9 @@
 
 #include "notify_entry.h"
 
-#include "../danmaku.h"
-#include "../loop_reminder.h"
-#include "../notification_gate.h"
+#include "../system/danmaku.h"
+#include "../automation/loop_reminder.h"
+#include "../automation/notification_gate.h"
 #include "provider_registry.h"   // 2026-11-01：提供方/渠道门控
 #include "../core/AgentSettings.h"
 #include "../tts/tts_speaker.h"

@@ -17,9 +17,9 @@
 #include <windows.h>
 
 #include "ota_state.h"              // 路径/状态机（otaPrevPath/otaPendingPath/otaPaused/otaNote* …）
-#include "../exam_mode.h"           // ExamMode::inst()（非强制升级要避开考试）
-#include "../island.h"              // IslandOverlay（发现新版本推送）
-#include "../winlauncher.h"         // stelarithStartHiddenDetached（回滚脚本静默拉起）
+#include "../system/exam_mode.h"           // ExamMode::inst()（非强制升级要避开考试）
+#include "../island/island.h"              // IslandOverlay（发现新版本推送）
+#include "../system/winlauncher.h"         // stelarithStartHiddenDetached（回滚脚本静默拉起）
 
 // ── 注入上下文（main() 早期 otaUpdateInit 填充）──
 OtaDeps *g_otaDeps = nullptr;

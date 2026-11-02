@@ -11,7 +11,7 @@
 #include <cstring>
 #include <memory>
 
-#include "../screen_capture.h"   // 默认帧源：ScreenCapture 门面（DXGI→GDI 自选）+ pickTargetDisplay
+#include "../capture/screen_capture.h"   // 默认帧源：ScreenCapture 门面（DXGI→GDI 自选）+ pickTargetDisplay
 
 namespace ThumbnailReporter {
 

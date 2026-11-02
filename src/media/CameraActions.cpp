@@ -5,7 +5,7 @@
 #include "MediaSession.h"
 #include "../core/ProcessUtil.h"
 
-#include "../winlauncher.h"  // stelarithHideChildConsole（子进程隐藏控制台，见 CMD 弹窗根治）
+#include "../system/winlauncher.h"  // stelarithHideChildConsole（子进程隐藏控制台，见 CMD 弹窗根治）
 
 #include <QProcess>
 #include <QDir>

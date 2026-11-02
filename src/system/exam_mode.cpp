@@ -1,6 +1,6 @@
 // 考试模式实现（见 exam_mode.h 头注释）。
 #include "exam_mode.h"
-#include "notify/notify_entry.h"   // 2026-11-01：考试模式提示（提供方 exam）
+#include "../notify/notify_entry.h"   // 2026-11-01：考试模式提示（提供方 exam）
 #include "proc_guard.h"   // 内核闸门（与 main.cpp 的 process_stop 共用，2026-10-13 抽出）
 
 #include <QWidget>

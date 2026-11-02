@@ -1,8 +1,8 @@
 // 远程终端（被控端侧）实现 —— 协议与约束见 terminal_console.h 顶部注释。
 
 #include "terminal_console.h"
-#include "cloud_proto.h"      // 协议 v1 信封的唯一声明（定义在 main.cpp）
-#include "winlauncher.h"      // 2026-10-19 需求①：子进程静默启动（杜绝终端子进程弹 cmd 窗）
+#include "../cloud_proto.h"      // 协议 v1 信封的唯一声明（定义在 main.cpp）
+#include "../system/winlauncher.h"      // 2026-10-19 需求①：子进程静默启动（杜绝终端子进程弹 cmd 窗）
 
 #include <QWebSocket>
 #include <QProcess>

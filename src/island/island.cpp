@@ -27,13 +27,13 @@
 
 #include "island.h"
 #include "island_bridge.h"       // P0-0：historySnapshotJson() 复用桥的 history() 组装口径
-#include "svgiconprovider.h"
-#include "whale_audio.h"
+#include "../ui/svgiconprovider.h"
+#include "../media/whale_audio.h"
 // 2026-10-22：系统媒体识别实例，注入 QML 给岛面/排期中心读「本机正在放什么」。
-#include "smtc_monitor.h"
-#include "danmaku.h"             // 2026-10-15 组件5：祝福弹幕全屏浮层
-#include "panel_domain.h"        // 2026-11-01：菜单栏动态课表（barLessonText）
-#include "notify/provider_registry.h"   // 2026-11-01：提供方门控（顶替 ClassIsland 第 2 步）
+#include "../system/smtc_monitor.h"
+#include "../system/danmaku.h"             // 2026-10-15 组件5：祝福弹幕全屏浮层
+#include "../domain/panel_domain.h"        // 2026-11-01：菜单栏动态课表（barLessonText）
+#include "../notify/provider_registry.h"   // 2026-11-01：提供方门控（顶替 ClassIsland 第 2 步）
 
 #include <QApplication>
 #include <QDebug>

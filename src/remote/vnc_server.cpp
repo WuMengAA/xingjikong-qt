@@ -9,7 +9,7 @@
 //    帧缓冲由 rfbGetScreen 分配、rfbScreenCleanup 释放（本类不重复 free）。
 
 #include "vnc_server.h"
-#include "screen_capture.h"
+#include "../capture/screen_capture.h"
 #include "input_inject.h"
 
 #ifdef STE_USE_LIBVNCSERVER

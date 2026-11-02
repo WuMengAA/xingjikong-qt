@@ -11,11 +11,11 @@
 
 #include "remote_control.h"
 
-#include "../island.h"       // IslandOverlay（setSuppressed / instance()->ensureIdle）
-#include "../vnc_bridge.h"   // VncBridge
+#include "../island/island.h"       // IslandOverlay（setSuppressed / instance()->ensureIdle）
+#include "vnc_bridge.h"   // VncBridge
 #include "../media/H264Streamer.h" // A档（2026-10-31）：远控停→H264 推流停（同生命周期）
 #ifdef STE_USE_LIBVNCSERVER
-#include "../vnc_server.h"   // VncServer（方案 A，编译开关同 main）
+#include "vnc_server.h"   // VncServer（方案 A，编译开关同 main）
 #endif
 #include <QDateTime>
 #include <QFile>

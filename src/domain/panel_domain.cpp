@@ -6,8 +6,8 @@
 
 #include "panel_domain.h"
 
-#include "island.h"
-#include "schedule_clock.h"
+#include "../island/island.h"
+#include "../schedule/schedule_clock.h"
 #include "timesync_domain.h"
 
 #include <QDateTime>

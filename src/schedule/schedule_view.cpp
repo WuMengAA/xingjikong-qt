@@ -1,5 +1,5 @@
 #include "schedule_view.h"
-#include "schedule/profile_repository.h"
+#include "profile_repository.h"
 #include <QPainter>
 #include <QKeyEvent>
 #include <QDateTime>

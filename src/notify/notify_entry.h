@@ -3,7 +3,7 @@
 #include <QJsonObject>
 #include <QSystemTrayIcon>
 
-#include "../island.h"   // IslandOverlay（Form 枚举 / instance()）
+#include "../island/island.h"   // IslandOverlay（Form 枚举 / instance()）
 
 // 灵动岛统一入口（2026-10-07 · #98）：被控端一切通知统一走 IslandOverlay。
 // 2026-10-30 main 拆分 #7：islandShow / islandShowAt / trayNotify / notifyFromParams

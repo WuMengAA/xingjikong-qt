@@ -5,8 +5,8 @@
 #include "../core/ProcessUtil.h"
 #include "../core/AgentSettings.h"   // 播放时段开关（第四刀地基：原嵌在 main.cpp 匿名域内）
 
-#include "../island.h"         // IslandOverlay::instance()->clearMediaSession()
-#include "../winlauncher.h"    // stelarithHideChildConsole（子进程隐藏控制台，见 CMD 弹窗根治）
+#include "../island/island.h"         // IslandOverlay::instance()->clearMediaSession()
+#include "../system/winlauncher.h"    // stelarithHideChildConsole（子进程隐藏控制台，见 CMD 弹窗根治）
 
 #include <QProcess>
 #include <QTimer>

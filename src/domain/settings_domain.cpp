@@ -2,7 +2,7 @@
 // 口径与设计见 settings_domain.h 顶部。
 #include "settings_domain.h"
 
-#include "core/AgentSettings.h"   // 只读「异常后自动进安全模式」这一个开关（QSettings 口径统一在那边）
+#include "../core/AgentSettings.h"   // 只读「异常后自动进安全模式」这一个开关（QSettings 口径统一在那边）
 
 #include <QCoreApplication>
 #include <QDateTime>

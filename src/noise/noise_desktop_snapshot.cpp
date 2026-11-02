@@ -1,6 +1,6 @@
 #include "noise_desktop_snapshot.h"
 
-#include "../screen_capture.h"
+#include "../capture/screen_capture.h"
 
 #include <QBuffer>
 #include <QDateTime>

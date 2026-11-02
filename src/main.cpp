@@ -19,20 +19,20 @@
 //   · 画面帧走二进制帧 [1B 版本][2B 大端 headerLen][header JSON][JPEG]，带 seq/ts/mime；
 //   · 云端拒绝时回的是统一 error 通道（code + 人话原因），这里必须打出来，不许静默。
 
-#include "singleinstance.h"
-#include "alarm_domain.h"   // 2026-10-27 第五刀：闹钟域
-#include "notify_domain.h"  // 2026-10-27 第六刀：定时通知域（F 收尾）
-#include "annotate_domain.h" // 2026-10-27 H 批：批注/白板内核（替代 ICC CE）
-#include "timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
-#include "settings_domain.h" // 2026-10-28 模块三：安全模式/存储统计/备份/重置（独立域）
-#include "panel_domain.h"     // 2026-10-27 G4/G5/G6：岛组件面板（日期/课表/倒计时）
-#include "automation_engine.h" // 2026-10-27 Phase 3：定时自动化规则引擎（纯模型 + 1s 调度，点火转 executeAction）
-#include "ppt_domain.h"       // 2026-10-27 I：PPT 放映控制（COM/IDispatch，PowerPoint/WPS）
-#include "schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
-#include "schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
-#include "oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
-#include "island.h"           // 2026-10-07：被控端灵动岛（顶部居中胶囊 + 缓动 + 交互穿透）
-#include "smtc_monitor.h"
+#include "system/singleinstance.h"
+#include "domain/alarm_domain.h"   // 2026-10-27 第五刀：闹钟域
+#include "domain/notify_domain.h"  // 2026-10-27 第六刀：定时通知域（F 收尾）
+#include "annotate/annotate_domain.h" // 2026-10-27 H 批：批注/白板内核（替代 ICC CE）
+#include "domain/timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
+#include "domain/settings_domain.h" // 2026-10-28 模块三：安全模式/存储统计/备份/重置（独立域）
+#include "domain/panel_domain.h"     // 2026-10-27 G4/G5/G6：岛组件面板（日期/课表/倒计时）
+#include "automation/automation_engine.h" // 2026-10-27 Phase 3：定时自动化规则引擎（纯模型 + 1s 调度，点火转 executeAction）
+#include "ppt/ppt_domain.h"       // 2026-10-27 I：PPT 放映控制（COM/IDispatch，PowerPoint/WPS）
+#include "schedule/schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
+#include "schedule/schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
+#include "oobe/oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
+#include "island/island.h"           // 2026-10-07：被控端灵动岛（顶部居中胶囊 + 缓动 + 交互穿透）
+#include "system/smtc_monitor.h"
 #include "media/MediaTools.h"
 #include "media/MediaSession.h"  // 2026-10-22 §10 第二刀：录像/播放会话控制
 #include "media/CameraActions.h" // 2026-10-23 §10 第 3 刀：相机六件套分支体
@@ -84,26 +84,26 @@
 #include "notify/notify_entry.h" // 2026-10-30 灵动岛统一入口迁出
 #include "p3log/p3_log.h" // 2026-10-30 P3 长期记录落盘内核迁出
 #include "p3log/p3_reader.h" // 2026-10-30 P3 长期记录查询/展示迁出
-#include "vnc_bridge.h"       // 2026-10-18：远控桥（主 WS vnc-data ↔ 本地 VNC，纯字节）
+#include "remote/vnc_bridge.h"       // 2026-10-18：远控桥（主 WS vnc-data ↔ 本地 VNC，纯字节）
 #ifdef STE_USE_LIBVNCSERVER
-#include "vnc_server.h"         // 2026-10-18：in-agent VNC Server（libvncserver 封装，方案 A）
+#include "remote/vnc_server.h"         // 2026-10-18：in-agent VNC Server（libvncserver 封装，方案 A）
 #endif
-#include "terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
-#include "exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
-#include "proc_guard.h"        // 2026-10-13：进程终止安全闸门（与 exam_mode 共用同一道门）
-#include "audio_player.h"      // 2026-10-07：语音对讲播放（waveOut）
+#include "terminal/terminal_console.h"  // 2026-10-06：远程终端（REPL，见该文件注释）
+#include "system/exam_mode.h"         // 2026-10-06：考试模式（全屏拦截 + 黑名单轮询 + 计时）
+#include "system/proc_guard.h"        // 2026-10-13：进程终止安全闸门（与 exam_mode 共用同一道门）
+#include "media/audio_player.h"      // 2026-10-07：语音对讲播放（waveOut）
 #include "opus_codec.h"        // 2026-10-21（P1）：语音 Opus 编解码（shared/audio，两端同源）
-#include "broadcast_view.h"    // 2026-10-07：屏幕广播全屏显示
+#include "ui/broadcast_view.h"    // 2026-10-07：屏幕广播全屏显示
 // ── 通知体系新组件（2026-10-09 接线 · DeepSeek Harness 造）──
-#include "danmaku.h"           // §1.2 弹幕：字幕式横向滚动
-#include "loop_reminder.h"     // §1.2 loopRemind：未确认循环提醒
-#include "notification_gate.h" // §6.2 考试模式禁一切通知与监视
-#include "edge_tts.h"          // §6.4 Edge 语音 TTS（管理端可选）
+#include "system/danmaku.h"           // §1.2 弹幕：字幕式横向滚动
+#include "automation/loop_reminder.h"     // §1.2 loopRemind：未确认循环提醒
+#include "automation/notification_gate.h" // §6.2 考试模式禁一切通知与监视
+#include "system/edge_tts.h"          // §6.4 Edge 语音 TTS（管理端可选）
 #include "tts/tts_speaker.h"   // 2026-10-30 main 拆分第一刀：TTS 统一播报（含 SAPI 兜底/音量序列）
-#include "noise_monitor.h"     // §6.5 噪音检测
+#include "noise/noise_monitor.h"     // §6.5 噪音检测
 #include "noise/noise_assembly.h"   // P0-2 分层装配工厂（main 只调 createNoisePipeline）
 #include "cloud_event_bridge.h"     // P0-2：噪音存证事件经 WS 桥发出（实体在本文件）
-#include "microphone.h"        // 语音通话：mic 会话内采集
+#include "media/microphone.h"        // 语音通话：mic 会话内采集
 #include <QHostInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -146,7 +146,7 @@
 #include <QNetworkReply>
 #include "plugin/pluginhost.h"   // P2：插件宿主（进程外插件 ABI）
 // 2026-10-20：首次启动引导（OOBE Wizard）——QML 向导 + 绑定数据面（详见 oobe_wizard.h）。
-#include "oobe_wizard.h"
+#include "oobe/oobe_wizard.h"
 #include <QQuickWidget>          // 向导宿主（与 AgentShell 同款：QQuickWidget 顶格承载 QML）
 #include <QQuickWindow>          // 2026-10-25：渲染诊断埋点（sceneGraphBackend 决议值）
 #include <QSysInfo>              // 2026-10-25：渲染诊断埋点（VxKex 谎报后的 OS 版本）
@@ -156,7 +156,7 @@
 #include "modules/modulehost.h"  // 2026-10-16：内置模块层（编译进 agent 的官方模块，与进程外插件共用门控）
 #include "modules/usbmodule.h"
 #include "modules/voicehubmodule.h"  // 2026-10-17：VoiceHub 联动（只读展示权威广播状态）
-#include "broadcastclub.h"  // 2026-10-23：广播社成员独立身份登录通道（非插件模块，2026-10-26 移出 src/modules/）
+#include "system/broadcastclub.h"  // 2026-10-23：广播社成员独立身份登录通道（非插件模块，2026-10-26 移出 src/modules/）
 #include <QMessageBox>         // P2：插件市场对话框
 #include <QListWidget>         // P2：插件市场列表
 #include <QUrlQuery>
@@ -167,13 +167,13 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <windows.h>
-#include "winlauncher.h"   // 2026-10-19 需求①：子进程静默启动（杜绝任何场景弹出 cmd 窗）
+#include "system/winlauncher.h"   // 2026-10-19 需求①：子进程静默启动（杜绝任何场景弹出 cmd 窗）
 #include <tlhelp32.h>   // 进程快照（process_list / process_stop）
 #include <psapi.h>      // 进程工作集内存
 #include <mmsystem.h>   // waveOutSetVolume（set_volume，Rust 版实测零依赖可用）
 #include <shellapi.h>   // ShellExecuteW（launch_app）+ SHFileOperationW（media_delete 进回收站）
 // <sapi.h> 已于 2026-10-30 随 TTS 模块（src/tts/tts_speaker.cpp）迁出 —— SAPI 5 朗读只在 TTS 用，main 不再直接引用。
-#include "system_volume.h"  // 2026-10-11：系统主音量（Core Audio/WASAPI，独立编译单元）
+#include "media/system_volume.h"  // 2026-10-11：系统主音量（Core Audio/WASAPI，独立编译单元）
 #include <cstdio>
 
 // 前向声明：进程图标（定义在文件后半段，process_list 要用）

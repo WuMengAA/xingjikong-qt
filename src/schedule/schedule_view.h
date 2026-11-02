@@ -2,7 +2,7 @@
 #include <QWidget>
 #include <QList>
 #include <QTimer>
-#include "schedule/profile.h"
+#include "profile.h"
 
 // 大屏课表窗口：显示今日全天课程（节次/科目/时间），当前上课节高亮。
 // 独立 QWidget，窗口可全屏（教室大屏）或普通大小；每 30 秒刷新当前节高亮。

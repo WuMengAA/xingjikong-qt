@@ -34,8 +34,17 @@ MOC_RECORD_OUT = os.path.join(OUT_DIR, "_agent_record_ui_moc.cpp")
 # 所以探针必须链真 mic_selector + noise_monitor（后者提供枚举实现）。
 MIC_SEL = os.path.join(SRC, "noise", "mic_selector.cpp")
 MIC_SEL_H = os.path.join(SRC, "noise", "mic_selector.h")
-NOISE_MON = os.path.join(SRC, "noise_monitor.cpp")
-NOISE_MON_H = os.path.join(SRC, "noise_monitor.h")
+# 2026-11-02：noise_monitor 随「按职能归档」搬进 src/noise/（与 mic_selector 同域）。
+# 探针脚本不在 CMakeLists 里，前面几轮按目录扫描的自愈脚本扫不到它 —— 搬家后
+# 这里会 moc 失败（找不到源文件）。凡 src 下改位置，同步改这一行。
+NOISE_MON = os.path.join(SRC, "noise", "noise_monitor.cpp")
+NOISE_MON_H = os.path.join(SRC, "noise", "noise_monitor.h")
+# 2026-11-02：SecUpdate.qml 新增 import Stelarith.Ota 1.0（渠道晋升进度，OtaChannelState
+# 单例，由 src/ota/ota_channel_state.cpp 静态注册）。同一类坑之前踩过 —— 见上面 mic_selector
+# 注释：QML import 未注册模块是**硬错误**，整页不加载且探针整片 FAIL。探针壳必须链它。
+OTA_STATE = os.path.join(SRC, "ota", "ota_channel_state.cpp")
+OTA_STATE_H = os.path.join(SRC, "ota", "ota_channel_state.h")
+MOC_OTA_OUT = os.path.join(OUT_DIR, "_ota_channel_state_moc.cpp")
 MOC_SEL_OUT = os.path.join(OUT_DIR, "_mic_selector_moc.cpp")
 MOC_MON_OUT = os.path.join(OUT_DIR, "_noise_monitor_moc.cpp")
 REPORT = os.path.join(OUT_DIR, "_agent_ui_probe_report.txt")
@@ -59,7 +68,19 @@ FLAGS = ["/nologo", "/TP", "/std:c++17", "-MD", "/utf-8", "/Zc:__cplusplus",
          "/permissive-", "/EHsc"]
 SHADCN_ROOT = os.path.join(ROOT, "..", "third_party", "qtshadcn")
 SHADCN_LIB = os.path.join(BUILD, "_qtshadcn", "src", "QtShadcn.lib")
-INCLUDES = ["/I", os.path.join(ROOT, "scripts"), "/I", SRC,
+def _src_dirs():
+    # 2026-11-02：「按职能归档」把 src 根下的文件陆续搬进 src/<域>/，探针脚本不是 CMake
+    # 目标，扫不到 glob 变更 ⇒ 只给 SRC 一条 /I 会在搬家当天就 C1083。这里把 src 下所有
+    # 子目录一并加入包含路径，今后再搬文件不必改探针（代价只是 /I 条数变多）。
+    out = []
+    for name in sorted(os.listdir(SRC)):
+        d = os.path.join(SRC, name)
+        if os.path.isdir(d):
+            out += ["/I", d]
+    return out
+
+
+INCLUDES = ["/I", os.path.join(ROOT, "scripts"), "/I", SRC] + _src_dirs() + [
             "/I", os.path.join(SHADCN_ROOT, "src"),
             "/I", os.path.join(SHADCN_ROOT, "src", "core"),
             "/I", QT + r"\include", "/I", QT + r"\include\QtCore",
@@ -138,7 +159,8 @@ def main():
     #    基类的 Q_OBJECT 产物（staticMetaObject / 信号实现）不在 agent_ui.h 的 moc 里。
     #    只 moc 派生头 ⇒ 链接期 11 个 undefined（LNK2001/LNK2019），实测确认。
     for hdr, out in ((AGENT_RECORD_UI_H, MOC_RECORD_OUT), (AGENT_UI_H, MOC_OUT),
-                     (MIC_SEL_H, MOC_SEL_OUT), (NOISE_MON_H, MOC_MON_OUT)):
+                     (MIC_SEL_H, MOC_SEL_OUT), (NOISE_MON_H, MOC_MON_OUT),
+                     (OTA_STATE_H, MOC_OTA_OUT)):
         if run([MOC, hdr, "-o", out]) != 0:
             print("moc 失败：" + os.path.basename(hdr))
             return 2
@@ -149,8 +171,8 @@ def main():
         print("rcc 失败（resources/icons 缺失？）")
         return 2
     objs = []
-    for s in [PROBE_SRC, MOC_OUT, MOC_RECORD_OUT, qrc_cpp, SRC + r"\svgiconprovider.cpp",
-              MIC_SEL, NOISE_MON, MOC_SEL_OUT, MOC_MON_OUT]:
+    for s in [PROBE_SRC, MOC_OUT, MOC_RECORD_OUT, qrc_cpp, os.path.join(SRC, "ui", "svgiconprovider.cpp"),
+              MIC_SEL, NOISE_MON, MOC_SEL_OUT, MOC_MON_OUT, OTA_STATE, MOC_OTA_OUT]:
         o = os.path.join(OUT_DIR, os.path.basename(s) + ".obj")
         if run([CL] + FLAGS + DEFINES + INCLUDES + ["/c", "/Fo" + o, s]) != 0:
             print("编译失败：", s)

@@ -1,6 +1,6 @@
 #include "mic_selector.h"
 
-#include "../noise_monitor.h"   // 采集类在 src/ 根（本工程未把 src/ 加进 include 路径）
+#include "noise_monitor.h"   // 采集类在 src/ 根（本工程未把 src/ 加进 include 路径）
 
 #include <QPointer>
 #include <QSettings>

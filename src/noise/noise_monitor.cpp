@@ -1,5 +1,5 @@
 #include "noise_monitor.h"
-#include "noise/mic_selector.h"   // ⑤ 反向上报采集实例（它只持 QPointer，不反向依赖）
+#include "mic_selector.h"   // ⑤ 反向上报采集实例（它只持 QPointer，不反向依赖）
 
 #include <QDebug>
 #include <QThreadPool>

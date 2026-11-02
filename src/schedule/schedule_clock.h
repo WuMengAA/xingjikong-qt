@@ -4,7 +4,7 @@
 #include <QDate>
 #include <QTime>
 #include <QList>
-#include "schedule/profile.h"
+#include "profile.h"
 
 // 课表时钟：读 ClassIsland 档案，轮询当前时间，检测「上课/下课」边界并触发提醒。
 //

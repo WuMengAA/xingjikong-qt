@@ -10,7 +10,7 @@
 //     ② 强杀会留下 agent-run.flag ⇒ 下次启动被判"上次异常退出"⇒ 进安全模式
 //        ⇒ 第三方插件全部不加载，界面与真机不一致。
 //   即"为了看一眼颜色，得付一整套副作用"。热重载把这个循环压到 1 秒。
-#include "agent_ui.h"
+#include "../agent_ui.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -20,7 +20,7 @@
 #include <QQmlEngine>
 #include <QTimer>
 
-#include "svgiconprovider.h"   // 图标 provider（与 island 同一份实现）
+#include "../ui/svgiconprovider.h"   // 图标 provider（与 island 同一份实现）
 
 bool AgentShell::reloadQml()
 {

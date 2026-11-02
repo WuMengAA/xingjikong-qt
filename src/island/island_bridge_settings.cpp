@@ -10,9 +10,9 @@
 #include "island_bridge.h"
 #include "island.h"
 // 系统主音量（Core Audio / WASAPI）
-#include "system_volume.h"
+#include "../media/system_volume.h"
 // 通知音量 / 黑名单（设备级 QSettings，与管理端同一份）
-#include "core/AgentSettings.h"
+#include "../core/AgentSettings.h"
 
 int IslandBridge::systemVolume() const
 {
