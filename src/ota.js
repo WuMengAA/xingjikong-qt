@@ -170,9 +170,12 @@ export function latestFor(product, channel, now = Date.now()) {
 }
 
 /** 发布时登记构建（供 publish-release.mjs 与管理台发布端点调用）。
- *  幂等：同一 version+sha 重复发布不重置 publishedAt（否则永远晋升不了）。 */
-export function registerBuild(product, entry, now = Date.now()) {
-  return recordBuild(OTA_MANIFEST_FILE, product, entry, now);
+ *  幂等：同一 version+sha 重复发布不重置 publishedAt（否则永远晋升不了）。
+ *  @param {string} releasedTier 本次是**显式发布到哪一档**（stable/rc/gray…）。
+ *    传了就意味着「人工干预」：该档立刻可见，不再等 5h/24h 晋升窗口。
+ *    不传 = 只登记计时起点（纯自动晋升语义），保持旧调用方的行为不变。 */
+export function registerBuild(product, entry, now = Date.now(), releasedTier = '') {
+  return recordBuild(OTA_MANIFEST_FILE, product, entry, now, releasedTier);
 }
 
 /** 某渠道此刻的晋升进度（管理台展示「还有多久进 beta/stable」用）。 */

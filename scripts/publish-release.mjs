@@ -498,10 +498,14 @@ async function cmdPublish() {
 	// 这是**晋升计时的起点**（alpha 发出时刻）。幂等：同一 version+sha 重复发布不会重置它，
 	// 否则每次重发都把时间往后推 ⇒ 永远凑不满 5h/24h，stable 永远等不到（最阴的一条）。
 	try {
-		const reg = recordBuild(MANIFEST, product, m.products[product]);
+		const reg = recordBuild(MANIFEST, product, m.products[product], Date.now(), CHANNEL);
 		log(reg.created
 			? `已登记构建 ${product} v${version} → 渠道晋升计时开始（+5h 进 beta，+24h 进 stable）`
 			: `构建 ${product} v${version} 已登记过 → 保留原发布时间（晋升计时不被重置）`);
+		// 人工干预：显式发布到某档 = 该档立刻可见，不受 5h/24h 窗口约束。
+		// 与"晋升"不冲突：晋升是**时间**让一个构建多开一档，人工是指定某个包现在就在这档。
+		const tier = String(CHANNEL || 'stable').toLowerCase();
+		log(`  · 人工干预：本次发布已把该构建钉在 ${tier} 档，该档设备立即可见（不再等晋升窗口）`);
 	} catch (e) {
 		// 登记失败不阻断发布（清单已经写好了），但必须吵出来：没登记 = 该构建永远不进 beta/stable
 		console.error(`[publish] FAIL 构建登记失败（渠道晋升会失效）：${e.message}`);

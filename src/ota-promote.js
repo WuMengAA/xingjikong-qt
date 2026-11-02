@@ -50,10 +50,17 @@ export function normalizeChannelName(channel) {
  *  @param {boolean} grandfathered 存量豁免：规则上线**之前**就已直发 stable 的构建。
  *    这类构建没有 alpha 起点可算，若按新规则回溯会造成"线上已发布的版本突然从 stable 消失"
  *    （全网教室机以为没版本、管理台显示未发布），属不可接受的回归。故对它们一律全渠道可见，
- *    并保留 publishedAt 真实时间以便审计。新构建不带此标记，必须走时间晋升。 */
-export function visibleInChannel(tier, ageMs, grandfathered = false) {
+ *    并保留 publishedAt 真实时间以便审计。新构建不带此标记，必须走时间晋升。
+ *  @param {string[]|null} manualTiers **人工干预**：该构建被显式发布到过哪些档。
+ *    用户原话「如果没有人工干预，那就是……渠道状态改变」—— 反过来说，人一旦显式把某个包
+ *    发到 stable，就不该再被 24 小时窗口挡在门外（否则"我发的正式版为什么设备看不到"，
+ *    现场唯一解释是等明天，等于把一次人工操作变成一次静默失败）。
+ *    注意：只对**被显式发过的那一档**生效，不会顺带解锁其它档 —— 发 stable 不等于发 beta。 */
+export function visibleInChannel(tier, ageMs, grandfathered = false, manualTiers = null) {
   if (grandfathered) return true;
-  switch (normalizeChannelName(tier)) {
+  const t = normalizeChannelName(tier);
+  if (Array.isArray(manualTiers) && manualTiers.includes(t)) return true;
+  switch (t) {
     case 'alpha': return true;
     case 'beta': return ageMs >= PROMOTE_BETA_MS;
     default: return ageMs >= PROMOTE_STABLE_MS;
@@ -102,16 +109,22 @@ export function buildKey(product, entry) {
  * 重复发布会把它往后推 = 永远晋升不了，是这条链最阴的坑）。
  * @returns {{entry:object, created:boolean}}
  */
-export function recordBuild(manifestFile, product, entry, now = Date.now()) {
+export function recordBuild(manifestFile, product, entry, now = Date.now(), releasedTier = '') {
   const reg = loadBuilds(manifestFile);
   const key = buildKey(product, entry);
   const prev = reg.builds[key];
+  const tier = releasedTier ? normalizeChannelName(releasedTier) : '';
   if (prev && prev.publishedAt) {
     // 已有：只更新可变字段（notes/mandatory 允许运维改公告），publishedAt 绝不动
     prev.notes = String(entry.notes || prev.notes || '');
     prev.mandatory = entry.mandatory == null ? prev.mandatory : !!entry.mandatory;
     prev.url = String(entry.url || prev.url || '');
     prev.size = Number(entry.size || prev.size || 0);
+    // 人工干预记录：同一构建每被显式发布到一个新档就记下（合并去重，不清旧值）
+    if (tier) {
+      const prevTiers = Array.isArray(prev.manualTiers) ? prev.manualTiers : [];
+      prev.manualTiers = Array.from(new Set([...prevTiers, tier]));
+    }
     writeRegistry(manifestFile, reg);
     return { entry: prev, created: false };
   }
@@ -125,6 +138,8 @@ export function recordBuild(manifestFile, product, entry, now = Date.now()) {
     mandatory: !!entry.mandatory,
     publishedAt: new Date(now).toISOString(),
   };
+  // 首次登记就带人工档位（例如直接发 stable），同样立即对该档可见
+  if (tier) rec.manualTiers = [tier];
   reg.builds[key] = rec;
   writeRegistry(manifestFile, reg);
   return { entry: rec, created: true };
@@ -160,7 +175,7 @@ export function pickBuildFor(reg, product, channel, now = Date.now()) {
     const at = Number.isFinite(raw) ? raw : -Infinity;
     // 时间不可解析的**新**构建直接跳过（宁可不推，也不要把时间戳坏掉的条目当成已催熟）
     if (!Number.isFinite(raw) && !gf) continue;
-    if (!visibleInChannel(tier, now - at, gf)) continue;
+    if (!visibleInChannel(tier, now - at, gf, rec.manualTiers)) continue;
     if (at > bestAt) { best = rec; bestAt = at; }
   }
   return best;

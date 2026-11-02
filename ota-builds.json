@@ -59,8 +59,38 @@
       "publishedAt": "2026-11-01T04:49:16.021000Z",
       "grandfathered": true,
       "migratedFrom": "stable"
+    },
+    "agent:0.6.62:6819b0fe407acd79": {
+      "product": "agent",
+      "version": "0.6.62",
+      "url": "https://gh.245959623.xyz/WuMengAA/xingjikong-qt/releases/download/v0.6.51-rc.1/stelarith-agent-setup-0.6.62.exe",
+      "sha256": "6819b0fe407acd79d60f7e429116ae4144491e184dacab9ed1f4e54b2995a36b",
+      "size": 38206198,
+      "notes": "v0.6.62 正式版 · 全量更新：更新渠道转正为「灰度/测试/正式」三档（显式发到某档即该档立即可见，不再干等 5/24 小时窗口）；设置页撤掉「临时」角标、渠道说明重写；渠道旧值 rc/gray 自动迁移到 beta/alpha，写错名字会告警而不是静默当成正式版",
+      "mandatory": true,
+      "publishedAt": "2026-11-02T12:46:36.711Z",
+      "manualTiers": [
+        "alpha",
+        "beta",
+        "stable"
+      ]
+    },
+    "viewer:0.6.62:ac48c981cec929fd": {
+      "product": "viewer",
+      "version": "0.6.62",
+      "url": "https://gh.245959623.xyz/WuMengAA/xingjikong-qt/releases/download/v0.6.51-rc.1/stelarith-viewer-setup-0.6.62.exe",
+      "sha256": "ac48c981cec929fd3e25ab2c41bb27af5dd9538d5197d0080b36ead5e4031eb7",
+      "size": 44362797,
+      "notes": "v0.6.62 正式版 · 全量更新：今日课表窗口（QtShadcn 全屏可投大屏）可用性修复；更新渠道转正为「灰度/测试/正式」三档；managebackend/viewerbackend 大规模结构整理，运行行为不变",
+      "mandatory": true,
+      "publishedAt": "2026-11-02T12:47:02.036Z",
+      "manualTiers": [
+        "alpha",
+        "beta",
+        "stable"
+      ]
     }
   },
-  "generatedBy": "scripts/_migrate_ota_builds.py",
-  "generatedAt": "2026-11-02T07:49:16.027840Z"
+  "generatedBy": "src/ota-promote.js",
+  "generatedAt": "2026-11-02T12:51:36.637Z"
 }

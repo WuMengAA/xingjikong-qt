@@ -40,6 +40,12 @@ ota.json
 # 每次 publish --channel rc 都会脏一次 status；灰度 ota-gray.json 是人工 pin 的
 # 配置性质且已入轨，保持 tracked 不一并忽略）
 ota-rc.json
+# 2026-11-02 渠道类转正（alpha 灰度 / beta 测试 / stable 正式）后的两个新清单：
+# 同样是每次发布生成的部署产物（含域名/URL/sha256），一律不入库。
+# ⚠️ ota-builds.json（构建注册表）相反 —— 它是**状态**，不入库就丢了晋升计时起点，
+#    会让已发构建回到"刚发布"状态、stable 突然看不见老版本。它必须 tracked。
+ota-alpha.json
+ota-beta.json
 
 # 设备报修台账（运行时数据，由 scripts/backup.mjs 备份；不入库）
 repairs.json

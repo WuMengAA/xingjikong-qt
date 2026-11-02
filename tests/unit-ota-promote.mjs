@@ -102,5 +102,39 @@ check('同版本同 sha -> 同一指纹', buildKey('agent', build) === buildKey(
 check('同版本不同 sha -> 不同指纹', buildKey('agent', build) !== buildKey('agent', { ...build, sha256: 'c'.repeat(64) }));
 check('不同产品 -> 不同指纹', buildKey('agent', build) !== buildKey('viewer', build));
 
+// ───────────────────────────────────────────────────────────────────────────
+// I. 人工干预（2026-11-02 加）：显式发布到某档 = 该档立刻可见
+//
+// 为什么必须有这条：用户要求「通过正式渠道进行更新」= 现在就要让 stable 设备拿到。
+// 但自动晋升规则要求构建满 24h 才进 stable（上面 D 组 t=0 stable 拿不到 就是它）。
+// 若不实现人工干预，一次人工发版会变成"发布会成功、设备明天再来"的静默失败 ——
+// 现场唯一的解释是"等一天"，没人看得出这是规则而不是故障。
+// 语义边界（务必守住）：
+//   · 只解锁**被显式发布过的那一档**，不连带解锁别的档（发 stable ≠ 发 beta）；
+//   · 人工干预不改变 publishedAt（晋升计时照走，之后仍按时间自然晋升到其余档）；
+//   · 不改 version/url/sha256/notes —— 构建不变，与用户核心约束一致。
+console.log('\nI. 人工干预（显式发布到某档 = 该档立即可见）');
+const t0Manual = { ...build, version: '0.6.62', publishedAt: new Date(T0).toISOString(), manualTiers: ['stable'] };
+const regM = { builds: { [buildKey('agent', t0Manual)]: t0Manual } };
+check('钉在 stable 的构建 t=0 就可见 stable', pickBuildFor(regM, 'agent', 'stable', T0)?.version === '0.6.62');
+check('钉在 stable 不连带解锁 beta', pickBuildFor(regM, 'agent', 'beta', T0) === null);
+check('钉在 stable 的构建 alpha 仍可见', pickBuildFor(regM, 'agent', 'alpha', T0)?.version === '0.6.62');
+check('可见性纯函数：manualTiers 命中即 true', visibleInChannel('stable', 0, false, ['stable']) === true);
+check('可见性纯函数：manualTiers 不含该档仍按时间', visibleInChannel('stable', 0, false, ['beta']) === false);
+check('可见性纯函数：manualTiers 为 null 不报错', visibleInChannel('stable', 24 * H, false, null) === true);
+check('人工干预不改 publishedAt（晋升计时照走）', pickBuildFor(regM, 'agent', 'stable', T0)?.publishedAt === t0Manual.publishedAt);
+check('人工干预不改 sha256/url（构建不变）', (() => {
+  const got = pickBuildFor(regM, 'agent', 'stable', T0);
+  return !!got && got.sha256 === build.sha256 && got.url === build.url;
+})());
+check('多档干预：stable+beta 都钉住', (() => {
+  const m = { ...build, manualTiers: ['stable', 'beta'] };
+  const r = { builds: { [buildKey('agent', m)]: m } };
+  return pickBuildFor(r, 'agent', 'stable', T0)?.version === build.version
+      && pickBuildFor(r, 'agent', 'beta', T0)?.version === build.version;
+})());
+check('gray 归一到 alpha：钉 alpha 即对 gray 生效', visibleInChannel('gray', 0, false, ['alpha']) === true);
+check('rc 归一到 beta：钉 beta 即对 rc 生效', visibleInChannel('rc', 0, false, ['beta']) === true);
+
 console.log(`\n==== ${pass} 通过 / ${fail} 失败 ====`);
 process.exit(fail === 0 ? 0 : 1);

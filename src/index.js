@@ -2247,7 +2247,7 @@ const server = http.createServer((req, res) => {
         // 2026-11-02 渠道自动晋升：管理台发布同样要登记构建（与 publish-release.mjs 同一真源），
         // 否则从这里发的版本永远只有 alpha 可见、5h/24h 后不会自己进 beta/stable。
         try {
-          registerBuild(product, manifest.products[product]);
+          registerBuild(product, manifest.products[product], Date.now(), ch);  // 第 4 参=人工干预档
         } catch (e) {
           console.error(`[cloud] FAIL 构建登记失败（该版本不会自动晋升渠道）：${e.message}`);
         }
