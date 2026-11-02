@@ -81,6 +81,61 @@ QString lastExitText()
     return QStringLiteral("上次异常退出（崩溃 / 断电 / 强杀进程）");
 }
 
+// 路径归一：Windows 上 dataDir 可能是 "C:/x/y" 而 absolutePath() 给 "C:\x\y"，
+// 直接 startsWith 会因分隔符不同而恒 false（2026-11-02 存储面板三倍数的根因之一）。
+// 注意不能只做 toLower 不换分隔符 —— 那正是出问题的写法。
+static QString canonicalPath(const QString &p)
+{
+    if (p.isEmpty()) return p;
+    QString s = QDir::cleanPath(p);
+    s.replace(QLatin1Char('/'), QLatin1Char('\\'));
+    return s.toLower();
+}
+
+// p 是否落在 dir 之下（含 dir 本身）。都走 canonicalPath，避免分隔符/大小写假阴性。
+static bool pathWithin(const QString &p, const QString &dir)
+{
+    const QString cp = canonicalPath(p);
+    const QString cd = canonicalPath(dir);
+    if (cd.isEmpty() || cp.isEmpty()) return false;
+    if (cp == cd) return true;
+    return cp.startsWith(cd.endsWith(QLatin1Char('\\')) ? cd : cd + QLatin1Char('\\'));
+}
+
+StorageBreakdown storageBreakdown(const QString &dataDir, const QString &logDir)
+{
+    StorageBreakdown out;
+    QFileInfo di(dataDir);
+    if (!di.exists() || !di.isDir()) {
+        out.logs = dirSizeBytes(logDir);
+        return out;
+    }
+    // ★ logDir 常常**就是** dataDir 本身：g_logPath 默认 dataDir/agent-qt.log，
+    //   取其 absolutePath 得到 dataDir。所以「是否在 logDir 之下」不能当分类依据
+    //   （那会把所有文件都算成日志，配置与数据两栏变 0），必须按文件特征判。
+    const bool logInsideData = !logDir.isEmpty() && pathWithin(logDir, dataDir);
+    const QString logSub = canonicalPath(QDir(dataDir).filePath(QStringLiteral("logs")));
+
+    QDirIterator it(dataDir, QDir::Files | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        const QFileInfo fi = it.fileInfo();
+        const qint64 sz = fi.size();
+        const QString dirPath = canonicalPath(fi.absolutePath());
+        const QString name = fi.fileName().toLower();
+        const bool isLogName = name.endsWith(QStringLiteral(".log"))
+                            || name.contains(QStringLiteral(".log."));
+        if (pathWithin(dirPath, logSub) || isLogName) { out.logs += sz; continue; }
+        // 直接躺在 dataDir 根下的是配置；有子目录层级的一律算数据。
+        if (dirPath == canonicalPath(dataDir)) out.config += sz;
+        else out.data += sz;
+    }
+    // 日志目录在数据目录之外时，那边的日志没被上面扫到，单独统计。
+    if (!logInsideData) out.logs += dirSizeBytes(logDir);
+    return out;
+}
+
 qint64 dirSizeBytes(const QString &path)
 {
     QFileInfo fi(path);

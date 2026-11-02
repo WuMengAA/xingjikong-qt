@@ -63,6 +63,17 @@ public:
     // 否则会出现"岛上写第 9 周、上下课提醒按第 8 周判"的分叉。
     static int semesterWeek(const QDate &d);
 
+    // 从档案构建「今天」的课程时间表（2026-11-03 从 private 提到 public static）。
+    //
+    // 为什么提出来：它本来就**不碰任何成员**（纯函数：档案 + 日期 + 周次 → 课程列表），
+    // 但藏在 private 里导致「下发 59 节、教室机只显示 3 节」这类口径错位
+    // 只能靠真机肉眼对数字才发现（三处 bug 全部静默）。
+    // 提成 public static 后，探针能直接喂构造好的档案逐条断言，不必起整个被控端。
+    // ⚠️ 必须声明在 `signals:` **之前** —— moc 会把 signals 段之后的方法当信号，
+    //    生成 `ScheduleClock::buildTodayLessons` 的信号桩，链接期报「与函数只差返回类型」。
+    static QList<LessonInfo> buildTodayLessons(const Profile& profile, const QDate& today,
+                                               int currentWeek);
+
     // 2026-10-27（G3 · 时间同步）：判定用时间的校正量（秒）。
     // 来源 = TimesyncDomain::skewMs()/1000（NTP 差 + 人工偏移），main.cpp 注入。
     // ⚠️ **不改系统钟**：只让"什么时候算上课"跟 NTP/铃声对齐。
@@ -88,9 +99,6 @@ signals:
     void lessonLeft(const LessonInfo& info, int slotIndex);
 
 private:
-    // 从档案构建「今天」的课程时间表（LessonInfo 已提到 public，见上）
-    QList<LessonInfo> buildTodayLessons(const Profile& profile, const QDate& today, int currentWeek);
-
     QString m_profilePath;
     QTimer m_timer;
     QDate m_builtFor;                // 课表按天重建的"已建日期"（原为函数级 static：多实例会互相干扰、也没法测）

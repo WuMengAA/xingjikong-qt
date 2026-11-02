@@ -174,16 +174,16 @@ void agentUiWire(AgentUi *ui)
         const QString dataDir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong");
         const QString cfgDir  = QFileInfo(agentEnvPath()).absolutePath();
         const QString logDir  = QFileInfo(g_logPath).absolutePath();
-        const qint64 cfg  = SettingsDomain::dirSizeBytes(cfgDir);
-        const qint64 data = SettingsDomain::dirSizeBytes(dataDir);
-        const qint64 logs = SettingsDomain::dirSizeBytes(logDir);
-        const QString cfgTxt  = SettingsDomain::humanSize(cfg) + QStringLiteral("  ·  ") + cfgDir;
-        const QString dataTxt = SettingsDomain::humanSize(data) + QStringLiteral("  ·  ") + dataDir;
-        const QString logTxt  = SettingsDomain::humanSize(logs) + QStringLiteral("  ·  ") + logDir;
-        // 总计按"去重"算：数据目录通常已包含日志目录，重复加会把数报大（现场会质疑）。
-        qint64 total = cfg + data;
-        if (!logDir.startsWith(dataDir, Qt::CaseInsensitive)) total += logs;
-        ui->setStorageTexts(cfgTxt, dataTxt, logTxt, SettingsDomain::humanSize(total),
+        // ★ 三分类必须互斥：cfgDir 与 logDir 其实都在 dataDir 这棵树里，
+        //   各自 dirSizeBytes 三次会得到同一个数（2026-11-02 线上截图：三栏都是
+        //   532.5 MB、合计 1.56 GB 正好三倍）。分类与去重统一在域里做，
+        //   顺带修掉 dataDir("/" 拼) 与 absolutePath("\") 分隔符不同导致 startsWith 恒 false。
+        const SettingsDomain::StorageBreakdown bk =
+            SettingsDomain::storageBreakdown(dataDir, logDir);
+        const QString cfgTxt  = SettingsDomain::humanSize(bk.config) + QStringLiteral("  ·  ") + cfgDir;
+        const QString dataTxt = SettingsDomain::humanSize(bk.data) + QStringLiteral("  ·  ") + dataDir;
+        const QString logTxt  = SettingsDomain::humanSize(bk.logs) + QStringLiteral("  ·  ") + logDir;
+        ui->setStorageTexts(cfgTxt, dataTxt, logTxt, SettingsDomain::humanSize(bk.total()),
                             QStringLiteral("统计于 %1")
                                 .arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss"))));
         emit ui->storageChanged();

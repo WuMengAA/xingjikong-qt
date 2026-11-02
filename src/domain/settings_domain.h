@@ -45,6 +45,29 @@ QString lastExitText();
 /** 递归统计目录占用字节数。目录不存在返回 0。大目录会有几十~几百 ms，别在滚动时调。 */
 qint64 dirSizeBytes(const QString &path);
 
+/**
+ * 存储用量三分类（配置 / 数据 / 日志），三者**互斥且并集等于总占用**。
+ *
+ * 为什么需要这个函数而不是让调用方各自 dirSizeBytes 三次：2026-11-02 线上截图暴露出
+ * 三栏报同一个 532.5 MB、合计 1.56 GB（正好三倍）——根因是 cfgDir 与 logDir 其实都在
+ * dataDir 这棵树里，"配置/数据/日志"并不是互斥分类；而且去重用的
+ * `logDir.startsWith(dataDir)` 因为 dataDir 是 `/` 拼、absolutePath 给 `\`，恒为 false，
+ * 于是日志被重复计入总账。
+ *
+ * 分类口径（按路径归属，不按文件扩展名猜）：
+ *   · logs —— 落在 logDir 之下的所有文件
+ *   · config —— 直接躺在 dataDir 根下的文件（agent.env / channel.txt / classcode.txt …）
+ *   · data —— dataDir 之下其余的（incoming / media / ota / shots / sched / logs 之外的一切）
+ * logDir 不在 dataDir 之下时单独算入 logs，其余照旧 —— 调用方无需判断包含关系。
+ */
+struct StorageBreakdown {
+    qint64 config = 0;
+    qint64 data = 0;
+    qint64 logs = 0;
+    qint64 total() const { return config + data + logs; }
+};
+StorageBreakdown storageBreakdown(const QString &dataDir, const QString &logDir);
+
 /** 人类可读体积："1.2 MB" / "345 KB" / "0 B"。 */
 QString humanSize(qint64 bytes);
 

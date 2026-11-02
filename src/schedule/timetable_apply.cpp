@@ -67,47 +67,67 @@ Result applyEnvelope(const QJsonObject &envelope, const QString &profilePath,
         return out;
     }
 
-    // ── 2. 时间表：以第一个「有课的日」的 timeLayoutId 为准 ────────────────
-    // 云端每天可能引用不同 TimeLayout；本机的判定只认**一张按开始时间排序的上课表**
-    // （见 schedule_clock.cpp buildTodayLessons）。取第一天的，并在下面逐节核对
-    // 每天的 start/end 是否与它对得上 —— 对不上就如实报出来，不假装整齐。
-    QString layoutId;
-    QJsonArray layoutItems;
+    // ── 2. 时间表：**每种 timeLayoutId 各留一张**，不许合并成一个 ─────────
+    // ★ 2026-11-03 修的真 bug（现场：下发 6 天 59 节，落盘 5 天 56 节，今日只显示 3 节）：
+    //   改造前这里只取「第一个有课的日」引用的那张 TimeLayout，然后把**所有** ClassPlan
+    //   的 TimeLayoutId 都指向它。云端一天的课表有 12 节、周日那张布局只有 3 个课时，
+    //   多出来的 9 节在 schedule_clock 里撞上 slot >= slotTimeTable.size() → 静默丢弃。
+    //   正确做法：云端的 layouts 有几个 id 就写几张，每个 ClassPlan 指向自己那张。
     const QJsonArray layouts = envelope.value(QStringLiteral("layouts")).toArray();
-    for (const QJsonValue &d : days) {
-        const QString tl = d.toObject().value(QStringLiteral("timeLayoutId")).toString();
-        if (tl.isEmpty()) continue;
-        for (const QJsonValue &l : layouts) {
-            const QJsonObject lo = l.toObject();
-            if (lo.value(QStringLiteral("id")).toString() == tl) {
-                layoutId = tl;
-                layoutItems = lo.value(QStringLiteral("items")).toArray();
-                break;
-            }
-        }
-        if (!layoutId.isEmpty()) break;
+    QHash<QString, QJsonArray> itemsByLayout;          // 云端 timeLayoutId -> items[]
+    for (const QJsonValue &l : layouts) {
+        const QJsonObject lo = l.toObject();
+        const QString id = lo.value(QStringLiteral("id")).toString();
+        if (id.isEmpty()) continue;
+        itemsByLayout.insert(id, lo.value(QStringLiteral("items")).toArray());
     }
 
-    QJsonArray layoutArr;
-    if (!layoutItems.isEmpty()) {
-        for (const QJsonValue &v : layoutItems) {
-            const QJsonObject it = v.toObject();
-            const QString start = normTime(it.value(QStringLiteral("start")).toString());
-            const QString end = normTime(it.value(QStringLiteral("end")).toString());
+    // 每张布局至少要能放下「引用它的那些天里最长的一天」的课时数。
+    // 云端布局与课时本来就同源，正常相等；这里仍然按天数上限兜底补齐 ——
+    // 宁可多一行时间表，也不能再出现「有 12 节课却只排出 3 个时段」的静默截断。
+    QMap<QString, int> needSlots;
+    QMap<QString, QJsonArray> sampleLessons;           // 补齐时取用的样本课时
+    for (const QJsonValue &dv : days) {
+        const QJsonObject d = dv.toObject();
+        QString tl = d.value(QStringLiteral("timeLayoutId")).toString();
+        if (tl.isEmpty()) tl = QStringLiteral("layout-from-cloud");
+        const QJsonArray ls = d.value(QStringLiteral("lessons")).toArray();
+        if (ls.size() > needSlots.value(tl)) {
+            needSlots[tl] = ls.size();
+            sampleLessons[tl] = ls;
+        } else if (!needSlots.contains(tl)) {
+            needSlots.insert(tl, 0);
+            sampleLessons.insert(tl, ls);
+        }
+    }
+    if (needSlots.isEmpty()) {
+        out.error = QStringLiteral("课表里没有任何可用的节次时间（days 里没有 timeLayoutId）");
+        return out;
+    }
+
+    QMap<QString, QJsonArray> layoutRows;
+    for (auto it = needSlots.begin(); it != needSlots.end(); ++it) {
+        QJsonArray rows;
+        int lessonRows = 0;
+        for (const QJsonValue &v : itemsByLayout.value(it.key())) {
+            const QJsonObject item = v.toObject();
+            const QString start = normTime(item.value(QStringLiteral("start")).toString());
+            const QString end = normTime(item.value(QStringLiteral("end")).toString());
             if (start.isEmpty() || end.isEmpty()) continue;
-            const bool isLesson = it.value(QStringLiteral("kind")).toString() == QLatin1String("lesson");
+            const bool isLesson = item.value(QStringLiteral("kind")).toString() == QLatin1String("lesson");
+            if (isLesson) ++lessonRows;
             QJsonObject row;
             row.insert(QStringLiteral("StartTime"), start);
             row.insert(QStringLiteral("EndTime"), end);
             row.insert(QStringLiteral("TimeType"), isLesson ? 0 : 1);
-            row.insert(QStringLiteral("BreakName"), isLesson ? QString() : it.value(QStringLiteral("label")).toString());
-            layoutArr.append(row);
+            row.insert(QStringLiteral("BreakName"),
+                       isLesson ? QString() : item.value(QStringLiteral("label")).toString());
+            rows.append(row);
         }
-    }
-    if (layoutArr.isEmpty()) {
-        // 兜底：云端没给 layouts（老信封）时，用第一天每节课自己的起止时间拼一张表。
-        for (const QJsonValue &v : days.at(0).toObject().value(QStringLiteral("lessons")).toArray()) {
-            const QJsonObject l = v.toObject();
+        // 布局缺失 / 课时行不够：用课时自带的 start/end 补齐（追在末尾，保持既有下标不动）。
+        const QJsonArray sample = sampleLessons.value(it.key());
+        for (int i = lessonRows; i < it.value() && i < sample.size(); ++i) {
+            const QJsonObject l = sample.at(i).toObject();
             const QString start = normTime(l.value(QStringLiteral("start")).toString());
             const QString end = normTime(l.value(QStringLiteral("end")).toString());
             if (start.isEmpty() || end.isEmpty()) continue;
@@ -116,14 +136,14 @@ Result applyEnvelope(const QJsonObject &envelope, const QString &profilePath,
             row.insert(QStringLiteral("EndTime"), end);
             row.insert(QStringLiteral("TimeType"), 0);
             row.insert(QStringLiteral("BreakName"), QString());
-            layoutArr.append(row);
+            rows.append(row);
         }
+        if (rows.isEmpty()) {
+            out.error = QStringLiteral("课表里没有任何可用的节次时间（start/end 全空）");
+            return out;
+        }
+        layoutRows.insert(it.key(), rows);
     }
-    if (layoutArr.isEmpty()) {
-        out.error = QStringLiteral("课表里没有任何可用的节次时间（start/end 全空）");
-        return out;
-    }
-    if (layoutId.isEmpty()) layoutId = QStringLiteral("layout-from-cloud");
 
     // ── 3. 组装 ClassIsland 官方 Profile（真机结构：TimeRule + Classes 下标） ──
     // 为什么用真机结构：Profile::fromJson 见到 TimeRule 才走真机分支，
@@ -149,7 +169,9 @@ Result applyEnvelope(const QJsonObject &envelope, const QString &profilePath,
     for (const QJsonValue &dv : days) {
         const QJsonObject d = dv.toObject();
         const int dow = d.value(QStringLiteral("dow")).toInt();
-        if (dow < 1 || dow > 7) continue;
+        // ★ 云端 dow 是 ClassIsland 口径 **0=周日 … 6=周六**（class-timetable.js 的 DOW 表）。
+        //   原先写 `dow < 1 || dow > 7` 直接把「周日」整条丢掉 —— 现场 6 天变 5 天的根因。
+        if (dow < 0 || dow > 6) continue;
         QJsonArray classes;
         for (const QJsonValue &lv : d.value(QStringLiteral("lessons")).toArray()) {
             const QJsonObject l = lv.toObject();
@@ -161,15 +183,21 @@ Result applyEnvelope(const QJsonObject &envelope, const QString &profilePath,
             ++lessonCount;
         }
         const QString cpId = QStringLiteral("cp-%1").arg(dow);
+        QString tl = d.value(QStringLiteral("timeLayoutId")).toString();
+        if (tl.isEmpty()) tl = QStringLiteral("layout-from-cloud");
         QJsonObject cp;
         cp.insert(QStringLiteral("Id"), cpId);
         cp.insert(QStringLiteral("Name"),
                   d.value(QStringLiteral("name")).toString(
                       QStringLiteral("周%1").arg(dow)));
-        cp.insert(QStringLiteral("TimeLayoutId"), layoutId);
+        // ★ 每天指向自己那张时间表 —— 写成同一张就是这次「12 节只排 3 个时段」的根因。
+        cp.insert(QStringLiteral("TimeLayoutId"), tl);
         cp.insert(QStringLiteral("AssociatedGroup"), groupId);
         QJsonObject rule;
-        rule.insert(QStringLiteral("WeekDay"), dow);
+        // ★ ClassIsland 的 WeekDay 是 **0=周日 … 6=周六**；云端信封的 dow 是 Qt 口径
+        //   （1=周一 … 7=周日）。不换算的话"周日"会变成"周一"，整周课表错位一天。
+        //   证据：D:\Classlsland 档案里 Name=周一 的 plan 为 WeekDay=1、Name=周日 的为 WeekDay=0。
+        rule.insert(QStringLiteral("WeekDay"), dow % 7);
         rule.insert(QStringLiteral("WeekCountDiv"), 0);        // 0 = 每周都上（ClassIsland 口径）
         rule.insert(QStringLiteral("WeekCountDivTotal"), 1);
         rule.insert(QStringLiteral("IsActive"), true);
@@ -179,12 +207,24 @@ Result applyEnvelope(const QJsonObject &envelope, const QString &profilePath,
         ++out.dayCount;
     }
 
-    QJsonObject tl;
-    tl.insert(QStringLiteral("Id"), layoutId);
-    tl.insert(QStringLiteral("Name"), QStringLiteral("云端下发"));
-    tl.insert(QStringLiteral("Layouts"), layoutArr);
+    // 每种布局一张表（名字取自云端，缺省「云端下发」）。
     QJsonObject timeLayouts;
-    timeLayouts.insert(layoutId, tl);
+    for (auto it = layoutRows.begin(); it != layoutRows.end(); ++it) {
+        QString name = QStringLiteral("云端下发");
+        for (const QJsonValue &l : layouts) {
+            const QJsonObject lo = l.toObject();
+            if (lo.value(QStringLiteral("id")).toString() == it.key()) {
+                const QString n = lo.value(QStringLiteral("name")).toString();
+                if (!n.isEmpty()) name = n;
+                break;
+            }
+        }
+        QJsonObject tl;
+        tl.insert(QStringLiteral("Id"), it.key());
+        tl.insert(QStringLiteral("Name"), name);
+        tl.insert(QStringLiteral("Layouts"), it.value());
+        timeLayouts.insert(it.key(), tl);
+    }
 
     QJsonObject grp;
     grp.insert(QStringLiteral("Id"), groupId);

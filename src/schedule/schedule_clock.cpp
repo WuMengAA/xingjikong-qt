@@ -46,6 +46,45 @@ int ScheduleClock::semesterWeek(const QDate &d)
     return days < 0 ? 1 : (days / 7) + 1;
 }
 
+// 某张 TimeLayout 的「课时表」——ClassPlan.Classes 的下标就是这张表的序号。
+//
+// ★ 2026-11-03 修的真 bug：原先这里把所有 TimeLayout 的课时**并成一张全局表**，
+//   于是「周一 12 节 / 周日 3 节」两份不同作息混在一起，先排出来的表长度只有 3，
+//   周一第 4 节往后全部撞 `slot >= slotTimeTable.size()` 被静默丢弃 ——
+//   现场表现为「下发 12 节，岛只显示 3 节」且日志无任何异常。
+//   正解：每个 ClassPlan 用它自己 TimeLayoutId 指向的那张表（profile.h 里 key = "<layoutId>/<index>"）。
+static QList<TimeSlot> slotsForLayout(const Profile& profile, const QString& layoutId)
+{
+    QList<QPair<int, TimeSlot>> indexed;
+    if (!layoutId.isEmpty()) {
+        const QString prefix = layoutId + QLatin1Char('/');
+        for (auto it = profile.timeSlots.cbegin(); it != profile.timeSlots.cend(); ++it) {
+            if (!it.key().startsWith(prefix)) continue;
+            bool ok = false;
+            const int idx = it.key().mid(prefix.size()).toInt(&ok);
+            if (ok) indexed.append({idx, it.value()});
+        }
+    }
+    if (indexed.isEmpty()) {
+        // 简化模型（无 layoutId / timeSlots 是平铺的上课时间点）：按开始时间排序，旧行为。
+        QList<TimeSlot> all;
+        for (const TimeSlot& ts : profile.timeSlots)
+            if (ts.timeType == 0 && ts.isActive) all.append(ts);
+        std::sort(all.begin(), all.end(),
+                  [](const TimeSlot& a, const TimeSlot& b) { return a.startTime < b.startTime; });
+        return all;
+    }
+    // 按 Layouts 数组下标排（**不是**按开始时间）—— Classes 下标跟的是数组序。
+    std::sort(indexed.begin(), indexed.end(),
+              [](const QPair<int, TimeSlot>& a, const QPair<int, TimeSlot>& b) {
+                  return a.first < b.first;
+              });
+    QList<TimeSlot> out;
+    for (const auto& pair : indexed)
+        if (pair.second.timeType == 0 && pair.second.isActive) out.append(pair.second);
+    return out;
+}
+
 // 从档案构建今天的课程
 QList<ScheduleClock::LessonInfo> ScheduleClock::buildTodayLessons(
     const Profile& profile, const QDate& today, int currentWeek)
@@ -53,43 +92,26 @@ QList<ScheduleClock::LessonInfo> ScheduleClock::buildTodayLessons(
     QList<LessonInfo> result;
     const int weekday = today.dayOfWeek();  // 1=周一 ... 7=周日
 
-    // 从档案提取"节次时间表"：
-    //   · 真机 ClassIsland：TimeLayouts 是 map<id, {Layouts:[{StartTime,EndTime,TimeType},...]}>，
-    //     节次时间在 Layouts 数组里（按下标 = slotIndex）。
-    //   · 简化模型（gen_ci_profile 早期版）：timeSlots 是 map<id, {StartTime,EndTime,TimeType}>。
-    // 这里两种都兼容：优先收集"按开始时间排序的上课时间点"作为 slot→时间 的索引表。
-    QList<TimeSlot> slotTimeTable;
-    {
-        // 尝试从真机 TimeLayouts 的 Layouts 数组收集（真机结构）
-        bool gotReal = false;
-        QList<TimeSlot> real;
-        const auto tlKeys = profile.timeSlots.keys();
-        for (const QString& k : tlKeys) {
-            // profile.timeSlots 是简化模型；真机档案的 TimeLayouts 在 fromJson 里也被解析进 timeSlots
-            // （见 profile.h：TimeLayouts 对象被当 TimeSlot 解析，Layouts 数组没展开）。
-            // 所以我们优先看简化模型，真机结构需要额外解析 —— 见下。
-            Q_UNUSED(k);
-        }
-        Q_UNUSED(gotReal);
-
-        // 简化模型：timeSlots 直接是 上课时间点（TimeType==0）
-        for (const TimeSlot& ts : profile.timeSlots) {
-            if (ts.timeType == 0 && ts.isActive) real.append(ts);
-        }
-        std::sort(real.begin(), real.end(),
-                  [](const TimeSlot& a, const TimeSlot& b) { return a.startTime < b.startTime; });
-        slotTimeTable = real;
-    }
-
     // 当前激活课表群里的 ClassPlan（含多周轮换判断）
+    QHash<QString, QList<TimeSlot>> slotCache;   // layoutId -> 课时表（同布局的日只算一次）
     const QList<ClassPlan> plans = profile.activeClassPlans();
     for (const ClassPlan& cp : plans) {
-        // 真机：WeekDay 在 TimeRule 里；简化模型：在 ClassPlan 顶层。
-        int cpWeekday = cp.weekDay;  // 简化模型
-        // 真机兼容：尝试从 TimeRule 读（需要额外解析，见 profile.h —— 目前简化模型解析器
-        // 把 TimeRule 丢掉了，这里仅对简化模型成立）。真机档案的完整兼容需要扩展 fromJson。
+        // ★ WeekDay 两套口径必须换算：
+        //   · ClassIsland 真机 TimeRule.WeekDay = **0=周日 … 6=周六**；
+        //   · 简化模型 / QDate::dayOfWeek() = **1=周一 … 7=周日**。
+        //   不换算时「周日的课」会挂到周一（或干脆不匹配），现场就是整周错位一天。
+        const int cpWeekday = (cp.weekDay == 0) ? 7 : cp.weekDay;
         if (cpWeekday != weekday) continue;
         if (!cp.matchesWeek(currentWeek)) continue;
+
+        QList<TimeSlot> slotTimeTable;
+        if (slotCache.contains(cp.timeLayoutId)) {
+            slotTimeTable = slotCache.value(cp.timeLayoutId);
+        } else {
+            slotTimeTable = slotsForLayout(profile, cp.timeLayoutId);
+            slotCache.insert(cp.timeLayoutId, slotTimeTable);
+        }
+        if (slotTimeTable.isEmpty()) continue;
 
         // 该天的每一节课（Classes 数组，下标即 slotIndex）
         for (const Lesson& lesson : cp.lessons) {
