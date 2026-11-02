@@ -174,11 +174,14 @@ export function adminDeleteClass(code, strategy = 'refuse', ident = null) {
     classCode: r.code, className: r.name, released: uidList.length, subsDropped: dropped,
     eventsDropped: ev.deleted, membersDropped: mb.deleted, studentsDropped: cd.students,
     attendanceDropped: at.removed,
+    // 2026-11-02：回执补 timetableDropped —— dropClassData 一直删了课表但没把计数透出，
+    // regression-class-data ⑮「名单与课表随班销毁」无法从回执确认课表这条腿。
   });
   return {
     ok: true, code: r.code, name: r.name, releasedDevices: uidList.length,
     subsDropped: dropped, eventsDropped: ev.deleted, membersDropped: mb.deleted,
     studentsDropped: cd.students, attendanceDropped: at.removed,
+    timetableDropped: cd.timetables,
   };
 }
 

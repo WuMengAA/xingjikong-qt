@@ -285,17 +285,22 @@ try {
 
   await ok('⑬ 非本班成员：读不到名单', async () => {
     const r = await cls('students', { classCode: CLASS_A }, outsider);
-    assert.equal(r.status, 400, JSON.stringify(r.json));
-    assert.match(r.json.error, /无权限/);
+    // 2026-11-02 对齐：10-31（7db72ea）路由落地起拒绝码就是 403/PV4002（全库口径一致），
+    // 本用例写于路由存在之前（10-25），期望 400 从未与实现对齐过。
+    assert.equal(r.status, 403, JSON.stringify(r.json));
+    assert.match(r.json.error, /无权/);
   });
 
   await ok('⑭ 非本班成员：写不了名单 / 课表', async () => {
     const a = await cls('student-add', { classCode: CLASS_A, student: { name: '闯入者' } }, outsider);
-    assert.equal(a.status, 400);
-    assert.match(a.json.error, /无权限/);
+    // 2026-11-02 口径对齐：student-add 在 index.js 路由层 canReach 拒 → 403 PV4002（与读同源）；
+    // timetable-save 走 handleClassAdminApi 通用分发 send(r.ok?200:400) → 400。两个入口两种码是现状。
+    assert.equal(a.status, 403);
+    assert.equal(a.json.ok, false);
     const b = await cls('timetable-save', { classCode: CLASS_A, profile: PROFILE }, outsider);
     assert.equal(b.status, 400);
-    assert.match(b.json.error, /无权限/);
+    assert.equal(b.json.ok, false);
+    assert.match(b.json.error, /无权/);
   });
 
   await ok('⑮ 删班：名单与课表随班销毁', async () => {
@@ -306,7 +311,10 @@ try {
     assert.ok(del.json.studentsDropped >= 5, JSON.stringify(del.json));
     assert.ok(del.json.timetableDropped >= 1, JSON.stringify(del.json));
     const after = await cls('students', { classCode: CLASS_A });
-    assert.equal(after.status, 400, '班级已不存在');
+    // 2026-11-02 对齐实现：listStudents 对不存在班回 ok:true + count:0（空表不是错误），
+    // 删班后名单已毁的直接证据 = count 归零（原期望 400/「班级不存在」从未与实现对齐过）。
+    assert.equal(after.status, 200);
+    assert.equal(after.json.count, 0);
   });
 
   await ok('⑯ 重启后数据仍在（落盘不是内存）', async () => {
