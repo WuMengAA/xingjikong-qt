@@ -77,8 +77,10 @@ Column {
         }
     }
 
-    // 更新渠道（临时测试开关 · 2026-10-28 B4）
-    // 用户点单原文：「被控端设置界面添加临时的测试更新渠道切换按钮」+「切换逻辑在 C++」。
+    // 更新渠道（2026-11-02 转正：临时测试开关 → 正式渠道类）
+    // 三档 = alpha 灰度 / beta 测试 / stable 正式，与云端渠道自动晋升同表：
+    // 灰度发布即可见 → 满 5 小时进测试 → 满 24 小时进正式。**版本号与安装包都不变**，
+    // 变的只是"此刻哪些设备能拿到这一版"。
     // 生效面：g_channel（register 上报 + OTA 查询）+ channel.txt（重启/升级后仍生效）。
     AppCard {
         anchors.left: parent.left
@@ -94,20 +96,7 @@ Column {
                     font.weight: Font.Medium
                     color: Theme.color.textPrimary
                 }
-                // 「临时」角标：让现场一眼看出这不是长期能力（服务端灰度上线后撤）
-                Rectangle {
-                    Layout.preferredWidth: 42
-                    Layout.preferredHeight: 19
-                    radius: 9.5
-                    color: Theme.color.warning
-                    Text {
-                        anchors.centerIn: parent
-                        text: "临时"
-                        font.pixelSize: 11
-                        font.weight: Font.Medium
-                        color: Theme.color.background
-                    }
-                }
+                // 2026-11-02：渠道从「临时测试开关」转正，撤掉「临时」角标。
                 Item { Layout.fillWidth: true }
             }
             AppInfoRow { label: "当前渠道"; value: agentUi.updateChannel }

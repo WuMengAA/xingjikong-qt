@@ -27,15 +27,15 @@ void agentUiWire(AgentUi *ui)
     // 生效面两条，都必须走：
     //   ① g_channel —— register 上报给云端（云端据此决定推哪个清单）与 otaSelfCheck 的查询参数；
     //   ② channel.txt —— 落盘，重启/OTA 升级后仍沿用该渠道（否则升级一次就悄悄掉回 stable）。
-    // 白名单三个渠道名：与云端 manifestFileFor 的三份清单一一对应；不认识的值**不落盘**
-    // （脏写 channel.txt 会让设备永久查到一个不存在的清单 ⇒ 永远"无更新"，且现场看不出来）。
+    // 白名单由 channelCanonical() 收口（2026-11-02 口径变更：stable/rc/gray → stable/beta/alpha）。
+    // 它既认新名也认旧名（rc→beta、gray→alpha），所以没升级的设备上报旧值、
+    // 已升级的设备上报新值，都落进同一套语义。未知值返回空串 ⇒ 不落盘、界面回弹
+    // （脏写 channel.txt 会让设备永久查到一个不存在的清单 ⇒ 永远"无更新"，现场看不出来）。
     QObject::connect(ui, &AgentUi::channelChangedRequested, ui, [ui](const QString &ch) {
-        const QString v = ch.trimmed();
-        const bool known = (v == QLatin1String("stable") || v == QLatin1String("rc")
-                            || v == QLatin1String("gray"));
-        if (!known) {
-            qWarning("[agent-shell] 未知更新渠道「%s」——拒绝落盘（界面回弹当前值）",
-                     qPrintable(ch));
+        const QString v = channelCanonical(ch);
+        if (v.isEmpty()) {
+            qWarning("[agent-shell] 未知更新渠道「%s」——拒绝落盘（界面回弹当前值）；"
+                     "合法值：alpha（灰度）/ beta（测试）/ stable（正式）", qPrintable(ch));
             agentUiFill(ui);
             ui->publish();
             return;

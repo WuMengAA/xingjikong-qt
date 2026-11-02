@@ -470,9 +470,12 @@ private:
 // 填快照（agentUiFill，friend）+ 接全部请求信号（agentUiWire）。AgentShell 构造时调用。
 void agentUiWire(AgentUi *ui);
 
-// 渠道清单（2026-10-28 B4）：云端按 channel 分文件存清单 ——
-//   stable → ota.json；rc → ota-rc.json；gray → ota-gray.json（见 cloud/src/ota.js manifestFileFor）。
-// 三个渠道名都过云端白名单 /^[a-z0-9_-]{1,16}$/，不会参与文件名拼接（防路径穿越）。
+// 渠道清单（2026-11-02 口径变更：三档改为 alpha 灰度 / beta 测试 / stable 正式）——
+//   与云端渠道自动晋升（src/ota-promote.js）同表：alpha 发布即可见 → 满 5h 进 beta
+//   → 满 24h 进 stable。设备侧**只看得到自己这一档该拿到什么**，判定权在云端。
+// ⚠️ 回退兼容：旧值 rc/gray 仍被 channelCanonical() 认（rc→beta、gray→alpha），
+//    已装机的老设备上报旧渠道也照样查得到清单，不需要人肉改配置。
+// 三个名字都过云端白名单 /^[a-z0-9_-]{1,16}$/，不参与文件名拼接（防路径穿越）。
 inline QVariantList AgentUi::channelOptionList(const QString &current)
 {
     QVariantList out;
@@ -490,9 +493,12 @@ inline QVariantList AgentUi::channelOptionList(const QString &current)
                  key == current ? QStringLiteral("solid") : QStringLiteral("secondary"));
         out.append(m);
     };
-    add(QStringLiteral("stable"), QStringLiteral("稳定"), QStringLiteral("对外正式版"));
-    add(QStringLiteral("rc"),     QStringLiteral("测试"), QStringLiteral("候选测试版"));
-    add(QStringLiteral("gray"),   QStringLiteral("灰度"), QStringLiteral("指定机型/班级灰度"));
+    add(QStringLiteral("stable"), QStringLiteral("正式"),
+        QStringLiteral("对外正式版，全网可见"));
+    add(QStringLiteral("beta"),   QStringLiteral("测试"),
+        QStringLiteral("候选版，发布满 5 小时"));
+    add(QStringLiteral("alpha"),  QStringLiteral("灰度"),
+        QStringLiteral("最新构建，发布即可见"));
     return out;
 }
 

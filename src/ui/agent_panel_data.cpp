@@ -126,13 +126,13 @@ void agentUiFill(AgentUi *ui)
             : QStringLiteral("立刻（有网就试）");
     }
 
-    // ── 2026-10-28 B4：更新渠道（临时测试开关）──
+    // ── 更新渠道（2026-11-02 从「临时测试开关」转正为正式渠道类）──
     // 快照取**当前生效**的 g_channel（不是环境变量那份）：切过之后界面要显示新值。
     ui->m_updateChannel = g_channel;
     ui->m_channelOptions = AgentUi::channelOptionList(g_channel);   // 选中态样式也在这里定
     ui->m_channelNoteText = QStringLiteral("生效渠道写在 %1；切换后立刻按新渠道重查一次更新，"
-                                           "重启/升级后仍沿用。此按钮为临时手段，"
-                                           "服务端按机型灰度上线后退役。")
+                                           "重启/升级后仍沿用。灰度 α 发布即可见，测试 β 满 5 小时，"
+                                           "正式 stable 满 24 小时 —— 版本号不变，只是渠道档位变化。")
                                 .arg(channelFilePath());
 
     ui->m_notifyEnabled   = AgentSettings::notifyEnabled();    ui->m_voiceEnabled    = AgentSettings::voiceEnabled();
