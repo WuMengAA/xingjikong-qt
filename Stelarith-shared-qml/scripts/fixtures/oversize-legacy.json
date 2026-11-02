@@ -283,7 +283,7 @@
       "plan": "[P1] 按路由域拆 router：devices/instructions/ota/interact。台账：2705（#436 登记）→ 2826（37ec4ae 广播社批次 +121，当时未回写）→ 2860（2026-10-23 #458 班级域接线 +34，委托模式压增量；拆分为独立批次，用户可否决）→ 2873（2026-10-24 #475 班级管理 API 分发 +13：import handleClassAdminApi + isViewerApi 加 /api/class/ 前缀 + POST 分发点） | 2026-10-25 回写 2873→2976：登记值滞后（班级域/发布中心增量），本批未改此文件 | 2026-10-25 回写 2976→2983：+7 为班级数据（学生/课表）接线 —— 一行 import + 建表与启动日志；业务全在新 TU src/class-data.js（307 行，红线 600 内），index.js 只留启动钩子 | 2026-10-25 回写 2983→2989：+6 为设备用途接线（register 解析 role 入 regMeta 3 行 + 回执下发 getDeviceRole 3 行）；业务在 registry.js | 2026-10-26 回写 2989→3014（+25）：上轮密码批次 7dc67ed（vnc 中继门控/vnc-auth/改密 API）未回写，据实回写使门禁可读 | 2026-10-26 回写 3014→3092（+78）：P4 回放传输优化 —— /recordings/* 支持 HTTP Range（206 分段 / 416 越界 / 畸形降级 200 / Accept-Ranges），使播放器可 seek、可边下边播 | 2026-10-27 据实回写（非本批次改动，属并行线在途；为使门禁可读而更新登记值） | 2026-10-31 回写 3112→3407：本批及此前已提交增量 —— ①考勤+名单 HTTP 路由（/api/class/attendance、students/student-add/update/remove，学生/考勤数据层早已写好、路由一直没挂；此后新路由应进独立 TU，index.js 只留入口）②OTA 资产启动自检约 +101；另含并行线在途未提交项，据实回写使门禁可读 | 2026-11-02 补登记 3407→3562：HEAD 已在此行数（非本批批准，为登记滞后补齐）；本批未改该文件内容"
     },
     "Stelarith-cloud/src/registry.js": {
-      "lines": 1510,
+      "lines": 1315,
       "limit": 600,
       "qInvokable": 0,
       "topLevel": 0,
