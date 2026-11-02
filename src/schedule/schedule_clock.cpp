@@ -116,6 +116,20 @@ QList<ScheduleClock::LessonInfo> ScheduleClock::buildTodayLessons(
     return result;
 }
 
+void ScheduleClock::reloadProfile()
+{
+    // m_builtFor 置成无效日期即可让下一拍重建（tick() 的判据是 `m_builtFor != today`）。
+    // 清三样"已触发"记忆：不清 m_lastEmitSlot 的话，新档案里同一 index 的课会被当作
+    // 已提醒过而静默不弹；不清当前节次会让"下课"事件对新表里的旧 index 直接跳过。
+    m_builtFor = QDate();
+    m_lastEmitSlot = -1;
+    m_currentSlotIndex = -1;
+    m_currentPeriod.clear();
+    m_today.clear();
+    qInfo().noquote() << "[schedule-clock] 课表档案已变更，下一拍重建：" << m_profilePath;
+    tick();   // 立刻重建一次，别让界面等最多 30 秒（下发是用户主动操作，反馈要即时）
+}
+
 void ScheduleClock::tick()
 {
     // 2026-10-27（G3）：判定时间 = 系统时间 + 校正量（NTP 差 + 人工偏移，见 TimesyncDomain）。
@@ -158,6 +172,7 @@ void ScheduleClock::tick()
                 const QString periodName = l.subjectName.isEmpty()
                     ? l.periodName : QStringLiteral("%1 · %2").arg(l.periodName, l.subjectName);
                 emit periodStarted(periodName, l.startTime);
+                emit lessonEntered(l, activeIdx);   // 2026-11-02：结构化版本（字段全、口径统一）
                 qInfo().noquote() << "[schedule-clock] 上课提醒: " << periodName;
             }
         } else {
@@ -165,6 +180,7 @@ void ScheduleClock::tick()
             if (m_currentSlotIndex >= 0 && m_currentSlotIndex < m_today.size()) {
                 const LessonInfo& l = m_today.at(m_currentSlotIndex);
                 emit periodEnded(l.subjectName, l.endTime);
+                emit lessonLeft(l, m_currentSlotIndex);   // 2026-11-02：结构化版本
                 qInfo().noquote() << "[schedule-clock] 下课提醒: " << l.subjectName;
             }
             m_currentPeriod.clear();

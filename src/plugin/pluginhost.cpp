@@ -255,6 +255,10 @@ void PluginHost::handleApi(Conn *c, const QJsonObject &j) {
             if (m_api.subscribeEvents) m_api.subscribeEvents(c->manifest.id, evs);
             r.insert(QStringLiteral("ok"), true);
         }
+    } else if (call == QStringLiteral("schedule_get")) {
+        handleApiScheduleGet(c, r);       // 2026-11-02：两段扩能力搬至 pluginhost_api_ext.cpp
+    } else if (call == QStringLiteral("run_action")) {
+        handleApiRunAction(c, args, r);
     } else {
         r.insert(QStringLiteral("ok"), false);
         r.insert(QStringLiteral("error"), QStringLiteral("未知 api：%1").arg(call));

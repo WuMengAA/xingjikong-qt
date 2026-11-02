@@ -101,14 +101,13 @@ static const int kBarW = 520;
 static const int kBarH = 38;
 // 活动态胶囊的最小宽度（原来写死 200；收到文件时路径很长会撑宽，短文案时兜这个下限）
 static const int kMinContentW = 200;
-// 触控容差（像素）：手指按下到抬起之间会有肉眼看不见的抖动，
-// 小于这个位移一律算点击不算拖拽；反过来超过它就只当手势、不当点击。
-static const int kDragSlop = 24;
+// 触控容差 kDragSlop 已随指针域搬到 island_touch.cpp（本文件不再用）。
 // 展开态最长停留时间（毫秒）：到点强制收回，避免大块胶囊长期压着屏幕顶部吃点击。
 // 交互态展开本来没有回收路径（m_autoClose 的守卫会吞掉），这是唯一兜底。
 static const int kExpandMaxMs = 20000;
 // 空闲态展开（无活跃通知，只是看一眼"暂无通知"）的自动收起时间：5s 够看一眼就收。
 static const int kIdleExpandMs = 5000;
+// 2026-11-02：按住/松手整套逻辑在 island_touch.cpp（本文件已超红线，新功能进自己的域）。
 
 // ── 2026-10-17 形态多样化（#330 剩余件）：Banner / Mini 两档外框的尺寸真源 ──
 // ⚠️ 这组值与 QML（IslandRoot 的 shell 圆角、两个面的版式）**必须同改**——
@@ -212,6 +211,7 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     m_autoClose = new QTimer(this);
     m_autoClose->setSingleShot(true);
     connect(m_autoClose, &QTimer::timeout, this, [this]() {
+        if (m_touching) return;  // 按住中：松手时 noteActivity() 重新起表；兜底定时器也走同路
         // 交互态展开不自动收 —— 但调用方**显式给了时长**的（U盘 15s / OTA 20s）到点
         // 一律收，含展开态（"到点就收、不打扰太久"是那条契约，见 showWithActions 注释）。
         // 常驻交互通知（durationMs<=0）本就不排期，走不到这里；此守卫只兜未来可能出现的
@@ -225,8 +225,12 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     m_expandGuard = new QTimer(this);
     m_expandGuard->setSingleShot(true);
     connect(m_expandGuard, &QTimer::timeout, this, [this]() {
+        if (m_touching) return;  // 按住中不回收（松手由 setTouching(false) 重新起表）
         if (m_expanded) setExpanded(false);
     });
+
+    // 按住态兜底（2026-11-02）：released 丢失时强制松手 —— 实现在 island_touch.cpp。
+    initTouchGuard();
 
     // ── T 档：任务过期扫描（2026-10-18）───────────────────────────────────
     // 1Hz 扫全表，把到期且非 sticky 的任务标 done。
@@ -1957,10 +1961,8 @@ void IslandOverlay::setExpanded(bool on)
 }
 
 // 2026-11-01：交互活动上报 —— 展开态每有操作就重置「无操作 5s 自动收起」的计时。
-void IslandOverlay::noteActivity()
-{
-    if (m_expanded) m_expandGuard->start(kIdleExpandMs);
-}
+// 2026-11-02：**同时**重排 m_autoClose（整条通知的收起表）与按住态闸 ——
+//   完整实现（含 setTouching / 兜底定时器）在 island_touch.cpp，本文件已超红线。
 
 void IslandOverlay::animateGeometry(const QRect &target){
     m_geoAnim->stop();
@@ -2728,79 +2730,3 @@ bool IslandOverlay::hitActionButton(const QPoint &pt, int *index) const
     return false;
 }
 
-void IslandOverlay::mousePressEvent(QMouseEvent *ev)
-{
-    if (!m_interactive) { ev->ignore(); return; }   // 穿透态不消费
-    if (ev->button() != Qt::LeftButton) { ev->ignore(); return; }
-    // ⚠️ 触控（2026-10-07）：按下**不做任何动作**，只记起点。
-    //    原先把"展开/打开"写在 press 里，手指在触屏上按下就有肉眼不可见的抖动，
-    //    轻轻一滑就被判定成点（表现为拉了一下就弹出资源管理器）。
-    //    现在动作一律挪到 release，且中间滑过 kDragSlop 就只当拖拽、不当点击。
-    // ⚠️ 起点用**全局坐标**：手势期间窗口自己会位移（空闲 y=10 → 展开 y=24），
-    //    局部坐标会被窗口位移污染，同一个屏幕位置算出来的 dy 会漂。
-    m_pressGlobal = ev->globalPosition();
-    m_pressed = true;
-    m_dragged = false;
-    ev->accept();
-}
-
-void IslandOverlay::mouseMoveEvent(QMouseEvent *ev)
-{
-    if (!m_interactive || !m_pressed) { ev->ignore(); return; }
-    // ⚠️ 方向在跨过阈值的那一刻就**锁死**，之后不再跟手重判：
-    //    拖拽会触发 geometry 动画，窗口自己在变大/变宽（空闲 y=10 → 展开 y=24 还会下移），
-    //    于是"下拉展开"的下一次 move 可能算出反向的 dy 又调 setExpanded(false)，
-    //    表现为一拉就展开、抖一下又收回去。锁定之后下拉就是下拉。
-    if (m_dragged) { ev->accept(); return; }
-    const qreal dy = ev->globalPosition().y() - m_pressGlobal.y();
-    if (qAbs(dy) < kDragSlop) { ev->accept(); return; }   // 还在抖动容差里，不算拖
-    m_dragged = true;
-    // 下拉展开、上推收起 —— 和 iPhone 灵动岛同一个方向直觉
-    setExpanded(dy > 0);
-    ev->accept();
-}
-
-void IslandOverlay::mouseReleaseEvent(QMouseEvent *ev)
-{
-    if (!m_interactive) { ev->ignore(); return; }
-    if (ev->button() != Qt::LeftButton) { ev->ignore(); return; }  // 右键/中键抬起不算点击
-    if (!m_pressed) { ev->ignore(); return; }                      // 没有对应的按下，不当点击
-    m_pressed = false;
-    if (m_dragged) {                  // 这是一次拖拽手势，收尾就完，别再当点击
-        m_dragged = false;
-        ev->accept();
-        return;
-    }
-
-    // 交互按钮优先：「确认 / 快捷回复」点哪枚回哪句。点完即清按钮并收回（不再展开/收起）。
-    int ai = -1;
-    if (hitActionButton(ev->pos(), &ai)) {
-        const QString reply = m_actions.value(ai);
-        auto cb = m_onAction;
-        m_actions.clear();
-        m_onAction = nullptr;
-        setInteractive(false);          // 内部会 sync
-        dismiss();                      // 内部会 sync
-        if (cb) cb(reply);
-        ev->accept();
-        return;
-    }
-
-    if (!m_openPath.isEmpty() && hitOpenButton(ev->pos())) {   // pos()=QPoint（不是 position()=QPointF）
-        // ⚠️ 点击**分区**处理：岛体本身只负责展开/收起，"打开文件夹"只认右侧那个「▸ 打开」。
-        //    原来一道按下就 openInShell + dismiss，而这条岛是 StaysOnTop 且开了交互（收走鼠标
-        //    穿透），正好压在课件/白板上方 —— 学生本想点下面的课件、结果弹出资源管理器，
-        //    教室大屏上属于事故。把破坏性动作关进一个小按钮区，误点最坏只是展开一下。
-        openInShell();
-        ev->accept();
-        clearOpenPath();
-        setInteractive(false);
-        dismiss();
-        return;
-    }
-    // 岛体：点一下展开看详情，**再点一下收回**（切换语义）。
-    // ⚠️ 原来这里恒传 true：展开后再点毫无反应，而注释/归档都写的是"再点收回"，
-    //    触屏用户又基本不会想到"上推"这个手势，结果点开就收不回去。
-    setExpanded(!m_expanded);
-    ev->accept();
-}

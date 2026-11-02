@@ -17,19 +17,12 @@
 // 历史注释里"与旧 NotifyWindow 同思路/同白名单"指的就是这次被吸收的那套窗口做法。
 //
 // ── 2026-10-11 · 绘制层改 QML（用户裁决）──────────────────────────────
-// 用户要求"被控端 QWidget 改 QML"。本次只把**绘制**搬走，**逻辑一行不动**：
-//   · 视觉层 → qml/island/IslandRoot.qml（+ 7 个组件），由 QQuickWidget 承载
-//   · 逻辑层（几何/动画/定时器/鼠标/生命周期/单例）→ 仍在本文件原样保留
-//   · 桥：island_bridge.{h,cpp}（private 实现细节，不为它新增公开接口）
-// ⚠️ 本文件的**公开接口一个字符都没改**（12 个方法 + 1 个信号），
-//    所以 main.cpp 的 5 处调用点 + notifyFromParams 全都零改动。
-//    这是本次改造最重要的风险控制点 —— 任何需要改 main.cpp 的方案都视为越界。
-// ── 2026-10-17 更正：上面那条纪律是**当时的**约束，不再是全时段铁律。
-//    此后公开接口有以下**纯增量**变化（只加不改，老调用点零改动）：
-//      · 2026-10-15：setQmlObjectProperty（模块联动）、setMediaSession 等 P3/组件接口
-//      · 2026-10-17 P0-0：setNoticeTimeForNext（插件通知的发生时刻，一次性注入）
-//    仍然成立的纪律：**既有签名不许改**、**行为不许悄悄变**；
-//    新增接口一律「不调用即零影响」。
+// 只把**绘制**搬走，**逻辑一行不动**：视觉层 → qml/island/IslandRoot.qml（+7 个组件，
+// QQuickWidget 承载）；逻辑层（几何/动画/定时器/鼠标/生命周期/单例）仍在本文件；
+// 桥 = island_bridge.{h,cpp}（private 实现细节，不为它新增公开接口）。
+// 纪律（2026-10-17 更正为常设）：**既有签名不许改、行为不许悄悄变**；新增接口一律
+// 「不调用即零影响」。此后纯增量：setQmlObjectProperty/setMediaSession（10-15）、
+// setNoticeTimeForNext（10-17）、noteActivity（11-01）、setTouching（11-02）。
 
 #ifndef STELARITH_ISLAND_H
 #define STELARITH_ISLAND_H
@@ -312,8 +305,9 @@ public:
     // 切换展开（点击展开看详情）/ 收起
     void setExpanded(bool on);
     bool isExpanded() const { return m_expanded; }
-    // 2026-11-01：交互活动上报 —— 重置展开态「无操作 5s 自动收起」的计时（QML hover/点击调）。
+    // 2026-11-02：同时重排 m_autoClose（见 .cpp 说明）；按住/松开由 QML 经 bridge 上报。
     void noteActivity();
+    void setTouching(bool on);
 
     // 深/浅色：true=浅色（白底黑字），false=深色（黑底白字，默认）
     void setLightMode(bool light);
@@ -626,6 +620,12 @@ private:
     void armMediaPhaseTimer(int ms);
 
     QTimer *m_autoClose = nullptr;
+    // 2026-11-02（用户「有触摸就等到无触摸才收起」）：按住期间自动收起全部不生效。
+    //   用布尔而非"记住剩余量"（按下 100ms 就抬起时剩余方案仍是手一松就闪掉）；
+    //   m_touchGuard 兜底 released 丢失，否则岛永久收不回。
+    bool m_touching = false;
+    QTimer *m_touchGuard = nullptr;
+    void initTouchGuard();
     QTimer *m_dismissGuard = nullptr;   // dismiss 淡出的兜底：动画没走完也强制 hide
     QTimer *m_expandGuard = nullptr;    // 展开态硬回收：交互态展开不能被 m_autoClose 的守卫永远吞掉
     // A3（2026-10-11）：空闲态时钟刷新。500ms 一跳、只在"空闲且可见"时 update()，

@@ -36,6 +36,19 @@ public:
     // 手动触发一次检查（测试/立即生效用）
     void tick();
 
+    /**
+     * 档案在磁盘上被换掉了：下一拍强制重建今日课程表（2026-11-02 课表下发落地）。
+     *
+     * 为什么不能只改 m_profilePath 了事：`tick()` 只在**跨天**时重建（m_builtFor 判据），
+     * 所以管理端上午下发的新课表，重启前都要等第二天才生效 —— 现场表现就是
+     * 「管理端说下发成功了，教室机上还是旧课表」，且没有任何报错可查。
+     * 这里把 m_builtFor 打成无效 + 清掉"已提醒过"的节次记忆，下一拍立刻重读。
+     *
+     * ⚠️ 不清 m_lastEmitSlot 的话，新档案里同一 index 的课会被当成"已经提醒过"而不弹。
+     */
+    void reloadProfile();
+    QString profilePath() const { return m_profilePath; }
+
     // 当前状态（QML/诊断可读）
     QString currentPeriod() const { return m_currentPeriod; }   // 正在上的课名，空=课间/无课
     int currentSlotIndex() const { return m_currentSlotIndex; } // -1 = 不在任何课内
@@ -62,6 +75,17 @@ signals:
     void periodStarted(const QString& periodName, const QTime& startTime);
     // 下课提醒：periodName，endTime
     void periodEnded(const QString& periodName, const QTime& endTime);
+
+    // ── 2026-11-02（插件大升级 #1）：结构化边界信号 ──────────────────────────
+    // 上面两条是给「弹提醒」用的**展示字符串**，把它当数据源用会踩两个坑：
+    //   ① periodStarted 传的是「第一节 · 语文」拼好的串，periodEnded 传的却是
+    //      **科目名**（`schedule_clock.cpp:167`）—— 两个信号的第一参口径本来就不一致，
+    //      订阅方要自己 split 中文间隔号才拆得开，拆错了还不报错；
+    //   ② 缺 endTime/slotIndex，订阅方没法算"还有几分钟下课"，只能自己再查一遍表。
+    // 所以另开一组**原样交结构体**的信号：谁要字段谁拿全，谁要展示串谁用上面两条。
+    // 老信号一行未改 —— 现有三条提醒链路（噪音周期/岛弹出/面板）行为完全不变。
+    void lessonEntered(const LessonInfo& info, int slotIndex);
+    void lessonLeft(const LessonInfo& info, int slotIndex);
 
 private:
     // 从档案构建「今天」的课程时间表（LessonInfo 已提到 public，见上）

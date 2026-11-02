@@ -129,6 +129,10 @@ add_executable(stelarith-agent-qt
   src/domain/timesync_domain.h
   src/domain/panel_domain.cpp
   src/domain/panel_domain.h
+  # 2026-11-02 班级绑定整合：班级码/名的唯一读写口（原来散在 main.cpp 的两份 static，
+  # "移出班级"只清了码没清名 —— 界面挂旧班名、缩略图已停报）。
+  src/domain/class_identity.cpp
+  src/domain/class_identity.h
   # 2026-10-27 Phase 3：定时自动化规则引擎（纯模型 + 1s 调度；Q_OBJECT 头须显式列入让 AUTOMOC 必扫）
   src/automation/automation_engine.cpp
   src/automation/automation_engine.h
@@ -149,6 +153,16 @@ add_executable(stelarith-agent-qt
   # ── 课表时钟模块（2026-10-06 加：上下课提醒）──
   src/schedule/schedule_clock.cpp
   src/schedule/schedule_clock.h
+  # 2026-11-02 插件大升级 #1：schedule_change 事件总线（全库此前从未 emit 过该事件）
+  src/schedule/schedule_event_bus.cpp
+  src/schedule/schedule_event_bus.h
+  # 2026-11-02 课表同步：云端 TIMETABLE_SCHEMA 信封 → ClassIsland 官方 Profile 落盘
+  src/schedule/timetable_apply.cpp
+  src/schedule/timetable_apply.h
+  # 2026-11-02：课表下发消息的流水线（落盘→热重载→回执）。从 main.cpp 搬出，
+  # 因为 main 有只降不升门禁，而这条链路是必须有的业务。
+  src/schedule/timetable_apply_wire.cpp
+  src/schedule/timetable_apply_wire.h
   # ── 大屏课表窗口（2026-10-06 加：今日课表展示）──
   src/schedule/schedule_view.cpp
   src/schedule/schedule_view.h
@@ -157,6 +171,14 @@ add_executable(stelarith-agent-qt
   # ── 插件宿主（P2 · 2026-10-14：进程外插件 ABI）──
   src/plugin/pluginhost.cpp
   src/plugin/pluginhost.h
+  # 2026-11-02 插件大升级：宿主能力扩展段（schedule_get / run_action），主文件撞 600 行红线后分出
+  src/plugin/pluginhost_api_ext.cpp
+  # 2026-11-02 插件大升级 #3：cmd:exec 的可调用指令白名单（此前只有权限词、无实现）
+  src/plugin/plugin_action_whitelist.cpp
+  src/plugin/plugin_action_whitelist.h
+  # 2026-11-02 插件大升级 #4：能力注入扇面（13 个函数指针的形状转换，从 main 搬出）
+  src/plugin/plugin_api_bridge.cpp
+  src/plugin/plugin_api_bridge.h
   # ── 内置模块层（2026-10-16「模块化插件」）：编译进 agent 的官方模块
   #    （U盘 / VoiceHub 联动 / 灵动岛多界面…），与进程外插件共用形状与门控。
   #    ⚠️ AUTOMOC：含 Q_OBJECT 的头**必须显式列入**，否则不生成 moc 产物 ⇒ LNK2001。
@@ -200,6 +222,9 @@ add_executable(stelarith-agent-qt
   src/ui/broadcast_view.h
   # ── 被控端灵动岛（2026-10-07 加：活动统一经过灵动岛，形状/位置转变 + 缓动 + 深浅色 + 交互穿透）──
   src/island/island.cpp
+  # 2026-11-02：按住/松手（有触摸就等到无触摸才收起）——island.cpp 已超行数红线，
+  # 新功能进自己的域，不给白名单开口子（开一次就有第二次）。
+  src/island/island_touch.cpp
   src/island/island.h
   # ── 灵动岛 QML 桥（2026-10-11 加：视觉层改 QML，本桥把状态推给 QML / 接 QML 回调）──
   src/island/island_bridge.cpp

@@ -26,9 +26,13 @@
 #include "domain/timesync_domain.h" // 2026-10-27 G3：时间同步域（NTP + 人工偏移，独立文件）
 #include "domain/settings_domain.h" // 2026-10-28 模块三：安全模式/存储统计/备份/重置（独立域）
 #include "domain/panel_domain.h"     // 2026-10-27 G4/G5/G6：岛组件面板（日期/课表/倒计时）
+#include "domain/class_identity.h"   // 2026-11-02：班级身份（码+名）的唯一读写口
 #include "automation/automation_engine.h" // 2026-10-27 Phase 3：定时自动化规则引擎（纯模型 + 1s 调度，点火转 executeAction）
 #include "ppt/ppt_domain.h"       // 2026-10-27 I：PPT 放映控制（COM/IDispatch，PowerPoint/WPS）
 #include "schedule/schedule_clock.h"   // 2026-10-06：课表时钟（上下课提醒）
+#include "schedule/schedule_event_bus.h"  // 2026-11-02：课表事件总线（schedule_change 唯一出口）
+#include "schedule/timetable_apply_wire.h"  // 2026-11-02：云端课表下发流水线（域文件）
+#include "schedule/profile_repository.h"
 #include "schedule/schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 #include "oobe/oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
 #include "island/island.h"           // 2026-10-07：被控端灵动岛（顶部居中胶囊 + 缓动 + 交互穿透）
@@ -144,7 +148,8 @@
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
-#include "plugin/pluginhost.h"   // P2：插件宿主（进程外插件 ABI）
+#include "plugin/pluginhost.h"                 // P2：插件宿主（进程外插件 ABI）
+#include "plugin/plugin_api_bridge.h"     // 2026-11-02：插件能力注入（从 main 搬出）
 // 2026-10-20：首次启动引导（OOBE Wizard）——QML 向导 + 绑定数据面（详见 oobe_wizard.h）。
 #include "oobe/oobe_wizard.h"
 #include <QQuickWidget>          // 向导宿主（与 AgentShell 同款：QQuickWidget 顶格承载 QML）
@@ -447,6 +452,12 @@ constexpr int kHeartbeatMaxMs = 60000;   // 上界：再稀就会被云端当离
 // 2026-10-09：班级**显示名**（站点 /api/device/activate 回喂的 className，如「1班」）。
 // 云端班级索引的 name 默认等于 code；带上它，管理端面板才显示真名而不是 class_01。
 QString g_className;
+
+// 2026-11-02（插件大升级 #2）：课表时钟提到文件作用域。
+// 原来它是 main() 里的 `static`，插件 schedule_get 在 4300 行附近要用它、
+// 而课表时钟在 4100 行才 new —— 局部 static 在 main 之外根本不可见。
+// 它没有多实例语义（全机一份课表），提上来只是把"作用域说了算"改成"属于进程"。
+ScheduleClock *g_schedClock = nullptr;
 // 2026-10-08：是否曾经注册成功过（决定首连用快速重试还是正常退避）。
 bool g_everRegistered = false;
 // 语音对讲（2026-10-07）：学生端播放器（waveOut，懒打开——只在收到音频帧时开）
@@ -1153,63 +1164,13 @@ bool saveAgentEnv(const QString &url, const QString &token, const QString &uid, 
     return true;
 }
 
-// 2026-10-08：班级码持久化（独立于 agent.env 的 4 行格式，单独存一个文件，避免破坏既有解析）。
-static QString classCodePath()
-{
-    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/classcode.txt");
-}
-static void saveClassCode(const QString &code)
-{
-    if (code.isEmpty()) return;
-    g_classCode = code.trimmed();
-    QFile f(classCodePath());
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        f.write(g_classCode.toUtf8());
-        f.close();
-        qInfo().noquote() << QStringLiteral("[agent-qt] 已保存班级码 → %1").arg(classCodePath());
-    } else {
-        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法保存班级码：%1").arg(f.errorString());
-    }
-}
-static void loadClassCode()
-{
-    QFile f(classCodePath());
-    if (f.open(QIODevice::ReadOnly)) {
-        const QString code = QString::fromUtf8(f.readAll()).trimmed();
-        f.close();
-        if (!code.isEmpty()) { g_classCode = code; qInfo().noquote() << QStringLiteral("[agent-qt] 已载入班级码 %1").arg(code); }
-    }
-}
-
-// 2026-10-09：班级显示名持久化（与 classCode 分开存；同款理由：不动 agent.env 的 4 行格式）。
-static QString classNamePath()
-{
-    return qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong/classname.txt");
-}
-static void saveClassName(const QString &name)
-{
-    const QString n = name.trimmed();
-    if (n.isEmpty()) return;   // 空值不覆盖已有（站点没回名时别把旧的抹掉）
-    g_className = n;
-    // 2026-10-31：同步给灵动岛菜单栏（岛为单例，实例化后即可推）
-    if (IslandOverlay *isl = IslandOverlay::instance()) isl->setClassName(g_className);
-    QFile f(classNamePath());
-    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        f.write(g_className.toUtf8());
-        f.close();
-    } else {
-        qWarning().noquote() << QStringLiteral("[agent-qt] ⚠️ 无法保存班级名：%1").arg(f.errorString());
-    }
-}
-static void loadClassName()
-{
-    QFile f(classNamePath());
-    if (f.open(QIODevice::ReadOnly)) {
-        const QString name = QString::fromUtf8(f.readAll()).trimmed();
-        f.close();
-        if (!name.isEmpty()) { g_className = name; qInfo().noquote() << QStringLiteral("[agent-qt] 已载入班级名 %1").arg(name); }
-    }
-}
+// 班级码/名的持久化（2026-10-08/10-09）整块已迁至 src/domain/class_identity.{h,cpp}
+// （2026-11-02 · 班级绑定整合）。原因：码与名是一门"身份组"，原来散在这里由两份
+// static 各写各的，结果"移出班级"只清了码没清名 —— 界面挂着旧班名、缩略图已停报。
+// 现在四个入口收敛为 ClassIdentity::saveCode/saveName/clearAll/applyBind，
+// 两个全局变量仍留在此处（register 报文的数据源），域内通过 init() 拿引用。
+static void saveClassCode(const QString &code) { ClassIdentity::saveCode(code); }
+static void saveClassName(const QString &name) { ClassIdentity::saveName(name); }
 
 // ── 设备用途持久化（2026-10-25）──────────────────────────────────
 // 与 classcode.txt 同目录同风格（单独小文件，不动 agent.env 的 4 行格式）。
@@ -2811,30 +2772,31 @@ void handleControlText(const QString &text)
         return;
     }
 
-    // 班级绑定下发（2026-10-24 · G4）：管理端在云端给本机绑班/改绑/移出后，
-    // 云端即向**在线**设备推 class-bound（registry.js notifyClassBoundIfOnline）。
-    // 没有这条推送时，在线设备要等下次重连（register 才带新码）才知道——
-    // 缩略图上报的 readyCheck 门（!g_classCode.isEmpty()）就一直不开 ⇒
-    // 班级工作台「暂无画面」。端侧落盘 + 更新全局，下一个缩略图 tick
-    // （默认 15s，STE_THUMB_INTERVAL_MS 可调）自动开工，无需额外唤醒。
-    // code 为空 = 被移出班级：删持久化文件 + 清全局（班级域数据停报）。
+    // 班级绑定下发（2026-10-24 · G4）：云端在绑班/改绑/移出后向**在线**设备推 class-bound
+    // （registry.js notifyClassBoundIfOnline）。没有它，在线设备要等重连才知新码 ——
+    // 缩略图 readyCheck 门（!g_classCode.isEmpty()）不开 ⇒ 班级工作台「暂无画面」。
+    // code 为空 = 被移出班级：整组清（持久化文件 + 全局），班级域数据停报。
     if (type == QStringLiteral("class-bound")) {
         const QString code = pay.value(QStringLiteral("code")).toString().trimmed();
         const QString name = pay.value(QStringLiteral("name")).toString().trimmed();
+        // 2026-11-02（班级绑定整合）：整组语义收进 ClassIdentity，不再在此手写
+        // 「清码 → 清文件 → 顺手记得也清名」这种分步操作 —— 上次漏的正是最后一步。
         if (code.isEmpty()) {
-            if (!g_classCode.isEmpty()) {
-                g_classCode.clear();
-                QFile::remove(classCodePath());
-                qInfo("[agent-qt] 云端已将本机移出班级（classCode 已清，班级域上报停止）");
-            }
+            if (ClassIdentity::clearAll())
+                qInfo("[agent-qt] 云端已将本机移出班级（班级码与班级名均已清，班级域上报停止）");
             return;
         }
-        if (code != g_classCode) {
-            saveClassCode(code);          // 落盘 + 更新 g_classCode（幂等）
-            if (!name.isEmpty()) saveClassName(name);
+        if (ClassIdentity::applyBind(code, name)) {
             qInfo().noquote() << QStringLiteral("[agent-qt] 云端下发班级绑定：%1（%2），已落盘")
                                      .arg(code, name.isEmpty() ? QStringLiteral("（未带班名）") : name);
         }
+        return;
+    }
+
+    // 2026-11-02（课表同步）：管理端下发课表 → 落盘 → 时钟热重载 → 回执。
+    // 流水线整段在 schedule/timetable_apply_wire.cpp（main 只留"认领"这一行）。
+    if (type == QStringLiteral("timetable-apply")) {
+        TimetableApplyWire::handle(pay);
         return;
     }
 
@@ -3450,11 +3412,19 @@ int main(int argc, char *argv[])
     // ⚠️ 必须在这里（日志 handler 已装之后）：失败原因要落 agent-qt.log，
     //    否则装到没起 WMP/SMTC 服务的老机器上，全是"看着像没实现"的黑洞。
     SmtcMonitor::instance()->start();
-    qInfo("[agent-qt] SMTC 系统媒体识别已启动（800ms 轮询，独立 MTA 线程）");    const int envN = loadEnvFile(agentEnvPath());
+    qInfo("[agent-qt] SMTC 系统媒体识别已启动（800ms 轮询，独立 MTA 线程）");
+    const int envN = loadEnvFile(agentEnvPath());
+    // 班级身份域初始化（2026-11-02）：把两个全局变量**按引用**交给域，域内不再存副本。
+    // 灵动岛菜单栏的同步做成回调而不是域内直调 IslandOverlay —— 域不反向依赖 UI 单例，
+    // 否则探针（无岛实例）与设置页预览（要建岛）会走出两条不同的路径。
+    ClassIdentity::init(qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/xingjikong"),
+                        g_classCode, g_className,
+                        [](const QString &n) {
+                            if (IslandOverlay *isl = IslandOverlay::instance()) isl->setClassName(n);
+                        });
     if (envN > 0) qInfo("[agent-qt] 已从 agent.env 读入 %d 项配置（%s）", envN, qPrintable(agentEnvPath()));
-    loadClassCode();   // 2026-10-08：载入持久化的班级码，register 时带给云端
+    ClassIdentity::loadPersisted();   // 2026-11-02：班级码 + 班级名一起载入（域内两文件各自独立）
     loadDeviceRole();  // 2026-10-25：载入用途（决定 register 自报与外壳），默认教室机
-    loadClassName();   // 2026-10-09：载入班级显示名（同上，register 一起带给云端）
 
     // ── Win7 渲染兜底（2026-10-25 · 现场实证）────────────────────────────
     // 现象：Win7+VxKex 上，灵动岛等**无边框透明窗口**整块窗口矩形被填成不透明黑底
@@ -3576,10 +3546,9 @@ int main(int argc, char *argv[])
     // ⚠️ 课表时钟（本函数后半段）才创建 —— 用 static 指针把"偏移变了"转给它：
     //    未建时回调是空操作（不崩），建时立刻补一次当前校正量。
     // ⚠️ **不改系统钟**：skew 只作用于判定（schedule_clock 的 tick）。
-    static ScheduleClock *s_schedClock = nullptr;
     TimesyncDomain::init(dataDir + QStringLiteral("/timesync.json"));
     TimesyncDomain::setOnChanged([] {
-        if (s_schedClock) s_schedClock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
+        if (g_schedClock) g_schedClock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
     });
     TimesyncDomain::start();
 
@@ -4179,8 +4148,17 @@ int main(int argc, char *argv[])
         auto *clock = new ScheduleClock(profilePath, &app);
         // 2026-10-27（G3）：接上时间同步的校正量 —— 之后 NTP 成功/人工偏移变更
         // 都会经 TimesyncDomain 的回调重设（见上方 init 块）。
-        s_schedClock = clock;
+        g_schedClock = clock;
         clock->setClockSkewSec(TimesyncDomain::skewMs() / 1000);
+        // 2026-11-02（课表同步）：注入课表下发流水线的三个依赖（时钟/班级码/回执）。
+        // 用取值函数而非裸指针：班级码与 g_ws 之后还会被换掉（重连/绑班）。
+        TimetableApplyWire::init({
+            []() -> ScheduleClock * { return g_schedClock; },
+            []() -> QString { return g_classCode; },
+            [](const QString &ty, const QJsonObject &rc) {
+                if (g_ws && g_ws->state() == QAbstractSocket::ConnectedState)
+                    g_ws->sendTextMessage(makeEnvelope(ty, rc).toUtf8());
+            }});
 
         // ── P0-2 分层装配（2026-10-30）：噪音存证链路 + 提醒环 ──────────────
         // 具体类型 new/接线收在 createNoisePipeline；这里持有协调器，并翻译课表节次为周期 key。
@@ -4243,6 +4221,19 @@ int main(int argc, char *argv[])
                     qInfo().noquote() << QStringLiteral("[agent-qt] 下课：噪音采集已停止，麦克风释放");
                 }
             });
+        // 2026-11-02（插件大升级 #1）：课表事件总线。
+        // `schedule_change` 在 pluginhost.cpp:246 早就被列为需 events:schedule 权限的
+        // 可订阅事件，但全库**从未 emit 过** —— 插件订阅了永远收不到，且不报错、
+        // 不打日志，属最难查的一类。这里把三条边界信号一次性接到总线上。
+        // 两个 sink 都惰性解引用全局指针：本节执行时 g_pluginHost 还是 nullptr（在后面才 new）。
+        ScheduleEventBus::init({ [](const QString &n, const QJsonObject &p) {
+                                     if (g_pluginHost) g_pluginHost->forwardEvent(n, p);
+                                 },
+                                 [](const QString &n, const QJsonObject &p) {
+                                     ModuleHost::instance()->forwardEvent(n, p);
+                                 },
+                                 nullptr });
+        ScheduleEventBus::attachClock(clock);
         clock->start();
         qInfo().noquote() << "[agent-qt] 课表时钟已启动，档案: " << profilePath;
     }
@@ -4279,44 +4270,9 @@ int main(int argc, char *argv[])
     // 插件无法直接调内部符号，只能走 islandShow / notify / settings / 事件订阅。
     g_pluginHost = new PluginHost(qApp);
     g_pluginHost->setAgentVersion(kAppVersion);
-    PluginAgentApi api;
-    api.islandShow = [](const QString &title, const QString &desc, const QString &icon,
-                        int form, bool fromAdmin, int durationMs) {
-        islandShow(title, desc, icon, durationMs, false, QString(),
-                   (IslandOverlay::Form)form, fromAdmin);
-    };
-    api.notify = [](const QJsonObject &params) { notifyFromParams(params); };
-    // P0-0（2026-10-17）：插件推的通知用「插件调用那一刻」当发生时刻（见 islandShowAt）。
-    // 传进来的 title 已带「[插件名] 」前缀、长度与频率已由 PluginHost::handleIslandShow 治理过；
-    // fromAdmin 恒 false —— 插件不是管理端，历史排序不能被它污染。
-    api.islandShowAt = [](const QString &title, const QString &desc, const QString &icon,
-                          int form, bool fromAdmin, int durationMs, qint64 noticeAtMs) {
-        // form 越界（插件给 7、-1 之类）一律回落胶囊，别让 std::function 里出现非法枚举值。
-        const auto f = (form >= int(IslandOverlay::Form::Capsule) && form <= int(IslandOverlay::Form::Mini))
-            ? static_cast<IslandOverlay::Form>(form) : IslandOverlay::Form::Capsule;
-        islandShowAt(title, desc, icon, durationMs, f, fromAdmin, noticeAtMs);
-    };
-    // 第三方推岛开关（设置页）：pluginhost 每次推岛前问一次，关掉即静默丢弃并计数。
-    api.senderPriorityLimit = []() { return AgentSettings::pluginIslandPush(); };
-    // 沙箱验证：插件回包里带岛的状态快照（只读）。同机并存生产实例时，截图分不清是哪个进程的岛。
-    api.islandSnapshot = []() { return IslandOverlay::instance()->historySnapshotJson(); };
-    api.settingsGet = [](const QString &key) -> QJsonValue {
-        if (key == QStringLiteral("noiseEnabled"))   return AgentSettings::noiseEnabled();
-        if (key == QStringLiteral("voiceEnabled"))   return AgentSettings::voiceEnabled();
-        if (key == QStringLiteral("notifyEnabled"))  return AgentSettings::notifyEnabled();
-        if (key == QStringLiteral("islandIdle"))     return AgentSettings::islandIdle();
-        if (key == QStringLiteral("lightMode"))      return AgentSettings::lightMode();
-        return QJsonValue();
-    };
-    api.settingsSet = [](const QString &key, const QJsonValue &v) {
-        const bool on = v.toBool();
-        if (key == QStringLiteral("noiseEnabled"))       AgentSettings::setNoiseEnabled(on);
-        else if (key == QStringLiteral("voiceEnabled"))  AgentSettings::setVoiceEnabled(on);
-        else if (key == QStringLiteral("notifyEnabled")) AgentSettings::setNotifyEnabled(on);
-        else if (key == QStringLiteral("islandIdle"))    AgentSettings::setIslandIdle(on);
-        else if (key == QStringLiteral("lightMode"))     AgentSettings::setLightMode(on);
-    };
-    api.subscribeEvents = [](const QString &, const QStringList &) { /* 订阅登记在宿主侧，事件经 forwardEvent 推送 */ };
+    // 2026-11-02（插件大升级 #4）：13 个能力指针的形状转换全部搬进 plugin_api_bridge，
+    // 这里只留"给谁、什么时候给"。扩插件能力从此不用动 main.cpp。
+    PluginAgentApi api = pluginApiBridgeBuild(g_schedClock);
     g_pluginHost->setAgentApi(api);
     if (g_pluginHost->start()) {
         // 2026-10-28 模块三「安全模式（意外崩溃防护）」：

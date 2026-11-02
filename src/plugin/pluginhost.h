@@ -86,6 +86,23 @@ struct PluginAgentApi {
     // 只为让插件在**自己收到的回包**里看到"这条到底进没进岛"——同机并存生产实例时，
     // 截图分不清是哪个进程的岛（本轮实测过）。为 nullptr 时回包不带 islandSnapshot 字段。
     QString (*islandSnapshot)() = nullptr;
+
+    // ── 2026-11-02（插件大升级 #2）：课表查询 ─────────────────────────────
+    // 「订阅事件」只能拿到**变化瞬间**那一节，插件常在启动后想问一句"现在上到哪了"，
+    // 没有这个口它只能一直干等下一节课 —— 装在中途的插件整个上午都是瞎的。
+    // 返回 null 表示"课表不可用"（档案缺失/未配置），与"今天没课"（空数组）必须能区分：
+    // 前者是配置问题该报错，后者是正常状态。为 nullptr 时 schedule_get 回 error。
+    QJsonValue (*scheduleGet)() = nullptr;
+
+    // ── 2026-11-02（插件大升级 #3）：受限指令执行（cmd:exec 权限）──────────
+    // 原来 `cmd:exec` 只活在 kKnownPermissions 与 UiContract.js 的清单里，**没有任何实现**
+    // —— 插件声明了也拿不到，等于画了个饼。
+    //
+    // 为什么不是"直接把 executeAction 给插件"：那等于把 100+ 条内建指令（含关机/杀进程/
+    // 改网络策略）无差别交给第三方。这里刻意做成**白名单 + 只读优先**：
+    // 由 main.cpp 注入的实现负责判定哪些 action 可被插件调用，宿主层只做权限闸。
+    // 返回 PluginResult{result,error,data}；result == "done" 视为成功。
+    PluginResult (*runAction)(const QString &action, const QJsonObject &params) = nullptr;
 };
 
 // ── P0-0：插件推岛的治理常量与审计计数（2026-10-17）──────────────────────────
@@ -172,6 +189,11 @@ private:
     // P0-0 治理入口（handleApi 只调这三个；逻辑集中在实现里，便于门禁逐条比对）
     void handleIslandShow(Conn *c, const QJsonObject &args, QJsonObject &r);
     void handleNotifyAt(Conn *c, const QJsonObject &args, QJsonObject &r);
+    // 2026-11-02（插件大升级 #2/#3）：schedule_get 与 run_action 两段实现放在
+    // pluginhost_api_ext.cpp —— 宿主主文件撞 600 行红线，且这两段是"能力扩展"，
+    // 与 P0-0 推岛治理那条线无关，混在一起改一处要看两份上下文。
+    void handleApiScheduleGet(Conn *c, QJsonObject &r);
+    void handleApiRunAction(Conn *c, const QJsonObject &args, QJsonObject &r);
     bool islandGateOpen();                    // 第三方推岛开关（api.senderPriorityLimit）
     bool takeToken(Conn *c);                  // 令牌桶（按墙钟补充，不依赖定时器）
     static QString clipCodepoints(const QString &s, int maxCodepoints);   // 按码点截断

@@ -7,17 +7,16 @@
 //   main.cpp 一行都不用改（它只认 IslandOverlay 的公开方法）。
 // · 逻辑（几何/动画/定时器/鼠标/生命周期）**全部留在 IslandOverlay**，
 //   本类只做「读成员 → Q_PROPERTY」和「QML 回调 → 调 IslandOverlay 方法」。
-// · 这不是"把岛搬到 QML"：是把**绘制**搬过去。#935 行里那些注释写满踩坑记录的
-//   状态机（m_closing 淡出守卫 / kDragSlop 方向锁 / explorer /select）一个字都不动。
+// · 这不是"把岛搬到 QML"：是把**绘制**搬过去。状态机（m_closing 淡出守卫 /
+//   kDragSlop 方向锁 / explorer /select）一个字都不动。
 //
 // ── 数据流 ─────────────────────────────────────────────────────
 //   C++ 改状态 → IslandOverlay 调 bridge->sync() → NOTIFY 全发 → QML 重绘
 //   QML 点按钮 → bridge.fireAction(label) → IslandOverlay 的 m_onAction 回调
 //   QML 手势   → bridge.requestExpand(on) → IslandOverlay::setExpanded(on)
 //
-// ⚠️ sync() 用「一次性全 NOTIFY」而不是逐字段判重：岛的状态字段少（~10 个），
-//    而判重逻辑一旦漏一个就会出现"改了不刷新"这种最难查的 bug。全发最多多几次
-//    QML 绑定求值，代价可控。
+// ⚠️ sync() 用「一次性全 NOTIFY」而不是逐字段判重：字段少（~10 个），而判重一旦
+//    漏一个就是"改了不刷新"这种最难查的 bug。多几次绑定求值，代价可控。
 
 #ifndef STELARITH_ISLAND_BRIDGE_H
 #define STELARITH_ISLAND_BRIDGE_H
@@ -153,12 +152,10 @@ class IslandBridge : public QObject
     Q_PROPERTY(QString annotateHint   READ annotateHint   NOTIFY changed)
 
     // ── C 批（2026-10-27）· 岛设置面：音量双滑块 + 通知黑名单 ──
-    // 用户裁决「这些功能大多在被控端、且和岛有关」：音量/黑名单是老师当场要调的，
-    // 入口放在岛「设」面，本机直调（系统音量走 Core Audio，通知音量/黑名单走 QSettings）。
-    // 系统音量：读 = getSystemMasterVolume（Core Audio 当前值，避免滑块一加载就显示 0）；
-    //           写 = setSystemMasterVolume（整台设备输出响度，含课件/视频）。
-    // 通知音量：Edge TTS 朗读响度（0-100，默认 75），只管"通知播报多大声"，不影响课件。
-    // 黑名单：通知来源（载荷 `from`）列表，命中即静默丢弃；与系统统一配置（设备级 QSettings）。
+    // 用户裁决「这些功能大多在被控端、且和岛有关」：音量/黑名单是老师当场要调的，入口放
+    // 岛「设」面、本机直调。系统音量读 Core Audio 当前值（避免滑块一加载就显示 0），写整台
+    // 设备输出响度（含课件/视频）；通知音量只管 Edge TTS 朗读（0-100，默认 75）；黑名单按
+    // 载荷 `from` 命中即静默丢弃，与系统统一配置（设备级 QSettings）。
     Q_PROPERTY(int          systemVolume    READ systemVolume    WRITE setSystemVolume    NOTIFY changed)
     Q_PROPERTY(int          notifyVolume    READ notifyVolume    WRITE setNotifyVolume    NOTIFY changed)
     Q_PROPERTY(QVariantList notifyBlacklist READ notifyBlacklist                           NOTIFY changed)
@@ -195,6 +192,9 @@ public:
     Q_INVOKABLE void whaleLongPressed();
     // 2026-11-01：QML 交互上报（hover/点击/滑动）→ 重置展开态「无操作 5s 自动收起」计时。
     Q_INVOKABLE void notifyActivity();
+    // 2026-11-02：按下/松手上报（用户「有触摸就等到无触摸才收起」）。QML 覆盖区内的事件
+    //   被 MouseArea 吃掉，岛体的 mousePressEvent 收不到 ⇒ 按住态必须由 QML 主动报。
+    Q_INVOKABLE void notifyTouching(bool down);
 
     // 历史通知
     QVariantList history() const;

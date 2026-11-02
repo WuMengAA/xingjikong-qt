@@ -214,6 +214,13 @@ void IslandBridge::notifyActivity()
     if (m_host) m_host->noteActivity();
 }
 
+// 2026-11-02：按下/松手上报 → 按住期间冻结所有自动收起。
+// QML 侧用 pressed/released 报（mouse 与 touch 在 QML 里都表现为 pressed）。
+void IslandBridge::notifyTouching(bool down)
+{
+    if (m_host) m_host->setTouching(down);
+}
+
 // 2026-10-31：班级显示名（菜单栏中间）。main.cpp 在已知班级名时经 setClassName 推入。
 QString IslandBridge::className() const
 {

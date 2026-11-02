@@ -439,6 +439,7 @@ int main(int argc, char *argv[])
     int holdSec = 0;
     int autocloseMs = 0;   // 2026-11-01：验「带按钮 + 显式时长 → 到点自动收起」（U盘 15s 修复）
     int endAtMsArg = 0;    // 2026-11-01：验 EndTime（绝对结束时刻）覆盖 durationMs
+    bool touchMode = false;       // 2026-11-02：验「有触摸就等到无触摸才收起」
     bool providersMode = false;   // 2026-11-01：验通知提供方注册表（纯逻辑，不开窗）
     bool queueMode = false;       // 2026-11-01：验排队与仲裁（低优先不顶掉 + 补播）
     bool vhclear = false;   // #Win7 排障：vh 模块销毁清空路径验收（见文件头注释）
@@ -497,6 +498,7 @@ int main(int argc, char *argv[])
             holdSec = QString::fromLocal8Bit(argv[++i]).toInt();
         if (a == QLatin1String("--autoclose") && i + 1 < argc)
             autocloseMs = QString::fromLocal8Bit(argv[++i]).toInt();
+        if (a == QLatin1String("--touch")) touchMode = true;
         if (a == QLatin1String("--providers")) providersMode = true;
         if (a == QLatin1String("--queue")) queueMode = true;
         if (a == QLatin1String("--endat") && i + 1 < argc)
@@ -674,6 +676,54 @@ int main(int argc, char *argv[])
             fflush(stdout);
             const int rc = (*earlyShown && idleNow) ? 0 : ((*earlyShown) ? 1 : 2);
             delete earlyShown;
+            QCoreApplication::exit(rc);
+        });
+        return app.exec();
+    }
+    if (touchMode) {
+        // 2026-11-02（用户：「灵动岛自动收起时机不对，有触摸就等到无触摸才收起」）。
+        // 三条断言，缺一条都测不到用户说的那个毛病：
+        //   ① t=400ms 按下 → 到点（1500ms）时**必须仍在上屏**（这是"有触摸就不收"）；
+        //   ② 按住期间再等 2s 也还在（不是"延后一次"而是"一直延到松手"）；
+        //   ③ 松手后 5s（kTouchIdleMs）过了才收（松手是重新起表，不是把剩余量续上）。
+        // ⚠️ 断言用 isIdle() 不是 isVisible()：岛到点收起后窗口仍在（变回空闲胶囊）。
+        const int touchDurMs = 1500;
+        isl->showWithActions(QStringLiteral("触摸验"),
+                             QStringLiteral("按住期间不该收"),
+                             QStringLiteral("folder"),
+                             IslandOverlay::Form::Centered,
+                             { QStringLiteral("知道了") },
+                             nullptr, touchDurMs);
+        bool *heldOk = new bool(false);
+        bool *heldLongOk = new bool(false);
+        QTimer::singleShot(400, [isl]() {
+            isl->setTouching(true);          // 模拟按下
+            fprintf(stdout, "[touch] t=400ms 按下\n");
+            fflush(stdout);
+        });
+        QTimer::singleShot(touchDurMs + 300, [isl, heldOk]() {
+            // 原时长已过：按住中 ⇒ 必须仍在上屏
+            *heldOk = !isl->isIdle();
+            fprintf(stdout, "[touch] t=%d 按住中仍在上屏=%d (expect 1)\n",
+                    touchDurMs + 300, *heldOk ? 1 : 0);
+            fflush(stdout);
+        });
+        QTimer::singleShot(touchDurMs + 2300, [isl, heldLongOk]() {
+            *heldLongOk = !isl->isIdle();
+            fprintf(stdout, "[touch] t=%d 按住 +2s 仍在上屏=%d (expect 1)\n",
+                    touchDurMs + 2300, *heldLongOk ? 1 : 0);
+            fflush(stdout);
+            isl->setTouching(false);         // 松手 → 重新起表（5s）
+            fprintf(stdout, "[touch] 松手，重新起表 5000ms\n");
+            fflush(stdout);
+        });
+        QTimer::singleShot(touchDurMs + 2300 + 5600, [isl, heldOk, heldLongOk]() {
+            const bool gone = isl->isIdle();
+            fprintf(stdout, "[touch] 松手 +5.6s 已收起=%d (expect 1)\n", gone ? 1 : 0);
+            fflush(stdout);
+            const int rc = (*heldOk && *heldLongOk && gone) ? 0 : 1;
+            delete heldOk;
+            delete heldLongOk;
             QCoreApplication::exit(rc);
         });
         return app.exec();
