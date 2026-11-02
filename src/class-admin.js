@@ -23,8 +23,11 @@ import {
 import {
   adminListStudents, adminAddStudent, adminUpdateStudent, adminRemoveStudent,
   adminImportStudents, adminGetTimetable, adminSaveTimetable, adminImportTimetable,
-  adminListTimetableGroups,
+  adminListTimetableGroups, adminPushTimetable, adminTimetableDelivery,
 } from './class-admin-students.js';
+// 课表回执处理也走本门面：index.js 已经 import 了 class-admin，
+// 再单开一条 import 会让 index.js 行数上涨，而它处在「只降不升」台账里。
+export { handleTimetableReceipt } from './class-timetable-push.js';
 import {
   adminRecordAttendance, adminBatchAttendance, adminListAttendance,
   adminListAttendanceRange, adminAttendanceStats, adminRemoveAttendance,
@@ -94,6 +97,12 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
                                  String(body.group ?? ''), ident);
       } else if (action === 'timetable-groups') {
         r = adminListTimetableGroups(body.profile ?? null);
+      } else if (action === 'timetable-push') {
+        // 下发到教室机（2026-11-02）。改造前这条链路不存在，见 class-timetable-push.js 头注释。
+        r = adminPushTimetable(String(body.classCode ?? ''), ident);
+      } else if (action === 'timetable-delivery') {
+        // 送达视图：已落盘 / 离线没回执（两者是不同运维动作，界面要分开）。
+        r = adminTimetableDelivery(String(body.classCode ?? ''), ident);
       } else if (action === 'attendance-record') {
         // 2026-10-31 考勤：单条记录 / 改判（upsert）。写权限 = canManageMembers。
         r = adminRecordAttendance(String(body.classCode ?? ''), body.record ?? {}, ident);
@@ -136,7 +145,7 @@ export {
   adminIssueBindCode, adminRevokeBindCode, adminPublish,
   adminListStudents, adminAddStudent, adminUpdateStudent, adminRemoveStudent,
   adminImportStudents, adminGetTimetable, adminSaveTimetable, adminImportTimetable,
-  adminListTimetableGroups,
+  adminListTimetableGroups, adminPushTimetable, adminTimetableDelivery,
   adminRecordAttendance, adminBatchAttendance, adminListAttendance,
   adminListAttendanceRange, adminAttendanceStats, adminRemoveAttendance,
 };

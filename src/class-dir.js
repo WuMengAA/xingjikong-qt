@@ -323,8 +323,33 @@ export function registerExternalCode(code, name, source = 'site', tenantId = DEF
  */
 export function getClass(code, tenantId = DEFAULT_TENANT) {
   const tn = normalizeTenantId(tenantId);
-  const hit = lookup.get(keyOf(tn, code));
+  // 2026-11-02：**名字也要过 normName**。reindex() 把显示名登记成 normName(name)
+  // （去空白 + 转小写），而这里原来只拿原串查 —— 于是「按显示名查班」只有
+  // 恰好全小写时才命中，中文班名带大写字母（回归A班）或带空格就查不到。
+  // 症状极隐蔽：管理端按班名下发报「班级不存在」，而班明明列在列表里。
+  const hit = lookup.get(keyOf(tn, code))
+    || lookup.get(keyOf(tn, normName(code)));
   return hit ? dir.get(dirKey({ code: hit, tenantId: tn })) : null;
+}
+
+/**
+ * 把一个「任意写法」（canonical 码 / 别名 / 显示名）归一到 canonical 码。
+ *
+ * 2026-11-02 · 班级绑定整合：`resolveClassCode` 管**写**（建班 / 绑班），本函数管**读**。
+ * 为什么读也要归一 —— `registry` 的 `classes` 运行时索引 key 是 canonical
+ * （`bindDeviceToClass` 过了解析器），但查/解绑路径拿的是调用方原串。调用方给别名时
+ * 必然查空，症状是「管理端点开一个班，设备列表是空的；按班下发 0 台；解绑报
+ * 『设备不在此班』」，而设备明明就在这个班里（同源回归见
+ * `tests/regression-class-unify.mjs` 的别名段）。
+ *
+ * **查不到就原样返回**：读路径不新建班、不落盘、不产生任何副作用 —— 否则一次
+ * 拼错码的查询就会在目录里长出幽灵班。
+ */
+export function canonicalCode(code, tenantId = DEFAULT_TENANT) {
+  const c = String(code ?? '').trim();
+  if (!c) return '';
+  const rec = getClass(c, tenantId);
+  return rec ? rec.code : c;
 }
 
 /**

@@ -39,7 +39,6 @@ const ENV_FILE = join(__dirname, '..', '.env');
 const ADMIN_HTML = join(__dirname, 'admin.html');
 const BIND_HTML = join(__dirname, 'bind.html');   // 手机扫码落地页（/bind?c=CODE）
 
-
 /** 管理台「用网站账号登录」的回跳 server（127.0.0.1 临时端口）。没配全站点就一直是 null。 */
 let adminOAuth = null;
 
@@ -384,7 +383,7 @@ import {
   noteMemberOnline, noteMemberOffline, removeViewerClasses,
 } from './class-events.js';
 // 班级管理（2026-10-24）：建/改名/删/移出的业务与路由处理。index.js 只挂分发点
-import { handleClassAdminApi, adminMyClasses } from './class-admin.js';
+import { handleClassAdminApi, adminMyClasses, handleTimetableReceipt } from './class-admin.js';
 // 用户 claims 存储（2026-10-20 · RBAC 第二批）：票无 claims 时按 uid 回填身份，权限真正流动
 import { initUserClaims, applyStoredClaims, setUserClaims, deleteUserClaims, listUserClaims } from './user-claims.js';
 // CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
@@ -1776,7 +1775,6 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-
 
   // ── 互动数据（2026-10-15 · 灵动岛扩展组件6）──
   // 点歌/祝福待审队列 + 反馈汇总 + 审批动作（HTTP 版）。管理端面板（候选，等用户点单）
@@ -3411,6 +3409,8 @@ wss.on('connection', (ws, req) => {
       handleAgentClassMsg(ws, p, uid, snd);
       return;
     }
+
+    if (p.type === 'timetable-applied') { handleTimetableReceipt(uid, p.payload || {}); return; }
 
     if (p.type === 'receipt') {
       // 被控端真执行完了，回的是 done/failed（不是 received）。必须如实记、如实转。

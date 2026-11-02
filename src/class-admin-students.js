@@ -11,6 +11,7 @@ import { listStudents, addStudent, updateStudent, removeStudent, importStudents,
 import { normalizeClassIslandProfile, classIslandGroupMeta, TIMETABLE_SCHEMA } from './class-timetable.js';
 import { pushEvent } from './registry.js';
 import { pushClassEvent } from './class-events.js';
+import { pushTimetableToClass, timetableDelivery } from './class-timetable-push.js';
 import { tenantOf, findClass, canReadClass, canManageMembers } from './class-admin-shared.js';
 
 /** 学生名单（按座位/学号排）。 */
@@ -123,4 +124,30 @@ export function adminListTimetableGroups(rawProfile) {
   return meta.groups.length
     ? { ok: true, groups: meta.groups, nameSource: meta.nameSource, conflict: meta.conflict }
     : { ok: false, error: '档案里没有任何日课表（ClassPlan 为空或格式不对）', groups: [] };
+}
+
+/* ───────────── 课表下发到教室机（2026-11-02）─────────────
+ * 在改造前，导入课表到这里就结束了：落库 + 广播给管理端浏览器，**没有一个字节到设备**。
+ * 下面的两个函数把「下发」与「送达视图」补上；真正的传输在 class-timetable-push.js。
+ * 权限口径与保存课表一致（canManageMembers）—— 能把课表改掉的人，才能让它到教室。
+ */
+export function adminPushTimetable(code, ident = null) {
+  const { hit, tn } = findClass(code, ident);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canManageMembers(ident, hit.code)) return { ok: false, error: '无权限下发该班课表' };
+  const r = pushTimetableToClass(hit.code, tn);
+  if (r.ok) {
+    pushEvent('info', '管理端下发课表到教室机', {
+      classCode: hit.code, online: r.online, delivered: r.delivered, by: ident?.uid ?? 'system',
+    });
+  }
+  return { ...r, classCode: hit.code };
+}
+
+/** 送达视图：谁已落盘、谁离线没回执。没回执 ≠ 失败，是两件事，界面必须分开显示。 */
+export function adminTimetableDelivery(code, ident = null) {
+  const { hit, tn } = findClass(code, ident);
+  if (!hit) return { ok: false, error: '班级不存在' };
+  if (!canReadClass(ident, hit.code)) return { ok: false, error: '无权限查看该班课表送达情况' };
+  return { ...timetableDelivery(hit.code, tn), classCode: hit.code };
 }

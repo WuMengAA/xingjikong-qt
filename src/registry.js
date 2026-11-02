@@ -14,7 +14,7 @@ import { wrapOutgoing, makeFrame } from './protocol.js';
 import { enqueueDispatch, dropDispatch, settle as settleQueue, pendingFor, listPendingAll, paramsOf, dispatchOwnerOf } from './store.js';
 // 班级身份的唯一真源（2026-10-20）：码/名/别名的解析与落盘都在 class-dir.js。
 // 本文件只负责"设备在哪个班"的运行时索引 —— 两边职责不重叠。
-import { resolveClassCode, getClass, listClassDir, listClassDirAll, tenantOfClass } from './class-dir.js';
+import { resolveClassCode, getClass, listClassDir, listClassDirAll, tenantOfClass, canonicalCode } from './class-dir.js';  // canonicalCode：查班/解绑归一口径（2026-11-02）
 // 租户身份（2026-11-02 多租户）：设备与班级都要记「哪所学校」。
 // registry 只存归属，不解析票、不做鉴权 —— 那分别是 perms.js / index.js 的事。
 import { DEFAULT_TENANT, normalizeTenantId } from './tenant.js';
@@ -701,10 +701,10 @@ export function bindDeviceToClass(code, uid, className = '', source = 'cloud', t
 
 export function unbindDeviceFromClass(code, uid, tenantId = DEFAULT_TENANT) {
   const tn = normalizeTenantId(tenantId);
-  const c = classes.get(classKey(tn, code));
+  const cc = canonicalCode(code, tn), c = classes.get(classKey(tn, cc));
   if (c) c.devices = c.devices.filter((x) => x !== uid);
   const known = knownDevices.get(uid);
-  if (known && known.classCode === code && normalizeTenantId(known.tenantId) === tn) known.classCode = null;
+  if (known && known.classCode === cc && normalizeTenantId(known.tenantId) === tn) known.classCode = null;
   broadcastDevices();
   return { ok: true };
 }
@@ -788,7 +788,7 @@ export function listClasses(tenantId) {
 }
 
 export function getDevicesOfClass(code, tenantId = DEFAULT_TENANT) {
-  const c = classes.get(classKey(tenantId, code));
+  const c = classes.get(classKey(tenantId, canonicalCode(code, tenantId)));
   return c ? c.devices.slice() : [];
 }
 
