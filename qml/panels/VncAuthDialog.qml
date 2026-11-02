@@ -50,7 +50,7 @@ Popup {
         color: dlg.theme ? (dlg.theme.cream || "#141414") : "#141414"
         radius: dlg.theme ? (dlg.theme.rCard || 12) : 12
         border.color: dlg.theme ? (dlg.theme.stroke || "#242424") : "#242424"
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: Column {

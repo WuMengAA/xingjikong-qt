@@ -2,7 +2,6 @@
 //
 // 为什么是模态而不是右栏第四格：右栏已三格（管理/动作/时间线），再叠一格会把
 // 整页撑爆；发布是一次性表单动作，收起后不占版面（对齐「掌上看班」发布弹窗）。
-// 视觉语言沿用 Md3Dialog：50% 黑 scrim + 居中卡 + 进场缩放淡入。
 // 表单（类型/标题/正文）抽到 ClassPublishForm，本件只管：开合、校验、发请求、收回执。
 //
 // 铁律：
@@ -30,8 +29,7 @@ Item {
     readonly property string code: (cs && cs.classCode) ? cs.classCode : ""
     readonly property bool canSend: dlg.subbed && !dlg.sending
                                    && (form.titleText.trim() !== "" || form.bodyText.trim() !== "")
-    /** 动效时长：令牌优先，({}) 兜底 200（与 Md3Dialog 同口径）。 */
-    readonly property int animDur: (Md3 && Theme.motion.fast !== undefined) ? Theme.motion.fast : 200
+    readonly property int animDur: (Theme.motion && Theme.motion.fast !== undefined) ? Theme.motion.fast : 200
 
     visible: opened
     anchors.fill: parent
@@ -79,7 +77,6 @@ Item {
         NumberAnimation { target: card; property: "opacity"; from: 0; to: 1; duration: dlg.animDur; easing.type: Easing.OutCubic }
     }
 
-    // ── 遮罩（挡背后点击，MD3 模态）──
     Rectangle {
         id: scrim
         anchors.fill: parent

@@ -29,7 +29,7 @@ Popup {
         color: dlg.theme ? dlg.theme.cream : "#141414"
         radius: dlg.theme ? dlg.theme.rCard : 12
         border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: Column {
@@ -130,7 +130,7 @@ Popup {
                 radius: dlg.theme ? dlg.theme.rCtrl : 8
                 color: "transparent"
                 border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
+                border.width: 0
 
                 Text {
                     anchors.centerIn: parent

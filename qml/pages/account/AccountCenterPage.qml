@@ -92,7 +92,7 @@ Item {
                         anchors.right: parent.right
                         text: ((backend.classes ? backend.classes.length : 0)) + " 个班级"
                               + (backend.classesFiltered ? "（我带的）" : "")
-                        color: page.th ? page.th.cPrimary : "#6750A4"
+                        color: page.th ? page.th.cPrimary : "#18181B"
                         font.pixelSize: 13
                     }
                 }

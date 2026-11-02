@@ -93,7 +93,7 @@ Popup {
         color: theme ? theme.panel : "#1D1B20"
         radius: theme ? theme.rCard : 12
         border.color: theme ? theme.card : "#2B2930"
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: ColumnLayout {

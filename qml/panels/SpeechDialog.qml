@@ -32,7 +32,7 @@ Popup {
         color: theme.cream
         radius: theme.rCard
         border.color: theme.stroke
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: Column {

@@ -9,12 +9,11 @@
 //   · camSync() 依赖 camPane 可见性，下沉到 CameraCenterStage 本地持有。
 import QtQuick
 import QtCore
-import "./theme"   // Theme 设计令牌单例（收口：t* 别名统一走 Theme，弃 Md3）
+import "./theme"
 
 Item {
     id: ctrl
 
-    // ⚠️ 仅作 StTabBar 等共享 Md3 组件的 theme 透传；CameraCenter 自身视觉已全走 Theme。
     property var theme: ({})
     property var backend
     property var panelCtx: null
@@ -56,9 +55,7 @@ Item {
     property string lastAction: ""      // 「重试」要点名重发的动作
     property var    camerasInfo: []     // 摄像头明细（含 virtual 标记）；为空时回落到 ctrl.cameras
 
-    // ── 设计令牌便捷取值（收口：t* 别名统一走 Theme 单例，弃用 Md3 `theme` 令牌）──
     // 这是 CameraCenter 唯一与主题耦合处；面板只通过 `cc.t*` 引用，故换令牌只动这一处。
-    // 语义映射：Md3 的 cContLow/cContHigh/cContHighest/cContLowest 容器阶
     //           → Theme.surface / surfaceVariant / background（shadcn 仅 3 级，高阶合并到 surfaceVariant）。
     readonly property color tSurface:     Theme.color.background
     readonly property color tCard:        Theme.color.surface
@@ -246,7 +243,6 @@ Item {
         ctrl.status = "正在绑定 " + dev + " …"
     }
 
-    // ── 底栏新动作（MD3 重构批）──
     /** 屏幕截图（screenshot）：与抓拍（camera_snapshot）是两回事——这个截整屏。 */
     function screenShot() {
         if (ctrl.selUid === "") return

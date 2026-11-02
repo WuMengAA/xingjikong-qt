@@ -31,7 +31,7 @@ Popup {
         color: theme.panel
         radius: theme.rCard
         border.color: theme.card
-        border.width: 1
+        border.width: 0
     }
     onOpened: multiThumb.watch()
     onClosed: backend.subscribeThumbnails([])
@@ -92,7 +92,7 @@ Popup {
                     radius: theme.rCtrl
                     color: theme.canvas
                     border.color: theme.stroke
-                    border.width: 1
+                    border.width: 0
                     clip: true
 
                     // 缩略图：帧更新时 tick++ 换缓存键

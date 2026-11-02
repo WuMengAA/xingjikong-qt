@@ -11,10 +11,7 @@ import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，
 Item {
     id: root
     width: 560; height: 680
-    // MD3 令牌：内部自建实例（深/浅由 dark 驱动）。
-    // ⚠️ 不许让宿主晚赋值替换整个 md3 实例——创建期 md3 为空会让 Behavior 时长
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
-    //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
     property var switches: [
         { k: "语音对讲接收", s: "关闭后听不到管理端语音，课堂安静模式", on: true },

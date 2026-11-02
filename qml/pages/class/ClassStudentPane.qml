@@ -118,7 +118,7 @@ Item {
             Btn {
                 width: 88
                 height: 26
-                theme: Md3
+                theme: ({ })
                 text: "导入 CSV"
                 tip: "列：姓名,学号,座位,备注（有表头自动认列；学号重复=更新同一人）"
                 disabled: !pane.subscribed
@@ -156,7 +156,7 @@ Item {
                 Btn {
                     Layout.preferredWidth: 64
                     Layout.preferredHeight: 44
-                    theme: Md3
+                    theme: ({ })
                     text: "加入"
                     strong: true
                     disabled: pane.inName.trim() === ""

@@ -1,15 +1,11 @@
-// 星集控 · 手机端主界面入口（2026-10-13 · MD3 唯一模板迁移批）
 //
 // 文档《手机端：独立 QML 还是响应式》落地：UI 层 mobile/ 独立，
 // C++ 层（viewerbackend）100% 共享；原子组件 components/ 共享。
 // 结构：qml/mobile/{Main, OverviewPage, DeviceListPage, MonitorPage,
-//                SettingsPage, DeviceDetailDrawer}.qml + components/md3/ 组件库
 //
 // main.cpp：Android 加载 qrc:/mobile/Main.qml（桌面仍 qml/Stelarith/Main.qml）。
 //
 // 2026-10-13：UI 转 Material 3（用户批准 MaterialLab 为唯一模板）。
-// 令牌单一真源 = ../components/theme/Md3.qml（pragma Singleton）；组件 = ../components/md3/。
-// 原 BottomNav.qml 已删除（由 Md3NavBar 取代）。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -25,10 +21,9 @@ ApplicationWindow {
     title: "星集控 · 手机端"
     color: Theme.color.surface
 
-    // Md3 = pragma Singleton（真源 shared-qml/ui/theme/）；本页是手机端独立入口，负责写全局 dark。
     Binding { target: Theme; property: "dark"; value: root.darkMode }
     // 迁移桥：保留 th 旧签名
-    readonly property var th: Md3
+    readonly property var th: Theme
     // E4 同步：darkMode 由 backend.themeMode 派生（0 浅色 / 1 深色 / 2 跟随系统取 backend.systemDark）。
     readonly property bool darkMode: (backend.themeMode === 1) ? true
                                       : (backend.themeMode === 2 ? backend.systemDark : false)
@@ -42,7 +37,6 @@ ApplicationWindow {
     property var recSummary: []   // [{uid, count, last}]
     property var recentEvents: [] // [{id, time, level, msg, uid}]
 
-    // ── 顶部条（MD3 top app bar：64 高、surface 底、titleL 标题）──
     Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
@@ -99,7 +93,6 @@ ApplicationWindow {
         MonitorPage {
             // 推文件：壳已持有 fileDlg，塞好目标机后开弹窗
             onFilePushRequested: function (uid) { backend.currentUid = uid; fileDlg.open() }
-            // 轻提示透传（壳有 Md3Snackbar）
             onToastMsg: function (s) { root.toast(s) }
         }
 
@@ -138,7 +131,7 @@ ApplicationWindow {
     // ── 文件传输弹窗（#5：手机端补上这条入口）──
     FilePushDialog {
         id: fileDlg
-        theme: Md3
+        theme: ({ })
         width: Math.min(560, root.width * 0.94)
     }
 

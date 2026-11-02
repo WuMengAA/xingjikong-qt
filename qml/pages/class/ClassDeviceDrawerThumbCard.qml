@@ -9,7 +9,6 @@
 //   规范明文禁 border.width/border.color ⇒ 改为「外扩一层低透明度实色块」做光晕，
 //   视觉效果等价、不碰 border 属性
 // · 硬编码 hex（#0F172A 缩略图底 / #64748B / #94A3B8）→ Theme 令牌
-// · `Md3.jellyHover / jellyPress / durJelly` → `Theme.motion.hoverScale / pressScale / normal`
 import QtQuick
 import QtQuick.Layouts
 import "../../components/theme"       // Theme 令牌

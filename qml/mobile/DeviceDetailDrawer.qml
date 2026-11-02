@@ -8,10 +8,6 @@
 // 我们完全接管（见下）。自绘一套抽屉等于重写手势与遮罩管理，收益为零。
 //
 // ── 迁移要点 ────────────────────────────────────────────────────────────
-// · `Md3.cContLow`→`Theme.color.surface`；`Md3.rXL`→`Theme.radius.xl`
-// · `Md3.cOk/cError` → `Theme.color.success/destructive`
-// · `Md3ListItem` → `AppListItem`（原 Md3ListItem 带 1px divider，属线条分区，规范禁）
-// · `Md3Btn error` → `AppButton destructive`
 // · 字号走规范 12/13/14/16；`Column`/`Row` → Layout（本件拖拽手柄等处保留 anchors 定位）
 import QtQuick
 import QtQuick.Controls

@@ -9,8 +9,6 @@
 //   Flow 那边引用不到（QML 作用域不向内穿透子组件实例）。
 //
 // ── 迁移要点 ────────────────────────────────────────────────────────────
-// · `Md3Btn` → `AppButton`；`Md3.rS` → `Theme.radius.sm`；`Md3.cOk` → `Theme.color.success`
-// · `Md3.cSurfaceVar` → `Theme.color.surfaceVariant`
 // · 保留 `Flow` 做目标班按钮的自然换行（GridLayout 会变等宽格）
 import QtQuick
 import QtQuick.Layouts

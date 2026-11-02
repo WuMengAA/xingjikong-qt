@@ -21,7 +21,6 @@ Rectangle {
         anchors.margins: cc.tSpM
         spacing: cc.tSpS
 
-        // 模式切换：共享组件 AppSegmentedButton（2026-10-29 取代 Md3SegmentedButton）
         AppSegmentedButton {
             id: segRow
             anchors.horizontalCenter: parent.horizontalCenter

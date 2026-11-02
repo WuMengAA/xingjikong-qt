@@ -48,7 +48,7 @@ Popup {
         color: dlg.theme.panel || "#101010"
         radius: dlg.theme.rCard || 12
         border.color: dlg.theme.stroke || "#242424"
-        border.width: 1
+        border.width: 0
     }
 
     Column {
@@ -88,7 +88,7 @@ Popup {
             color: dlg.theme.cream || "#141414"
             radius: 8
             border.color: dlg.theme.stroke || "#242424"
-            border.width: 1
+            border.width: 0
 
             ListView {
                 id: camList
@@ -107,7 +107,7 @@ Popup {
                                 : "transparent"
                         border.color: dlg.selectedCam === modelData
                                       ? (dlg.theme.inv || "#F0F0F0") : "transparent"
-                        border.width: 1
+                        border.width: 0
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter

@@ -12,9 +12,6 @@
 //   · 本件不碰任何班级状态：确认时把 trim 后的文本交给父级，取消只发信号。
 //
 // ── 迁移要点 ────────────────────────────────────────────────────────────
-// · `Md3TextField` → `AppInput`（规范点名必须自定义输入组件）
-// · `Md3Btn filled/text` → `AppButton primary/ghost`
-// · `Md3.bodyS`→13、`Md3.cOutline`→`Theme.color.textSecondary`
 // · `Column`/`Row` → `ColumnLayout`/`RowLayout`
 // · `onTextChanged` → `onTextEdited`：只在**用户编辑**时回写，
 //   避免 open() 程序化赋值再触发一轮回写

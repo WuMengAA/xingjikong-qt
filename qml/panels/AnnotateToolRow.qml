@@ -66,14 +66,14 @@ ColumnLayout {
                                     row.theme ? row.theme.acc.g : 0.3,
                                     row.theme ? row.theme.acc.b : 0.85, 0.18)
                           : "transparent"
-                border.width: 1
-                border.color: on ? (row.theme ? row.theme.acc : "#D0BCFF")
-                                 : (row.theme ? row.theme.stroke2 : "#79747E")
+                border.width: 0
+                border.color: on ? (row.theme ? row.theme.acc : "#FAFAFA")
+                                 : (row.theme ? row.theme.stroke2 : "#71717A")
                 Text {
                     id: lbl
                     anchors.centerIn: parent
                     text: modelData.label
-                    color: parent.on ? (row.theme ? row.theme.acc : "#D0BCFF")
+                    color: parent.on ? (row.theme ? row.theme.acc : "#FAFAFA")
                                      : (row.theme ? row.theme.fg3 : "#CAC4D0")
                     font.pixelSize: 12
                 }
@@ -99,9 +99,9 @@ ColumnLayout {
                                     row.theme ? row.theme.acc.g : 0.3,
                                     row.theme ? row.theme.acc.b : 0.85, 0.18)
                           : "transparent"
-                border.width: 1
-                border.color: on ? (row.theme ? row.theme.acc : "#D0BCFF")
-                                 : (row.theme ? row.theme.stroke2 : "#79747E")
+                border.width: 0
+                border.color: on ? (row.theme ? row.theme.acc : "#FAFAFA")
+                                 : (row.theme ? row.theme.stroke2 : "#71717A")
                 // 用点的大小表示粗细，比写"细/中/粗"一眼看懂
                 Rectangle {
                     anchors.centerIn: parent
@@ -140,9 +140,9 @@ ColumnLayout {
                 radius: width / 2
                 color: modelData.hex
                 // 选中的用主题色描边；白笔在黑底上也能看见
-                border.width: on ? 2 : 1
-                border.color: on ? (row.theme ? row.theme.acc : "#D0BCFF")
-                                 : (row.theme ? row.theme.stroke2 : "#79747E")
+                border.width: 0   // 无边框：激活态靠底色
+                border.color: on ? (row.theme ? row.theme.acc : "#FAFAFA")
+                                 : (row.theme ? row.theme.stroke2 : "#71717A")
                 Behavior on Layout.preferredWidth { NumberAnimation { duration: 120 } }
                 MouseArea {
                     anchors.fill: parent

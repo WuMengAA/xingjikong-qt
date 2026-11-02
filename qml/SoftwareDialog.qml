@@ -39,7 +39,7 @@ Popup {
         color: dlg.theme ? dlg.theme.cream : "#141414"
         radius: dlg.theme ? dlg.theme.rCard : 12
         border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: Column {
@@ -268,7 +268,7 @@ Popup {
                             radius: 5
                             color: "transparent"
                             border.color: "#2A2A2A"
-                            border.width: 1
+                            border.width: 0
                             Text {
                                 anchors.centerIn: parent
                                 // 必须兜底：process_list 回来的进程不一定带 protected 字段，
@@ -390,7 +390,7 @@ MouseArea {
                 radius: 6
                 color: "transparent"
                 border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
+                border.width: 0
                 Text {
                     anchors.centerIn: parent
                     text: "加入黑名单"
@@ -504,7 +504,7 @@ MouseArea {
                 radius: dlg.theme ? dlg.theme.rCtrl : 8
                 color: "transparent"
                 border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
+                border.width: 0
 
                 Text {
                     anchors.centerIn: parent
@@ -586,7 +586,7 @@ MouseArea {
             color: dlg.theme ? dlg.theme.cream : "#141414"
             radius: dlg.theme ? dlg.theme.rCard : 12
             border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-            border.width: 1
+            border.width: 0
         }
 
         contentItem: Column {

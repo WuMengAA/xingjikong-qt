@@ -12,7 +12,7 @@
 //       交互细节：紧急通知**长按 3 秒**发送（进度由 C++ 计时，QML 只显示）。
 import QtQuick 2.15
 import QtQuick.Shapes 1.15
-import "../../components/theme"       // Md3 令牌
+import "../../components/theme"
 import "../../island"                 // SvgIcon
 
 Item {
@@ -111,7 +111,7 @@ Item {
             height: 128
             radius: 24
             color: Theme.color.surface
-            border.width: 1
+            border.width: 0
             border.color: Theme.color.textSecondary
 
             Row {
@@ -185,7 +185,7 @@ Item {
             height: 128
             radius: 24
             color: Theme.color.surface
-            border.width: 1
+            border.width: 0
             border.color: Theme.color.textSecondary
             Column {
                 anchors.fill: parent
@@ -247,13 +247,12 @@ Item {
             height: 116
             radius: 20
             color: Theme.color.surface
-            border.width: 1
+            border.width: 0
             border.color: Theme.color.textSecondary
 
             // 果冻曲线（原型 .jelly-effect）：
             //   hover  scale(1.05) —— 400ms cubic-bezier(.34,1.7,.64,1) ⇒ Easing.OutBack（overshoot）
             //   press  scale(0.90)
-            // 刻度与时长都取自 Md3 令牌（jellyHover / jellyPress / durJelly），本件不写裸数字。
             scale: 1.0
             Behavior on scale {
                 NumberAnimation { duration: Theme.motion.slow; easing.type: Easing.OutBack }
@@ -268,7 +267,7 @@ Item {
                 anchors.margins: -1
                 radius: card.radius + 1
                 color: "transparent"
-                border.width: 1
+                border.width: 0
                 border.color: Theme.color.accent
                 opacity: 0
                 Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }
@@ -376,7 +375,7 @@ Item {
         width: resultText.implicitWidth + 28
         radius: 16
         color: Theme.color.surface
-        border.width: 1
+        border.width: 0
         border.color: classCenter.lastOpColor
         opacity: 0
         Behavior on opacity { NumberAnimation { duration: Theme.motion.fast } }

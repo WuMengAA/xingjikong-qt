@@ -1,7 +1,5 @@
-// 星集控 · 手机端设备列表页（2026-10-13 · MD3 迁移批）
 // 页 1：ListView，行高 76（触摸友好 ≥64）。行点击 → openDetail 信号（Main 开抽屉）；
 // 行内 ping / 关机快捷（shutdownRequested 信号 → Main 开确认弹窗）。
-// MD3：filled 卡片行（containerHigh / 圆角 12）+ 状态点 + text 按钮（primary / error）。
 import QtQuick
 import "../components/theme"   // Theme 设计令牌单例（pragma Singleton）
 
@@ -56,7 +54,6 @@ Item {
                             width: parent.width
                         }
                     }
-                    // 轻指令：ping / 关机（MD3 text 按钮：labelL + primary/error）
                     Row {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter

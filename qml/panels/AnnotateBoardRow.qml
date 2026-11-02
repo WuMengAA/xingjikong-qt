@@ -48,14 +48,14 @@ RowLayout {
                                 row.theme ? row.theme.acc.g : 0.3,
                                 row.theme ? row.theme.acc.b : 0.85, 0.18)
                       : "transparent"
-            border.width: 1
-            border.color: on ? (row.theme ? row.theme.acc : "#D0BCFF")
-                             : (row.theme ? row.theme.stroke2 : "#79747E")
+            border.width: 0
+            border.color: on ? (row.theme ? row.theme.acc : "#FAFAFA")
+                             : (row.theme ? row.theme.stroke2 : "#71717A")
             Text {
                 id: bl
                 anchors.centerIn: parent
                 text: modelData.label
-                color: parent.on ? (row.theme ? row.theme.acc : "#D0BCFF")
+                color: parent.on ? (row.theme ? row.theme.acc : "#FAFAFA")
                                  : (row.theme ? row.theme.fg3 : "#CAC4D0")
                 font.pixelSize: 12
             }

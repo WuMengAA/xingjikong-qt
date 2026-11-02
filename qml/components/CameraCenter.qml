@@ -1,6 +1,4 @@
-// 星集控 · 监控中心（2026-10-19 · MD3 重构批 / 2026-10-29 拆分）
 //
-// 本次按 MD3 规范重构（用户点单），彻底消除旧版"拼凑感"。规格对照：
 //   ① 净化边框：卡片/区域一律无 border 无阴影，用**背景色阶**区分层级；
 //      仅保留 1px 分隔线（cOutlineVar）作小节分隔。
 //   ② 统一圆角：按钮/卡片/分段/徽标一律 rM（12px）。
@@ -19,7 +17,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtCore
 import "../island"   // SvgIcon 唯一真源在共享岛目录（构建期拷到 qml/island/）
-import "./theme"     // Theme 设计令牌单例（IconBtn 收口走 Theme，弃 Md3 th 令牌）
+import "./theme"
 
 Item {
     // ⚠️ 见 CameraController：这些属性由宿主（CameraCenterDialog）注入，转发给内部控制器。
@@ -175,7 +173,6 @@ Item {
             }
         }
 
-        // ⑤ 底栏：左＝截图/推文件，右＝停止/返回（MD3 按钮，统一 12 圆角）
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: 40

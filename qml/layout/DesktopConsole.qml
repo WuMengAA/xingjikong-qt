@@ -1,4 +1,3 @@
-// 桌面集控台布局模板（1280×800 · MD3 唯一模板 · 2026-10-14）
 //
 // 管理端桌面主界面骨架：左侧导航轨 + 顶栏（作用域切换器/搜索/账户）+
 // 统计行 + 设备网格卡（实时画面占位 + 状态 + 快捷指令）。
@@ -11,10 +10,7 @@ import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，
 Item {
     id: root
     width: 1280; height: 800
-    // MD3 令牌：内部自建实例（深/浅由 dark 驱动）。
-    // ⚠️ 不许让宿主晚赋值替换整个 md3 实例——创建期 md3 为空会让 Behavior 时长
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
-    //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
     property string currentUid: "PC-CLASS-01"
     property int page: 1
@@ -37,7 +33,6 @@ Item {
 
     Rectangle { anchors.fill: parent; color: Theme.color.surface }
 
-    // ── 左侧导航轨（MD3 navigation rail：220 宽，激活项全宽 pill）──
     Rectangle {
         width: 220; height: parent.height
         color: Theme.color.background
@@ -119,7 +114,6 @@ Item {
         }
     }
 
-    // ── 顶栏（MD3 top app bar 64）──
     Rectangle {
         x: 220
         width: parent.width - 220; height: 64
@@ -139,7 +133,7 @@ Item {
             Rectangle {
                 width: 132; height: 36; radius: 18
                 color: Theme.color.surface
-                border.color: Theme.color.textSecondary; border.width: 1
+                border.color: Theme.color.textSecondary; border.width: 0
                 Text { anchors.centerIn: parent; text: "高一1班 ▾"; font.pixelSize: 14; color: Theme.color.textPrimary }
             }
             // 搜索（filled 字段样式）
@@ -204,9 +198,6 @@ Item {
             clip: true
             model: root.devices
             cellWidth: 344; cellHeight: 252
-            // ⚠️ 委托用 plain Item 自绘卡片，不直接拿 Md3Card 当委托——
-            //    GridView 委托池 + Md3Card（Rectangle+default alias）实测内容不渲染
-            //    （2026-10-14 探针）。Row/Repeater 里的 Md3Card 没问题（统计卡就在用）。
             delegate: Item {
                 required property var modelData
                 width: 328; height: 236
@@ -246,7 +237,6 @@ Item {
                             Text { text: modelData.name; font.pixelSize: 14; color: Theme.color.textPrimary; elide: Text.ElideRight; width: parent.width }
                             Text { text: "v" + modelData.version + " · " + modelData.uid; font.pixelSize: 12; color: Theme.color.textSecondary; elide: Text.ElideRight; width: parent.width }
                         }
-                        // 快捷指令（MD3 text 按钮）
                         Row {
                             anchors.right: parent.right
                             spacing: 4

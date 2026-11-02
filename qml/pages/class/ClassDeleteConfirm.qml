@@ -6,10 +6,7 @@
 // 云端默认策略也是 refuse（班内有设备即拒），这里是双保险。
 //
 // ── 迁移要点 ────────────────────────────────────────────────────────────
-// · `Md3.rS` → `Theme.radius.sm`；`Md3.bodyS` → 13（规范字号 12/13/14/16）
-// · **规范无 errorContainer 语义**：`Md3.cErrorCont`（浅红底）改用
 //   `Theme.color.destructive` 叠 10% 透明度派生 —— 仍是令牌派生，不硬编码 Hex
-// · `Md3Btn error/text` → `AppButton destructive/ghost`
 // · `Column`/`Row` → `ColumnLayout`/`RowLayout`（规范只许 Layout 系列）
 // · `anchors.margins: 10` → `Theme.spacing.sm`(8)，严格 8 的倍数
 import QtQuick

@@ -11,7 +11,7 @@
 // （tick 由 C++ 递增，QML 不写计数器）。未接通时显示 liveStateText，不假装有画面。
 // 指针：只报局部坐标，归一化与夹取在 C++（stagePointer）。
 import QtQuick 2.15
-import "../../components/theme"       // Md3 令牌
+import "../../components/theme"
 import "../../island"                 // SvgIcon
 
 Item {
@@ -31,7 +31,7 @@ Item {
             height: classCenter.stageBoxH
             radius: 16
             color: "#0F172A"
-            border.width: 1
+            border.width: 0
             border.color: Theme.color.textSecondary
 
             // 容器内 16:9：宽满容器，垂直居中 ⇒ 上下自然留黑边
@@ -137,7 +137,7 @@ Item {
             height: classCenter.stageBoxH
             radius: 16
             color: Theme.color.surface
-            border.width: 1
+            border.width: 0
             border.color: Theme.color.textSecondary
 
             RemoteOpPanel {

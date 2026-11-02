@@ -45,7 +45,6 @@ ColumnLayout {
         return 2
     }
 
-    // ── S1 三张统计卡（禁手绘卡片，一律 Md3Card）──
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing.md

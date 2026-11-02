@@ -9,10 +9,7 @@ import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，
 Item {
     id: root
     width: 560; height: 640
-    // MD3 令牌：内部自建实例（深/浅由 dark 驱动）。
-    // ⚠️ 不许让宿主晚赋值替换整个 md3 实例——创建期 md3 为空会让 Behavior 时长
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
-    //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
     property string code: ""
     property string status: "idle"     // idle | connecting | ok | error
@@ -20,7 +17,6 @@ Item {
 
     // 背板（模拟桌面，凸显窗口）
     Rectangle { anchors.fill: parent; color: Theme.color.background }
-    // 窗口卡（MD3 28 圆角）
     Rectangle {
         anchors.fill: parent
         anchors.margins: 16
@@ -121,6 +117,5 @@ Item {
             }
         }
     }
-    // ok 容器兜底（Md3 令牌没有 ok container，用 outline 组合表达）
     function okContIfAny() { return Theme.color.surface }
 }

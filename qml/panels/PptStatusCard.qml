@@ -34,7 +34,7 @@ Rectangle {
                                         : Qt.rgba(card.theme ? card.theme.ok.r : 0.2,
                                                   card.theme ? card.theme.ok.g : 0.7,
                                                   card.theme ? card.theme.ok.b : 0.45, 0.16)
-            border.width: 1
+            border.width: 0
             border.color: card.appLabel === "" ? (card.theme ? card.theme.stroke : "#49454F")
                                                : (card.theme ? card.theme.ok : "#4CC38A")
             Text {

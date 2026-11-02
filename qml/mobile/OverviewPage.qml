@@ -1,6 +1,4 @@
-// 星集控 · 手机端概览页（2026-10-13 · MD3 迁移批）
 // 页 0：教室在线 / 连接状态 / 账户。纯展示，backend context 直接读。
-// MD3：filled 卡片（containerHigh）+ 字阶（displayS 大数字 / labelM 标签 / bodyS 辅助）。
 import QtQuick
 import QtQuick.Layouts
 import "../components"         // AppCard

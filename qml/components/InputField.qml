@@ -1,4 +1,3 @@
-// 统一的单行输入框（2026-10-14 · MD3 唯一模板迁移批）
 //
 // 为什么要有这一个文件：界面上的输入框以前每个调用点都只写 `color: th.fg`，
 // **没有一个设 background**。于是输入框沿用 Qt 自带的系统调色板 —— 在 Windows 上
@@ -16,13 +15,12 @@ TextField {
     id: fld
 
     // 主题对象（Main.qml 的 root.th / CommandPalette 的 pal.theme）。
-    // 不传也能用：退回一组 MD3 浅色安全值，不至于变成"没颜色"。
     property var th: null
 
     readonly property color colFg:    th ? (th.fg     || "#1C1B1F") : "#1C1B1F"
     readonly property color colPh:    th ? (th.ph     || "#49454F") : "#49454F"
-    readonly property color colLine:  th ? (th.stroke2 || "#79747E") : "#79747E"
-    readonly property color colLine2: th ? (th.acc    || "#6750A4") : "#6750A4"
+    readonly property color colLine:  th ? (th.stroke2 || "#71717A") : "#71717A"
+    readonly property color colLine2: th ? (th.acc    || "#18181B") : "#18181B"
     readonly property real  rad:      th ? (th.rXS !== undefined ? th.rXS : 4) : 4
 
     color: colFg
@@ -36,7 +34,5 @@ TextField {
     background: Rectangle {
         radius: fld.rad
         color: "transparent"     // 面板本身就是底（两层灰叠一起更糊）
-        border.color: fld.activeFocus ? fld.colLine2 : fld.colLine
-        border.width: fld.activeFocus ? 2 : 1   // MD3：聚焦描边升 2dp
     }
 }

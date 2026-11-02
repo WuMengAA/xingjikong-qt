@@ -13,7 +13,7 @@ import QtQuick.Layouts
 
 import "../../components"
 import "../../island"
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"
 
 Item {
     id: page
@@ -68,7 +68,7 @@ Item {
             radius: 12
             color: page.th ? page.th.cContLow : "#F7F2FA"
             border.color: page.th ? page.th.cOutlineVar : "#CAC4D0"
-            border.width: 1
+            border.width: 0
 
             Column {
                 anchors.fill: parent

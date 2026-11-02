@@ -2,12 +2,9 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../../components"     // Btn / ToggleRow 等本端自有通用组件
-// 2026-10-18：MD3 布局组件（Md3Chip / Md3SwitchRow…）。
-// 真源在 Stelarith-shared-qml/ui/md3/，构建时由 CMake copy_directory 落到
-// qml/Stelarith/components/md3/ —— 源码树下 qmllint 解析不到（磁盘加载模式），
 // 以「构建 + 运行」验证为准，与岛同套路。
 import "../../island"         // SvgIcon（唯一真源在共享岛目录，构建期拷到 qml/island/）
-import "../../components/theme"   // Md3 令牌（pragma Singleton）
+import "../../components/theme"
 import "../../shell/ClassSort.js" as ClassSort   // 班级显示序（1班<…<12班；规则唯一真源）
 
 // 控制页（整屏页 · U5「两端同 shell」A-2 第二页）
@@ -33,7 +30,6 @@ Item {
     property var ctx
 
     // 设计令牌：宿主经 ctx 传入。
-    // ⚠️ 刻意**不写 fallback 实例**：`Md3` 只存在于**产物树**的 `components/`
     //    （共享 ui 由构建期 `copy_directory` 拷过去），源树里没有 —— 写下来会让
     //    "直接吃源树"的探针加载失败。宿主保证给，这里只做空保护。
     readonly property var th: (ctx && ctx.window && ctx.window.th) ? ctx.window.th : null
@@ -86,9 +82,7 @@ Item {
         bottomPadding: 4
         Repeater {
             model: [ { k: "all", l: "全部" }, { k: "online", l: "在线" }, { k: "offline", l: "离线" } ]
-            // 2026-10-18 MD3 布局：分组筛选从手写 42×22 方块 → Md3Chip（filter 变体）。
             // 高 32/圆角 8、选中 secondaryContainer + ✓、未选 outline 描边 + 状态层。
-            // 三枚 chip 一排 + 计数，是把"分段筛选"说清楚的 MD3 标准形态。
             delegate: AppChip {
                 text: modelData.l
                 selected: (ctx.window.deviceFilter === modelData.k)
@@ -138,16 +132,10 @@ Item {
                 }
                 return arr
             })()
-            // ── 2026-10-18 MD3 色阶重排（保留 2 列网格与"班名+台数"双行信息）──
-            // 班级筛选是"双行信息密度"场景，Md3Chip 单行放不下"班名+台数"；
-            // 用 MD3 容器色阶表达选中/未选：选中 secondaryContainer、
             // 未选 cContLow 底 + cOutlineVar 细边。班名 cOnSurface、台数 cOnSurfaceVar。
-            // 与左侧"分组筛选 Md3Chip"、上方统计卡同语言，整栏不再三套色调。
             delegate: Rectangle {
                 width: 73; height: 38; radius: 8
                 color: (backend.currentClass === modelData.code) ? th.cSecondaryCont : th.cContLow
-                border.color: (backend.currentClass === modelData.code) ? "transparent" : th.cOutlineVar
-                border.width: 1
                 Column {
                     anchors.centerIn: parent
                     spacing: 1
@@ -177,9 +165,6 @@ Item {
 
     Repeater {
         model: ctx.window.filteredDevices
-        // ── 2026-10-18 MD3 色阶重排（保留 36 高紧凑布局与状态点）──
-        // 设备行信息密度高（可能 30+ 台），不换 56 高的 Md3ListItem（会撑长整栏）；
-        // 改用 MD3 容器色阶表达状态，与上方班级网格/筛选 chip 同语言：
         //   cur（当前查看）= secondaryContainer 底
         //   picked（多选）= secondary 描边 + 淡 secondaryContainer 底
         //   设备名 cOnSurface / 元信息 cOnSurfaceVar / 离线 cOutline
@@ -190,8 +175,8 @@ Item {
             property bool cur: (modelData.uid === ctx.window.currentUid)
             property bool picked: (ctx.window.picked.indexOf(modelData.uid) >= 0)
             // picked 优先于 cur 显示（多选态是最明确的反馈）
-            readonly property bool md3Active: picked || cur
-            color: md3Active ? th.cSecondaryCont : (devHover.containsMouse ? th.cContLow : "transparent")
+            readonly property bool rowActive: picked || cur
+            color: rowActive ? th.cSecondaryCont : (devHover.containsMouse ? th.cContLow : "transparent")
             Behavior on color { ColorAnimation { duration: th ? th.durShort : 200 } }
 
             // 状态点：在线亮、离线暗。以前这一颗恒亮，掉线的机器也画成"在线"，
@@ -215,9 +200,9 @@ Item {
                     // 2026-10-08：优先显示设备名（云端 register 带上来），没有才回退 uid
                     text: (modelData.name !== undefined && modelData.name !== null && modelData.name !== "")
                           ? modelData.name : modelData.uid
-                    color: md3Active ? th.cOnSecondaryCont : (devOnline ? th.cOnSurface : th.cOutline)
+                    color: rowActive ? th.cOnSecondaryCont : (devOnline ? th.cOnSurface : th.cOutline)
                     font.pixelSize: 14
-                    font.weight: (md3Active || picked) ? Font.Medium : Font.Normal
+                    font.weight: (rowActive || picked) ? Font.Medium : Font.Normal
                     elide: Text.ElideRight
                     // 右侧那行小字要留位置，别让长机器名压上去
                     width: Math.max(60, 168 - 10 - 5 - 9 - devMeta.width - 16)
@@ -239,19 +224,17 @@ Item {
                          : "离线")
                       : (modelData.version !== undefined && modelData.version !== ""
                          ? modelData.version : "")
-                color: md3Active ? th.cOnSecondaryCont : th.cOnSurfaceVar
+                color: rowActive ? th.cOnSecondaryCont : th.cOnSurfaceVar
                 font.pixelSize: 12
             }
 
-            // ∠ 选中态（4.4）：picked 那台描边强调——"选了哪台"是当前最明确的反馈。
-            // 底色已用 secondaryContainer 表达，这里补一条 secondary 描边区分
-            //  cur（当前看）与 picked（已选中）两件事。
+            // 选中态：QtShadcn 规范「无边框」⇒ 用**底色反差**表达 picked，
+            // 不再画 border（原写法 border.color/width 违反视觉铁律 1）。
             Rectangle {
                 anchors.fill: parent
-                radius: 9
-                color: "transparent"
-                border.color: picked ? th.cSecondary : "transparent"
-                border.width: picked ? 1 : 0
+                radius: Theme.radius.md
+                color: picked ? Theme.color.accent : "transparent"
+                visible: picked
             }
             MouseArea {
                 id: devHover
@@ -285,8 +268,6 @@ Item {
                 id: batBtn
                 width: 168; height: 30; radius: th.rCtrl
                 color: batMa.containsMouse ? th.hover2 : "transparent"
-                border.color: th.stroke
-                border.width: 1
                 Text {
                     anchors.centerIn: parent
                     text: modelData.title
@@ -335,7 +316,7 @@ ColumnLayout {
         visible: ctx.window.compact
         width: 96; height: 30; radius: th.rCtrl
         color: devToggleMa.containsMouse ? th.hover2 : th.panel
-        border.color: th.stroke; border.width: 1
+
         Text { anchors.centerIn: parent; text: ctx.window.devOpen ? "收起设备" : "设备列表"; color: th.fg; font.pixelSize: 13 }
         MouseArea { id: devToggleMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: ctx.window.devOpen = !ctx.window.devOpen }
     }
@@ -371,9 +352,7 @@ ColumnLayout {
             width: linkLabel.implicitWidth + (ctx.window.linkBusy ? 24 : 14)
             color: backend.frameSource === "vnc" ? th.inv
                  : ctx.window.linkBusy ? th.todo : "transparent"
-            border.color: backend.frameSource === "vnc" ? th.inv
-                        : ctx.window.linkBusy ? th.stroke : th.stroke
-            border.width: 1
+            // 无边框：vnc 状态靠底色（th.inv）区分，不再描边
 
             Rectangle {
                 visible: ctx.window.linkBusy
@@ -435,8 +414,6 @@ ColumnLayout {
         // 稿 .canvas＝panel 底 + #1A1A1A 边。以前这里写死 #0E0E0E/#1F1F1F，
         // 两个都不在令牌里 —— 换主题时这块永远是暗的，是个没人记得住的例外。
         color: th.panel
-        border.color: th.canvas
-        border.width: 1
         clip: true
 
         Image {
@@ -723,25 +700,19 @@ Flickable {
             // 宽度往上问，别自己拍。见 Btn 里那段注释：写死具体值会让
             // "跟着容器变"这件事失效，而 Loader 那条路又是单向绑不回来的。
             width: parent ? parent.width : 94
-            // ── 2026-10-18 MD3：动作按钮从 30px 描边方块升级为 40px tonal 胶囊 ──
             // 旧样式（th.stroke 描边 + th.hover 底）与概览页被改掉的快捷按钮同源，
-            // 是"一眼老样子"的主因之一。现按 MD3 tonal 按钮：
-            //   · 高度 30→40（MD3 标准按钮高），radius 全圆
             //   · heavy（不可逆操作）用 filled error 语义（cError 底 + cOnError 字）
             //   · 普通动作用 tonal（cSecondaryCont 底 + cOnSecondaryCont 字）
-            //   · 状态层 hover 8% / press 12% 叠 onSecondaryContainer（MD3 规范）
             //   · 未实现（灰）保持留白 + 淡描边（不引诱点击，语义不变）
             height: 40
             radius: 20
-            property bool md3Heavy: heavy
+            property bool rowHeavy: heavy
             color: {
                 if (!capOkAll(d) && !permOk(d ? d.role : "")) return "transparent"
                 if (heavy) return th.cError
                 return th.cSecondaryCont
             }
-            border.color: (!capOkAll(d) && !permOk(d ? d.role : "")) ? th.cOutlineVar : "transparent"
-            border.width: 1
-            // MD3 状态层：onSecondaryContainer 或 onError 叠加
+            // 无边框：权限不足由底色透明表达（见上 color 绑定）
             Rectangle {
                 anchors.fill: parent
                 radius: parent.radius

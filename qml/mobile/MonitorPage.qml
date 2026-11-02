@@ -8,12 +8,9 @@
 //   ④ 远控 VNC 画面（image://vnc/live）同屏显示。
 //
 // ── 2026-10-29 迁移要点 ────────────────────────────────────────────────
-// · `Md3Chip` → `AppChip`（Md3Chip 选中态靠描边，规范禁边框 ⇒ 改实底主色）
-// · **修掉一个既有 Bug**：原操作栏 4 个 `Md3Btn` **完全没有 text**，
 //   渲染出来是 4 个空白按钮，用户不知道点哪个。本次补上 截图/远程控制/推文件/停止。
 // · **删主画面区的 border**（规范铁律），改由 surface 与 background 色差分区
 // · 链路徽标原来把文字色写死成十六进制白，改为令牌派生（见 badge 段）
-// · `Md3.cOk` → `Theme.color.success`
 import QtQuick
 import QtQuick.Layouts
 import "../components"           // AppButton / AppChip

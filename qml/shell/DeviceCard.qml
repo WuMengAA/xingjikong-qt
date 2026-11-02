@@ -1,8 +1,5 @@
-// MD3 设备卡片 · 卡片网格区的单元 · V1.0 P1 骨架层（视觉提质：去塑料感 + Endfield 工业青点缀）
 //
-// ⚠️ 视觉提质纪律（2026-10-21，用户点单「不要塑料感 / 不要贴边 / 以 qml-md3 Gallery 为标杆」）：
 //   ① 卡片加 Level-1 柔和投影（零依赖偏移矩形，仿 SideSheet，不引 QtQuick.Effects）；
-//   ② hover / press 用 MD3 状态层（onSurface @ stHover/stPress）而非改底色 —— 这是塑料感的主因；
 //   ③ 选中态用主色薄雾（primary @ 0.06）+ 主色描边，不再是"纯白 + 1px 灰边"的平片感；
 //   ④ 在线设备左侧加一道终末地工业青（#2FB8C6）细规，作"数据在流"的冷调点缀（不抢紫色主色）；
 //   ⑤ 版本号等宽字（技术读数）。
@@ -26,7 +23,6 @@ Item {
     implicitWidth: 132
     implicitHeight: 168
 
-    // 交互态透明度：hover/press 驱动状态层（MD3 state layers，叠 onSurface 不动底色）
     property real _stateOpacity: 0
 
     // ── 卡片本体（须先于阴影声明，阴影用 z 压在它身后）──
@@ -34,9 +30,9 @@ Item {
         id: cardBg
         anchors.fill: parent
         radius: Theme.radius.lg
-        color: Theme.color.background
-        border.width: root.selected ? 1.5 : 1
-        border.color: root.selected ? Theme.color.primary : Theme.color.textSecondary
+        // 无边框（QtShadcn 铁律 1）：选中态靠**底色反白**表达，
+        // 原写法 selected ? 1.5 : 1 + 描边色 已删。
+        color: root.selected ? Theme.color.accent : Theme.color.background
         z: 1
     }
 
@@ -66,7 +62,6 @@ Item {
         z: 2
     }
 
-    // MD3 状态层（hover/press 用 onSurface 叠透明度）
     Rectangle {
         id: stateLayer
         anchors.fill: cardBg

@@ -23,13 +23,11 @@ Popup {
     property var theme: ctx ? ctx.window.th : null
 
     anchors.centerIn: parent
-    // 2026-10-19 MD3 重构：560×440 → 680×520（新布局信息密度更高，需要呼吸空间）
     width: 680
     height: 520
     modal: true
     padding: 0
     closePolicy: Popup.CloseOnEscape
-    // MD3 对话窗：surface 底 + rXL(28) 圆角；浮层允许脱离"无边框"规则，
     // 但这里也用底色区分而非描边（层次靠色阶，不靠线）。
     background: Rectangle {
         color: theme ? theme.cSurface : "#1C1B1F"
@@ -45,7 +43,6 @@ Popup {
         backend: camCenterDlg.ctx.window.backendRef
         panelCtx: camCenterDlg.ctx
         anchors.fill: parent
-        // 网格对齐：面板左右外边距 spL(24)（MD3 重构⑥）
         anchors.margins: 24
     }
 

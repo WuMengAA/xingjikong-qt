@@ -38,14 +38,14 @@ RowLayout {
                                 sw.theme ? sw.theme.acc.g : 0.3,
                                 sw.theme ? sw.theme.acc.b : 0.85, 0.18)
                       : "transparent"
-            border.width: 1
-            border.color: on ? (sw.theme ? sw.theme.acc : "#D0BCFF")
-                             : (sw.theme ? sw.theme.stroke2 : "#79747E")
+            border.width: 0
+            border.color: on ? (sw.theme ? sw.theme.acc : "#FAFAFA")
+                             : (sw.theme ? sw.theme.stroke2 : "#71717A")
             Text {
                 id: pill
                 anchors.centerIn: parent
                 text: modelData.label
-                color: parent.on ? (sw.theme ? sw.theme.acc : "#D0BCFF")
+                color: parent.on ? (sw.theme ? sw.theme.acc : "#FAFAFA")
                                  : (sw.theme ? sw.theme.fg3 : "#CAC4D0")
                 font.pixelSize: 12
             }

@@ -9,7 +9,6 @@
 //   danger-ghost  透明底红字 —— 破坏性轻量动作（如「删除班级」收起态）
 //
 // 规格：高 40、全圆（frRPill）、字 labelL(14) Medium、状态层 hover/press
-// （MD3 state layers 口径：叠 onSurface 不动底色）。禁用 = 整件 38% 透明。
 // 图标走 SvgIcon（lucide，随 exe 打包）—— 不用 emoji（本机渲染成方块）。
 import QtQuick
 import "../../island"            // SvgIcon
@@ -50,7 +49,7 @@ Item {
         anchors.fill: parent
         radius: Theme.radius.full || 999
         color: root.bgColor()
-        border.width: variant === "outlined" ? 1 : 0
+        border.width: 0   // 无边框：outlined 退役，统一靠底色
         border.color: Theme.color.surfaceVariant || "#EEF0F3"
 
         // 状态层（hover 8% / press 10%，叠 fg 不动底色）

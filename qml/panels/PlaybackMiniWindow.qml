@@ -11,7 +11,6 @@
 // 交互与提示（笔记"要保留视觉与可交互"）：播放/暂停、进度拖动、时间显示、
 // 音量与静音切换、缓冲与失败文字提示、双击放大/还原、拖动释放后自动贴角。
 //
-// 2026-10-27 翻新：对齐《灵动岛统一布局规范》—— 间距/圆角/字阶走 Md3 令牌，
 // 图标优先、克制动效；**只改显示层**：不动 viewerbackend.cpp、不引入 backend
 // 新接口、不塞进灵动岛（岛只属被控端，本窗是管理端浮层）。
 import QtQuick
@@ -33,7 +32,6 @@ Item {
     readonly property int smallH: 268
     readonly property int largeW: 680
     readonly property int largeH: 430
-    // 结构度量（对齐 MD3 阶梯，不再散落裸数字）
     readonly property int headerH: 36      // 标题栏高
     readonly property int controlH: 44     // 控制条高
     readonly property int playBtn: 32      // 播放/暂停圆钮直径
@@ -88,12 +86,11 @@ Item {
         }
     }
 
-    // 背景面：MD3 容器（surface + 浅描边），统一圆角 rM
     Rectangle {
         anchors.fill: parent
         radius: win.theme ? win.theme.rM : 12
         color: win.theme ? win.theme.cSurface : "#1E1E1E"
-        border.width: 1
+        border.width: 0
         border.color: win.theme ? win.theme.cOutlineVar : "#3A3A3A"
         clip: true
 

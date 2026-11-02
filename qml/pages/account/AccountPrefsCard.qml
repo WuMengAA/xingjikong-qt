@@ -72,7 +72,7 @@ SettingsCard {
                     border.color: (backend.themeMode === modelData.m)
                                   ? (Theme.color.primary)
                                   : (Theme.color.textSecondary)
-                    border.width: 1
+                    border.width: 0
 
                     Text {
                         anchors.centerIn: parent

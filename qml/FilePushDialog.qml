@@ -6,7 +6,6 @@
 // 分块推送的节奏在 backend（C++）里：一片一片等回执再发下一片。这里只负责
 // 选文件 / 显示进度 / 把失败原因照原样念出来，不自己攒状态。
 //
-// 2026-10-26（产品笔记 P2）：视觉换新 —— 正式吃 Md3 令牌 + fresh 组件族
 //（与班级发布中心同语言）。交互、协议、字段一律未动，只换了皮。
 
 import QtQuick
@@ -54,7 +53,7 @@ Popup {
         color: Theme.color.surface
         radius: Theme.radius.lg
         border.color: Theme.color.surfaceVariant
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: Column {
@@ -118,7 +117,7 @@ Popup {
                        ? (Theme.color.surface)
                        : (Theme.color.background)
                 border.color: Theme.color.textSecondary
-                border.width: 1
+                border.width: 0
                 Text {
                     anchors.centerIn: parent
                     text: "选文件"
@@ -215,7 +214,7 @@ Popup {
                        ? (Theme.color.surface)
                        : (Theme.color.background)
                 border.color: Theme.color.textSecondary
-                border.width: 1
+                border.width: 0
                 Text {
                     anchors.centerIn: parent
                     text: "取消"
@@ -240,7 +239,7 @@ Popup {
                        ? (Theme.color.primary)
                        : (Theme.color.primary)
                 border.color: Theme.color.primary
-                border.width: 1
+                border.width: 0
                 Text {
                     anchors.centerIn: parent
                     text: "开始推送"

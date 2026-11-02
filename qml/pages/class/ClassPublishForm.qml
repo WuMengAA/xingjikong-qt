@@ -7,7 +7,6 @@
 // 发布那一刻读一次、复位时调 reset()。不两边各存一份（两份状态必然漂移）。
 //
 // 类型白名单与云端 class-admin.PUBLISH_TYPES 严格一致（顺序即段序）。
-// 正文用自绘多行框：Md3TextField 是单行 TextInput，作业/通知正文必须能换行；
 // 不新开共享件 —— shared-qml 不在「只改三工程」范围内，等第二处消费方再提升。
 import QtQuick
 import "../../components"           // AppInput / AppSegmentedButton
@@ -86,7 +85,6 @@ Item {
             onTextChanged: form.titleText = text
         }
 
-        // 正文（多行）：与 Md3TextField 同一语言自绘（filled 底 + 聚焦底线）
         Rectangle {
             width: parent.width
             height: 96

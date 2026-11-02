@@ -40,7 +40,7 @@ Popup {
         color: dlg.theme ? dlg.theme.cream : "#141414"
         radius: dlg.theme ? dlg.theme.rCard : 12
         border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: Column {
@@ -99,7 +99,7 @@ Popup {
                 height: 30
                 radius: dlg.theme ? dlg.theme.rCtrl : 9
                 border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
+                border.width: 0
                 TextInput {
                     id: minInput
                     anchors.fill: parent
@@ -120,7 +120,7 @@ Popup {
                 height: 30
                 radius: dlg.theme ? dlg.theme.rCtrl : 9
                 border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
+                border.width: 0
                 color: btnShutdownMA.containsMouse ? (dlg.theme ? dlg.theme.hover : "#1E1E1E") : "transparent"
                 Text {
                     anchors.centerIn: parent
@@ -143,7 +143,7 @@ Popup {
                 height: 30
                 radius: dlg.theme ? dlg.theme.rCtrl : 9
                 border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
+                border.width: 0
                 color: btnRebootMA.containsMouse ? (dlg.theme ? dlg.theme.hover : "#1E1E1E") : "transparent"
                 Text {
                     anchors.centerIn: parent
@@ -240,7 +240,7 @@ Popup {
                 height: 30
                 radius: dlg.theme ? dlg.theme.rCtrl : 9
                 border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
+                border.width: 0
                 color: btnCancelMA.containsMouse ? (dlg.theme ? dlg.theme.hover : "#1E1E1E") : "transparent"
                 Text {
                     anchors.centerIn: parent

@@ -6,8 +6,6 @@
 //
 // ── 迁移要点 ────────────────────────────────────────────────────────────
 // · **删 2 处 border**（卡片描边 + 内部分隔线）—— 规范禁边框，改由 surfaceVariant 底分区
-// · `Md3.cSurface` → `Theme.color.surface`；`Md3.cOutline` → `Theme.color.textSecondary`
-// · `Md3Btn` → `AppButton`（班级改绑按钮，variant 仍由 C++ 的 classOptions 给）
 // · 保留 `Flow`（班级数不定，需自然换行）
 import QtQuick
 import QtQuick.Layouts
@@ -55,7 +53,6 @@ Item {
                     delegate: AppButton {
                         required property var modelData
                         text: modelData.name
-                        // C++ 给的 variant 是 Md3 语义（filled/tonal/outlined/text），
                         // 这里直传给 AppButton；AppButton 对未知 variant 回落到 primary。
                         variant: modelData.variant
                         size: "sm"

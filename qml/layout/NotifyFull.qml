@@ -2,7 +2,6 @@
 //
 // 语境：需求 #4「灵动岛是唯一信息出口」之前的全屏通知形态（2026-10-26 P0 起
 // 通知语义收敛为 弹窗/角标/跑马灯/全屏 四类，本模板即「全屏」的版式参考）。
-// 本模板演示全屏态的 MD3 形态：severity 着色 + 来源信息 + 倒计时条 + 单按钮。
 import QtQuick
 import "../components"
 import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
@@ -10,10 +9,7 @@ import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，
 Item {
     id: root
     width: 960; height: 600
-    // MD3 令牌：内部自建实例（深/浅由 dark 驱动）。
-    // ⚠️ 不许让宿主晚赋值替换整个 md3 实例——创建期 md3 为空会让 Behavior 时长
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
-    //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
     property string severity: "inform"    // urgent | inform | remind
     property int remainSec: 8

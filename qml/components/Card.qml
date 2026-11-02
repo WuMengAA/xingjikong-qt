@@ -20,7 +20,7 @@ Rectangle {
     radius: card.theme && card.theme.rCard !== undefined ? card.theme.rCard : 12
     color: card.theme && card.theme.panel !== undefined ? card.theme.panel : "#101010"
     border.color: card.theme && card.theme.card !== undefined ? card.theme.card : "#242424"
-    border.width: 1
+    border.width: 0
 
     default property alias content: inner        // 直接写子组件即可，不用再包一层 Column
 

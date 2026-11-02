@@ -55,7 +55,7 @@ Item {
             Btn {
                 Layout.preferredWidth: 44
                 Layout.preferredHeight: 26
-                theme: Md3
+                theme: ({ })
                 text: "编辑"
                 tip: "改姓名/学号/座位/备注（学号重复 = 同一个人，不会长出两条）"
                 onClicked: row.editRequested(row.student)
@@ -63,7 +63,7 @@ Item {
             Btn {
                 Layout.preferredWidth: 44
                 Layout.preferredHeight: 26
-                theme: Md3
+                theme: ({ })
                 text: "移出"
                 tip: "从本班名单移除（学生本来就没有账号，不影响任何登录）"
                 onClicked: row.removeRequested(row.student.id, row.student.name)

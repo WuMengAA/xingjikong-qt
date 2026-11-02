@@ -35,7 +35,7 @@ Popup {
         color: dlg.theme ? dlg.theme.cream : "#141414"
         radius: dlg.theme ? dlg.theme.rCard : 12
         border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: Column {
@@ -149,7 +149,7 @@ Popup {
                 color: backend.termState === 1 ? "transparent"
                                                : (dlg.theme ? dlg.theme.inv : "#F0F0F0")
                 border.color: dlg.theme ? dlg.theme.stroke : "#242424"
-                border.width: 1
+                border.width: 0
                 Text {
                     anchors.centerIn: parent
                     // Pending 显示「…」：那会儿按钮按了也不会有别的反应（见下面 MouseArea）

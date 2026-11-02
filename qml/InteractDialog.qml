@@ -61,7 +61,7 @@ Popup {
         color: dlg.theme ? dlg.theme.cream : "#141414"
         radius: dlg.theme ? dlg.theme.rCard : 12
         border.color: dlg.cLine
-        border.width: 1
+        border.width: 0
     }
 
     onOpened: {
@@ -169,7 +169,7 @@ Popup {
                 radius: 8
                 color: dlg.tab === tabItem.modelData.k ? dlg.cInv : "transparent"
                 border.color: dlg.tab === tabItem.modelData.k ? "transparent" : dlg.cLine
-                border.width: 1
+                border.width: 0
                 Text {
                     anchors.centerIn: parent
                     text: tabItem.modelData.label
@@ -202,7 +202,7 @@ Popup {
         radius: 10
         color: dlg.theme ? dlg.theme.panel : "#101010"
         border.color: dlg.cLine
-        border.width: 1
+        border.width: 0
         clip: true
 
         // 反馈汇总（只读）：反馈是统计不是待办，没有"通过/驳回"。
@@ -255,7 +255,7 @@ Popup {
                 color: dlg.selIndex === rowItem.index ? dlg.cHov
                        : (rowHover.containsMouse ? dlg.cHov : "transparent")
                 border.color: dlg.selIndex === rowItem.index ? dlg.cSub : "transparent"
-                border.width: 1
+                border.width: 0
 
                 Column {
                     anchors.left: parent.left

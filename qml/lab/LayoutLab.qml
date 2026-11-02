@@ -1,7 +1,6 @@
 // 布局演示宿主 · LayoutLab（2026-10-14）
 //
 // 用户点单「看布局——不同界面的模板和简易演示 demo」：本页把五个主要界面
-// 的 MD3 布局模板装进一个可切换的演示器，供逐个评价。评价通过后，
 // 各 layout/*.qml 即成为对应真实界面的迁移底稿。
 //
 // 屏幕清单（设计尺寸）：
@@ -10,14 +9,12 @@
 //   ExamMode       1280×800  被控端考试模式全屏（#88）
 //   LocalSettings   560×680  被控端本机设置窗（需求 #3：本地开关组）
 //   NotifyFull      960×600  被控端通知/广播全屏（需求 #4 之前的全屏态）
-// 注：只 import 组件目录拿 Md3 令牌；屏幕由 Loader 按路径加载，各自文件管自己的 import。
 import QtQuick
 import "components"
 import "components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
 
 Item {
     id: root
-    // 宿主只传 dark 布尔；各屏内部自建 Md3 实例（见各屏注释——晚赋值换实例会出事故）。
     // 本文件左侧切换轨用自己的实例（同模式）。
     property bool dark: false
     property int screen: 0
@@ -106,7 +103,7 @@ Item {
             anchors.margins: 8
             text: root.screens[root.screen].name + "  " + root.screens[root.screen].w + "×" + root.screens[root.screen].h
             font.pixelSize: 10
-            color: root.dark ? "#938F99" : "#79747E"
+            color: root.dark ? "#938F99" : "#71717A"
         }
     }
 }

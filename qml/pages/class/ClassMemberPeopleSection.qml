@@ -4,10 +4,8 @@
 // 数据与写操作全由父级（ClassMemberPane）经信号发起，本件不碰 backend。
 //
 // ── 迁移要点 ────────────────────────────────────────────────────────────
-// · `Md3Card` → `AppCard`；`Md3Btn` → `AppButton`；`TextInput` 手写占位 → `AppInput`
 // · 角色选择：原为「只读 TextInput 伪装下拉 + 浮层三档按钮」，现改为**常驻 AppChip 三档**
 //   —— 少一层浮层状态（visible/点外收起），且用上规范组件。属有意简化，非纯换皮。
-// · `Md3.cSurfaceVar` → `Theme.color.surfaceVariant`；`Md3.cOk` → `Theme.color.success`
 import QtQuick
 import QtQuick.Layouts
 import "../../components"             // AppCard / AppButton / AppChip / AppInput

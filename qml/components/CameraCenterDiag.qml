@@ -52,7 +52,6 @@ Rectangle {
                 onClicked: cc.retryLast()
             }
 
-            // ── 画面说明（MD3 重构④：从实时页移来的长文字）──
             Rectangle { width: parent.width; height: 1; color: cc.tOutlineVar }
             Text { text: "画面说明"; color: cc.tFg3; font.pixelSize: cc.tLabelM; font.weight: Font.Medium }
             Text {

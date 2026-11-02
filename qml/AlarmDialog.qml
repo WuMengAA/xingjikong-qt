@@ -10,7 +10,6 @@
 // 面板自管「拉列表 / 挂 / 删」：全部走 backend.sendAction（viewer → 云端 → agent），
 // 云端仅透传（无 action 白名单），无需云端改动。
 //
-// 2026-10-26（产品笔记 P2）：视觉直接吃 MD3 令牌 + fresh 组件（与发布中心同语言）。
 
 import QtQuick
 import QtQuick.Controls
@@ -53,7 +52,7 @@ Popup {
         color: Theme.color.surface
         radius: Theme.radius.lg
         border.color: Theme.color.surfaceVariant
-        border.width: 1
+        border.width: 0
     }
 
     // 手写小组件：分段选择的一段（与 NotifyDialog 同款）
@@ -69,7 +68,7 @@ Popup {
                ? (Theme.color.primary)
                : (segHover.containsMouse ? (Theme.color.surface) : "transparent")
         border.color: seg.active ? "transparent" : (Theme.color.textSecondary)
-        border.width: 1
+        border.width: 0
         Text {
             anchors.centerIn: parent
             text: seg.label
@@ -95,7 +94,7 @@ Popup {
         color: tick.checked ? (Theme.color.primary) : "transparent"
         border.color: tick.checked ? (Theme.color.primary)
                                    : (Theme.color.textSecondary)
-        border.width: 1
+        border.width: 0
         SvgIcon {
             anchors.centerIn: parent
             visible: tick.checked

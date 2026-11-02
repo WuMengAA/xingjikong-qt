@@ -9,10 +9,7 @@ import "../components/theme"   // Theme 设计令牌单例（pragma Singleton，
 Item {
     id: root
     width: 1280; height: 800
-    // MD3 令牌：内部自建实例（深/浅由 dark 驱动）。
-    // ⚠️ 不许让宿主晚赋值替换整个 md3 实例——创建期 md3 为空会让 Behavior 时长
     //    变 NaN 卡死、颜色停默认值、空实例子树盖住宿主内容（2026-10-14 探针实测）。
-    //    与手机端 mobile/ 页面同一模式：页面自建 Md3，宿主只传 dark 布尔。
     property bool dark: false
     property int remainSec: 2700        // 45:00
     property var seats: [
@@ -109,7 +106,7 @@ Item {
             width: 280; height: 104
             radius: Theme.radius.md
             color: Theme.color.surface
-            border.width: modelData.state === "举手求助" ? 2 : 0
+            border.width: 0   // 无边框：求助态由底色/图标表达
             border.color: Theme.color.destructive
             Row {
                 anchors.left: parent.left; anchors.leftMargin: 16

@@ -61,7 +61,7 @@ SettingsCard {
                    ? (Theme.color.surface)
                    : (Theme.color.background)
             border.color: Theme.color.textSecondary
-            border.width: 1
+            border.width: 0
             Text { anchors.centerIn: parent; text: "更新日志"; color: Theme.color.textPrimary; font.pixelSize: 13 }
             MouseArea {
                 id: h1
@@ -78,7 +78,7 @@ SettingsCard {
                    ? (Theme.color.surface)
                    : (Theme.color.background)
             border.color: Theme.color.textSecondary
-            border.width: 1
+            border.width: 0
             Text { anchors.centerIn: parent; text: "帮助"; color: Theme.color.textPrimary; font.pixelSize: 13 }
             MouseArea {
                 id: h2
@@ -95,7 +95,7 @@ SettingsCard {
                    ? (Theme.color.surface)
                    : (Theme.color.background)
             border.color: Theme.color.textSecondary
-            border.width: 1
+            border.width: 0
             Text { anchors.centerIn: parent; text: "诊断与反馈"; color: Theme.color.textPrimary; font.pixelSize: 13 }
             MouseArea {
                 id: h3

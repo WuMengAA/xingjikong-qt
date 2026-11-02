@@ -1,4 +1,3 @@
-// 星集控 · 开关行（2026-10-14 · MD3 唯一模板迁移批）
 //
 // 内部规格升到 Material Design 3：开关 52×32 轨道、thumb 16→24 emphasized 缓动、
 // 开=primary 轨道 + onPrimary thumb、关=surfaceVariant 轨道 + outline 描边；
@@ -15,7 +14,6 @@ Item {
     property bool checked
     signal toggled(bool on)
 
-    // MD3 列表项高度：单行 56 / 两行 72（旧 26/42 会长一点，设置页 GridLayout 可吸收）
     height: row.note === "" ? 56 : 72
 
     Text {
@@ -43,7 +41,6 @@ Item {
         elide: Text.ElideRight
     }
 
-    // MD3 开关（52×32；与 md3/Md3SwitchRow 同规格）
     Item {
         id: sw
         anchors.right: parent.right
@@ -53,9 +50,8 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: 16
-            color: row.checked ? (row.theme.acc || "#6750A4") : (row.theme.seg || "#E7E0EC")
-            border.width: row.checked ? 0 : 2
-            border.color: row.theme.stroke2 || "#79747E"
+            color: row.checked ? (row.theme.acc || "#18181B") : (row.theme.seg || "#F4F4F5")
+            // 无边框：开关轨道未选态靠 track 底色区分
             Behavior on color { ColorAnimation { duration: 200 } }
             Rectangle {
                 anchors.fill: parent
@@ -71,7 +67,7 @@ Item {
             width: row.checked ? 24 : 16
             height: width
             radius: width / 2
-            color: row.checked ? (row.theme.win || "#FFFFFF") : (row.theme.fg4 || "#79747E")
+            color: row.checked ? (row.theme.win || "#FFFFFF") : (row.theme.fg4 || "#71717A")
             Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.Bezier; easing.bezierCurve: [0.05, 0.7, 0.1, 1.0] } }
             Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.Bezier; easing.bezierCurve: [0.05, 0.7, 0.1, 1.0] } }
         }

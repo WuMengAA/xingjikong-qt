@@ -169,7 +169,7 @@ Item {
                     visible: board.count === 0
                     text: pane.subscribed ? "本班暂无设备" : "未选择班级"
                     font.pixelSize: 12 || 12
-                    color: Theme.color.textSecondary || "#79747E"
+                    color: Theme.color.textSecondary || "#71717A"
                 }
             }
         }

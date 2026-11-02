@@ -34,7 +34,7 @@ Popup {
         color: theme ? theme.panel : "#1E1E1E"
         radius: theme ? theme.rCard : 12
         border.color: theme ? theme.card : "#3C3C3C"
-        border.width: 1
+        border.width: 0
     }
 
     readonly property bool hasThumb: !!(payload && payload.thumb && payload.thumb.length > 0)
@@ -98,7 +98,7 @@ Popup {
             color: theme ? theme.body : "#141414"
             radius: theme ? theme.rCard : 8
             border.color: theme ? theme.card : "#3C3C3C"
-            border.width: 1
+            border.width: 0
             clip: true
 
             Image {
@@ -161,7 +161,7 @@ Popup {
                 width: 76; height: 28; radius: theme ? theme.rCard : 8
                 color: saveMa.containsMouse ? (theme ? theme.hover2 : "#2A2A2A") : (theme ? theme.panel : "#1E1E1E")
                 border.color: theme ? theme.stroke : "#3C3C3C"
-                border.width: 1
+                border.width: 0
                 Text {
                     anchors.centerIn: parent
                     text: "另存为…"

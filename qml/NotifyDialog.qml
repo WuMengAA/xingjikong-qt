@@ -81,7 +81,7 @@ Popup {
         color: Theme.color.surface
         radius: Theme.radius.lg
         border.color: Theme.color.surfaceVariant
-        border.width: 1
+        border.width: 0
     }
 
     // 手写小组件：勾选框。界面上没有现成的 CheckBox（另外四个弹窗也都是手写的）。
@@ -96,7 +96,7 @@ Popup {
         border.color: tick.checked
                       ? (Theme.color.primary)
                       : (Theme.color.textSecondary)
-        border.width: 1
+        border.width: 0
         SvgIcon {
             anchors.centerIn: parent
             visible: tick.checked
@@ -120,7 +120,7 @@ Popup {
                ? (Theme.color.primary)
                : (segHover.containsMouse ? (Theme.color.surface) : "transparent")
         border.color: seg.active ? "transparent" : (Theme.color.textSecondary)
-        border.width: 1
+        border.width: 0
         Text {
             anchors.centerIn: parent
             text: seg.label

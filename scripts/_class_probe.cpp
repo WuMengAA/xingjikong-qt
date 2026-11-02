@@ -20,6 +20,8 @@
 #include <QPair>
 #include <QSize>
 #include <QStringList>
+#include <QVariantList>
+#include <QVariantMap>
 #include <cstdio>
 
 #include "class/class_service.h"
@@ -367,6 +369,42 @@ int main(int argc, char *argv[])
     old.insert(QStringLiteral("id"), 16);
     svc.onClassEvent(old);
     check(ev->count() == evc2, "低于水位的旧事件丢弃");
+
+    // ⑰ publish 事件字段（2026-10-25 · 班级展板「已发布内容」的数据契约）
+    //    云端 adminPublish 落的是 {type,title,body,from}；模型必须原样透出，
+    //    detail 回落到 title（否则 Timeline 第二行是空白），recentOfKind 能筛出来。
+    {
+        const int revBefore = ev->revision();
+        QJsonObject data;
+        data.insert(QStringLiteral("type"), QStringLiteral("homework"));
+        data.insert(QStringLiteral("title"), QStringLiteral("第三章习题"));
+        data.insert(QStringLiteral("body"), QStringLiteral("P42 1-6 题，明天交"));
+        data.insert(QStringLiteral("from"), QStringLiteral("admin_xlzx"));
+        QJsonObject pub;
+        pub.insert(QStringLiteral("id"), 1300);
+        pub.insert(QStringLiteral("at"), QStringLiteral("2026-10-25T15:00:00.000Z"));
+        pub.insert(QStringLiteral("kind"), QStringLiteral("publish"));
+        pub.insert(QStringLiteral("uid"), QStringLiteral("admin_xlzx"));
+        pub.insert(QStringLiteral("data"), data);
+        svc.onClassEvent(pub);
+
+        check(ev->data(ev->index(0, 0), ClassEventModel::TitleRole).toString() == QStringLiteral("第三章习题")
+                  && ev->data(ev->index(0, 0), ClassEventModel::BodyRole).toString() == QStringLiteral("P42 1-6 题，明天交")
+                  && ev->data(ev->index(0, 0), ClassEventModel::TypeRole).toString() == QStringLiteral("homework")
+                  && ev->data(ev->index(0, 0), ClassEventModel::FromRole).toString() == QStringLiteral("admin_xlzx"),
+              "publish：title/body/type/from 原样透出");
+        check(ev->data(ev->index(0, 0), ClassEventModel::DetailRole).toString() == QStringLiteral("第三章习题"),
+              "publish：detail 回落到 title（Timeline 不再空白）");
+        check(ev->revision() > revBefore, "revision 随事件自增（展板绑定靠它重算）");
+
+        const QVariantList notices = ev->recentOfKind(QStringLiteral("publish"), 12);
+        check(notices.size() == 1, "recentOfKind(\"publish\") 从混排流里只筛发布事件");
+        const QVariantMap n0 = notices.value(0).toMap();
+        check(n0.value(QStringLiteral("title")).toString() == QStringLiteral("第三章习题")
+                  && n0.value(QStringLiteral("type")).toString() == QStringLiteral("homework")
+                  && n0.value(QStringLiteral("from")).toString() == QStringLiteral("admin_xlzx"),
+              "recentOfKind 摊平字段可被 QML 直接消费");
+    }
 
     // ⑯ provider 占位图（未知 uid / 空 id 都不崩、都返回非空）
     const QImage ph = prov.requestImage(QStringLiteral("nope?t1"), &gotSz, QSize(160, 100));

@@ -95,7 +95,7 @@ Popup {
         color: theme ? theme.panel : "#1D1B20"
         radius: theme ? theme.rCard : 12
         border.color: theme ? theme.card : "#2B2930"
-        border.width: 1
+        border.width: 0
     }
 
     contentItem: ColumnLayout {
@@ -188,7 +188,7 @@ Popup {
             Layout.bottomMargin: 10
             visible: dlg.rawStatus !== ""
             text: dlg.rawStatus
-            color: dlg.theme ? dlg.theme.fg3 : "#79747E"
+            color: dlg.theme ? dlg.theme.fg3 : "#71717A"
             font.pixelSize: 11
             font.family: "Consolas"
             elide: Text.ElideRight

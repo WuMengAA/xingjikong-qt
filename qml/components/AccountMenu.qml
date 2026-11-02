@@ -44,7 +44,7 @@ Item {
         radius: 14
         color: chipHover.containsMouse ? (acct.theme.cream || "#141414") : "transparent"
         border.color: acct.theme.stroke || "#242424"
-        border.width: 1
+        border.width: 0
 
         RowLayout {
             id: acctRow
@@ -59,7 +59,7 @@ Item {
                 radius: 10
                 color: backend.loggedIn ? (acct.theme.inv || "#F0F0F0") : "transparent"
                 border.color: acct.theme.stroke || "#242424"
-                border.width: 1
+                border.width: 0
                 Text {
                     anchors.centerIn: parent
                     text: backend.loggedIn && backend.accountName !== ""
@@ -91,7 +91,7 @@ Item {
                 radius: 9
                 color: (acct.theme.cream || "#141414")
                 border.color: acct.theme.stroke || "#242424"
-                border.width: 1
+                border.width: 0
                 Text {
                     id: badgeText
                     anchors.centerIn: parent
@@ -145,7 +145,7 @@ Item {
             color: acct.theme.panel || "#101010"
             radius: acct.theme.rCard || 12
             border.color: acct.theme.stroke || "#242424"
-            border.width: 1
+            border.width: 0
         }
 
         contentItem: Column {

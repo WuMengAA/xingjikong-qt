@@ -5,9 +5,6 @@
 // （OAuth 授权流程 = 站点验证密码）→ 新票据到位后一切自动恢复。
 //
 // ── 2026-10-29 迁移要点（原 MainWindow 内联 71 行）──────────────────
-// · `th.*`（Md3 实例）→ `Theme.*` 令牌，零硬编码
-// · `Md3Btn` → `AppButton`（variant：filled→primary / text→ghost；
-//   规范禁裸用 Button，且 Md3 组件已在退役清单）
 // · 自绘遮罩理由同 ToastLayer 文件头：骨架页不依赖灵动岛/组件弹窗挂载层级
 // · 内部连 backend.onReauthRequired —— 宿主无需再写 Connections
 import QtQuick

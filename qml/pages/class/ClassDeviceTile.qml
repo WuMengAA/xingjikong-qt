@@ -22,7 +22,6 @@ Item {
     implicitWidth: 144
     implicitHeight: 188
 
-    // hover / press 状态层目标透明度（MD3 state layers，叠 onSurface 不动底色）
     property real _stateOpacity: 0
 
     // ── 卡片本体（先声明，阴影用 z 压在身后）──
@@ -31,8 +30,7 @@ Item {
         anchors.fill: parent
         radius: Theme.radius.lg || 18
         color: Theme.color.surface || "#FFFFFF"
-        border.width: root.selected ? 1.5 : 1
-        border.color: root.selected ? (Theme.color.success || "#22C55E") : (Theme.color.surfaceVariant || "#EEF0F3")
+        // 无边框：选中态靠底色（accent）+ 阴影表达
         z: 1
     }
 
@@ -62,7 +60,6 @@ Item {
         z: 2
     }
 
-    // MD3 状态层
     Rectangle {
         id: stateLayer
         anchors.fill: cardBg

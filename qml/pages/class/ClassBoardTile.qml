@@ -23,7 +23,7 @@ Item {
         anchors.margins: 4
         radius: Theme.radius.sm
         color: Theme.color.surface || "#FFFFFF"
-        border.width: 1
+        border.width: 0
         border.color: Theme.color.surfaceVariant || "#EEF0F3"
 
         Column {

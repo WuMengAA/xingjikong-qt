@@ -35,7 +35,7 @@ Popup {
         color: pal.theme.panel || "#101010"
         radius: pal.theme.rCard || 12
         border.color: pal.theme.stroke || "#242424"
-        border.width: 1
+        border.width: 0
     }
 
     // ── 打开即清空输入、回到第一条 ──────────────────────────────────

@@ -53,7 +53,7 @@ SettingsCard {
             spacing: 10
             Btn {
                 Layout.preferredWidth: 120
-                theme: Md3
+                theme: ({ })
                 text: "登录"
                 strong: true
                 enabled: !backend.accountBusy
@@ -61,7 +61,7 @@ SettingsCard {
             }
             Btn {
                 Layout.preferredWidth: 120
-                theme: Md3
+                theme: ({ })
                 text: "注册新账号"
                 enabled: !backend.accountBusy
                 onClicked: backend.openRegisterPage()
@@ -163,7 +163,7 @@ SettingsCard {
             Btn {
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 26
-                theme: Md3
+                theme: ({ })
                 text: "换成管理员"
                 disabled: backend.role === "admin"
                 onClicked: backend.setRole("admin")
@@ -171,7 +171,7 @@ SettingsCard {
             Btn {
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 26
-                theme: Md3
+                theme: ({ })
                 text: "换成教师"
                 disabled: backend.role === "teacher"
                 onClicked: backend.setRole("teacher")
@@ -180,7 +180,7 @@ SettingsCard {
 
         Btn {
             width: 168
-            theme: Md3
+            theme: ({ })
             text: "退出登录"
             tip: "清掉本机凭据；下次登录要重新授权"
             onClicked: backend.forgetAccount()

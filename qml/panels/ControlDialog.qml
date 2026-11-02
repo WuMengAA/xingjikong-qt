@@ -31,7 +31,7 @@ Popup {
         color: theme.panel
         radius: theme.rCard
         border.color: theme.card
-        border.width: 1
+        border.width: 0
     }
 
     Flickable {
@@ -51,7 +51,7 @@ Popup {
                 radius: theme.rCard
                 color: theme.panel
                 border.color: theme.card
-                border.width: 1
+                border.width: 0
                 Column {
                     id: bcastCol
                     anchors.left: parent.left
@@ -89,7 +89,7 @@ Popup {
                 radius: theme.rCard
                 color: theme.panel
                 border.color: theme.card
-                border.width: 1
+                border.width: 0
                 Column {
                     id: examCol
                     anchors.left: parent.left
@@ -160,7 +160,7 @@ Popup {
                 radius: theme.rCard
                 color: theme.panel
                 border.color: theme.card
-                border.width: 1
+                border.width: 0
                 Column {
                     id: speechCol
                     anchors.left: parent.left
@@ -237,7 +237,7 @@ Popup {
                 radius: theme.rCard
                 color: theme.panel
                 border.color: theme.card
-                border.width: 1
+                border.width: 0
                 visible: !ctx.window.isPhone   // 屏幕广播 = 老师桌面推流，手机管理端不出现
                 Column {
                     id: bcastCol2

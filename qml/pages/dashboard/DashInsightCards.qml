@@ -77,7 +77,6 @@ GridLayout {
             Repeater {
                 // 排名算进 model：delegate 声明 required property 后，Qt 6 不再把上下文
                 // 属性 index 注入委托链（实测 ReferenceError: index is not defined；
-                // 存量 Md3Shell.qml:449 同坑）。这里不依赖 index。
                 model: {
                     const src = backend.actionRanking ? backend.actionRanking.slice(0, 5) : []
                     const out = []

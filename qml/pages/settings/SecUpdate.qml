@@ -52,7 +52,7 @@ SettingsCard {
         Btn {
             Layout.preferredWidth: 118
             Layout.preferredHeight: 26
-            theme: Md3
+            theme: ({ })
             text: updater.busy ? "处理中…" : "检查更新"
             tip: "检查云端是否有新版本"
             disabled: updater.busy
@@ -62,7 +62,7 @@ SettingsCard {
         Btn {
             Layout.preferredWidth: 118
             Layout.preferredHeight: 26
-            theme: Md3
+            theme: ({ })
             visible: updater.state === "available"
             strong: true
             text: updater.mandatory ? "必须更新" : "立即更新"
@@ -73,7 +73,7 @@ SettingsCard {
         Btn {
             Layout.preferredWidth: 118
             Layout.preferredHeight: 26
-            theme: Md3
+            theme: ({ })
             text: "去官网下载页"
             tip: "打开 www.245959623.xyz/download"
             onClicked: backend.openExternal("https://www.245959623.xyz/download")

@@ -14,7 +14,6 @@ import QtQuick.Layouts
 import "schedule"          // 课表编辑器模块（2026-10-06 并入，schedule/ 子目录）
 import "components"        // 通用组件：Card / Btn / ToggleRow（2026-10-06 打磨抽出；EmptyState 已清理，全库 0 引用）
 import "components/theme"   // Theme 设计令牌单例（pragma Singleton，2026-10-25；dark 由主外壳统一写）
-// 2026-10-22：全局主框架（App Scaffold · MainWindow）——原 pages/Md3Shell.qml 更名移入。
 // 它是管理端唯一应用外壳（侧栏+顶栏+内容区+状态条），业务页经它挂载；见 AGENTS.md §9。
 import "shell"
 import "shell/ClassSort.js" as ClassSort   // 引导第一步的班级 chip 顺序（1班<…<12班）
@@ -82,21 +81,18 @@ ApplicationWindow {
     readonly property bool darkMode: (backend.themeMode === 1) ? true
                                       : (backend.themeMode === 2 ? backend.systemDark : false)
 
-    // 主题 Token 单一真源：shared-qml/ui/theme/Md3.qml（构建期拷到 components/theme/；
     // 用户批准 MaterialLab 为全项目唯一模板）。深 / 浅两套由 dark 切换。
-    // Md3 提供 legacy 别名（win/panel/fg/acc/rCtrl…）⇒ 本文件 3802 行零改动换肤；
-    // 组件逐个迁 md3/ 后别名块删除。原 Theme.qml 全端迁移完成后退役。
-    // 2026-10-25（用户点单「MD3 太难控制」）：Md3 改 pragma Singleton（真源
     // shared-qml/ui/theme/ + qmldir），本文件是**桌面端唯一 dark 写入口**。
     // 原先 darkTh/lightTh 两个实例只是因为 th 声明成 property var 需要预构造对象，
     // 实际 th 只取其一（darkMode ? darkTh : lightTh），从未同时显示两套 ——
     // 所以「需要深浅两套并存」的旧理由不成立，singleton 后全局 binding 自动随动。
-    readonly property var th: Md3
+    // 删掉后这里是 `({ })` 空对象 ⇒ 所有页面 `th.cOnSurface` / `th.stroke`
+    // 现指向 Theme：Theme 已补齐全部历史别名（见 Theme.qml 兼容别名层）。
+    readonly property var th: Theme
     Binding { target: Theme; property: "dark"; value: root.darkMode }
 
     // 界面自身的状态（只跟显示有关的东西）
     // 2026-10-22（用户点单「把新界面全面替换老界面」）：默认页由 1（旧壳集控）改为
-    // **6（MD3 主界面）**。旧壳的 1-5 页一律保留，作为下钻目标（骨架侧栏「运行监控」
     // 跳 3、SideSheet「在集控页打开」跳 1、「返回经典界面」也回 1），功能不丢。
     // 想临时看旧壳：侧栏底部「返回经典界面」，或命令行 --page 1（若后续需要）。
     property int page: 6
@@ -413,7 +409,7 @@ ApplicationWindow {
             color: th.cream
             radius: th.rCard
             border.color: th.stroke
-            border.width: 1
+            border.width: 0
         }
 
         contentItem: Column {
@@ -471,7 +467,7 @@ ApplicationWindow {
                     width: 120; height: 34; radius: th.rCtrl
                     color: "transparent"
                     border.color: th.stroke
-                    border.width: 1
+                    border.width: 0
                     Text {
                         anchors.centerIn: parent
                         text: "取消"
@@ -495,6 +491,26 @@ ApplicationWindow {
     Connections {
         target: backend
         function onDiagFeedbackRequested() { diagDlg.refreshLog(); diagDlg.open() }
+    }
+
+    // ── 今日课表大屏窗口（2026-11-02 · 取代 QWidget 手绘版）──────────────────
+    // 原实现是 src/schedule_view.cpp 里的 `ScheduleViewWindow : public QWidget`，
+    // 在 paintEvent() 里 QPainter 手绘整屏。已按 2026-11-01 裁决删除：
+    // 「qtshadcn 是唯一图形库，不允许 QWidget 等 CPU 渲染」。
+    // 现在：数据来自 todayScheduleModel（强类型 Model），渲染全在 QML + QtShadcn。
+    // 声明成根的子对象（不写 visible: true）——首次 show() 才建窗口，常驻不占资源。
+    TodayScheduleWindow {
+        id: schedWindow
+        model: typeof todayScheduleModel !== "undefined" ? todayScheduleModel : null
+    }
+    Connections {
+        target: backend
+        function onTodayScheduleRequested() {
+            schedWindow.visibility = Window.Windowed
+            schedWindow.show()
+            schedWindow.raise()
+            schedWindow.requestActivate()
+        }
     }
 
     // 被控端访问密码弹窗（2026-10-26）：接管启用了访问密码的设备前，云端要求先鉴权。
@@ -692,7 +708,6 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+1"; enabled: backend.firstRunDone; onActivated: { goPage(0) } }
     Shortcut { sequence: "Ctrl+2"; enabled: backend.firstRunDone; onActivated: { goPage(1) } }
     Shortcut { sequence: "Ctrl+3"; enabled: backend.firstRunDone; onActivated: { goPage(2) } }
-    // 2026-10-20 P1：Ctrl+6 = MD3 新版界面骨架（页号 6，与 Ctrl+1..3 同一套心智）
     Shortcut { sequence: "Ctrl+6"; enabled: backend.firstRunDone; onActivated: { goPage(6) } }
 
     // 选择类（4.7）：锁屏是最高频也最容易误伤的操作，给它两个键不加面板；
@@ -1340,7 +1355,7 @@ ApplicationWindow {
             color: th.cream
             radius: th.rCard
             border.color: th.stroke
-            border.width: 1
+            border.width: 0
         }
 
         contentItem: Column {
@@ -1431,7 +1446,7 @@ ApplicationWindow {
             width: 560; height: 388
             radius: th.rWin
             color: th.body
-            border.color: th.card; border.width: 1
+            border.color: th.card; border.width: 0
 
             // 跳过（任意步都能跳过，写标记收起）
             Text {
@@ -1477,7 +1492,7 @@ ApplicationWindow {
                                     color: (backend.currentClass === modelData.code) ? th.inv : th.hover2
                                     border.color: (backend.currentClass === modelData.code) ? th.inv
                                                                                             : th.stroke
-                                    border.width: 1
+                                    border.width: 0
                                     Text {
                                         id: wLbl; anchors.centerIn: parent
                                         text: modelData.name
@@ -1547,7 +1562,7 @@ ApplicationWindow {
                     Rectangle {
                         visible: welcomeLayer.step > 0
                         width: 96; height: 32; radius: th.rCtrl
-                        color: th.hover; border.color: th.stroke; border.width: 1
+                        color: th.hover; border.color: th.stroke; border.width: 0
                         Text { anchors.centerIn: parent; text: "上一步"; color: th.fg; font.pixelSize: 13 }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                             onClicked: welcomeLayer.step = Math.max(0, welcomeLayer.step - 1) }

@@ -8,7 +8,6 @@
 //
 // 用法（默认属性 = 内容，子项按声明顺序纵向排）：
 //   SettingsCard {
-//       md3: th
 //       title: "连接"
 //       Text { ... }
 //       Btn { ... }
@@ -29,7 +28,7 @@ Rectangle {
     radius: 12
     color: Theme.color.background
     border.color: Theme.color.textSecondary
-    border.width: 1
+    border.width: 0
     implicitHeight: col.implicitHeight + 32
 
     Column {

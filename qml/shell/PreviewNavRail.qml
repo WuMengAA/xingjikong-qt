@@ -1,11 +1,19 @@
-// 新版外壳 · 左导航轨（2026-11-01）
+// 新版外壳 · 左导航轨（2026-11-01 · QtShadcn 全量）
 //
 // 从 PreviewConsole.qml 拆出（该文件超 200 行红线，见 §10.5）。
 // 观感照设计稿 qml/layout/DesktopConsole.qml：品牌区 + 图标导航项 + 底部用户卡。
-// 图标用 lucide SVG（image://svgicon）而非设计稿的 emoji —— 本机 emoji 渲染成方块。
+//
+// ── 2026-11-01 QtShadcn 迁移（执行 10-29 用户裁决「两端全量 QtShadcn」）──
+// 导航项之前是手画 Rectangle + HoverHandler + TapHandler —— 与裁决不符。本版换成库组件：
+//   · 导航项：手画 → **ShadcnButton**(variant Ghost / Secondary，checked 态由 checkable 驱动)
+//     —— 自带 hover/press/focus 状态层，不用自己写 ColorAnimation
+//   · 品牌方块：手画 Rectangle → **ShadcnAvatar**(size Large, text "星")
+//   · 分隔线：Rectangle → **ShadcnSeparator**
+//   · 底部用户卡头像：手画 → **ShadcnAvatar**
+// 令牌仍统一走 Theme.*（唯一真源，见 ui/theme/Theme.qml 头注释）。
 import QtQuick
+import QtShadcn
 import "../components/theme"
-import "../island"          // SvgIcon
 
 Rectangle {
     id: root
@@ -33,17 +41,11 @@ Rectangle {
             anchors.left: parent.left
             anchors.leftMargin: Theme.spacing.lg
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.spacing.sm
-            Rectangle {
-                width: 32; height: 32; radius: Theme.radius.md
-                color: Theme.color.primary
-                Text {
-                    anchors.centerIn: parent
-                    text: "星"
-                    color: Theme.color.primaryForeground
-                    font.pixelSize: 16
-                    font.weight: Font.Medium
-                }
+            spacing: Theme.spacing.md
+            ShadcnAvatar {
+                anchors.verticalCenter: parent.verticalCenter
+                size: ShadcnAvatar.Size.Small
+                text: "星"
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -53,16 +55,15 @@ Rectangle {
                 font.weight: Font.Medium
             }
         }
-        Rectangle {
+        ShadcnSeparator {
             anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
-            height: 1
-            color: Theme.color.accent
+            orientation: Qt.Horizontal
         }
     }
 
-    // 导航项
+    // 导航项（ShadcnButton：Ghost 常态 / Secondary 选中，自带状态层）
     Column {
         anchors.top: brand.bottom
         anchors.topMargin: Theme.spacing.md
@@ -76,46 +77,28 @@ Rectangle {
                 required property var modelData
                 width: parent.width
                 height: 48
-                Rectangle {
+
+                ShadcnButton {
                     anchors.fill: parent
                     anchors.leftMargin: Theme.spacing.sm
                     anchors.rightMargin: Theme.spacing.sm
-                    radius: Theme.radius.full
-                    color: root.section === modelData.key
-                           ? Theme.color.primary
-                           : (hover.hovered ? Theme.color.surfaceVariant : "transparent")
-                    Behavior on color { ColorAnimation { duration: Theme.motion.fast } }
-                    HoverHandler { id: hover }
-                }
-                Row {
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.spacing.lg
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Theme.spacing.md
-                    SvgIcon {
-                        name: modelData.icon
-                        px: 20
-                        tint: root.section === modelData.key
-                               ? Theme.color.primaryForeground
-                               : Theme.color.textSecondary
-                    }
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.label
-                        font.pixelSize: 14
-                        color: root.section === modelData.key
-                              ? Theme.color.primaryForeground
-                              : Theme.color.textPrimary
-                    }
-                }
-                TapHandler {
-                    onTapped: root.navActivated(modelData.key)
+                    text: modelData.label
+                    iconName: modelData.icon
+                    checkable: true
+                    checked: root.section === modelData.key
+                    variant: checked ? ShadcnButton.Variant.Secondary
+                                     : ShadcnButton.Variant.Ghost
+                    size: ShadcnButton.Size.Medium
+                    // ⚠️ ShadcnButton 的 contentItem 固定居中（图标+文字），
+                    //    没有 horizontalAlignment —— 导航项沿用居中观感，
+                    //    要左对齐就得覆写 contentItem（等于自己重画，违背用库组件的初衷）。
+                    onClicked: root.navActivated(modelData.key)
                 }
             }
         }
     }
 
-    // 底部用户卡（贴着轨道底边；轨道本身不覆盖状态条——那是宿主的事）
+    // 底部用户卡（ShadcnAvatar + 文案；整块可点 → 个人中心）
     Rectangle {
         anchors.bottom: parent.bottom
         anchors.left: parent.left
@@ -128,15 +111,10 @@ Rectangle {
             anchors.leftMargin: Theme.spacing.lg
             anchors.verticalCenter: parent.verticalCenter
             spacing: Theme.spacing.md
-            Rectangle {
-                width: 32; height: 32; radius: Theme.radius.full
-                color: Theme.color.primary
-                Text {
-                    anchors.centerIn: parent
-                    text: root.accountAvatarText || "?"
-                    color: Theme.color.primaryForeground
-                    font.pixelSize: 14
-                }
+            ShadcnAvatar {
+                anchors.verticalCenter: parent.verticalCenter
+                size: ShadcnAvatar.Size.Small
+                text: root.accountAvatarText || "?"
             }
             Column {
                 anchors.verticalCenter: parent.verticalCenter

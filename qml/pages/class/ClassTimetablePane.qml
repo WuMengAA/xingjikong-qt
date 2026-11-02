@@ -168,8 +168,7 @@ Item {
                             height: 28
                             radius: Theme.radius.sm
                             color: index === pane.dayIdx ? (Theme.color.surfaceVariant || "#E9FBF0") : "transparent"
-                            border.width: index === pane.dayIdx ? 1 : 0
-                            border.color: Theme.color.success || "#22C55E"
+                            // 无边框：当天靠 surfaceVariant 底色区分
                             Text {
                                 anchors.centerIn: parent
                                 text: (modelData.name || "") + " " + ((modelData.lessons || []).length)

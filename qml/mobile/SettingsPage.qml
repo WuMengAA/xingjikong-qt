@@ -3,9 +3,6 @@
 // recSummary / recentEvents / recBusy 由 Main 传入（数据在 Main 汇总）。
 //
 // ── 迁移要点 ────────────────────────────────────────────────────────────
-// · `Md3Card` → `AppCard`（AppCard 自带 ColumnLayout + padding 16，子项改用 Layout）
-// · `Md3Chip` → `AppChip`（选中态改实底主色，不再靠描边）
-// · `Md3Btn filled/tonal` → `AppButton primary/secondary`
 // · 头像原用 `cPrimaryCont`（浅紫底）—— Theme 无 container 层级 ⇒ 用 primary 叠 15% 透明派生
 // · 字阶走规范 12/13/14/16
 import QtQuick

@@ -8,7 +8,7 @@
 //
 // ⚠️ 布局纪律：纵向面板必须进 Flickable，否则按钮落到可视区外会表现为「按不动」。
 import QtQuick 2.15
-import "../../components/theme"       // Md3 令牌
+import "../../components/theme"
 import "../../island"                 // SvgIcon
 
 Item {
@@ -59,7 +59,7 @@ Item {
                 height: inner.height + 24
                 radius: 24
                 color: Theme.color.surface
-                border.width: 1
+                border.width: 0
                 border.color: Theme.color.textSecondary
 
                 Column {
@@ -201,7 +201,7 @@ Item {
                             height: parent.height
                             radius: 16
                             color: Theme.color.surface
-                            border.width: 1
+                            border.width: 0
                             border.color: Theme.color.textSecondary
                             Text {
                                 anchors.centerIn: parent
@@ -221,7 +221,7 @@ Item {
                             height: parent.height
                             radius: 16
                             color: Theme.color.surface
-                            border.width: 1
+                            border.width: 0
                             border.color: Theme.color.textSecondary
                             Text {
                                 anchors.centerIn: parent

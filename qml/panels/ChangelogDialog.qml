@@ -26,7 +26,7 @@ Popup {
     width: 560; height: 460
     modal: true; focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    background: Rectangle { color: theme.win; radius: theme.rCard; border.color: theme.card; border.width: 1 }
+    background: Rectangle { color: theme.win; radius: theme.rCard; border.color: theme.card; border.width: 0 }
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 18
@@ -62,7 +62,7 @@ Popup {
         }
         Rectangle {
             Layout.fillWidth: true; Layout.preferredHeight: 30; radius: theme.rCtrl
-            color: theme.hover; border.color: theme.stroke; border.width: 1
+            color: theme.hover; border.color: theme.stroke; border.width: 0
             Text { anchors.centerIn: parent; text: "关闭"; color: theme.fg; font.pixelSize: 13 }
             MouseArea { anchors.fill: parent; onClicked: changelogDlg.close() }
         }

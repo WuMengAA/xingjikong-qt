@@ -2,11 +2,9 @@
 //
 // 定位（2026-10-22 用户点单「全局统一」+ AGENTS.md §9 全局 UI 构建红线）：
 //   本文件是管理端**唯一的应用外壳**——规范里三种全局骨架的第一种
-//   （主框架 / 弹窗遮罩 Md3Dialog+SideSheet / OOBE 独立窗口）。
 //   **所有业务页面必须长在本骨架里**（经 StackLayout/Loader 挂载），
 //   禁止任何页面自绘侧栏 / 顶栏 / 状态条，禁止新建第二个应用外壳。
 //
-// 结构（规范口径，全部尺寸走命名常量或 Md3 令牌，零硬编码）：
 //   横屏：左侧 NavigationDrawer 240（surfaceContainer 底）+ 右侧 64 顶栏 + 内容区
 //        （边缘内边距 spL=24）+ 底部 32 状态条；上层 SideSheet（400 右滑）+ Toast。
 //   竖屏（2026-10-22 用户点单「竖屏横屏两种布局模式」）：左栏 240 让位给底部
@@ -14,10 +12,7 @@
 //        S2/S3/S4 双卡改单列堆叠，Toast 抬到底栏上方；SideSheet 宽度自适应。
 //        判定用**窗口朝向**（宽<高）而非设备类型：桌面窗拉高也进竖屏，手机旋转自动切。
 //
-// 沿革：本文件原为 pages/Md3Shell.qml（2026-10-22 更名为 MainWindow.qml 并
 //   从 pages/ 移入 shell/——它是骨架不是业务页；内容为"迁移到设计系统"版：
-//   手绘统计卡/排行卡/存储卡 → Md3Card，手绘筛选 chip → Md3Chip，
-//   Toast 配色 → inverse 令牌，字号/圆角/间距全部走 Md3 令牌）。
 //
 // 本页承载（对应《骨架迁移缺口清单》S 系列，2026-10-22 补齐）：
 //   S1 三张统计卡（在线 / 待办 / 离线）
@@ -58,17 +53,15 @@ Item {
     // QtShadcn 主题实例。库要求「窗口内先放一个 QtShadcnTheme」——组件从它取
     // 语义 token（颜色/圆角/间距），没有它组件会取不到色值。
     // ⚠️ id 用 shadcnTheme：本文件与子件里 `theme` 另有含义（命名纪律，避自引用）。
-    // 过渡期：Md3 令牌（th/tok）与 shadcn token 并存，P1 做 Token 对齐时统一。
     QtShadcnTheme { id: shadcnTheme }
 
     // ── P1 Token 对齐（2026-10-29）───────────────────────────────────────
     // 把品牌主色与明暗同步给 QtShadcn 的 ThemeManager，让 shadcn 组件与
-    // 现有 Md3 令牌**观感一致**，而不是各说各话。
     // ⚠️ ThemeManager 只开放 `primary` 一个覆写口（其余 token 只读，
     //    见 third_party/qtshadcn/src/core/thememanager.h）⇒ 只对齐主色 + 明暗，
     //    **不去改三方 C++ 的 rebuildTokens()**（那属于在别人地基上叠补丁，换版本必丢）。
     Binding { target: ThemeManager; property: "mode"; value: Theme.dark ? "dark" : "light" }
-    Binding { target: ThemeManager; property: "primary"; value: Theme.dark ? "#D0BCFF" : "#6750A4" }
+    Binding { target: ThemeManager; property: "primary"; value: Theme.dark ? "#FAFAFA" : "#18181B" }
 
     property var ctx
     // ── 后端转发（2026-11-01）──
@@ -86,7 +79,7 @@ Item {
     // ── 骨架结构尺寸（AGENTS.md §9.2：令牌未覆盖的骨架尺寸以命名常量集中声明）──
     readonly property int statusBarH: 32      // 底部状态条高
     readonly property int toastBottomMargin: 28  // Toast 距底（横屏）
-    readonly property int navBarH: 80         // 竖屏底部导航高（MD3 bottom navigation）
+    readonly property int navBarH: 80
 
     // ── 竖横屏自适应（2026-10-22 用户点单）─────────────────────────────
     // 判定用**窗口朝向**（宽<高 = 竖屏），不用设备类型：

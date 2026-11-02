@@ -25,7 +25,7 @@ Item {
     signal closed()
 
     /** 动效时长：令牌优先，({}) 兜底 200（与 ClassPublishDialog 同口径）。 */
-    readonly property int animDur: (Md3 && Theme.motion.fast !== undefined) ? Theme.motion.fast : 200
+    readonly property int animDur: (Theme.motion && Theme.motion.fast !== undefined) ? Theme.motion.fast : 200
 
     visible: opened
     anchors.fill: parent
@@ -75,7 +75,6 @@ Item {
         NumberAnimation { target: card; property: "opacity"; from: 0; to: 1; duration: dlg.animDur; easing.type: Easing.OutCubic }
     }
 
-    // ── 遮罩（挡住背后点击，MD3 模态）──
     Rectangle {
         id: scrim
         anchors.fill: parent

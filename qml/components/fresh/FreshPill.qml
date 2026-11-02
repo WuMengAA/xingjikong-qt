@@ -14,7 +14,6 @@ Rectangle {
     property string text: ""
     /** ok / wait / off（默认 off；颜色解析集中在此，消费方不持色值）。 */
     property string tone: "off"
-    /** 状态点颜色（空 = 不画点；通常传 Md3.frGreen / Md3.cWarn / Md3.frOffDot）。 */
     property color dotColor: "transparent"
     /** 是否可点（静态状态 pill 不挂 MouseArea —— 点了没反馈比不能点更糟）。 */
     property bool interactive: false
@@ -28,7 +27,7 @@ Rectangle {
 
     function bgColor() {
         if (tone === "ok") return Theme.color.surfaceVariant || "#E9FBF0"
-        if (tone === "wait") return "#F5E6C8"   // 黄软底（MD3 无 warn 容器令牌，字值随 fr 组）
+        if (tone === "wait") return "#F5E6C8"
         return Theme.color.surfaceVariant || "#EEF0F3"
     }
     function fgColor() {
