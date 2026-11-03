@@ -1919,6 +1919,28 @@ void IslandOverlay::setExpanded(bool on)
     //     点击 → 收起 → 下次再展开从头开始，不会停在半截。
     if (!on) { m_marqueeX = 0; m_marqueeRun = false; }
 
+    // 2026-11-04（用户 m18046：「进去后退不出来」）—— 面板是**看板**不是通知。
+    //   点组件槽 openFace() 走 showPanel(...,durationMs=0)，那里把 m_autoClose 与
+    //   m_expandGuard 全停了（常驻就该一直亮着）。于是用户再点岛时，本函数只把
+    //   m_expanded 置 false、几何缩到 56 —— 但 **m_panelFace 没清**：
+    //     · _idle 仍 false ⇒ 收起条（组件槽）不画；
+    //     · _panelOn 需 _expanded ⇒ 面板也不画；
+    //     · m_contentActive 仍 true ⇒ 下面 "!on && !m_contentActive" 的回到空闲分支进不去。
+    //   结果是一个既不展开也不空闲的空胶囊，且没有任何定时器会再救它（两条都停了）。
+    //   清 m_panelFace 原本只活在 enterIdle/closePanel 两条路径里，点击走的都不是。
+    //   修法：收起时若面板在，先按"内容结束"处理再回空闲条 —— 与 dismiss 同语义。
+    if (!on && !m_panelFace.isEmpty()) {
+        m_panelFace.clear();
+        m_panelData = QJsonObject();
+        m_contentActive = false;
+        m_actions.clear();          // 面板态的按钮（若有）也不该残留到空闲条
+        m_onAction = nullptr;
+        enterIdle();
+        emit expandedChanged(false);
+        if (m_bridge) m_bridge->sync();
+        return;
+    }
+
     // 从空闲态展开：得有东西可看。从来没显示过内容就给一句占位话，
     // 否则展开是一块空白的黑底 —— 用户会觉得"点了没反应"。
     if (on && !m_hadContent) {

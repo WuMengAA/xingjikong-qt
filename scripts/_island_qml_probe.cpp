@@ -195,6 +195,11 @@ static void captureAndSave(IslandOverlay *isl, QQuickWidget *q, const QString &o
         dumpProp("_light");
         dumpProp("_interactive");
         dumpProp("_severity");
+        // 2026-11-04（用户 m18046「进去后退不出来」）：面板态三属性 ——
+        //   _panelFace 非空 = 展开区画的是看板；_panelOn 还要求 _expanded。
+        //   验收点：收起后 _panelFace 必须回到 ""，否则岛既非展开也非空闲（卡死态）。
+        dumpProp("_panelFace");
+        dumpProp("_panelOn");
         dumpProp("_formKind");         // #330：形态串 capsule|centered|fullscreen|banner|mini
         dumpProp("_compactForm");      // #330：紧凑外框（Banner/Mini）判据
         dumpProp("_miniOrb");          // #330：Mini 正圆档（无描述）判据
@@ -440,6 +445,10 @@ int main(int argc, char *argv[])
     QString panelArg;
     QString panelJsonArg;
     QString profileArg;
+    // 2026-11-04（用户 m18046「进去后退不出来」）：--panel-collapse 在面板摊开后再
+    //   调一次 setExpanded(false)，复现「点开看板 → 再点岛 → 应回空闲条」这条路。
+    //   验收判据看 dump 的 _panelFace（必须回到 ""）+ _idle（必须 true）。
+    bool panelCollapse = false;
     // 2026-10-27（灵动岛 6 形态骨架）：--morph <mode> 直接走 C++ 演示入口
     //   progress | countdown | alert | marquee | audio | dock | notice | cycle | auto
     // 强制形态层接管收起态胶囊，给 6 形态各自的渲染抓一张图（验证 QML 守 §10.9 纯净渲染）。
@@ -503,6 +512,7 @@ int main(int argc, char *argv[])
             panelArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--panel-json") && i + 1 < argc)
             panelJsonArg = QString::fromLocal8Bit(argv[++i]);
+        if (a == QLatin1String("--panel-collapse")) panelCollapse = true;
         if (a == QLatin1String("--profile") && i + 1 < argc)
             profileArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--out") && i + 1 < argc)
@@ -985,6 +995,14 @@ int main(int argc, char *argv[])
                 qPrintable(panelArg), int(pok), qPrintable(perr),
                 QJsonDocument(pdata).toJson(QJsonDocument::Compact).constData());
         fflush(stderr);
+        // 2026-11-04（用户 m18046「进去后退不出来」）：复现「点开看板 → 再点岛 → 回空闲条」。
+        //   面板是 durationMs=0 的常驻面板，两条定时器都被停掉，所以这里必须走
+        //   真实点击路径 setExpanded(false)，而不是靠超时自愈。
+        if (panelCollapse) {
+            isl->setExpanded(false);
+            fprintf(stderr, "PANEL-COLLAPSE sent setExpanded(false)\n");
+            fflush(stderr);
+        }
     } else if (!channelArg.isEmpty()) {
         // 渠道标签：与 main.cpp 的上课提醒同一条路（一次性 hint → 胶囊通知）
         isl->setChannelForNext(channelArg);
