@@ -27,6 +27,18 @@ QtObject {
     property color fg:        light ? "#161616" : "#FAFAFA"
     property color sub:       light ? "#6E6E6E" : "#C8C8C8"
 
+    // ── 2026-11-04 补三个「被消费但从未定义」的令牌（真 bug）──────
+    //   用户报「组件里面的内容字看不清，还有白底白字」。
+    //   IslandIdleSlot / IslandTileGrid / IslandTimetableFace 一直在读
+    //   th.surfaceVariant / th.textPrimary / th.onAccent，而本文件从未定义过 ⇒
+    //   读到的永远是 undefined ⇒ 三处全部落到各自硬编码兜底（#EEEEEE / #222222 /
+    //   #2A2A2A），**深浅主题完全不跟随**：浅色模式下槽底仍是深灰、文字却是
+    //   light 的深色 fg ⇒ 深压深看不清；平铺面签 #EEEEEE 亮底在深色岛上像贴白纸。
+    //   定义于此＝单一真源，消费方自动跟随，不再各写各的兜底。
+    property color surfaceVariant: light ? "#DCDCE0" : "#2A2A2A"   // 药丸/面签/chip 底
+    property color textPrimary:    light ? "#161616" : "#FAFAFA"   // 主文字（= fg，语义名）
+    property color onAccent:       light ? "#FFFFFF" : "#1B1B1B"   // 压强调色底上的文字
+
     // ── 严重度（island.cpp 556-558，逐字；2026-10-13 urgent 归 MD3 error 色系）──
     // MD3 唯一模板（用户 2026-10-13 批准）：urgent 对齐 baseline error #B3261E。
     // inform（琥珀）/ remind（绿）为协议语义档，MD3 baseline 未定义语义状态色，保留原值。
