@@ -52,6 +52,7 @@ void check(bool ok, const QString &what)
 } // namespace（辅助函数；FakeAgentUi 必须在全局 —— moc 不支持匿名 namespace）
 
 #include "../src/agent_ui.h"
+#include "../src/island/island_layout.h"   // 岛组件布局（设置页「灵动岛组件」卡）
 
 
 namespace {
@@ -385,6 +386,13 @@ int main(int argc, char *argv[])
 
     QQuickWidget view;
     view.engine()->addImageProvider(QStringLiteral("svgicon"), new SvgIconProvider());
+
+    // 岛组件布局（2026-11-04 · m14970）：设置页「灵动岛组件」卡读 islandLayout.*，
+    // 不注入会退化成「当前环境未注入组件布局模型」—— 那一屏就等于没验。
+    // 用**真**模型（island_layout.cpp，探针已可链），不用假对象：方向开关的三态
+    // （carousel/tiled/持久化）是待验行为本身，假对象验不了它。
+    IslandLayoutModel layModel;
+    view.engine()->rootContext()->setContextProperty(QStringLiteral("islandLayout"), &layModel);
     view.engine()->rootContext()->setContextProperty(QStringLiteral("agentUi"), &ui);
 
     // 假 voicehub（2026-10-28）：广播台页内联的排期中心面板（BroadcastScheduleSheet）

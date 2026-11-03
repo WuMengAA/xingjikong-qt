@@ -118,7 +118,11 @@ Item {
         // ── 缩放：−  100%  + ──
         Row {
             spacing: 2
-            anchors.verticalCenter: parent.verticalCenter
+            // 2026-11-04：原为 anchors.verticalCenter —— 本 Row 是 RowLayout 的**直接子项**，
+            //   布局管理器与 anchors 二选一，混用会让 Qt 报 "Detected anchors on an item
+            //   that is managed by a layout" 并忽略该 anchor（缩放行会贴顶而不是居中）。
+            //   改用 Layout.alignment 才是布局容器的正确表达。
+            Layout.alignment: Qt.AlignVCenter
             AppButton {
                 text: "−"
                 size: "sm"

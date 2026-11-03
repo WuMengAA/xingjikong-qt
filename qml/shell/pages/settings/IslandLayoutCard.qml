@@ -93,6 +93,40 @@ AppCard {
             }
         }
 
+        // 显示方向（2026-11-04 · 用户 m14970「不要仅限于列表式的展示」）
+        // 二选一，整岛切换（不是 per-face）：轮播=一次一页横滑；平铺=多面同屏网格。
+        // 为什么不做成"每面可选"：面组件按 520×320 设计，per-face 混排会让同一屏里
+        // 格子尺寸不一致，平铺的网格线立刻变锯齿 —— 视觉代价大于收益。
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: 12
+            spacing: 8
+            Text {
+                text: "显示方向"
+                color: Theme.color.textPrimary
+                font.pixelSize: 13
+            }
+            AppButton {
+                text: "轮播"
+                size: "sm"
+                variant: (card.lay && card.lay.direction === "carousel") ? "solid" : "secondary"
+                onClicked: if (card.lay) card.lay.setDirection("carousel")
+            }
+            AppButton {
+                text: "平铺"
+                size: "sm"
+                variant: (card.lay && card.lay.direction === "tiled") ? "solid" : "secondary"
+                onClicked: if (card.lay) card.lay.setDirection("tiled")
+            }
+            Text {
+                Layout.fillWidth: true
+                text: (card.lay && card.lay.direction === "tiled")
+                      ? "多面同屏，一眼看全；点子可放大" : "一次一页，左右滑"
+                color: Theme.color.textSecondary
+                font.pixelSize: 12
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.topMargin: 8

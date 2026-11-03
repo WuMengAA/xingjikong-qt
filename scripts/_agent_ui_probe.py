@@ -47,6 +47,11 @@ OTA_STATE_H = os.path.join(SRC, "ota", "ota_channel_state.h")
 MOC_OTA_OUT = os.path.join(OUT_DIR, "_ota_channel_state_moc.cpp")
 MOC_SEL_OUT = os.path.join(OUT_DIR, "_mic_selector_moc.cpp")
 MOC_MON_OUT = os.path.join(OUT_DIR, "_noise_monitor_moc.cpp")
+# 2026-11-04：设置页「灵动岛组件」卡读 islandLayout（真模型，不是假对象 —— 方向开关
+# 的三态是待验行为本身）。真模型就**必须 moc 它的头**：IslandLayoutModel 是 Q_OBJECT，
+# 不 moc ⇒ setData/moveRow 里 emit 的四个信号全成未解析外部符号（LNK2019 x4）。
+ISLAND_LAYOUT_H = os.path.join(SRC, "island", "island_layout.h")
+MOC_LAYOUT_OUT = os.path.join(OUT_DIR, "_island_layout_moc.cpp")
 REPORT = os.path.join(OUT_DIR, "_agent_ui_probe_report.txt")
 # 2026-10-30：单张截图升级为逐屏截图（页 ×6 + 设置 7 分类 + 广播浮层 + 广播机 7 页），
 # 落 OUT_DIR/_shots/NN_<id>.png。为什么不覆盖旧图：换新核验要能左右比较。
@@ -160,7 +165,7 @@ def main():
     #    只 moc 派生头 ⇒ 链接期 11 个 undefined（LNK2001/LNK2019），实测确认。
     for hdr, out in ((AGENT_RECORD_UI_H, MOC_RECORD_OUT), (AGENT_UI_H, MOC_OUT),
                      (MIC_SEL_H, MOC_SEL_OUT), (NOISE_MON_H, MOC_MON_OUT),
-                     (OTA_STATE_H, MOC_OTA_OUT)):
+                     (OTA_STATE_H, MOC_OTA_OUT), (ISLAND_LAYOUT_H, MOC_LAYOUT_OUT)):
         if run([MOC, hdr, "-o", out]) != 0:
             print("moc 失败：" + os.path.basename(hdr))
             return 2
@@ -172,7 +177,8 @@ def main():
         return 2
     objs = []
     for s in [PROBE_SRC, MOC_OUT, MOC_RECORD_OUT, qrc_cpp, os.path.join(SRC, "ui", "svgiconprovider.cpp"),
-              MIC_SEL, NOISE_MON, MOC_SEL_OUT, MOC_MON_OUT, OTA_STATE, MOC_OTA_OUT]:
+              MIC_SEL, NOISE_MON, MOC_SEL_OUT, MOC_MON_OUT, OTA_STATE, MOC_OTA_OUT,
+              MOC_LAYOUT_OUT]:
         o = os.path.join(OUT_DIR, os.path.basename(s) + ".obj")
         if run([CL] + FLAGS + DEFINES + INCLUDES + ["/c", "/Fo" + o, s]) != 0:
             print("编译失败：", s)
@@ -186,7 +192,7 @@ def main():
     # QuitGuard::setPassword/hasPassword（新增 C++ 入口 ⇒ 探针壳必须同轮链上，
     # 否则 LNK2019 —— 这就是"加了 C++ 注册点不更新探针壳"的老坑，别再过一遍）。
     for _rel in ("notify/agent_ui_providers.cpp.obj", "notify/provider_registry.cpp.obj",
-                 "policy/quit_guard.cpp.obj"):
+                 "policy/quit_guard.cpp.obj", "island/island_layout.cpp.obj"):
         _p = os.path.join(BUILD, "CMakeFiles", "stelarith-agent-qt.dir", "src", _rel)
         if not os.path.exists(_p):
             print("缺 obj（先跑 _build_agent.py）：", _p)
