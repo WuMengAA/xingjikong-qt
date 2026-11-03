@@ -11,6 +11,7 @@
 // 2000 行里定位。按**指令域**拆才对得上「一条指令归谁管」这个真实边界。
 
 #include "execute_action_shared.h"
+#include "../island/island_countdown_target.h"
 
 ExecOut executeNoticeAction(const QString &action, const QJsonObject &params, bool &handled)
 {
@@ -195,6 +196,26 @@ ExecOut executeNoticeAction(const QString &action, const QJsonObject &params, bo
         handled = true;
         PanelDomain::close();
         out.result = QStringLiteral("done");
+        return out;
+    }
+
+    // ── 倒计时固定目标（2026-11-03 · Task1 + Task5：替代 ClassIsland 倒计时组件）──
+    //   管理端发 `set_countdown_target{to:"12:30",label:"午休"}` 持久化到 QSettings
+    //   （键 panel/countdownTarget），常驻倒计时面（face 9）即显示该死时刻，跨重启保留。
+    //   `{clear:true}` 或 `to` 空 ⇒ 清除，回落「课表边界」语义。
+    //   to 必须 HH:MM 或 ISO8601，非法 ⇒ failed（不让坏配置悄悄生效）。
+    //   ⚠️ 这是「配置」不是「临时面板」：临时面板走 island_panel{face:"countdown"}，
+    //      两者语义同源但生命周期不同（临时=当次，固定=常驻持久化）。
+    if (action == QStringLiteral("set_countdown_target")) {
+        handled = true;
+        const QJsonObject res = CountdownTarget::set(params);
+        if (!res.value(QStringLiteral("ok")).toBool(false)) {
+            out.result = QStringLiteral("failed");
+            out.error = res.value(QStringLiteral("error")).toString();
+            return out;
+        }
+        out.result = QStringLiteral("done");
+        out.data.insert(QStringLiteral("to"), CountdownTarget::params().value(QStringLiteral("to")));
         return out;
     }
 

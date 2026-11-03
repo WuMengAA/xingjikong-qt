@@ -52,6 +52,7 @@
 #include "remote/remote_control.h" // 2026-10-30 远控会话收口 + 泄漏看门狗迁出
 #include "ui/agent_panel.h" // 2026-10-30 main 拆分 #9：QML 控制面板数据接线（AgentPanelDeps/TrayState/g_panelDeps）
 #include "action/execute_action.h" // 2026-10-30 main 拆分 #10：播放时段管理/调度/软控/文件接收（ActionDeps/g_actionDeps/executeAction）
+#include "action/action_caps.h" // 2026-11-03：action 名册唯一真源（从 main 抽出，main 只做装配）
 #include "wire/frame_builder.h" // 2026-10-31 main 拆分 #12：协议 v1 信封三打包函数（makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes）
 #include "media/H264Streamer.h"  // A档（2026-10-31）：H264 推流装配（信号接线，业务逻辑在 src/media/）
 #include "core/proc_inspect.h" // 2026-10-31 main 拆分 #13：进程/窗口只读检查（snapshotProcessNames/enumWindowsCb/visibleWindowsCached/windowTitleOf/memMbOf）
@@ -643,38 +644,9 @@ void scheduleReconnect()
     g_backoffMs = qMin(g_backoffMs * 2, kMaxBackoffMs);
 }
 
-/** 本端真实实现的指令全集，**必须与 executeAction 的分支逐条对齐**。
- *  （2026-10-06 契合度改造：以前 register 只报 screen/input/power 三个能力组、
- *   这条表一个都不报，于是云端和管端无从知道这台机器能不能拍照/定时/推文件，
- *   管端只能把按钮对着所有机器开放，点下去才收到一句「未知指令」。）
- * 放成常量数组而不是散在各个 if 里，是为了让"能做什么"只有一处真值来源：
- * 以后 executeAction 加分支，这张表也得跟着加，否则设备会自称会做却做不了（或反之）。 */
-static const char *kActionNames[] = {
-    "camera_bind", "camera_list", "camera_record_start", "camera_record_stop", "camera_snapshot", "camera_test",
-    "cancel_schedule", "file_chunk", "file_done", "file_push",
-    "input", "launch_app", "list_schedules", "list_shortcut_candidates",
-    "lock", "log_tail", "media_delete", "media_list",
-    "media_session_start", "media_session_stop", "notify", "open_app",
-    "ping", "process_list", "process_stop", "reboot",
-    "remote_control_start", "remote_control_stop", "schedule_reboot", "schedule_shutdown",
-    "screenshot", "self_update", "set_volume", "shutdown",
-    // 远程终端三条（2026-10-06）。必须报上去：管理端按 caps 决定「终端」按钮亮不亮，
-    // 不报 = 管理端永远置灰，功能做完了看得见摸不着。
-    // 顺序照旧按字母表末段排，方便以后和别的动作一起校对。
-    "terminal_close", "terminal_input", "terminal_open",
-    // 考试模式（2026-10-06，设计文档 3.7 第一版）：全屏拦截 + 黑名单轮询 + 计时。
-    "exam_mode", "exam_mode_stop",
-    // 噪音 / 自习（2026-10-13）：noise_monitor_* 是底层采集开关（只测不录）；
-    // study_mode_* 是上层模式（周期测噪 + 连续超阈自动录一段摄像头并上传）。
-    // ⚠️ noise_monitor_* 之前一直漏登记 —— 设备实际能做却自称不会，本轮补上。
-    "noise_monitor_start", "noise_monitor_stop",
-    "study_mode_start", "study_mode_stop",
-    // 定时自动化规则引擎（2026-10-27 Phase 3）：管理端经此下发 / 拉取规则。
-    // 仅做"转发到 AutomationEngine"的薄壳，规则执行仍走 executeAction 既有词表（零新攻击面）。
-    "automation_list", "automation_upsert", "automation_remove",
-    "automation_toggle", "automation_run",
-};
-static const int kActionCount = (int)(sizeof(kActionNames) / sizeof(kActionNames[0]));
+/** 本端 action 名册（能力上报用）已抽到 src/action/action_caps.{h,cpp}：
+ *  ActionCaps::kActionNames / kActionCount 是唯一真源，与 executeAction 分支逐条对齐。
+ *  这里不再内联——main.cpp 只做装配，名册属动作域知识。 */
 
 void sendRegister()
 {
@@ -695,8 +667,8 @@ void sendRegister()
     caps.insert(QStringLiteral("power"), true);
     QJsonArray acts;
     // 注：Qt6 的 QJsonArray 没有 reserve()（不是 QVector/QList），直接 append 即可。
-    for (int i = 0; i < kActionCount; ++i)
-        acts.append(QString::fromLatin1(kActionNames[i]));
+    for (int i = 0; i < ActionCaps::kActionCount; ++i)
+        acts.append(QString::fromLatin1(ActionCaps::kActionNames[i]));
     caps.insert(QStringLiteral("actions"), acts);
 
     QJsonObject p;

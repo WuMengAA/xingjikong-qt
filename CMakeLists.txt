@@ -234,6 +234,9 @@ add_executable(stelarith-agent-qt
   # 配定时器会把倒计时越算越远）
   src/island/island_panel_source.cpp
   src/island/island_panel_source.h
+  # 2026-11-03：倒计时固定目标（QSettings 持久化，常驻面读它；独立成模块使探针轻量）
+  src/island/island_countdown_target.cpp
+  src/island/island_countdown_target.h
   # ── 灵动岛 QML 桥（2026-10-11 加：视觉层改 QML，本桥把状态推给 QML / 接 QML 回调）──
   src/island/island_bridge.cpp
   src/island/island_bridge.h
@@ -402,6 +405,9 @@ add_executable(stelarith-agent-qt
   src/action/execute_notice.cpp
   src/action/execute_media.cpp
   src/action/execute_file.cpp
+  # ── action 名册唯一真源（2026-11-03 从 main.cpp 抽出：main 只做装配，名册属动作域知识）──
+  src/action/action_caps.cpp
+  src/action/action_caps.h
   # ── 协议 v1 信封打包（2026-10-31 main 拆分 #12）：makeFrameBytes/makeVncFrameBytes/makeAudioFrameBytes ──
   #   kProtocolVersion 与上行序号计数器（g_vncUpSeq/g_audioUpSeq）随函数迁出；
   #   g_uid 按既有 extern 模式复用（main.cpp 文件作用域外部链接）。
