@@ -18,36 +18,25 @@ import "."
 //   bridge.clearHistory()                     清空全部历史
 //
     // ── 尺寸模型 ───────────────────────────────────────────
-    //   root 用 implicitWidth / implicitHeight 显式给出目标尺寸（预算）。
-    //   shell 用 anchors.fill: parent 跟随 root 实际大小。
     //   ⚠️ 2026-10-15 组件1 实证（纠正旧注释）：宿主 QQuickWidget 用
-    //      SizeRootObjectToView ⇒ **根随视图**——view 尺寸由 C++
-    //      IslandOverlay::geometryForContent/geometryForForm 按内容定
-    //      （媒体专用 320/640，通知类内容定宽 ~200 起），root 实际 w/h 由
-    //      view 驱动；implicitWidth/Height **只是布局预算，从不直接生效**。
-    //      探针实证：--media 收起态 geom=200x56（内容定宽），加媒体宽度
-    //      分支后才 320x56；IslandRoot 旧注释「view 按 root implicit 走」错。
-    //   ⚠️ 不给 width/height 显式赋值：会被 view 覆盖，且与 Behavior 打架。
-    //   ⚠️ 之前试过让 shell 用 anchors.fill + root.implicitHeight 靠内容推导，
-    //      循环依赖把 implicitHeight 压到最小、岛被压扁——所以改成显式三段式。
+    //      SizeRootObjectToView ⇒ **根随视图**，root 实际 w/h 由 C++ 的
+    //      geometryForContent/geometryForForm 按内容定（媒体专用 320/640）；
+    //      implicitWidth/Height **只是布局预算，从不直接生效**。探针实证：
+    //      --media 收起态 geom=200x56（内容定宽），加媒体宽度分支后才 320x56。
+    //   ⚠️ 不给 width/height 显式赋值：会被 view 覆盖，且与 Behavior 打架；
+    //      也不用 anchors.fill 靠 implicitHeight 推导 —— 循环依赖会把岛压扁。
 Item {
     id: root
 
     // ── C 批（2026-10-27）：左右滑动切面 ────────────────────────────────
-    // 为什么用 DragHandler 而不是 MouseArea：
-    //   DragHandler 只处理"拖动"（超过 dragThreshold 才 active），不碰"单击"
-    //   ⇒ 岛内的按钮照常点。MouseArea 方案会把整片区域的点击都吃掉。
-    // 为什么放在根 Item 的最前面：PointerHandler 的优先级按"离事件源越近越高"，
-    //   根部的 handler 优先级最低，子项里的控件优先接管。
-    // ⚠️ 2026-10-27（本批修订）：原来只在**概览面**(faceNow===0)启用，怕媒体进度条 /
-    //    设置音量滑块的横拖被抢。其实不用禁面 —— 用 grabPermissions 去掉
-    //    "CanTakeOverFromItems" 即可：岛内控件（进度条 / 滑块）是 MouseArea(Item)
-    //    先抢到 grab，DragHandler 抢不过 ⇒ 在控件上横拖归控件、不切面；在空白区横拖
-    //    没有任何 Item 抢 ⇒ DragHandler 正常接管切到下一面。于是**所有展开面都能左右
-    //    滑切换**，且天然不与横拖控件冲突，不需要到处埋"锁"。
-    // ⚠️ 不要写 grabPermissions: PointerHandler.CanTakeOverFromNothing ——
-    //    这个枚举名在 Qt 6.12 不存在，会被赋成 undefined 并在加载时报
-    //    "Unable to assign [undefined] to QFlags<GrabPermission>"（实测踩到）。
+    // 用 DragHandler 不用 MouseArea：前者只处理"拖动"（超 dragThreshold 才 active），
+    //   不碰单击 ⇒ 岛内按钮照常点；放在根 Item 最前面是因为根部 handler 优先级最低，
+    //   子项控件优先接管。
+    // ⚠️ 不用给每个面加"锁"：靠 grabPermissions 去掉 CanTakeOverFromItems 即可 ——
+    //    控件（进度条/滑块）是 MouseArea(Item) 会先抢到 grab，DragHandler 抢不过，
+    //    于是控件上横拖归控件、空白区横拖才切面，所有展开面都能左右滑。
+    // ⚠️ 不要写 PointerHandler.CanTakeOverFromNothing —— Qt 6.12 无此枚举，
+    //    会被赋成 undefined 并报 "Unable to assign [undefined] to QFlags<GrabPermission>"。
     //    正确写法：保留 CanTakeOverFromHandlers*，去掉 CanTakeOverFromItems。
     DragHandler {
         id: faceSwipe
@@ -285,16 +274,11 @@ Item {
     //   · 概览面 = 现有布局，零改动（面面板只在 face≠0 时满盖内容区）。
     //   · 面的可用性：媒体面要有本机媒体或 VoiceHub 广播；历史面要有历史；
     //     今天/批注/设置恒在；概览面恒在 ⇒ 至少 2 面才显示切换器。
-    //     2026-11-01 用户裁决「状态完全不需要」⇒ 「态」面（id 3）连同 compState /
-    //     faceStatusRows 一并删除（不是隐藏，是不存在）。
-    //   · faceNow 是**有效面**：选中的面失效（媒体停了/历史清了）自动回概览，
-    //     不倒扣 face 本身（用户切换意图保留）。
+    //     2026-11-01 用户裁决「状态完全不需要」⇒「态」面(id 3) 连 compState/faceStatusRows 一并删除。
+    //   · faceNow 是**有效面**：选中面失效时自动回概览，但不回写 face（保留用户切换意图）。
     property int face: 0
-    // ⚠️ 2026-10-18 · 区分「系统回落」与「用户主动选择」（face 混淆缺陷修复）
-    // 原实现：faceNow 只在选中面失效时回落 0，但 **face 永不回写** ⇒ 用户主动切到
-    // 别的面后，一旦"失效的面"（媒体/历史）再次可用，又会被**记忆拽回**那个面。
-    // 例：face=1(媒体) → 媒体停 → 回概览 → 用户切到态(face=3) → 媒体重启 →
-    //     原实现 faceNow 又变回 1（因为 face 还是 1），用户意图被违背。
+    // ⚠️ 2026-10-18：区分「系统回落」与「用户主动选择」——
+    // 原实现 face 永不回写 ⇒ 失效面（媒体/历史）再次可用时会被记忆拽回，违背用户当时的切换。
     // 修法：faceUserPick 记录"用户最后一次主动选择"。faceNow 的回落规则改为：
     //   · 用户从未主动选过（faceUserPick==-1）⇒ 选中面失效时回落，但**保留 face**，
     //     等它恢复（系统替我记住"最近看过媒体"）；
@@ -331,9 +315,11 @@ Item {
     readonly property bool faceTiled: (typeof islandLayout !== "undefined" && islandLayout)
         ? islandLayout.direction === "tiled" : false
     readonly property var faceComponents: ({7: compToday, 1: compMedia, 4: compAnnotate, 5: compSettings, 6: compAutomation, 8: compDate, 9: compCountdown})  // 轮播/平铺共用
-    // C 批（2026-10-27）：按 faceModel 顺序翻一面（左右滑动/键盘/遥控都走它）。⚠️ 必须按 model 顺序
-    // 而不是 id±1：媒体(1)/历史(2) 按需出现，id 连号不代表在 model 里连号。到头即停不循环：循环会
-    // "划过头又回到原点"，讲台上没法解释。
+
+    // ── 收起条组件槽（2026-11-04 · m16706/m16757）：时钟/日期/课表/倒计时显示在**收起态**，
+    // 点槽展开对应面、长按进编辑。取数/走字/长按全在 IslandIdleFace 内部（本文件已顶门禁线）。
+    // C 批（2026-10-27）：按 faceModel 顺序翻一面（滑动/键盘/遥控都走它）——⚠️ 必须按 model 顺序，
+    // 不能 id±1：媒体(1)/历史(2) 按需出现、id 连号不代表在 model 连号。到头即停不循环。
     function faceStep(delta) {
         const fs = root.faceModel
         let i = 0
@@ -888,10 +874,12 @@ Item {
     }
 
     // ══════════════════════════════════════════════════════════
-    // 空闲态 —— 已抽为 island/IslandIdleFace.qml（D 档拆分·第一块）
+    // 空闲态 —— island/IslandIdleFace.qml（D 档拆分·第一块）
     // ══════════════════════════════════════════════════════════
-    // 只搬不改：几何/锚/字号/动效逐字保留（验证＝diff-island-tree.mjs 零差异）。
-    // ⚠️ 实例化处必须**显式传依赖** —— 隐式作用域不会跟着搬进独立文件。
+    // 2026-11-04（m16706/m16757）：承载**收起条上的组件槽**（时钟/日期/课表/倒计时）。
+    // 「时钟什么的组件应该显示在收起态上，而不是放到页面里面」
+    // 「其他的改为按收起态上面的各种按钮组件进行展开，长按进入编辑模式」。
+    // ⚠️ 槽的取数与 1s 走字在 IslandIdleFace 内部（本文件已顶门禁线，且那本就是它的职责）。
     IslandIdleFace {
         id: idleFace
         anchors.fill: parent
@@ -901,12 +889,25 @@ Item {
         unread: root.bridgeRef ? (root.bridgeRef.historyUnreadCount || 0) : 0
         // 2026-10-31：菜单栏中间显示班级名（未绑定则空串 → 隐藏）
         className: root.bridgeRef ? (root.bridgeRef.className || "") : ""
-        // 2026-11-01：菜单栏中间动态课表
-        lesson: root.bridgeRef ? (root.bridgeRef.barLesson || "") : ""
         // 点整条 → 展开/收起（空闲态 gestureArea 是 disabled，靠这一路）
         onTapped: {
             if (root.bridgeRef && root.bridgeRef.requestExpand)
                 root.bridgeRef.requestExpand(!root._expanded)
+        }
+        // 点组件槽 → 展开并打开那一面（不是笼统展开）
+        onSlotPicked: (id) => {
+            if (typeof panelSource !== "undefined" && panelSource
+                    && panelSource.openFace && panelSource.openFace(id))
+                return
+            // 该面当时没有数据（如倒计时没配目标）→ 退回笼统展开，别让点击石沉大海
+            if (root.bridgeRef && root.bridgeRef.requestExpand)
+                root.bridgeRef.requestExpand(true)
+        }
+        // 长按 → 进编辑模式（2026-11-04 · m16757）：打开设置页「主界面」分类，
+        // 那张组件卡本就有拖动/启停/缩放 −/+。走 panelSource 钩子（未注入时静默 false）。
+        onSlotLongPressed: (id) => {
+            if (typeof panelSource !== "undefined" && panelSource && panelSource.openEditor)
+                panelSource.openEditor(id)
         }
     }
 
