@@ -143,8 +143,36 @@
         "alpha",
         "stable"
       ]
+    },
+    "agent:0.6.65:73fc98251407dc9e": {
+      "product": "agent",
+      "version": "0.6.65",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.65.exe",
+      "sha256": "73fc98251407dc9ea8d1d7b9f902db10a4df08f3555668874ab8a610b36cf02f",
+      "size": 38248977,
+      "notes": "灵动岛收起条改为组件槽（时钟/日期/倒计时/课表并排显示）、组件槽响应设置页缩放、课表节次编号修复（原按作息数组下标导致跳号）、长按收起条进编辑",
+      "mandatory": true,
+      "publishedAt": "2026-11-03T18:41:23.373Z",
+      "manualTiers": [
+        "alpha",
+        "stable"
+      ]
+    },
+    "viewer:0.6.65:4f3d37dbac2fdc4a": {
+      "product": "viewer",
+      "version": "0.6.65",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-viewer-setup-0.6.65.exe",
+      "sha256": "4f3d37dbac2fdc4abaa604124e16837abd02b190a4aed17a2176e3754813366e",
+      "size": 44364610,
+      "notes": "0.6.65 配套管理端（本轮无功能改动）",
+      "mandatory": true,
+      "publishedAt": "2026-11-03T18:41:39.675Z",
+      "manualTiers": [
+        "alpha",
+        "stable"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-03T16:02:49.365Z"
+  "generatedAt": "2026-11-03T18:42:21.640Z"
 }
