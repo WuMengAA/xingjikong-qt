@@ -133,8 +133,15 @@ QVariantList IslandPanelSource::barSlots() const
 
     QVariantList out;
     for (const QVariant &v : faces) {
-        const int id = v.toMap().value(QStringLiteral("id")).toInt();
+        const QVariantMap fm = v.toMap();
+        const int id = fm.value(QStringLiteral("id")).toInt();
         QVariantMap slot;
+        // 2026-11-04（用户「大小调节也有问题」）：设置页的 −/+ 缩放（80~140%）
+        // 原来只作用于**展开面**（IslandFaceLoader.scalePercent），收起条上的组件槽
+        // 完全不受影响 —— 同一个"缩放"两处语义不一致，用户调了没反应。
+        // 这里把每面的 scale 一并下发，QML 侧按它缩字号与药丸高度。
+        const int sc = fm.value(QStringLiteral("scale")).toInt();
+        if (sc > 0) slot.insert(QStringLiteral("scale"), sc);
         slot.insert(QStringLiteral("id"), id);
 
         if (id == 10) {
