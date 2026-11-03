@@ -380,6 +380,30 @@ QRect IslandOverlay::geometryForContent(int shapeHeight) const
     if (!screen) return QRect(0, 0, 200, shapeHeight);
     const QRect sg = screen->geometry();
 
+    // ── 平铺模式（2026-11-04 · m14970 ① · 用户裁决「不要仅限于列表式的展示」）──
+    // 平铺把岛面切成 N 个格子。格子若仍套胶囊的 520×320，每个面只能缩到 ~44%，
+    // 12px 字变 5px —— 实测第一版就是这样，五个面全成缩略图、一个字也读不出。
+    // **平铺本来就不是胶囊**，给它一块更大的画布是"多面同屏"的前提，不是奢侈：
+    // 取屏宽 70%（夹在 640~960）、16:10 比例。轮播态完全不受影响。
+    if (m_expanded && islandLayoutInstance()
+            && islandLayoutInstance()->direction() == QStringLiteral("tiled")) {
+        // 画布尺寸按**格子数 × 设计尺寸**反推，目标 = 每格 1:1（scale 1.0，不缩放）。
+        // 为什么要 1:1：面组件按 520 宽设计，字号 12~23px。缩到 0.7 ⇒ 8px 字，
+        // 老师在三米外的教室大屏上根本读不了（实测 736 宽画布就是这样）。
+        // 缩放只在屏幕装不下时才发生（小屏/多面），此时宁可字小也不能超屏。
+        // n 用 faceList() 的条数（已过滤未启用/条件面），与 QML 侧 tiles 同一口径；
+        // cols/rows 的算法必须与 IslandTileGrid.qml 逐字一致，否则「画布按 3 列撑开、
+        // QML 却排成 2 列」，右半边全空。
+        const int n = qMax(2, islandLayoutInstance()->faceList().size());
+        const int cols = (n <= 4) ? 2 : (n <= 9 ? 3 : 4);
+        const int rows = qMax(1, (n + cols - 1) / cols);
+        const int wantW = cols * 520 + (cols - 1) * 8 + 32;
+        const int wantH = rows * 320 + (rows - 1) * 8 + 32 + 22;   // +22 给顶栏标题行
+        const int tw = qMin(wantW, sg.width() - 48);
+        const int th = qMin(wantH, sg.height() - 48);
+        return QRect(sg.x() + (sg.width() - tw) / 2, sg.y() + 24, tw, th);
+    }
+
     // ── 面板（2026-10-27 · G4/G5/G6 组件）：定宽 680 ──────────────────────
     // 与媒体同一口径：面板内容是**多行表格/大数字**，宽度由内容定会算成"标题那行"
     // 的宽度（200 出头），课表一行都排不下。

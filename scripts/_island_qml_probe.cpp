@@ -217,6 +217,10 @@ static void captureAndSave(IslandOverlay *isl, QQuickWidget *q, const QString &o
         // 面能渲染但面签不在 model 里 ⇒ 讲台上够不着（swipe 翻不到、也没有可点的签）。
         dumpProp("automationFaceOn");
         dumpProp("automationObj");
+        // 2026-11-04（m14970 ①）：平铺态。faceTiled 是 QML 侧从 islandLayout.direction
+        // 绑出来的布尔 —— 它若为 false 而 C++ 模型已是 tiled，说明绑定断了（设置页
+        // 改完方向、岛不长样），这是本轮唯一能抓「模型→渲染」断链的判据。
+        dumpProp("faceTiled");
         // 面签是 11px 单字，截图 OCR 不可靠（自/记 易混）⇒ 直接问 QML 面清单长度。
         // 期望 6：概(0) 史(2) 态(3) 笔(4) 设(5) 自(6)（媒面按需，本轮无媒体）。
         {
@@ -417,6 +421,11 @@ int main(int argc, char *argv[])
     // 面只在展开态存在 ⇒ 隐含 --expand；1 隐含 --media（媒体面要有媒体）；
     // 2 会自动铺 3 条历史（见下方 show 段）。
     int faceArg = 0;
+    // 2026-11-04（m14970 ①）：岛显示方向 carousel|tiled。走**真实 C++ 入口**
+    //   islandLayoutInstance()->setDirection()，不 setProperty 注入 QML —— 平铺与否
+    //   是 C++ 模型驱动 QML 的绑定（IslandRoot.faceTiled 读 islandLayout.direction），
+    //   注入 QML 属性只能验渲染、验不到「设置页改方向 → 岛变样」这条真链路。
+    QString dirArg;
     // #330（2026-10-17）形态多样化：直接走**真实 C++ 入口**进 Banner / Mini。
     // ⚠️ 不用 setProperty 注入：几何是 C++ geometryForForm 算出来的，只有
     //    走 showIsland(..., Form::X) 才验证得到"窗口几何 + QML 版式"整条链。
@@ -484,6 +493,8 @@ int main(int argc, char *argv[])
             if (faceArg == 1) media = true;                     // 媒体面要有媒体
         }
         // #330 形态多样化 + 2026-10-17 补 centered/fullscreen（大卡片两档此前无 QML 版式）
+        if (a == QLatin1String("--direction") && i + 1 < argc)
+            dirArg = QString::fromLocal8Bit(argv[++i]);        // 2026-11-04：carousel|tiled
         if (a == QLatin1String("--form") && i + 1 < argc)
             formArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--channel") && i + 1 < argc)
@@ -520,6 +531,13 @@ int main(int argc, char *argv[])
     if (QQuickWidget *qw0 = findQuick(isl))
         qw0->rootContext()->setContextProperty(QStringLiteral("panelSource"),
                                                islandPanelSourceInstance());
+    // 2026-11-04（m14970 ①）：方向必须在 QML 起来前设好，否则先按 carousel 建一遍
+    //   分页器再切，截图会抓到切换中态（实测抓过：半张轮播 + 半张网格）。
+    if (!dirArg.isEmpty()) {
+        islandLayoutInstance()->setDirection(dirArg);
+        fprintf(stderr, "PROBE: direction=%s（模型返回值）\n",
+                qPrintable(islandLayoutInstance()->direction()));
+    }
     if (!classArg.isEmpty()) isl->setClassName(classArg);   // 2026-10-31：注入班级名供菜单栏验证
     isl->setIdleEnabled(true);
     if (light) isl->setLightMode(true);
