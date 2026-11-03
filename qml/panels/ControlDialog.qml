@@ -277,6 +277,62 @@ Popup {
                 }
             }
 
+            // ── 灵动岛倒计时固定目标（2026-11-03 · Task1 + Task5：替代 ClassIsland 倒计时组件）──
+            // 管理端给某台教室机的常驻倒计时面（face 9）设置一个「死时刻」，跨重启保留。
+            // 语义对标 ClassIsland 的 CountDown 组件：老师设 12:30 午休，面板一直盯它。
+            // 下发 set_countdown_target → 被控端持久化到 QSettings(panel/countdownTarget)，
+            // 常驻面读到后显示该目标；{clear:true} 或空 to 取消、回落「课表边界」语义。
+            // ⚠️ 这是「配置」不是「临时面板」：临时面板走 ControlDialog 的岛面板指令或
+            //    sendAction("island_panel",{face:"countdown",to:...})，生命周期不同，别混淆。
+            Rectangle {
+                width: parent.width
+                height: cdCol.height + 32
+                radius: theme.rCard
+                color: theme.panel
+                border.color: theme.card
+                border.width: 0
+                Column {
+                    id: cdCol
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.topMargin: 16
+                    spacing: 10
+                    Text { text: "灵动岛倒计时固定目标（常驻面 face 9）"; color: theme.fg3; font.pixelSize: 12 }
+                    Text { text: "给这台教室机的常驻倒计时面设一个死时刻，跨重启保留；留空=取消，回落课表边界"; color: theme.fg4; font.pixelSize: 12 }
+                    Row {
+                        spacing: 8
+                        InputField {
+                            th: ctx.window.th
+                            id: cdTo
+                            width: 110
+                            placeholderText: "HH:MM 或 ISO"
+                        }
+                        InputField {
+                            th: ctx.window.th
+                            id: cdLabel
+                            width: 140
+                            placeholderText: "标签(如 午休)"
+                        }
+                        Btn {
+                            theme: ctx.window.th
+                            width: 90
+                            text: "设目标"
+                            onClicked: {
+                                const uid = backend.currentUid
+                                if (!uid) { ctx.window.toast("先在控制页选中一台设备"); return }
+                                var params = {}
+                                if (cdTo.text.trim() !== "") params.to = cdTo.text.trim()
+                                if (cdLabel.text.trim() !== "") params.label = cdLabel.text.trim()
+                                backend.sendAction("set_countdown_target", params)
+                                ctx.window.toast(params.to ? ("倒计时目标已设 → " + params.to) : ("倒计时已取消 → " + uid))
+                                ctx.window.refreshIsland()
+                            }
+                        }
+                    }
+                }
+            }
+
         }
     }
 }
