@@ -80,6 +80,8 @@ public:
 
     /** 启用/停用某一行（设置页开关）。未知 id 忽略。 */
     Q_INVOKABLE void setEnabledById(int id, bool on);
+    // 2026-11-03 探针诊断用：空操作但发 layoutChanged，验证 QML 对 faceList() 的重算时机
+    Q_INVOKABLE void touch();
 
     /** 缩放：80..140，越界夹紧。 */
     Q_INVOKABLE void setScaleById(int id, qint64 scale);

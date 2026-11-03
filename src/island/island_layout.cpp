@@ -33,6 +33,10 @@ QVector<IslandLayoutModel::Row> IslandLayoutModel::builtinRows()
     add(4, "笔", "批注", "批注工具与画笔（默认收起）", false, true);
     add(5, "设", "音量设置", "系统音量 / 通知音量 / 通知黑名单", false, true);
     add(6, "自", "自动化", "本机自动化规则（没有规则就不出现）", true, true);
+    // 2026-11-03（m09876「多一些控件」）：把管理端临时下发的两个面板接成常驻可配置组件。
+    // 默认关：这两面此前只在老师远程下发时出现，默认打开=凭空改变所有现役机器的岛。
+    add(8, "期", "日期周次", "今天日期、星期与第几教学周", false, false);
+    add(9, "倒", "倒计时", "距指定时刻的倒计时（管理端可设目标）", false, false);
     return rows;
 }
 
@@ -266,3 +270,5 @@ IslandLayoutModel *islandLayoutInstance()
     static IslandLayoutModel s_model;
     return &s_model;
 }
+
+void IslandLayoutModel::touch() { emit layoutChanged(); }

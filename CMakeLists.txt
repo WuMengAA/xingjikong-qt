@@ -230,6 +230,10 @@ add_executable(stelarith-agent-qt
   # 跨重启的状态真源；QML 里存数组重启即丢，且违反 §10.9（QML 不存业务状态）。
   src/island/island_layout.cpp
   src/island/island.h
+  # 2026-11-03：岛「期/倒」取数源（Q_INVOKABLE 而非 Q_PROPERTY——打开那刻算一次，
+  # 配定时器会把倒计时越算越远）
+  src/island/island_panel_source.cpp
+  src/island/island_panel_source.h
   # ── 灵动岛 QML 桥（2026-10-11 加：视觉层改 QML，本桥把状态推给 QML / 接 QML 回调）──
   src/island/island_bridge.cpp
   src/island/island_bridge.h

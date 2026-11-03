@@ -37,6 +37,8 @@
 //                         --click abtn_submit 演示敏感词拦截（结果码 1）
 //                         等真实拒绝路径（2026-10-15）
 #include "island.h"
+#include "island_layout.h"          // 2026-11-03：期/倒面启用开关（setEnabledById）
+#include "island_panel_source.h"      // 2026-11-03：期/倒面取数源
 #include "danmaku.h"           // 组件5：弹幕层单例诊断（peek 不建窗口）
 // 2026-10-27（G4/G5/G6）：面板三面 —— 探针走**真实数据域**（PanelDomain::build），
 // 而不是在 QML 里塞假 JSON：课表数据/倒计时边界/周次都来自 C++，塞假数据等于没测。
@@ -512,6 +514,12 @@ int main(int argc, char *argv[])
     qInstallMessageHandler(vhclearMsgHandler);   // 必须在岛（QML）创建前装
 
     IslandOverlay *isl = IslandOverlay::instance();
+    // 2026-11-03：期/倒面取数源。生产链路由 island.cpp:306 注入；探针复用同一
+    // IslandOverlay，QML（compDate/compCountdown）用 typeof panelSource !== "undefined"
+    // 守卫 —— 不补注时守卫成立、info 恒空 map，采样必是空皮。
+    if (QQuickWidget *qw0 = findQuick(isl))
+        qw0->rootContext()->setContextProperty(QStringLiteral("panelSource"),
+                                               islandPanelSourceInstance());
     if (!classArg.isEmpty()) isl->setClassName(classArg);   // 2026-10-31：注入班级名供菜单栏验证
     isl->setIdleEnabled(true);
     if (light) isl->setLightMode(true);
@@ -1002,10 +1010,40 @@ int main(int argc, char *argv[])
     // QML 绑定是**异步重算**的，同帧读 faceNow/facesOn 会拿到未就绪值
     //（2026-10-17 实测：同帧 dump 出 <invalid>，提前 500ms 注入后稳定）。
     if (faceArg > 0) {
+        // 2026-11-03：期(8)/倒(9) 默认 enabled=false（见 island_layout builtinRows），
+        // 不先启用就在 faceList() 里不存在，setProperty("face") 切不过去 —— 采样必空。
+        islandLayoutInstance()->setEnabledById(faceArg, true);
+        {   // 诊断：模型里到底有没有这面（有才谈得上切）
+            const QVariantList fl = islandLayoutInstance()->faceList();
+            QStringList ids;
+            for (const QVariant &e : fl) ids << QString::number(e.toMap().value("id").toInt());
+            fprintf(stderr, "PROBE: faceList ids=[%s] want=%d\n",
+                    ids.join(QLatin1Char(',')).toLocal8Bit().constData(), faceArg);
+        }
         QTimer::singleShot(2000, [isl, faceArg]() {
             if (QQuickWidget *q2 = findQuick(isl)) {
-                if (QQuickItem *ri2 = q2->rootObject())
+                if (QQuickItem *ri2 = q2->rootObject()) {
                     ri2->setProperty("face", faceArg);
+                    // 诊断 2：faceModel 是否感知 setEnabledById —— 再触发一次 layoutChanged
+                    //（model=[0,7,4,5] 缺 8 ⇒ faceModel 的 readonly var 绑定没重算）。
+                    if (IslandLayoutModel *lm = islandLayoutInstance())
+                        lm->touch();
+                    // 诊断：切完后 QML 侧的真实状态（faceNow=fall back 后、页点序）
+                    QTimer::singleShot(300, [ri2, faceArg]() {
+                        const QVariant f = ri2->property("face");
+                        const QVariant fn = ri2->property("faceNow");
+                        const QVariant fm = ri2->property("faceModel");
+                        QStringList seq;
+                        const QVariantList l = fm.toList();
+                        for (const QVariant &e : l)
+                            seq << QString::number(e.toMap().value("id").toInt());
+                        fprintf(stderr, "PROBE: face=%s faceNow=%s model=[%s] (want %d)\n",
+                                f.toString().toLocal8Bit().constData(),
+                                fn.toString().toLocal8Bit().constData(),
+                                seq.join(QLatin1Char(',')).toLocal8Bit().constData(),
+                                faceArg);
+                    });
+                }
             }
         });
     }
@@ -1225,6 +1263,9 @@ int main(int argc, char *argv[])
                 });
             } else {
                 captureAndSave(isl, q, outPath, extra);
+                // 2026-11-03：quit 前先打一行 —— 0xC0000005 若发生在 quit 之后
+                //（QQuickWidget/岛销毁序问题），这行能把它和"采样阶段崩"分开。
+                fprintf(stderr, "PROBE: before quit\n");
                 qApp->quit();
             }
         });
