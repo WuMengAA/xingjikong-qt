@@ -123,9 +123,16 @@ QList<ScheduleClock::LessonInfo> ScheduleClock::buildTodayLessons(
             LessonInfo l;
             l.periodName = ts.name;
             const auto subIt = profile.subjects.find(lesson.subjectId);
-            l.subjectName = (subIt != profile.subjects.end())
-                ? (subIt->name.isEmpty() ? subIt->simplifiedName : subIt->name)
-                : ts.name;
+            if (subIt != profile.subjects.end()) {
+                l.subjectName = subIt->name.isEmpty() ? subIt->simplifiedName : subIt->name;
+                // 2026-11-03（m14970 ③④）：简称/全称分流——课表组件用简称、上下课提醒用全称。
+                l.subjectAbbr = subIt->simplifiedName.isEmpty() ? l.subjectName : subIt->simplifiedName;
+                l.subjectFullName = subIt->name.isEmpty() ? l.subjectName : subIt->name;
+            } else {
+                l.subjectName = ts.name;
+                l.subjectAbbr = ts.name;
+                l.subjectFullName = ts.name;
+            }
             l.startTime = ts.startTime;
             l.endTime = ts.endTime;
             result.append(l);
@@ -191,8 +198,12 @@ void ScheduleClock::tick()
             m_currentSlotIndex = activeIdx;
             if (m_lastEmitSlot != activeIdx) {  // 同一节上课只提醒一次
                 m_lastEmitSlot = activeIdx;
-                const QString periodName = l.subjectName.isEmpty()
-                    ? l.periodName : QStringLiteral("%1 · %2").arg(l.periodName, l.subjectName);
+                // 2026-11-03（m14970 ④）：上下课提醒**显示全称**。
+                // 用户原话「上下课提醒显示全称」——课表面用简称（一格一个汉字），
+                // 但弹出来的提醒必须让人一眼认出是哪门课，缩写在这里是负担。
+                const QString& fullName = l.subjectFullName.isEmpty() ? l.subjectName : l.subjectFullName;
+                const QString periodName = fullName.isEmpty()
+                    ? l.periodName : QStringLiteral("%1 · %2").arg(l.periodName, fullName);
                 emit periodStarted(periodName, l.startTime);
                 emit lessonEntered(l, activeIdx);   // 2026-11-02：结构化版本（字段全、口径统一）
                 qInfo().noquote() << "[schedule-clock] 上课提醒: " << periodName;
@@ -201,9 +212,10 @@ void ScheduleClock::tick()
             // 刚下课（从某一节出来）
             if (m_currentSlotIndex >= 0 && m_currentSlotIndex < m_today.size()) {
                 const LessonInfo& l = m_today.at(m_currentSlotIndex);
-                emit periodEnded(l.subjectName, l.endTime);
+                const QString& fullName = l.subjectFullName.isEmpty() ? l.subjectName : l.subjectFullName;
+                emit periodEnded(fullName, l.endTime);   // 2026-11-03（m14970 ④）：下课提醒同样用全称
                 emit lessonLeft(l, m_currentSlotIndex);   // 2026-11-02：结构化版本
-                qInfo().noquote() << "[schedule-clock] 下课提醒: " << l.subjectName;
+                qInfo().noquote() << "[schedule-clock] 下课提醒: " << fullName;
             }
             m_currentPeriod.clear();
             m_currentSlotIndex = -1;

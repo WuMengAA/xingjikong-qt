@@ -50,6 +50,13 @@ IslandLayoutModel::IslandLayoutModel(QObject *parent)
 void IslandLayoutModel::reload()
 {
     QSettings s;
+    // 2026-11-03（m14970 ①）：显示方向（全局）。与面序同一 JSON 但分开存键——
+    // 面序键 `island/layout` 是门禁契约（见头注释），内容格式也不能动。
+    m_direction = s.value(QStringLiteral("island/direction"),
+                          QStringLiteral("carousel")).toString();
+    if (m_direction != QStringLiteral("carousel") && m_direction != QStringLiteral("tiled"))
+        m_direction = QStringLiteral("carousel");   // 被改坏 ⇒ 认默认，绝不弹错
+
     const QString raw = s.value(QStringLiteral("island/layout")).toString();
     if (raw.isEmpty()) return;          // 从没配过 ⇒ 内置默认，不写盘
 
@@ -81,6 +88,18 @@ void IslandLayoutModel::reload()
     }
     if (loaded.isEmpty()) return;       // 一个都不认 ⇒ 保留内置默认
     m_rows = loaded;
+    emit layoutChanged();
+}
+
+void IslandLayoutModel::setDirection(const QString &direction)
+{
+    // 2026-11-03（m14970 ①）：只认两个合法值，其它静默忽略（与 setData 的幂等口径一致）。
+    if (direction != QStringLiteral("carousel") && direction != QStringLiteral("tiled"))
+        return;
+    if (m_direction == direction) return;
+    m_direction = direction;
+    QSettings s;
+    s.setValue(QStringLiteral("island/direction"), m_direction);
     emit layoutChanged();
 }
 
@@ -258,6 +277,10 @@ void IslandLayoutModel::resetToDefault()
     beginResetModel();
     m_rows = builtinRows();
     endResetModel();
+    // 2026-11-03（m14970 ①）：恢复默认 = 显示方向也回到轮播（builtinRows 语义的一部分）。
+    m_direction = QStringLiteral("carousel");
+    QSettings s;
+    s.remove(QStringLiteral("island/direction"));
     emit layoutChanged();
     QSettings().remove(QStringLiteral("island/layout"));   // 删键而不是写默认值：
     // 写默认值会把"从没配过"和"配成默认"混成一种状态，以后改默认序老机器跟不上。

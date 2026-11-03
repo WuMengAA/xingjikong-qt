@@ -82,4 +82,50 @@ Column {
             }
         }
     }
+
+    // ── 退出保护（2026-11-03 · 用户笔记序号 2）────────────────────────────
+    // 防误退/防学生乱退：设了口令后，从托盘「退出被控端」要输口令。
+    // 边界（写在这里避免以后有人当安全机制）：只挡这一条路 —— 关机/注销/
+    // 任务管理器结束进程/OTA 自重启都不经过它。防手滑，不防破解。
+    AppCard {
+        anchors.left: parent.left
+        anchors.right: parent.right
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            AppCardTitle { text: "退出保护" }
+            AppInfoRow { label: "当前状态"; value: agentUi.quitPasswordStateText }
+
+            AppInput {
+                id: quitPw
+                Layout.fillWidth: true
+                placeholder: "输入新口令（留空并点「清除」＝取消口令）"
+                echoMode: TextInput.Password
+            }
+
+            RowLayout {
+                spacing: 8
+                AppButton {
+                    text: "保存口令"
+                    variant: "solid"
+                    onClicked: agentUi.setQuitPassword(quitPw.text)
+                }
+                AppButton {
+                    text: "清除"
+                    variant: "secondary"
+                    onClicked: agentUi.setQuitPassword("")
+                }
+                Item { Layout.fillWidth: true }
+            }
+
+            AppInfoRow {
+                visible: agentUi.actionResultVisible
+                label: ""
+                value: agentUi.actionResultText
+                wrapValue: true
+            }
+        }
+    }
 }

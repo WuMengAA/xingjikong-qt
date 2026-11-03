@@ -182,7 +182,11 @@ def main():
     # 2026-11-01（顶替 ClassIsland 第 2 步）：AgentUi 的「通知提供者」方法体不在头文件里
     # （拆到 src/notify/agent_ui_providers.cpp，守 agent_ui.h 不再胖化），它又依赖
     # notify/provider_registry.cpp。两个 obj 都由主构建产出，探针直接链生产那份代码。
-    for _rel in ("notify/agent_ui_providers.cpp.obj", "notify/provider_registry.cpp.obj"):
+    # 2026-11-03 追加 policy/quit_guard.cpp：providers.cpp 里的 setQuitPassword 调
+    # QuitGuard::setPassword/hasPassword（新增 C++ 入口 ⇒ 探针壳必须同轮链上，
+    # 否则 LNK2019 —— 这就是"加了 C++ 注册点不更新探针壳"的老坑，别再过一遍）。
+    for _rel in ("notify/agent_ui_providers.cpp.obj", "notify/provider_registry.cpp.obj",
+                 "policy/quit_guard.cpp.obj"):
         _p = os.path.join(BUILD, "CMakeFiles", "stelarith-agent-qt.dir", "src", _rel)
         if not os.path.exists(_p):
             print("缺 obj（先跑 _build_agent.py）：", _p)

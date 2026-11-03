@@ -57,6 +57,8 @@
 #include "media/H264Streamer.h"  // A档（2026-10-31）：H264 推流装配（信号接线，业务逻辑在 src/media/）
 #include "core/proc_inspect.h" // 2026-10-31 main 拆分 #13：进程/窗口只读检查（snapshotProcessNames/enumWindowsCb/visibleWindowsCached/windowTitleOf/memMbOf）
 #include "policy/policy_engine.h" // 2026-10-31 main 拆分 #14：调度/软控/进程策略（ActionDeps 共享类型 + PolicyDeps 注入）
+#include "policy/quit_guard.h"    // 2026-11-03：退出口令守卫（托盘「退出被控端」前校验）
+#include "system/boot_trace.h"    // 2026-11-03：启动耗时埋点（用户笔记序号 3「启动慢」）
 #include "localapi/localapi_server.h" // 2026-10-31：本地 API 鉴权网关（127.0.0.1:8080，三条已知缺口之一）
 
 #include <QApplication>
@@ -352,7 +354,7 @@ void sendActionReceipt(const QString &id, const QString &action, const QString &
 
 
 // ── OTA 全局：文件作用域（namespace 外），供 src/ota/ota_state 模块 extern 复用 ──
-extern const char *kAppVersion = "0.6.62";
+extern const char *kAppVersion = "0.6.64";
 QString g_channel = QStringLiteral("stable");   // 供 register 上报；main 启动即解析覆盖
 QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
 bool g_updateMandatory = false;     // 云端 ota.json 的 mandatory（true=强制自动升级）
@@ -3251,6 +3253,9 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);   // 要托盘 → QApplication（托盘在 QtWidgets 里）
 
+    // 启动耗时埋点（2026-11-03 · 用户笔记序号 3「启动慢」）：实现见 src/system/boot_trace.h
+    BootTrace::mark("qapp");
+
     // 2026-10-12 修（跨端对齐报告 #2）：以前**没设**应用名/组织名 → QSettings 和
     // QStandardPaths::writableLocation(AppLocalDataLocation) 定位不到稳定落点，
     // IslandOverlay::historyPath() 里那种"返回空→手拼兜底 xingjikong/"的怪癖就是它造成的。
@@ -3281,6 +3286,7 @@ int main(int argc, char *argv[])
     //   放在日志/单例锁之前的原因：这是"上一次为什么没起来/为什么崩"的第一手证据，
     //   后续任何一步 fail-silent 都不该把这条判据吃掉。
     SettingsDomain::init(dataDir);
+    BootTrace::mark("settings-domain");
     // 2026-10-21（审查 #11）：原来用 qEnvironmentVariable(key, default) —— 变量存在但
     // 为空字符串时返回空（不是 default），部署脚本写了 `set STE_QT_SHOT_DIR=` 就会把
     // 截图路径顶成空、图写到盘根。与本文件其他目录统一走 envOr（空串回落默认值）。
@@ -3354,6 +3360,7 @@ int main(int argc, char *argv[])
     // 默认 quitOnLastWindowClosed=true —— 配置窗是本进程唯一的窗口，老师一点「以后再说」/
     // 保存关窗，整个被控端就跟着退了（托盘也一起没），比不配置还糟。必须关掉这个默认行为。
     app.setQuitOnLastWindowClosed(false);
+    BootTrace::mark("single-instance");
 
     // Windows GUI 程序里 qInfo 默认走 OutputDebugString，重定向到文件就是空的——
     // 被控端没有日志等于瞎子。这里把 Qt 日志全部接管到 stdout/stderr。
@@ -3386,6 +3393,7 @@ int main(int argc, char *argv[])
     SmtcMonitor::instance()->start();
     qInfo("[agent-qt] SMTC 系统媒体识别已启动（800ms 轮询，独立 MTA 线程）");
     const int envN = loadEnvFile(agentEnvPath());
+    BootTrace::mark("env+class-identity");
     // 班级身份域初始化（2026-11-02）：把两个全局变量**按引用**交给域，域内不再存副本。
     // 灵动岛菜单栏的同步做成回调而不是域内直调 IslandOverlay —— 域不反向依赖 UI 单例，
     // 否则探针（无岛实例）与设置页预览（要建岛）会走出两条不同的路径。
@@ -3559,6 +3567,7 @@ int main(int argc, char *argv[])
     // 同时 g_shotDir/g_mediaDir 那套目录约定在这里也是断的。收件文件统一进 ~\incoming。
     g_recvDir = envOr("STE_QT_RECV_DIR", dataDir + QStringLiteral("/incoming"));
     QDir().mkpath(g_recvDir);
+    BootTrace::mark("domains-sched-notify-timesync");
 
     // ── 托盘常驻（先建好；后面连接状态一变就往它上面写）──
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
@@ -3626,7 +3635,11 @@ int main(int argc, char *argv[])
         });
         menu->addSeparator();
         auto *actQuit = menu->addAction(QStringLiteral("退出被控端"));
-        QObject::connect(actQuit, &QAction::triggered, &app, &QApplication::quit);
+        // 2026-11-03（用户笔记序号2）：退出前询口令。没设口令时 confirmQuit() 直接 true，
+        // 行为与之前完全一致；设了才弹框。只挡这一条路（关机/任务管理器/OTA 自重启不挡）。
+        QObject::connect(actQuit, &QAction::triggered, &app, [] {
+            if (QuitGuard::confirmQuit()) QCoreApplication::quit();
+        });
         g_tray->setContextMenu(menu);
         if (g_unconfigured) {
             // 配置校验时已落过盘；这里把图标刷成"未配置"，气泡留到 show() 之后再弹
@@ -3636,6 +3649,7 @@ int main(int argc, char *argv[])
             updateTray(TrayState::Disconnected, QStringLiteral("正在连接…"));
         }
         g_tray->show();             // 先设图标再 show，避免 "No Icon set" 警告
+        BootTrace::mark("tray-show");
         notifyUnconfiguredOnce();   // show 之后再弹气泡（托盘可见才弹得出来）
         qInfo("[agent-qt] 托盘已就绪");
 
@@ -3654,12 +3668,19 @@ int main(int argc, char *argv[])
         }
         isl->setLightMode(AgentSettings::lightMode());   // 浅色主题开关（P0-1）
         isl->ensureIdle();
+        BootTrace::mark("island-idle");
 
         // ── U5-A3 验证开关（2026-10-16）：STE_QT_SHELL_AUTOOPEN=1 → 启动 1.5s 后
         //    自动开一次 QML 控制面板。面板是懒建的（不点托盘不加载 QML），
         //    无人值守验证 QML 真实加载全靠它；日常不设即零影响。
         if (qEnvironmentVariable("STE_QT_SHELL_AUTOOPEN") == QStringLiteral("1")) {
-            QTimer::singleShot(1500, &app, [] {
+            // 2026-11-03：延时可用 STE_QT_SHELL_AUTOOPEN_MS 覆盖（默认 1500）。
+            // 为什么需要：要验「面板预热是否真让首开变快」，自动开必须排在
+            // prewarmPanel（默认 3s）之后，否则量到的还是未预热的首开 —— 已踩过。
+            const int openMs = qEnvironmentVariableIntValue("STE_QT_SHELL_AUTOOPEN_MS") > 0
+                                   ? qEnvironmentVariableIntValue("STE_QT_SHELL_AUTOOPEN_MS")
+                                   : 1500;
+            QTimer::singleShot(openMs, &app, [] {
                 AgentShell::openPanel();
                 qInfo("[agent-shell] 自动打开控制面板（STE_QT_SHELL_AUTOOPEN=1）");
             });
@@ -3733,6 +3754,12 @@ int main(int argc, char *argv[])
     // ⚠️ 必须放在托盘分支**之外**：无托盘的 Session0/服务化环境照样要能查更新
     //    （放在里面时离屏实测根本没启动 —— 托盘不可用就整段跳过）。
     otaStartPeriodicCheck();
+
+    // ── 面板预热（2026-11-03 · 用户笔记序号 3「启动慢」）─────────────────
+    // 实测：托盘 137ms / 岛 777ms / **面板首开 1732ms**（构造+解析 1340 + 显示 392）——
+    // 用户感知的"慢"就是点托盘后那 1.3 秒。启动空档期（3s 后，岛已稳定）提前建好，
+    // 首次点击就只剩 show。放托盘分支之外；show→hide 不留任务栏痕迹，env 可关。
+    AgentShell::prewarmPanel();
 
     // ── 通知体系接线（2026-10-09 · DeepSeek Harness）─────────────────────
     // 循环提醒：展示由 notifyFromParams 的 loop 分支走灵动岛（含确认按钮，

@@ -50,6 +50,7 @@
 #include "../p3log/p3_record_view.h"     // buildNoiseRecordView/buildStudyRecordView（记录页行）
 #include "../system/winlauncher.h"       // stelarithHideChildConsole（插件解压静默）
 #include "../plugin/pluginhost.h"        // PluginHost（g_pluginHost 类型）
+#include "../policy/quit_guard.h"        // QuitGuard（退出口令，2026-11-03）
 
 // ── 复用 main 的状态全局（提升文件作用域外部链接，同 g_uid/agentEnvPath 模式）──
 extern const char *kAppVersion;

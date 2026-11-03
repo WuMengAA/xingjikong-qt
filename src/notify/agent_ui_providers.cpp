@@ -12,6 +12,7 @@
 //   （不做 QML 侧乐观更新，避免"勾了但没生效"的假勾）。
 
 #include "../agent_ui.h"
+#include "../policy/quit_guard.h"   // 退出守卫（2026-11-03）：setQuitPassword 的落盘口
 #include "provider_registry.h"
 
 QVariantList AgentUi::notifyProviders() const
@@ -112,3 +113,18 @@ void AgentUi::setSettingsTab(const QString &key)
     emit settingsTabChanged();
 }
 
+/* ── 退出守卫（2026-11-03 · 用户笔记序号 2）─────────────────────────────
+ *  为什么在这份 TU 而不在 agent_panel.cpp：能 include policy/quit_guard.h，
+ *  且这份 TU 已被设置页探针链（_agent_ui_probe.py），改了会被覆盖到。
+ *  agent_panel.cpp 依赖 main.cpp 一堆全局，探针链不了 ⇒ 写在那儿等于没验。
+ *  写完**重读快照再 publish**，与全部开关同一纪律：界面不会"显示成功但没落盘"。 */
+void AgentUi::setQuitPassword(const QString &plain)
+{
+    QuitGuard::setPassword(plain.trimmed());   // 空串 = 清除
+    m_quitPasswordEnabled = QuitGuard::hasPassword();
+    setActionResultText(m_quitPasswordEnabled
+        ? QStringLiteral("退出口令已保存：从托盘「退出被控端」需要输入口令。")
+        : QStringLiteral("退出口令已清除：退出被控端不再需要口令。"));
+    qInfo("[agent-shell] 退出口令 → %s", m_quitPasswordEnabled ? "已启用" : "已清除");
+    publish();
+}

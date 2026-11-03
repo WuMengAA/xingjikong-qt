@@ -112,6 +112,10 @@ QJsonObject buildTimetable(Result *r)
         QJsonObject o;
         o.insert(QStringLiteral("period"), l.periodName);
         o.insert(QStringLiteral("subject"), l.subjectName);
+        // 2026-11-03（m14970 ③）：课表组件改横向排列后一格只放一个科目简称，
+        // 简称缺失时回退全称（QML 侧不用再做兜底判断）。
+        o.insert(QStringLiteral("subjectAbbr"),
+                 l.subjectAbbr.isEmpty() ? l.subjectName : l.subjectAbbr);
         o.insert(QStringLiteral("start"), l.startTime.toString(QStringLiteral("HH:mm")));
         o.insert(QStringLiteral("end"), l.endTime.toString(QStringLiteral("HH:mm")));
         o.insert(QStringLiteral("state"), state);

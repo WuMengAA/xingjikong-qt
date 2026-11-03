@@ -385,3 +385,9 @@ void agentUiWire(AgentUi *ui)
         ui->publish();
     });
 }
+
+/* 退出守卫（2026-11-03 · 用户笔记序号 2）的方法体不在本文件 ——
+ * 放在 src/notify/agent_ui_providers.cpp。理由：本文件（agentUiWire）依赖 main.cpp 的
+ * 一堆文件作用域全局，**探针壳链不了它**；而 setQuitPassword 必须被设置页探针覆盖到，
+ * 否则又是"改了但没人验"。providers 那份 TU 本来就被探针链（见 _agent_ui_probe.py:185）。 */
+

@@ -45,6 +45,8 @@ class IslandLayoutModel : public QAbstractListModel
     Q_PROPERTY(QString summary READ summary NOTIFY layoutChanged)
     /** 至少有一个面启用（全关掉时岛不该显示面签区）。 */
     Q_PROPERTY(bool anyEnabled READ anyEnabled NOTIFY layoutChanged)
+    /** 显示方向（2026-11-03 m14970）：「carousel」整面单页轮播 /「tiled」多面同屏平铺。 */
+    Q_PROPERTY(QString direction READ direction NOTIFY layoutChanged)
 
 public:
     enum Roles {
@@ -86,6 +88,10 @@ public:
     /** 缩放：80..140，越界夹紧。 */
     Q_INVOKABLE void setScaleById(int id, qint64 scale);
 
+    /** 显示方向（2026-11-03 m14970）："carousel" | "tiled"。其它值忽略。 */
+    Q_INVOKABLE void setDirection(const QString &direction);
+    QString direction() const { return m_direction; }
+
     /** 恢复内置默认序（设置页"恢复默认"）。 */
     Q_INVOKABLE void resetToDefault();
 
@@ -113,6 +119,9 @@ private:
     int indexOfId(int id) const;
 
     QVector<Row> m_rows;
+    // 2026-11-03（m14970 ①）：显示方向是**全局**属性（岛只有一个壳），不是每面各一份——
+    // per-face 的方向会导致「这一页轮播、下一页平铺」的语义灾难。
+    QString m_direction = QStringLiteral("carousel");
 };
 
 /** 全机唯一实例（岛壳与设置页是两个独立的 QQuickWidget engine，必须拿同一个对象，

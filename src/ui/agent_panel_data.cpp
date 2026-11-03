@@ -205,6 +205,10 @@ void agentUiFill(AgentUi *ui)
             ? QDateTime::fromMSecsSinceEpoch(st.lastSyncMs).toString(QStringLiteral("MM-dd HH:mm:ss"))
             : QStringLiteral("从未成功同步");
     }
+
+    // 退出守卫快照（2026-11-03 · 用户笔记序号2）：设置页只显示"已启用/未启用"，
+    // 真实口令哈希在 QuitGuard 里，这里只问一个布尔。
+    ui->m_quitPasswordEnabled = QuitGuard::hasPassword();
 }
 
 // ── 跨 TU 出口（定义在此，声明在 agent_panel_internal.h）───────────────────

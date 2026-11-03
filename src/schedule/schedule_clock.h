@@ -22,6 +22,8 @@ public:
     // 端到端交给 QML，所以提到 public —— 但字段保持最小集（QML 只读这四样）。
     struct LessonInfo {
         QString subjectName;   // 科目名（无则用时间点名）
+        QString subjectAbbr;   // 科目简称（ClassIsland 档案 simplifiedName；缺省回退 subjectName）
+        QString subjectFullName; // 科目全称（始终 subIt->name；缺省回退 subjectName）
         QString periodName;    // 时间点名（如「第一节」）
         QTime startTime;
         QTime endTime;

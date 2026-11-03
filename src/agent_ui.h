@@ -180,6 +180,13 @@ class AgentUi : public AgentRecordUi
      *  空串 = 还没操作过（QML 据此隐藏结果条，不写 `=== ""` 判断…… 用 visible: 绑布尔）。 */
     Q_PROPERTY(QString actionResultText READ actionResultText NOTIFY infoChanged)
     Q_PROPERTY(bool actionResultVisible READ actionResultVisible NOTIFY infoChanged)
+    /** 退出守卫（2026-11-03 · 用户笔记序号2）：是否设了退出口令（设置页显示已启用/未启用）。
+     *  真实存储在 QuitGuard（QSettings `agent/quitPassword`，SHA-256 加盐）；这里只做快照
+     *  + 上抛设置请求。托盘「退出被控端」走 QuitGuard::confirmQuit() 原生弹窗，不经 QML。 */
+    Q_PROPERTY(bool quitPasswordEnabled READ quitPasswordEnabled NOTIFY infoChanged)
+    /** 退出守卫的状态文案。为什么由 C++ 出而不是 QML 三元（见 SecGeneral.qml 头注释
+     *  「QML 零逻辑」铁律）：判断文案必须在一处算，QML 只绑定。 */
+    Q_PROPERTY(QString quitPasswordStateText READ quitPasswordStateText NOTIFY infoChanged)
 
 public:
     explicit AgentUi(QObject *parent = nullptr) : AgentRecordUi(parent)
@@ -340,6 +347,16 @@ public:
     QString storageHintText() const { return m_storageHintText; }
     QString actionResultText() const { return m_actionResultText; }
     bool actionResultVisible() const { return !m_actionResultText.isEmpty(); }
+    bool quitPasswordEnabled() const { return m_quitPasswordEnabled; }
+    /** 界面文案在 C++ 算死（QML 只绑定，不写三元 —— SecGeneral.qml 头注释的零逻辑铁律）。 */
+    QString quitPasswordStateText() const
+    {
+        return m_quitPasswordEnabled ? QStringLiteral("已启用（从托盘退出需输入口令）")
+                                     : QStringLiteral("未启用（从托盘退出不需要口令）");
+    }
+    /** 设置/清除退出口令（空串 = 清除，回到"退出不要口令"）。实现见 agent_panel.cpp
+     *  —— 那里能 include QuitGuard 并能写动作结果条（agent_ui.h 本身不能引用 main.cpp 符号）。 */
+    Q_INVOKABLE void setQuitPassword(const QString &plain);
 
     // ── 给 main.cpp 的接线 lambda 用的写入口 ──────────────────────────────
     // 为什么不用 friend：friend 只对 `agentUiFill` 那**一个函数**有效，
@@ -465,6 +482,8 @@ private:
     QString m_storageTotalText, m_storageHintText;
     /** ⚠️ agentUiFill **不清它**：这是"刚才那个动作的结果"，不是快照。 */
     QString m_actionResultText;
+    /** 退出守卫快照（agentUiFill 每轮从 QuitGuard::hasPassword() 重读）。 */
+    bool    m_quitPasswordEnabled = false;
 };
 
 // 由 main.cpp 提供（那里能访问匿名域的 static 自由函数与 AgentSettings）：
@@ -558,15 +577,24 @@ public:
         return s_inst;
     }
     /** 托盘入口：先重读快照再显示（连接/升级状态是"点开那一刻"的）。 */
-    static void openPanel()
-    {
-        AgentShell *w = ensure();
-        w->m_ui.refresh();          // → refreshRequested → agentUiWire 接收端同步 fill+publish
-        w->show();
-        w->raise();
-        w->activateWindow();
-        w->setWindowState((w->windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
-    }
+    static void openPanel();
+
+    /** 启动期预热（2026-11-03 · 用户笔记序号 3「启动慢」）。
+     *
+     *  实测（`scripts/_boot_trace_probe.py`，生产数据目录副本）：
+     *  托盘 113ms / 岛 667ms / **面板首开 1660ms（构造+解析 1247 + 显示 413）**。
+     *  用户能感知的"慢"就是点托盘之后那 1.5 秒空白。预热把它挪到启动空档期，
+     *  首次点击只剩 show —— 实测降到 224ms（构造+解析 0 / 显示 224）。
+     *  反向验证：`STE_QT_PANEL_PREWARM=0` 重跑回到 1631ms，收益属实。
+     *
+     *  **实现**在 `src/ui/agent_shell_warm.cpp`（不在本头内联）。
+     *  为什么外移：本头 745 行已超 §10.5 登记值（707），一行都不许再加；
+     *  且按 §10.2「新代码进职能目录」，预热是行为而非装配，本就该有独立 TU。
+     *  那段的完整考据（为什么不挪进启动主链 / 为什么延迟 1.5s / 为什么必须
+     *  show→hide / 代价 30~40MB / 失败不影响功能）见 .cpp 头部注释。
+     *
+     *  @param delayMs 延迟多久开始预热（默认 1500ms，须排在岛落定之后） */
+    static void prewarmPanel(int delayMs = 1500);
 
     bool reloadQml();              // 以下三个实现均在 agent_shell_reload.cpp
     void enableQmlAutoReload();    // 开发期：改 QML 自动重画（STE_QML_RELOAD=1）

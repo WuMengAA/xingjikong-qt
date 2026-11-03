@@ -55,7 +55,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opus ${CMAKE_BINARY_
 # 命名同为 DeepSeek Harness 同款：正式 X.Y.Z / 内测 X.Y.Z-alpha.N / 候选 X.Y.Z-rc.N
 # （阶段序 alpha < rc < 正式；号同核心递增、换核心归零、转正即剥离后缀）。
 # 成熟度标记不进版本号，归 ota.json 的 mandatory / notes 管。完整规则见 ../../docs/版本号命名规范-2026-10-07.md。
-set(AGENT_VERSION "0.6.62")
+set(AGENT_VERSION "0.6.64")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" _agent_src)
 if(_agent_src MATCHES "kAppVersion[ \t\r\n]*=[ \t\r\n]*\"([^\"]+)\"")
   set(_src_agent_version "${CMAKE_MATCH_1}")
@@ -144,12 +144,17 @@ add_executable(stelarith-agent-qt
   src/ppt/ppt_com.h
   src/agent_ui.h      # U5-A3：QML 控制面板（header-only，Q_OBJECT 经 AUTOMOC；显式列入让 AUTOMOC 必扫）
   src/island/agent_shell_reload.cpp  # 2026-10-31 QML 热重载（单独 .cpp：agent_ui.h 已卡 707 行白名单）
+  src/ui/agent_shell_warm.cpp        # 2026-11-03 面板首开埋点 + 启动期预热（同上，也是为让 agent_ui.h 不涨）
   src/agent_record_ui.h  # 2026-10-31 拆分第一刀：记录/自检/插件/时段的 Q_OBJECT 基类。
                          # ⚠️ 必须显式列入（同 agent_ui.h 的理由）：AUTOMOC 对「只被别的头 include
                          # 的头文件」解析缓存不可靠，漏列 ⇒ moc 产物不生成 ⇒ 链接期 LNK2001
                          # （staticMetaObject / metaObject / infoChanged 全 undefined，2026-10-31 实测）。
   src/system/singleinstance.cpp
   src/system/singleinstance.h
+  # 启动耗时埋点（2026-11-03 · 用户笔记序号 3「启动慢」）：main.cpp 台账只降不升，
+  # 埋点逻辑放职能目录，main 只留 BootTrace::mark("阶段名") 一行。
+  src/system/boot_trace.cpp
+  src/system/boot_trace.h
   # ── 课表时钟模块（2026-10-06 加：上下课提醒）──
   src/schedule/schedule_clock.cpp
   src/schedule/schedule_clock.h
@@ -429,6 +434,10 @@ add_executable(stelarith-agent-qt
   #   execute_action.cpp 经 g_actionDeps 函数指针访问（零改动）；snapshotProcessNames 直接 include proc_inspect。
   src/policy/policy_engine.cpp
   src/policy/policy_engine.h
+  # ── 退出守卫（2026-11-03 · 用户笔记序号2）：托盘「退出被控端」前询口令 ──
+  #   口令只存 SHA-256(盐+口令) 于 QSettings `agent/quitPassword`，空 = 不启用（存量机器行为不变）。
+  #   只挡这一条路：关机/注销/任务管理器/OTA 自重启都不经过它（否则升级会变砖）。
+  src/policy/quit_guard.cpp
   # ── 发布中心卡片 → 通知参数（2026-10-24 · P1）：纯映射逻辑，渲染复用 notifyFromParams ──
   src/core/BlackboardCard.cpp
   src/core/BlackboardCard.h
