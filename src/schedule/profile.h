@@ -58,16 +58,16 @@ struct TimeSlot {
         return ts;
     }
 
-    // 真机 TimeLayout.Layouts 数组元素解析（下标即节次）
-    static TimeSlot fromLayoutItem(int index, const QJsonObject& item) {
+    // TimeLayout.Layouts 元素解析（index=slotIndex 供 Classes 索引；classIndex=第几节）
+    // ★ 2026-11-04 修「课表的顺序节次有误」：Layouts 混排 TimeType 0上课/1课间/3分割点，
+    //   原「下标+1」命名会显示成第3、5、7…节。第几节 = 到本元素为止的上课段个数。
+    static TimeSlot fromLayoutItem(int index, int classIndex, const QJsonObject& item) {
         TimeSlot ts;
         ts.id = QStringLiteral("layout-%1").arg(index);
         ts.name = item["BreakName"].toString();  // 上课段通常空，用时间点标记
-        if (ts.name.isEmpty()) {
-            ts.name = item["TimeType"].toInt() == 0
-                ? QStringLiteral("第%1节").arg(index + 1)
-                : QStringLiteral("课间%1").arg(index + 1);
-        }
+        if (ts.name.isEmpty())
+            ts.name = item["TimeType"].toInt() == 0 ? QStringLiteral("第%1节").arg(classIndex + 1)
+                                                    : QStringLiteral("课间%1").arg(classIndex + 1);
         ts.startTime = QTime::fromString(item["StartTime"].toString(), "HH:mm:ss");
         ts.endTime = QTime::fromString(item["EndTime"].toString(), "HH:mm:ss");
         ts.timeType = item["TimeType"].toInt();
@@ -106,9 +106,8 @@ struct ClassPlan {
         // TimeRule: {WeekDay, WeekCountDiv, WeekCountDivTotal, IsActive}
         const QJsonObject tr = obj["TimeRule"].toObject();
         cp.weekDay = tr["WeekDay"].toInt(1);
-        // 真机语义：WeekCountDiv=0（0-based）+ WeekCountDivTotal=2 在真机里表示
-        // 「每周都生效」（ClassIsland 的 0 表示周次无关，不是"第 1 周"）。
-        // 只有 WeekCountDivTotal>1 且 WeekCountDiv>0 才算真正的多周轮换。
+        // 真机语义：WeekCountDiv=0 + Total=2 表示「每周都生效」（ClassIsland 的 0 是周次无关，不是第 1 周）。
+        // 只有 Total>1 且 Div>0 才算真正的多周轮换。
         cp.weekCountDivTotal = tr["WeekCountDivTotal"].toInt(1);
         cp.weekCountDiv = tr["WeekCountDiv"].toInt(0) + 1;
         if (cp.weekCountDivTotal <= 1 || tr["WeekCountDiv"].toInt(0) <= 0) {
@@ -272,7 +271,7 @@ struct Profile {
         return root;
     }
 
-    // 从 ClassIsland 官方 Profile JSON 格式反序列化
+    // 从 ClassIsland 官方 Profile JSON 反序列化
     static Profile fromJson(const QJsonObject& root) {
         Profile p;
         p.name = root["Name"].toString();
@@ -326,16 +325,13 @@ struct Profile {
             grp.id = it.key();
             grp.name = g["Name"].toString();
             grp.color = g["Color"].toString();
-            QStringList ids;
             const auto idsArr = g["ClassPlanIds"].toArray();
-            for (const QJsonValue& v : idsArr) { ids.append(v.toString()); }
-            grp.classPlanIds = ids;
+            for (const QJsonValue& v : idsArr) grp.classPlanIds.append(v.toString());
             grp.isActive = g["IsActive"].toBool(true);
             p.classPlanGroups[it.key()] = grp;
         }
 
-        // ── 真机 ClassIsland 兼容（2026-10-06）──────────────────────────
-        // 检测：任一个 ClassPlan 带 TimeRule（真机结构），或 ClassPlanGroups 无 ids（真机无该字段）
+        // ── 真机 ClassIsland 兼容（2026-10-06）：任一带 TimeRule 或 ClassPlanGroups 无 ids 即判真机
         bool isReal = false;
         const auto realCpObj = root["ClassPlans"].toObject();
         for (auto it = realCpObj.begin(); it != realCpObj.end() && !isReal; ++it) {
@@ -353,12 +349,15 @@ struct Profile {
             for (auto it = p.classPlanGroups.begin(); it != p.classPlanGroups.end(); ++it)
                 it->classPlanIds.clear();
 
-            // 1) TimeLayouts: Layouts[] 展开成 timeSlots（key = layout-N）
+            // 1) TimeLayouts：Layouts[] 展开成 timeSlots（key=layout-N）；classIndex 只数 TimeType==0
             const auto tlObj = root["TimeLayouts"].toObject();
             for (auto it = tlObj.begin(); it != tlObj.end(); ++it) {
                 const QJsonArray layouts = it.value().toObject()["Layouts"].toArray();
+                int classIndex = 0;
                 for (int i = 0; i < layouts.size(); ++i) {
-                    TimeSlot ts = TimeSlot::fromLayoutItem(i, layouts.at(i).toObject());
+                    const QJsonObject li = layouts.at(i).toObject();
+                    TimeSlot ts = TimeSlot::fromLayoutItem(i, classIndex, li);
+                    if (li["TimeType"].toInt() == 0) ++classIndex;
                     ts.id = QStringLiteral("%1/%2").arg(it.key(), QString::number(i));
                     p.timeSlots[ts.id] = ts;
                 }

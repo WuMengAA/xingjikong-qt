@@ -835,6 +835,16 @@ int main(int argc, char *argv[])
         return fail == 0 ? 0 : 1;
     }
     if (idle) {
+        // 2026-11-04：收起条现在是**组件槽**（时钟/日期/课表/倒计时），课表槽要有数据才出现，
+        // 而 PanelDomain::build("timetable") 在没 init 时钟时直接返回 error。
+        // 探针照生产那条路建课表源（同 ScheduleClock、同档案路径口径），否则 --idle 永远验不到课表槽。
+        const QString prof = profileArg.isEmpty()
+            ? QStringLiteral("%1/ClassIsland/data/Profiles/Default.json")
+                  .arg(qEnvironmentVariable("LOCALAPPDATA"))
+            : profileArg;
+        auto *idleClock = new ScheduleClock(prof, &app);
+        idleClock->start();
+        PanelDomain::init(idleClock);
         isl->ensureIdle();
     } else if (!morphModeArg.isEmpty()) {
         // 2026-10-27（灵动岛 6 形态骨架）：强制形态层接管收起态 —— 先给一条占位通知

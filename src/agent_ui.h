@@ -596,6 +596,15 @@ public:
      *  @param delayMs 延迟多久开始预热（默认 1500ms，须排在岛落定之后） */
     static void prewarmPanel(int delayMs = 1500);
 
+    /** 打开面板并切到指定设置分类（2026-11-04 · m16757「长按进入编辑模式」）。
+     *  实现在 agent_shell_warm.cpp —— 与本头的行数台账无关，且那里已经
+     *  有 ensure()/show() 的完整启动语义，放一起才不会两处各写一遍。 */
+    static void openPanelToTab(const QString &tabKey);
+
+    /** 把「岛收起条长按 → 编辑」钩子接到 openPanelToTab("interface")
+     *  （2026-11-04 · m16757）。main.cpp 只留一行调用，实现全在 .cpp。 */
+    static void wireIslandEditorHook();
+
     bool reloadQml();              // 以下三个实现均在 agent_shell_reload.cpp
     void enableQmlAutoReload();    // 开发期：改 QML 自动重画（STE_QML_RELOAD=1）
     void registerIconProvider();   // 面板图标 provider（漏注册 = 图标全空白且不报错）

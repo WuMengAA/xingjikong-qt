@@ -53,7 +53,7 @@ int main(int argc, char **argv)
         // 与 IslandRoot.qml 的回落序逐项一致：概 今 媒 笔 设 自
         check(ids == QStringList({"0", "7", "1", "4", "5", "6"}),
               QStringLiteral("A 默认序 = 概今媒笔设自（实际 %1）").arg(ids.join(",")));
-        check(m.rowCount() == 8, QStringLiteral("A2 八行（概今媒笔设自+期倒，实际 %1）").arg(m.rowCount()));
+        check(m.rowCount() == 9, QStringLiteral("A2 九行（概今钟期倒媒笔设自，实际 %1）").arg(m.rowCount()));
         check(!ids.contains("8") && !ids.contains("9"),
               QStringLiteral("A3 期/倒默认不出现（实际 %1）").arg(ids.join(",")));
     }
@@ -71,7 +71,7 @@ int main(int argc, char **argv)
         const QVariantList fl = m2.faceList();
         const int first = fl.first().toMap().value(QStringLiteral("id")).toInt();
         check(first == 7, QStringLiteral("B2 顺序已持久化（新模型首位 id=%1）").arg(first));
-        check(m2.rowCount() == 8, QStringLiteral("B3 持久化不丢行（实际 %1）").arg(m2.rowCount()));
+        check(m2.rowCount() == 9, QStringLiteral("B3 持久化不丢行（实际 %1）").arg(m2.rowCount()));
     }
 
     // ── C 关掉一个面 ──
@@ -135,12 +135,12 @@ int main(int argc, char **argv)
         QSettings s;
         s.setValue(QStringLiteral("island/layout"), QStringLiteral("这不是JSON{"));
         IslandLayoutModel m1;
-        check(m1.rowCount() == 8, QStringLiteral("G 非 JSON 时回落内置默认（%1 行）").arg(m1.rowCount()));
+        check(m1.rowCount() == 9, QStringLiteral("G 非 JSON 时回落内置默认（%1 行）").arg(m1.rowCount()));
 
         s.setValue(QStringLiteral("island/layout"),
                    QStringLiteral(R"([{"id":999,"enabled":true},{"id":7,"enabled":false,"scale":120}])"));
         IslandLayoutModel m2;
-        check(m2.rowCount() == 8, QStringLiteral("G2 未知 id 被丢弃、缺的面补回（%1 行）").arg(m2.rowCount()));
+        check(m2.rowCount() == 9, QStringLiteral("G2 未知 id 被丢弃、缺的面补回（%1 行）").arg(m2.rowCount()));
         const QVariantList fl = m2.faceList();
         bool has7 = false;
         for (const auto &v : fl) if (v.toMap().value(QStringLiteral("id")).toInt() == 7) has7 = false;

@@ -100,6 +100,11 @@ static const int kIdleW = 132;
 // 2026-10-31：空闲态改「macOS 顶部菜单栏」——常驻顶部、居中定宽横条。
 // 左应用标识 + 右通知铃/时钟，点击展开。宽度定死（不再由内容推导），高度贴 38 更"窄横条"。
 static const int kBarW = 520;
+// 2026-11-04（m16706/m16757）：收起条从「一条通知文案」改成**并排组件槽**
+// （课表简称条 + 时钟 + 日期周次 + 倒计时），520 装不下四槽 —— 实测日期槽被右端裁掉。
+// 本机 ClassIsland 主界面横条同样在 600~700 量级。收起态单独放宽到 680，
+// **展开态仍是 520**（各面按 520 设计，改它等于把所有面版式推翻）。
+static const int kIdleBarW = 680;
 static const int kBarH = 38;
 // 活动态胶囊的最小宽度（原来写死 200；收到文件时路径很长会撑宽，短文案时兜这个下限）
 static const int kMinContentW = 200;
@@ -367,10 +372,10 @@ IslandOverlay::~IslandOverlay()
 QRect IslandOverlay::geometryForIdle() const
 {
     QScreen *screen = QGuiApplication::primaryScreen();
-    if (!screen) return QRect(0, 0, kBarW, kBarH);
+    if (!screen) return QRect(0, 0, kIdleBarW, kBarH);
     const QRect sg = screen->geometry();
     // 菜单栏：顶部居中定宽横条（y+8 贴顶，比活动态 y+24 更近顶）
-    return QRect(sg.x() + (sg.width() - kBarW) / 2, sg.y() + 8, kBarW, kBarH);
+    return QRect(sg.x() + (sg.width() - kIdleBarW) / 2, sg.y() + 8, kIdleBarW, kBarH);
 }
 
 // 活动态的位置：宽度由内容决定（上限 60% 屏宽），顶部居中 y=24。

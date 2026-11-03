@@ -36,6 +36,7 @@
 #include "schedule/schedule_view.h"    // 2026-10-06：大屏今日课表窗口   // 单实例守卫（与管理端 viewer 同一份实现）
 #include "oobe/oauthbind.h"        // 2026-10-06：用星璃账号绑定（OAuth + 设备票）
 #include "island/island.h"           // 2026-10-07：被控端灵动岛（顶部居中胶囊 + 缓动 + 交互穿透）
+#include "island/island_panel_source.h"  // 2026-11-04：岛收起条组件槽（barSlots/openFace/openEditor）
 #include "system/smtc_monitor.h"
 #include "media/MediaTools.h"
 #include "media/MediaSession.h"  // 2026-10-22 §10 第二刀：录像/播放会话控制
@@ -354,7 +355,7 @@ void sendActionReceipt(const QString &id, const QString &action, const QString &
 
 
 // ── OTA 全局：文件作用域（namespace 外），供 src/ota/ota_state 模块 extern 复用 ──
-extern const char *kAppVersion = "0.6.64";
+extern const char *kAppVersion = "0.6.65";
 QString g_channel = QStringLiteral("stable");   // 供 register 上报；main 启动即解析覆盖
 QString g_latestVer, g_updateUrl, g_updateSha, g_updateNotes;bool g_updateChecked = false;       // 有没有从云端拿到过版本信息
 bool g_updateMandatory = false;     // 云端 ota.json 的 mandatory（true=强制自动升级）
@@ -3669,7 +3670,7 @@ int main(int argc, char *argv[])
         isl->setLightMode(AgentSettings::lightMode());   // 浅色主题开关（P0-1）
         isl->ensureIdle();
         BootTrace::mark("island-idle");
-
+        AgentShell::wireIslandEditorHook();   // 岛收起条长按 → 编辑（m16757，实现在 .cpp）
         // ── U5-A3 验证开关（2026-10-16）：STE_QT_SHELL_AUTOOPEN=1 → 启动 1.5s 后
         //    自动开一次 QML 控制面板。面板是懒建的（不点托盘不加载 QML），
         //    无人值守验证 QML 真实加载全靠它；日常不设即零影响。

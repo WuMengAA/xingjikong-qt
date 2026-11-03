@@ -43,6 +43,7 @@
 // 放在 src/ui/ 与 agent_panel.cpp / agent_shell_reload.cpp 同域。
 
 #include "../agent_ui.h"
+#include "../island/island_panel_source.h"   // wireIslandEditorHook：setEditorOpener
 
 #include <QElapsedTimer>
 #include <QTimer>
@@ -63,6 +64,42 @@ void AgentShell::openPanel()
     qInfo("[boot] panel-open             累计 %5lld ms（构造+解析 %lld / 显示 %lld）",
           static_cast<long long>(t.elapsed()), static_cast<long long>(tBuild),
           static_cast<long long>(t.elapsed() - tBuild));
+}
+
+void AgentShell::openPanelToTab(const QString &tabKey)
+{
+    // 2026-11-04（m16757「长按进入编辑模式」）：岛收起条上的组件槽被长按后，
+    // 走的就是这条路 —— 打开面板并落到「主界面」分类的灵动岛组件卡。
+    //
+    // ⚠️ 必须先 openPanel() 再设 tab：openPanel 里的 m_ui.refresh() 会触发
+    //    refreshRequested → main.cpp 重读快照，若先设 tab 会被那次 fill 覆盖回
+    //    上一次的值（实测：先设后开，打开后仍停在「通用」）。
+    openPanel();
+    AgentShell *w = ensure();
+    w->m_ui.setSettingsTab(tabKey);
+}
+
+// 2026-11-04（m16757「长按进入编辑模式」）：把岛收起条的长按钩子接到设置页。
+//
+// ── 为什么长按 = 打开设置页的「主界面」分类，而不是造一个浮层拖拽编辑器 ──
+//   那里本就有灵动岛组件卡：拖动把手排序、启停开关、缩放 −/+（IslandLayoutCard）。
+//   能力已经齐了；再写一套跨窗口浮层编辑器 = 第二份真源，两份必然漂移。
+//   岛是独立的 QQuickWidget，设置页在另一个窗口 —— 浮层拖拽要跨窗口传递
+//   拖拽目标，成本远高于把已有的编辑 UI 摆到用户面前。
+//
+// ── 为什么走 std::function 钩子，而不是让岛桥直接调 AgentShell ────────────
+//   见 island_panel_source.h 的 openEditor() 注释：把 AgentShell 依赖塞进岛桥，
+//   所有链岛桥的探针都要被迫拖上整套面板依赖（2026-11-02 LNK2019 血案同型）。
+//   钩子未注入时 openEditor() 静默返回 false，探针与管理端共用同一份代码也不炸。
+//
+// ── 为什么把这个 lambda 挪到本文件 ─────────────────────────────────────
+//   main.cpp 行数台账只降不升（AGENTS.md 第 2 条），装配区多出 10 行注释就顶破线。
+//   装配留一行调用，含义与理由仍写在离实现最近的地方。
+void AgentShell::wireIslandEditorHook()
+{
+    IslandPanelSource::setEditorOpener([](int) {
+        AgentShell::openPanelToTab(QStringLiteral("interface"));
+    });
 }
 
 void AgentShell::prewarmPanel(int delayMs)
