@@ -185,11 +185,11 @@
       "plan": "[P3] 拆预览/参数两段 | 2026-10-26 回写 447→453（+6）：产品笔记 P2 视觉换新 + P0 形态收敛（去 island 改 banner，服务 NotifyParams.js KINDS）"
     },
     "Stelarith-viewer-qt/qml/panels/ControlDialog.qml": {
-      "lines": 282,
+      "lines": 338,
       "limit": 200,
       "qInvokable": 0,
       "topLevel": 0,
-      "plan": "[P3] 拆控制项组件"
+      "plan": "[P3] 拆控制项组件 | 2026-11-03 回写 282→338（+56）：倒计时目标下发批次（viewer 提交 b144dac）新增「灵动岛倒计时固定目标」卡片（AppCard + 目标时间/标签输入 + sendAction('set_countdown_target')），已提交未回写。据实回写使门禁可读；拆分计划仍然有效。"
     },
     "Stelarith-viewer-qt/qml/schedule/ScheduleEditor.qml": {
       "lines": 206,

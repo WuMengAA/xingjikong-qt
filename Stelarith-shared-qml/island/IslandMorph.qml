@@ -51,10 +51,20 @@ Item {
         case "progress":  return "接收中 " + Math.round((morph.mdata.bytes||0)/(morph.mdata.total||1)*100) + "%"
         case "countdown": return morph.formatMMSS(morph.mdata.remainSec||0)
         case "alert":     return morph.mdata.title || "已拦截应用"
-        case "marquee":   return "通知"
+        case "marquee": {
+            // 真实长通知优先 bridgeRef.desc→title（recomputeMorph 不填 mdata）；mdata.text 为演示兜底。
+            var md = (morph.bridgeRef && (morph.bridgeRef.desc || morph.bridgeRef.title)) || morph.mdata.text || ""
+            return md
+        }
         case "audio":     return "语音对讲中"
         case "dock":      return "快捷操作"
-        case "notice":    return morph.mdata.title || "收到通知"
+        case "notice": {
+            // 真实通知优先 bridgeRef.title/desc（recomputeMorph 只设 mode 不填 mdata）；mdata 为演示兜底。
+            var nt = (morph.bridgeRef && morph.bridgeRef.title) || morph.mdata.title || ""
+            var nd = (morph.bridgeRef && morph.bridgeRef.desc)  || morph.mdata.desc  || ""
+            if (nt === "" && nd === "") return "收到通知"
+            return (nt ? nt : "") + (nd ? "：" + nd : "")
+        }
         }
         return ""
     }
@@ -227,7 +237,9 @@ Item {
     // ════════════════════════════════════════════════════════════
     MarqueeText {
         visible: morph.mode === "marquee"
-        text: morph.mdata.text || ""
+        text: (morph.bridgeRef && (morph.bridgeRef.desc || morph.bridgeRef.title))
+              ? (morph.bridgeRef.desc || morph.bridgeRef.title)
+              : (morph.mdata.text || "")
         theme: morph.th
         paused: morph.expanded       // 展开态停滚看全文
         px: morph.th.fsTitle
@@ -244,7 +256,9 @@ Item {
         anchors.fill: parent
         Text {
             id: marqueeFull
-            text: morph.mdata.text || ""
+            text: (morph.bridgeRef && (morph.bridgeRef.desc || morph.bridgeRef.title))
+              ? (morph.bridgeRef.desc || morph.bridgeRef.title)
+              : (morph.mdata.text || "")
             color: morph.th.fg
             font.pixelSize: 14
             wrapMode: Text.WrapAnywhere
