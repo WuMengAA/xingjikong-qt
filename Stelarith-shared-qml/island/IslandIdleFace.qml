@@ -183,6 +183,7 @@ Item {
                     accent: modelData.accent === true
                     wide: modelData.wide === true
                     isClock: modelData.isClock === true
+                    scalePercent: modelData.scale !== undefined ? modelData.scale : 100
                     anchors.verticalCenter: parent.verticalCenter
                     onPicked: (id) => face.slotPicked(id)
                     onLongPressed: (id) => face.slotLongPressed(id)

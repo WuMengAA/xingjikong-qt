@@ -31,12 +31,16 @@ Item {
     property bool accent: false      // 正在发生（正在上课/倒计时到点）→ 强调色
     property bool wide: false        // 需要更宽（课表横条）
     property bool isClock: false     // 时钟槽：文案由 IslandClock 自己滴答（C++ 不逐秒 emit）
+    property int scalePercent: 100   // 设置页 −/+ 缩放（80~140），与展开面同一个口径
     signal picked(int id)
     signal longPressed(int id)
 
-    implicitWidth: wide ? Math.min(360, contentRow.implicitWidth + 20)
-                        : contentRow.implicitWidth + 20
-    implicitHeight: 26
+    // 缩放只动字号与药丸内边距/高度，不动布局位置 —— 否则整条会随缩放跳动。
+    readonly property real k: scalePercent ? Math.max(0.6, Math.min(1.6, scalePercent / 100.0)) : 1.0
+
+    implicitWidth: wide ? Math.min(360, contentRow.implicitWidth + 20 * k)
+                        : contentRow.implicitWidth + 20 * k
+    implicitHeight: 26 * k
 
     // 药丸底：收起条本身就是深色横条，槽底再深一档形成"按钮"层次。
     // 不用 border（§9.4 无边框原则），靠 surfaceVariant 色差 + 圆角。
@@ -68,7 +72,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             name: slot.icon
             tint: slot.accent ? (th ? th.accent : "#D0BCFF") : (th ? th.sub : "#C8C8C8")
-            px: 13
+            px: 13 * slot.k
         }
 
         Text {
@@ -78,7 +82,7 @@ Item {
             visible: !slot.isClock
             text: slot.text
             color: slot.accent ? (th ? th.accent : "#D0BCFF") : (th ? th.fg : "#FAFAFA")
-            font.pixelSize: th ? th.fsBody : 13
+            font.pixelSize: (th ? th.fsBody : 13) * slot.k
             font.weight: slot.accent ? Font.Medium : Font.Normal
             elide: slot.wide ? Text.ElideNone : Text.ElideRight
             maximumLineCount: 1
@@ -90,7 +94,7 @@ Item {
             visible: slot.isClock
             anchors.verticalCenter: parent.verticalCenter
             theme: slot.th
-            timePx: slot.th ? slot.th.fsBody : 13
+            timePx: (slot.th ? slot.th.fsBody : 13) * slot.k
         }
 
         Text {
@@ -98,7 +102,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: slot.sub
             color: th ? th.sub : "#C8C8C8"
-            font.pixelSize: th ? th.fsNote : 12
+            font.pixelSize: (th ? th.fsNote : 12) * slot.k
         }
     }
 
