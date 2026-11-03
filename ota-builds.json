@@ -89,8 +89,34 @@
         "beta",
         "stable"
       ]
+    },
+    "agent:0.6.63-alpha.1:e947c7dcc2c03eac": {
+      "product": "agent",
+      "version": "0.6.63-alpha.1",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.63-alpha.1.exe",
+      "sha256": "e947c7dcc2c03eac423a935331cec7bb32eeddb6a12596a845ca4185fab11c95",
+      "size": 38243350,
+      "notes": "✨新增 灵动岛日期周次面板：一眼看教学周与星期\\n✨新增 灵动岛倒计时面板：常驻显示+管理端可设目标\\n🔧修复 倒计时目标下发：管理端配置持久化到被控端\\n⚡优化 动作白名单抽取：main.cpp 继续瘦身\\n—— 代号「双生面」· 中程开发第一波 🔵",
+      "mandatory": false,
+      "publishedAt": "2026-11-03T08:44:28.311000Z",
+      "manualTiers": [
+        "alpha"
+      ]
+    },
+    "viewer:0.6.63-alpha.1:8088f37fac7580c3": {
+      "product": "viewer",
+      "version": "0.6.63-alpha.1",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-viewer-setup-0.6.63-alpha.1.exe",
+      "sha256": "8088f37fac7580c35ecda45cd481c66813569b304105643a754d77145ef4d431",
+      "size": 44368060,
+      "notes": "✨新增 管理端灵动岛倒计时固定目标卡片：下发并持久化到被控端\\n⚡优化 控件对齐既有 sendAction 契约\\n—— 代号「双生面」· 中程开发第一波 🔵",
+      "mandatory": false,
+      "publishedAt": "2026-11-03T08:44:53.864000Z",
+      "manualTiers": [
+        "alpha"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-02T12:51:36.637Z"
+  "generatedAt": "2026-11-03T08:14:53.865Z"
 }
