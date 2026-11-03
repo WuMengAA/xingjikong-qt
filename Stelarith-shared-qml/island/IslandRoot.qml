@@ -8,9 +8,7 @@ import "."
 //
 // ── 接口契约（批次 3 由 IslandBridge 提供，签名不得改）──────────────
 //   bridge.title / desc / icon / form / severity / light / idle / expanded
-//   bridge.states     多状态列表 [{k,t,d,p}]
-//   bridge.actions    [{label, role}]
-//   bridge.fireAction(label)   QML → C++ 回调
+//   bridge.states [{k,t,d,p}] / bridge.actions [{label, role}] / bridge.fireAction(label)
 //   bridge.requestExpand(bool) 手势 → C++
 //   bridge.history     [{title,desc,icon,ts,timeStr,fromAdmin}]  历史通知列表
 //                      2026-10-13：**后端已按显示序排好** —— 管理端下发(fromAdmin)在前、
@@ -305,27 +303,31 @@ Item {
     readonly property bool mediaFaceOn: root._mediaActive || root.mediaIsContent
         || (root.vhRef && root.vhRef.active)
     readonly property bool histFaceOn: root._history.length > 0
+    // 2026-11-03 面清单改由 C++ `IslandLayoutModel` 出（开关/拖动排序/缩放）；未注入时回落内置默认序，
+    // 与 `island_layout.cpp:builtinRows()` 逐项一致（A 断言盯着）。「媒」「自」是条件面：模型给位置，出现看运行态。
     readonly property var faceModel: {
-        var fs = [{ id: 0, label: "概" }];
-        fs.push({ id: 7, label: "今" });   // 2026-11-01：今天看板（提升功能密度 —— 今日课表全量）
-        if (root.mediaFaceOn) fs.push({ id: 1, label: "媒" });
-        // 2026-10-31 · 苹果式极简：历史不再作为可滑动面 —— 统一收进「⋯」弹层，
-        // 走完整 historyPanel（facePanel 里的 IslandHistoryFace 紧凑预览一并退役，
-        // 历史要看就开完整列表，概览上不再有"史"面签、左右滑也不再滑到历史）。
-        // 2026-11-01 用户裁决「状态完全不需要」—— 移除「态」面（face id 3）
-        fs.push({ id: 4, label: "笔" });
-        // 2026-10-27（C 批）：设置面常驻（音量双滑块 + 通知黑名单）。
-        // 用户裁决「这些功能大多在被控端、且和岛有关」—— 音量/黑名单老师上课当场要调，岛才是他的手。
-        fs.push({ id: 5, label: "设" });
-        // 2026-10-27（Phase 3）：自动化规则面常驻（被控端 AutomationEngine）。
-        // 用户裁决「自动化是被控端能力、主入口在岛」—— 老师在讲台上当场配规则，岛才是他的手。
-        if (root.automationFaceOn) fs.push({ id: 6, label: "自" });
-        return fs;
+        if (typeof islandLayout !== "undefined" && islandLayout && islandLayout.count > 0) {
+            const out = []
+            const all = islandLayout.faceList()
+            for (let i = 0; i < all.length; ++i) {
+                const e = all[i]
+                if (e.id === 1 && !root.mediaFaceOn) continue
+                if (e.id === 6 && !root.automationFaceOn) continue
+                out.push(e)
+            }
+            if (out.length > 0) return out
+        }
+        const fs = [{ id: 0, label: "概" }]
+        fs.push({ id: 7, label: "今" })            // 今天看板（今日课表全量）
+        if (root.mediaFaceOn) fs.push({ id: 1, label: "媒" })
+        fs.push({ id: 4, label: "笔" })            // 2026-11-01 用户裁决移除「态」(id 3)；历史收进「⋯」弹层
+        fs.push({ id: 5, label: "设" })            // 音量双滑块 + 通知黑名单（老师当场要调）
+        if (root.automationFaceOn) fs.push({ id: 6, label: "自" })
+        return fs
     }
-    // C 批（2026-10-27）：按 faceModel 的顺序翻一面（左右滑动 & 将来的键盘/遥控都走它）。
-    // ⚠️ 必须按 model 顺序而不是 id±1：媒体(1)/历史(2) 是按需出现的，
-    //    id 连号不代表它们在 model 里连号（历史关掉时就是 1 → 3）。
-    // 到头即停、不循环：循环会"划过头又回到原点"，讲台上没法解释。
+    // C 批（2026-10-27）：按 faceModel 顺序翻一面（左右滑动/键盘/遥控都走它）。⚠️ 必须按 model 顺序
+    // 而不是 id±1：媒体(1)/历史(2) 按需出现，id 连号不代表在 model 里连号。到头即停不循环：循环会
+    // "划过头又回到原点"，讲台上没法解释。
     function faceStep(delta) {
         const fs = root.faceModel
         let i = 0
@@ -2774,6 +2776,10 @@ Item {
                                 Loader {
                                     anchors.fill: parent
                                     anchors.margins: modelData.id === 5 ? 14 : 10
+                                    // 2026-11-03 面内容缩放（设置页 −/+）。缩放而非改字体：
+                                    // 字号/行高/间距是一套比例关系，只放大字号行间会挤成一片。
+                                    scale: modelData.scale ? modelData.scale / 100.0 : 1.0
+                                    transformOrigin: Item.Center
                                     sourceComponent: {
                                         switch (modelData.id) {
                                         case 7: return compToday
@@ -2781,6 +2787,8 @@ Item {
                                         case 4: return compAnnotate
                                         case 5: return compSettings
                                         case 6: return compAutomation
+                                        case 8: return compDate
+                                        case 9: return compCountdown
                                         }
                                         return null
                                     }
@@ -2868,6 +2876,9 @@ Item {
                 Component { id: compAnnotate; IslandAnnotateFace { th: root.th; bridge: root.bridgeRef } }
                 Component { id: compSettings; IslandSettingsFace { th: root.th; bridge: root.bridgeRef } }
                 Component { id: compAutomation; IslandAutomationFace { th: root.th; automationRef: root.automationRef; bridgeRef: root.bridgeRef } }
+                // 2026-11-03 日期/倒计时接成常驻组件；panelSource 仅被控端注入，管理端共用本文件 ⇒ typeof 守卫。
+                Component { id: compDate; IslandDateFace { th: root.th; info: (typeof panelSource !== "undefined") ? panelSource.dateInfo() : ({}) } }
+                Component { id: compCountdown; IslandCountdownFace { th: root.th; info: (typeof panelSource !== "undefined") ? panelSource.countdownInfo() : ({}) } }
             }
         }
     }

@@ -73,7 +73,9 @@ Item {
         // 且数字走系统默认字体就够等宽观感）
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: face.arrived ? "时间到" : face.clockText(face.leftMs)
+            // 2026-11-03：「未配置」（C++ 侧 ok=false，error 已透传进 info）不能画成
+            // 「时间到」—— 00:00 停格会被当成"正好到点"，是最坏的一种错。两者必须可区分。
+            text: face.arrived ? (face.info.error || "时间到") : face.clockText(face.leftMs)
             color: face.arrived
                    ? (face.th ? face.th.accent : "#D0BCFF")
                    : (face.th ? face.th.fg : "#FAFAFA")
