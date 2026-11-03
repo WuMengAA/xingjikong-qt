@@ -79,9 +79,7 @@ Item {
             color: face.arrived
                    ? (face.th ? face.th.accent : "#D0BCFF")
                    : (face.th ? face.th.fg : "#FAFAFA")
-            font.pixelSize: face.arrived
-                            ? (face.th ? face.th.fsTitleLg : 36)
-                            : (face.th ? face.th.fsTitleXxl : 64)
+            font.pixelSize: face.arrived ? 30 : 30   // 2026-11-03（m14970 ②）用户点单默认 30px，到点/倒计时同字号
             font.weight: Font.Medium
         }
 

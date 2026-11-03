@@ -325,6 +325,12 @@ Item {
         if (root.automationFaceOn) fs.push({ id: 6, label: "自" })
         return fs
     }
+    // 2026-11-03（m14970 ①·用户裁决「岛多面同屏平铺」）：显示方向**全局**开关。
+    // 「carousel」= 现状整面单页轮播；「tiled」= 所有启用面缩小同屏平铺。二选一。
+    // C++ 没注入（管理端共用本文件）时恒为轮播 —— typeof 守卫，缺了自动回落。
+    readonly property bool faceTiled: (typeof islandLayout !== "undefined" && islandLayout)
+        ? islandLayout.direction === "tiled" : false
+    readonly property var faceComponents: ({7: compToday, 1: compMedia, 4: compAnnotate, 5: compSettings, 6: compAutomation, 8: compDate, 9: compCountdown})  // 轮播/平铺共用
     // C 批（2026-10-27）：按 faceModel 顺序翻一面（左右滑动/键盘/遥控都走它）。⚠️ 必须按 model 顺序
     // 而不是 id±1：媒体(1)/历史(2) 按需出现，id 连号不代表在 model 里连号。到头即停不循环：循环会
     // "划过头又回到原点"，讲台上没法解释。
@@ -2740,8 +2746,11 @@ Item {
                 // 用 Flickable + Row 而非 ListView：**跟手拖动**（内容随手指实时位移）+ 松手用
                 //   **自定义柔缓曲线**（OutCubic 320ms）吸附。ListView 的吸附缓动是 Qt 内定、改不了。
                 //   第 0 页是「概」（空页）：滑到它 = faceNow 回 0 ⇒ 面板收起回概览。
+                // 2026-11-03（m14970 ①·用户裁决）：islandLayout.direction === "tiled" 时改走
+                //   多面同屏平铺（Grid），轮播 Flickable 整体隐掉 —— 两种形态二选一，整岛切换。
                 Flickable {
                     id: fpFlick
+                    visible: root.faceTiled === false
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: parent.top
@@ -2773,25 +2782,11 @@ Item {
                                 required property var modelData
                                 width: fpFlick.pageW
                                 height: fpFlick.height
-                                Loader {
+                                IslandFaceLoader {
                                     anchors.fill: parent
-                                    anchors.margins: modelData.id === 5 ? 14 : 10
-                                    // 2026-11-03 面内容缩放（设置页 −/+）。缩放而非改字体：
-                                    // 字号/行高/间距是一套比例关系，只放大字号行间会挤成一片。
-                                    scale: modelData.scale ? modelData.scale / 100.0 : 1.0
-                                    transformOrigin: Item.Center
-                                    sourceComponent: {
-                                        switch (modelData.id) {
-                                        case 7: return compToday
-                                        case 1: return compMedia
-                                        case 4: return compAnnotate
-                                        case 5: return compSettings
-                                        case 6: return compAutomation
-                                        case 8: return compDate
-                                        case 9: return compCountdown
-                                        }
-                                        return null
-                                    }
+                                    faceId: modelData.id
+                                    scalePercent: modelData.scale  // 设置页 −/+ 缩放（非改字号）
+                                    components: root.faceComponents
                                 }
                             }
                         }
@@ -2845,29 +2840,33 @@ Item {
                         }
                     }
                 }
-                // 圆点指示（跟随拖动实时高亮）
-                Row {
+                // 圆点指示（跟随拖动实时高亮；自 IslandDotRow.qml 抽出）；平铺态整行隐掉
+                IslandDotRow {
                     id: dotRow
+                    visible: root.faceTiled === false
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 5
-                    spacing: 6
-                    Repeater {
-                        model: root.faceModel
-                        delegate: Rectangle {
-                            required property int index
-                            width: index === fpFlick.curPage ? 14 : 6
-                            height: 6
-                            radius: 3
-                            color: index === fpFlick.curPage
-                                   ? (root.th ? root.th.accent : "#6750A4")
-                                   : (root.th ? (root.th.light ? Qt.rgba(0, 0, 0, 0.18) : Qt.rgba(1, 1, 1, 0.22)) : "#888888")
-                            // 指示条宽度跟随（2026-11-02）：原来写死 220，全岛令牌化时漏了这处。
-                            // 220 本来就不在阶梯上，就近落到 durMid(200)，观感几乎无差。
-                            Behavior on width {
-                                NumberAnimation { duration: root.th ? root.th.durMid : 200; easing.type: Easing.OutCubic }
-                            }
-                        }
+                    th: root.th
+                    pageCount: root.faceModel.length
+                    curPage: fpFlick.curPage
+                }
+                // ── 平铺模式（2026-11-03 · m14970 ① · 用户裁决「岛多面同屏平铺」）──
+                // 抽为 island/IslandTileGrid.qml（行数门禁：IslandRoot 只降不升）；
+                // 点击某格 = 回轮播并翻到那一页 —— 平铺是"总览"，进去还是轮播。
+                IslandTileGrid {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    visible: root.faceTiled === true
+                    th: root.th
+                    faceModel: root.faceModel
+                    components: root.faceComponents  // 与轮播共用映射
+                    onFacePicked: function (id) {
+                        root.historyOpen = false
+                        root.face = id
+                        root.faceUserPick = id
                     }
                 }
                 // ── 面内容 Component（供分页 delegate 按 id 取）──────────

@@ -55,7 +55,9 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             text: face.hm(face.nowMs)
             color: face.th ? face.th.fg : "#FAFAFA"
-            font.pixelSize: face.th ? face.th.fsTitleXxl : 64
+            // 2026-11-03（m14970 ②）：用户点单「时间组件默认字体大小为 30px」。
+            // 刻意不走令牌阶梯（原 fsTitleXxl=64 太大，把课表横向条挤没了）——本条即引用出处。
+            font.pixelSize: 30
             font.weight: Font.Medium
         }
 

@@ -26,9 +26,9 @@ Item {
 
     readonly property int pad: 20
     readonly property var lessons: face.info.lessons || []
-    // 行高 30 + 行距 1：8 节 = 8*31-1 = 247px，正好落在可用区（320−20上−24表头−8间距−20下=248）。
-    // ⚠️ 别再加回 34：那是两行时间列的旧值，8 节会被切掉最后一节（2026-10-27 探针实测）。
-    readonly property int rowH: 30
+    // 2026-11-03（m14970 ③）：横向胶囊条形态下不再需要 rowH 逐节行高（胶囊定高 30）。
+    // 全称提示行内容：点任一科目胶囊后短暂显示「节次 · 全称（到 xx:xx）」。
+    property string fullHint: ""
 
     // ── 表头：标题 + 周次 + 节数 ─────────────────────────────────
     Item {
@@ -82,9 +82,12 @@ Item {
         font.pixelSize: face.th ? face.th.fsBodyLg : 15
     }
 
-    // ── 课表列表 ───────────────────────────────────────────────
-    // Flickable 而不是纯 Column：一天 8~10 节 + 小屏（或 125% 缩放下高度被压）
-    // 会超出面板；纵向面板必须能滚（布局红线的老教训）。
+    // ── 课表条（2026-11-03 · m14970 ③ · 用户裁决「横向排列的每科简称」）──
+    // 纵向逐节列表改为**横向科目条**：每科一个胶囊，显示 `subjectAbbr`（简称，
+    // ClassIsland 档案 simplifiedName，缺了回退全称——数据链 panel_domain.cpp 已给）。
+    // 参照用户截图：`语 英 体 数 数 政 化 化 自 语 地` 一条排开。当前节 accent 描边，
+    // 已结课降透明度；悬停/长按无（被控端触屏点按才弹 tooltip 式全称行）。
+    // 横向放不下 ⇒ Flickable 横滚（纵向面板的老教训，横条同理）。
     Flickable {
         id: flick
         anchors.left: parent.left
@@ -97,82 +100,58 @@ Item {
         anchors.bottomMargin: face.pad
         visible: face.lessons.length > 0
         clip: true
-        contentWidth: width
-        contentHeight: col.implicitHeight
+        contentHeight: height
+        contentWidth: strip.implicitWidth
+        flickableDirection: Flickable.HorizontalFlick
         boundsBehavior: Flickable.StopAtBounds
 
-        Column {
-            id: col
-            width: flick.width
-            spacing: 1
+        Row {
+            id: strip
+            spacing: 6
 
             Repeater {
                 model: face.lessons
-                delegate: Item {
-                    width: col.width
-                    height: face.rowH
-
+                delegate: Rectangle {
+                    id: chip
                     // ⚠️ 不能叫 state —— Item 自带 state（QML 状态机），重名会直接加载失败
                     readonly property string rowState: modelData.state || ""
+                    width: chipLabel.implicitWidth + 20
+                    height: 30
+                    radius: 8
+                    color: chip.rowState === "now"
+                           ? (face.th ? face.th.accent : "#D0BCFF")
+                           : (face.th ? face.th.surfaceVariant : "#2A2A2A")
+                    opacity: chip.rowState === "done" ? 0.45 : 1.0
 
-                    // 状态竖条：只在 now 上出现（3×18 圆角条，靠左缘）
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 3
-                        height: 18
-                        radius: 1.5
-                        visible: parent.rowState === "now"
-                        color: face.th ? face.th.accent : "#D0BCFF"
-                    }
-
-                    // 时间列：**只放开始时间**（单行）。
-                    // ⚠️ 2026-10-27 探针实测：原来上下两行（13px 起 / 12px 止）导致
-                    //    行高必须 ≥34，8 节 = 288px > 可用 248px ⇒ 最后一节被切在
-                    //    Flickable 边界外，看着像"课表少了半节"。结束时间改到右侧
-                    //    「第一节 · 08:40」同排显示 —— 信息一个不少，行高压到 30。
                     Text {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 10
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.start || ""
-                        color: parent.rowState === "now"
-                               ? (face.th ? face.th.accent : "#D0BCFF")
+                        id: chipLabel
+                        anchors.centerIn: parent
+                        text: modelData.subjectAbbr || modelData.subject || ""
+                        color: chip.rowState === "now"
+                               ? (face.th ? face.th.onAccent || "#1B1B1B" : "#1B1B1B")
                                : (face.th ? face.th.fg : "#FAFAFA")
-                        font.pixelSize: face.th ? face.th.fsBody : 13
-                        font.weight: Font.Medium
-                    }
-
-                    // 科目（主信息）：给足宽度，长名字省略号
-                    Text {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 62
-                        anchors.right: periodText.left
-                        anchors.rightMargin: 10
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.subject || ""
-                        color: parent.rowState === "done"
-                               ? (face.th ? face.th.sub : "#C8C8C8")
-                               : (face.th ? face.th.fg : "#FAFAFA")
-                        opacity: parent.rowState === "done" ? 0.55 : 1.0
                         font.pixelSize: face.th ? face.th.fsBodyLg : 15
-                        elide: Text.ElideRight
-                        maximumLineCount: 1
+                        font.weight: chip.rowState === "now" ? Font.Medium : Font.Normal
                     }
 
-                    // 节次名 + 结束时间（一行：「第一节 · 08:40」）
-                    Text {
-                        id: periodText
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: (modelData.period || "")
-                              + ((modelData.end || "") !== "" ? (" · " + modelData.end) : "")
-                        color: face.th ? face.th.sub : "#C8C8C8"
-                        opacity: parent.rowState === "done" ? 0.55 : 1.0
-                        font.pixelSize: face.th ? face.th.fsNote : 12
-                    }
+                    // 全称提示：简称被截/语义不清时老师点一下看全称（节次+全称+时间）
+                    TapHandler { onTapped: face.fullHint = (modelData.period || "") + " · "
+                        + (modelData.subject || "") + (modelData.end ? ("（到 " + modelData.end + "）") : "") }
                 }
             }
         }
+    }
+
+    // 全称提示行（点胶囊后短暂显示；下一次点击/翻面被覆盖）
+    Text {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: face.pad
+        visible: face.fullHint !== ""
+        text: face.fullHint
+        color: face.th ? face.th.sub : "#C8C8C8"
+        font.pixelSize: face.th ? face.th.fsNote : 12
+        elide: Text.ElideRight
     }
 }
