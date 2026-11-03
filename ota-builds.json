@@ -115,8 +115,34 @@
       "manualTiers": [
         "alpha"
       ]
+    },
+    "agent:0.6.64:aee0bf65c5aaeafa": {
+      "product": "agent",
+      "version": "0.6.64",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.64.exe",
+      "sha256": "aee0bf65c5aaeafa89be724474d55bc2f9445aa51a9f72927e86ea9946dce482",
+      "size": 38239179,
+      "notes": "灵动岛多面同屏平铺；时间组件 30px；课表横向科目简称；上下课提醒全称；退出密码；启动预热（面板首开 1660ms→224ms）",
+      "mandatory": false,
+      "publishedAt": "2026-11-03T15:58:14.681Z",
+      "manualTiers": [
+        "alpha"
+      ]
+    },
+    "viewer:0.6.64:cd0f005a510bc596": {
+      "product": "viewer",
+      "version": "0.6.64",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-viewer-setup-0.6.64.exe",
+      "sha256": "cd0f005a510bc596fc11cc9a23f7d95ad15228367d6883e767b272d35750fd69",
+      "size": 44358286,
+      "notes": "随 0.6.64 同步发版（本轮功能在 control 与 shared-qml）",
+      "mandatory": false,
+      "publishedAt": "2026-11-03T15:58:23.091Z",
+      "manualTiers": [
+        "alpha"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-03T08:14:53.865Z"
+  "generatedAt": "2026-11-03T15:58:23.092Z"
 }
