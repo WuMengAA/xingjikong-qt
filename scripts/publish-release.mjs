@@ -405,7 +405,18 @@ async function cmdPublish() {
 		try {
 			const u = new URL(baseUrl);
 			origin = u.origin;
-			dir = u.pathname && u.pathname !== '/' ? path.posix.dirname(u.pathname) : dir;
+			if (u.pathname && u.pathname !== '/') {
+				dir = path.posix.dirname(u.pathname);
+			} else {
+				// 2026-11-04 修（0.6.64 发布事故）：`--base-url https://host` 只给根域时，
+				// 原来会**保留 inferred.dir** —— 而 inferred 来自上一版条目。上一版如果是
+				// gh.245959623.xyz 这种外部托管（路径形如
+				// /WuMengAA/xingjikong-qt/releases/download/v0.6.51-rc.1），新清单就会写成
+				// `https://control.245959623.xyz/WuMengAA/.../stelarith-agent-setup-0.6.64.exe`，
+				// 发布自验必然 404，现场表现是"发了版但教室机永远下不动"。
+				// 根域 + 自托管的默认落点就是 /assets/pkg，不该继承上一版的外部路径。
+				dir = '/assets/pkg';
+			}
 		} catch {
 			fail(`--base-url / CLOUD_PUBLIC_BASE 不是合法地址：${baseUrl}`);
 		}
