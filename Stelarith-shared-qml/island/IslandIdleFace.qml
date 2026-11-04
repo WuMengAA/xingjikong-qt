@@ -3,25 +3,15 @@ import "."
 
 // 灵动岛 · 顶部菜单栏面部（macOS 菜单栏风格 · 2026-11-04 组件化重写）
 //
-// ── 这一版为什么推翻旧版（m16706/m16757 用户裁决）───────────────────
-//   用户原话：「时钟什么的组件应该显示在**收起态**上，而不是放到页面里面」。
-//   旧版收起条只有「星集控 · 班级名 | 一句课表摘要 | 时钟 | 铃铛」——
-//   课表/日期/倒计时全在**展开后翻页**里找，这是把 ClassIsland 的
-//   「组件」做成了「页面」，方向就错了。
+// 结构照 ClassIsland 实测主界面（一条常驻横条，每个组​件是一个并排单元）：
+//   左：应用标识 + 班级名（身份）｜中：组件槽横排（时钟/日期/课表/倒计时…，序由 C++ 布局模型定）
+//   右：铃铛 + 未读角标 + 「收起最小化」按钮
 //
-//   实测本机 ClassIsland（`D:/Classlsland`）主界面是一条常驻横条：
-//     `🔴距离运动会还有0天 | 🌫霾10°C | 周三11/04第10周双周 | 00:58 | 早化数物英数语地地自化地 | 下午第一·07:25`
-//   ——**每个组件就是一个并排单元**。本文件照这个结构重写：
-//     左：应用标识 + 班级名（身份，不是组件）
-//     中：**组件槽横排**（时钟 / 日期周次 / 课表简称 / 倒计时 …，由 C++ 布局模型决定哪些、什么序）
-//     右：铃铛 + 未读角标（通知入口，不是组件）
+// 交互（m16757）：点槽 → 展开那一面；长按槽 → 进编辑；点空白 → 笼统展开。
+// 2026-11-04（m18334）：右侧「收起最小化」→ 整条缩成 112×26 小胶囊，撑到本时段结束自动弹回；
+//   点胶囊只回到本条（**不**展开整页）。
 //
-// ── 交互（m16757）─────────────────────────────────────────────────
-//   · 点组件槽 → slotPicked(id)：展开并打开**那一面**（不是笼统展开概览）
-//   · 长按组件槽 → slotLongPressed(id)：进编辑模式
-//   · 点空白区 → tapped()：笼统展开（保留旧入口，老师习惯点条就展开）
-//
-// ── 依赖一律显式声明成 property（隐式作用域不跟着搬进独立文件 —— D 档拆分踩过）
+// 依赖一律显式声明成 property（隐式作用域不跟着搬进独立文件 —— D 档拆分踩过）
 Item {
     id: face
 
@@ -30,15 +20,17 @@ Item {
     property bool idle: true
     property int  unread: 0
     property string className: ""   // 班级显示名（星集控右侧）
-    /** 组件槽数据：默认由本件自己向 panelSource 取（见下方 _slotsNow）。
-     *  外部也可显式喂（探针/预览），非空即优先用外部给的。
+    /** 组件槽数据：默认本件自己向 panelSource 取（见 _slotsNow）。外部可显式喂，非空即优先用。
      *  [{ id:int, icon:string, text:string, sub:string, accent:bool, wide:bool }, ...]
-     *  ⚠️ 只传"要显示的"——隐藏哪个由 C++ 布局模型的 enabled/inBar 决定，QML 不再过滤（§10.9）。 */
+     *  ⚠️ 只传"要显示的"——隐藏哪个由 C++ 布局模型决定，QML 不再过滤（§10.9）。 */
     property var slots: []
-    /** 自取结果。**必须自己持有一个 property**：Q_INVOKABLE 的返回值不是可观察属性，
-     *  不落地就读不到变化 —— 时钟/课表/倒计时全要逐秒走字（2026-11-03 踩过：只截到静态图）。 */
+    /** 自取结果。**必须自己持有一个 property**：Q_INVOKABLE 返回值不是可观察属性，
+     *  不落地就读不到变化 —— 时钟/课表/倒计时都要逐秒走字（2026-11-03 踩过：只截到静态图）。 */
     property var _auto: []
     readonly property var _slotsNow: face.slots.length > 0 ? face.slots : face._auto
+    // 2026-11-04（m18334）：最小化胶囊态。几何由 C++ 收到 112×26，本件按**自己的宽度**
+    // 决定要不要退成紧凑排版 —— 不新增 C++ 属性，也就不动已顶格的 island_bridge.h。
+    readonly property bool _mini: face.width < 200
 
     // 1s 重取：秒针够准，又不至于让整条 Row 每秒重排两次。
     Timer {
@@ -46,8 +38,8 @@ Item {
         onTriggered: if (typeof panelSource !== "undefined" && panelSource && panelSource.barSlots)
                          face._auto = panelSource.barSlots()
     }
-    // ⚠️ 取数放在本件而不是 IslandRoot：IslandRoot 登记 3220 行、已顶到门禁线，
-    //    而"横条上要摆什么"本身就是本件的职责（§10.2 新代码进职能文件）。
+    // ⚠️ 取数放在本件而不是 IslandRoot：那边登记 3220 行已顶到门禁线，
+    //    而"横条上摆什么"本身就是本件职责（§10.2 新代码进职能文件）。
 
     signal tapped()
     signal slotPicked(int id)
@@ -65,18 +57,25 @@ Item {
         onClicked: face.tapped()
     }
 
+    // 最小化胶囊：112×26 只装得下「星」标 + 时间，其余全隐身（点它走 C++ setMinimized(false)）
+    IslandClock {
+        visible: face._mini
+        anchors.centerIn: parent
+        theme: face.th
+        timePx: 11
+    }
+
     // ── 左：应用标识 + 班级名 ──────────────────────────────
     Row {
         id: leftRow
+        visible: !face._mini
         anchors.left: parent.left
         anchors.leftMargin: 14
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
 
         Rectangle {
-            width: 16
-            height: 16
-            radius: 4
+            width: 16; height: 16; radius: 4
             color: face.th ? face.th.fg : "#FAFAFA"
             Text {
                 anchors.centerIn: parent
@@ -87,16 +86,14 @@ Item {
             }
         }
         Text {
-            height: 16
-            verticalAlignment: Text.AlignVCenter
+            height: 16; verticalAlignment: Text.AlignVCenter
             text: "星集控"
             color: face.th ? face.th.fg : "#FAFAFA"
             font.pixelSize: 13
             font.weight: Font.Medium
         }
         Text {
-            height: 16
-            verticalAlignment: Text.AlignVCenter
+            height: 16; verticalAlignment: Text.AlignVCenter
             visible: face.className !== ""
             text: face.className !== "" ? "· " + face.className : ""
             color: face.th ? face.th.sub : "#C8C8C8"
@@ -106,17 +103,17 @@ Item {
         }
     }
 
-    // ── 右：铃铛 + 未读角标（通知入口）──────────────────────
+    // ── 右：铃铛 + 未读角标 + 收起最小化 ────────────────────
     Row {
         id: rightRow
+        visible: !face._mini
         anchors.right: parent.right
         anchors.rightMargin: 14
         anchors.verticalCenter: parent.verticalCenter
         spacing: 12
 
         Item {
-            width: 16
-            height: 16
+            width: 16; height: 16
             anchors.verticalCenter: parent.verticalCenter
 
             SvgIcon {
@@ -133,8 +130,7 @@ Item {
                 anchors.topMargin: -6
                 anchors.rightMargin: -6
                 width: Math.max(14, badgeTxt.implicitWidth + 6)
-                height: 14
-                radius: 7
+                height: 14; radius: 7
                 color: "#E24B4A"
                 Text {
                     id: badgeTxt
@@ -146,12 +142,20 @@ Item {
                 }
             }
         }
+
+        // 2026-11-04（m18334）：「收起最小化」。QML 是唯一入口，状态全在 C++（§10.9）。
+        IslandMinimizeButton {
+            th: face.th
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: if (typeof islandCapsule !== "undefined" && islandCapsule) islandCapsule.minimize()
+        }
     }
 
     // ── 中：组件槽横排（本版核心）────────────────────────────
-    // 宽度不够时右端渐隐消失 —— 宁可少显示一个槽，也不把字压成豆腐块。
+    // 宽度不够时允许横滑 —— 宁可少显示一个槽，也不把字压成豆腐块。
     Flickable {
         id: slotFlick
+        visible: !face._mini
         anchors.left: leftRow.right
         anchors.right: rightRow.left
         anchors.top: parent.top
