@@ -171,8 +171,64 @@
         "alpha",
         "stable"
       ]
+    },
+    "agent:0.6.66:e96ebe3a6e795888": {
+      "product": "agent",
+      "version": "0.6.66",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.66.exe",
+      "sha256": "e96ebe3a6e79588865480923e2b01bffdcfd446805707fd7020c16d19f8d01ee",
+      "size": 38251834,
+      "notes": "灵动岛收起条新增收起最小化：缩成小胶囊撑到本时段结束自动弹回，点胶囊只回完整收起条不展开整页；修复面板打开后退不出的死态；补齐 IslandTheme 缺失的三色令牌，消除白底白字",
+      "mandatory": true,
+      "publishedAt": "2026-11-04T01:10:35.540Z",
+      "manualTiers": [
+        "alpha",
+        "stable"
+      ]
+    },
+    "viewer:0.6.66:9a152f2ff75ae2ee": {
+      "product": "viewer",
+      "version": "0.6.66",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-viewer-setup-0.6.66.exe",
+      "sha256": "9a152f2ff75ae2ee57f5b00bee4295d0f2736242a123172f22006249db7370b0",
+      "size": 44365637,
+      "notes": "版本对齐 0.6.66（本端无功能改动）",
+      "mandatory": true,
+      "publishedAt": "2026-11-04T01:10:51.700Z",
+      "manualTiers": [
+        "alpha",
+        "stable"
+      ]
+    },
+    "viewer:0.6.67:b86a793844943f6a": {
+      "product": "viewer",
+      "version": "0.6.67",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-viewer-setup-0.6.67.exe",
+      "sha256": "b86a793844943f6afc8d9a5b6df8d89ccedfd5e72f1a8503015c4a448ece5295",
+      "size": 44370593,
+      "notes": "补齐 calendar.svg（灵动岛日期槽图标一直空白，生产日志持续报 Failed to get image from provider）；版本对齐 0.6.67",
+      "mandatory": true,
+      "publishedAt": "2026-11-04T01:20:26.250Z",
+      "manualTiers": [
+        "alpha",
+        "stable"
+      ]
+    },
+    "agent:0.6.67:4fdedae2e6750136": {
+      "product": "agent",
+      "version": "0.6.67",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.67.exe",
+      "sha256": "4fdedae2e6750136c778fb5d3d5d36fe101e096fc04dc793cb186afe6a6971e7",
+      "size": 38251794,
+      "notes": "补齐 calendar.svg（灵动岛日期槽图标一直空白，生产日志持续报 Failed to get image from provider）；版本对齐 0.6.67",
+      "mandatory": true,
+      "publishedAt": "2026-11-04T01:20:49.023Z",
+      "manualTiers": [
+        "alpha",
+        "stable"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-03T18:42:21.640Z"
+  "generatedAt": "2026-11-04T01:20:51.404Z"
 }
