@@ -103,12 +103,12 @@ struct ClassPlan {
         cp.associatedGroupId = obj["AssociatedGroup"].toString();
         cp.isActive = obj["IsActive"].toBool(obj["IsEnabled"].toBool(true));
 
-        // TimeRule: {WeekDay, WeekCountDiv, WeekCountDivTotal, IsActive}
+        // TimeRule{WeekDay,WeekCountDiv,WeekCountDivTotal,IsActive}：WeekDay 是 C# DayOfWeek
+        // （0=周日…6=周六），本项目 1=周一…7=周日，0 折成 7，否则周日那张表永远匹配不上网格列。
+        // Div=0(0-based)+Total=2 在真机表示「每周生效」（0=周次无关），Total>1 且 Div>0 才是多周轮换。
         const QJsonObject tr = obj["TimeRule"].toObject();
-        cp.weekDay = tr["WeekDay"].toInt(1);
-        // 真机语义：WeekCountDiv=0（0-based）+ WeekCountDivTotal=2 在真机里表示
-        // 「每周都生效」（ClassIsland 的 0 表示周次无关，不是"第 1 周"）。
-        // 只有 WeekCountDivTotal>1 且 WeekCountDiv>0 才算真正的多周轮换。
+        const int wdRaw = tr["WeekDay"].toInt(0);   // C# DayOfWeek：0=周日
+        cp.weekDay = wdRaw == 0 ? 7 : wdRaw;        // 本项目：1=周一…7=周日
         cp.weekCountDivTotal = tr["WeekCountDivTotal"].toInt(1);
         cp.weekCountDiv = tr["WeekCountDiv"].toInt(0) + 1;
         if (cp.weekCountDivTotal <= 1 || tr["WeekCountDiv"].toInt(0) <= 0) {
