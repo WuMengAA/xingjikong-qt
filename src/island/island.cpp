@@ -382,7 +382,9 @@ QRect IslandOverlay::geometryForIdle() const
 {
     // 2026-11-04（m18334）：最小化胶囊 —— 仍顶部居中，只是窄且矮。**不隐藏**。
     const bool mini = m_minimized;
-    const int w = mini ? kMiniCapW : kIdleBarW;
+    // 2026-11-04（m20578 ②）：收起条宽度随组件内容长度自适应，下限历史默认 680，
+    // 上限 1100（见 island_panel_source.cpp::barIdleWidth）。计算放数据源，不挤占本文件行数账。
+    const int w = mini ? kMiniCapW : qMax(kIdleBarW, islandPanelSourceInstance()->barIdleWidth());
     const int h = mini ? kMiniCapH : kBarH;
     QScreen *screen = QGuiApplication::primaryScreen();
     if (!screen) return QRect(0, 0, w, h);

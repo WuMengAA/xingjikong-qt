@@ -59,6 +59,18 @@ public:
      *  用于 QML 在 slots 为空时至少有东西显示。空串 = 今天没课（不是故障）。 */
     Q_INVOKABLE QString barLessonText() const;
 
+    /** ★收起条自适应宽度（2026-11-04 · m20578 ②）：按各组件槽文本长度估算，夹在 [最小,最大]。
+     *  逻辑放本文件而非 island.cpp 的 geometryForIdle：纯显示度量归数据源，且不挤占 island.cpp 只降不升账。 */
+    Q_INVOKABLE int barIdleWidth() const;
+
+    /** ★岛收起条上的「主界面」「设置」按钮（2026-11-04 · m20578 ⑥）。
+     *  点「主界面」→ 开管理面板首屏；点「设置」→ 开面板并切到「主界面」分类（灵动岛设置所在）。
+     *  与 openEditor 同款 std::function 钩子：不直接依赖 AgentShell，避免污染 island_bridge.h 与探针链。 */
+    Q_INVOKABLE bool openHome();
+    Q_INVOKABLE bool openSettings();
+    static void setHomeOpener(std::function<void()> opener);
+    static void setSettingsOpener(std::function<void()> opener);
+
     /** ★点收起条上的组件槽 → 展开并打开那一面（2026-11-04 · m16757）。
      *
      *  用户原话：「灵动岛触发展开除了通知，其他的改为按收起态上面的各种按钮组件进行展开」。

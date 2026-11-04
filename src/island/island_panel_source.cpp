@@ -216,6 +216,22 @@ QVariantList IslandPanelSource::barSlots() const
     return out;
 }
 
+// 收起条宽度自适应（m20578 ②）：左标识 + 右铃铛/按钮 + 各槽文本长度，夹在 [最小, 1100]。
+// 纯显示度量，放这里不挤占 island.cpp 的只降不升账；island.cpp::geometryForIdle 调用。
+// 下界不在这里定（交给调用方 qMax(kIdleBarW,...)），保证空条也不窄于历史默认 680。
+int IslandPanelSource::barIdleWidth() const
+{
+    const QVariantList slotList = barSlots();
+    int w = 80 + 60 + 16;            // 左「星集控·班级」 + 右铃铛/按钮 + 外边距
+    for (const QVariant &v : slotList) {
+        const QVariantMap m = v.toMap();
+        const QString t = m.value(QStringLiteral("text")).toString();
+        const int unit = m.value(QStringLiteral("wide")).toBool() ? 140 : 90;
+        w += qMin(t.size() * 12 + 30, unit) + 8;   // 每槽估算宽 + 间距
+    }
+    return qMin(w, 1100);            // 最大宽度上限
+}
+
 IslandPanelSource *islandPanelSourceInstance()
 {
     static IslandPanelSource *s = new IslandPanelSource();
@@ -241,5 +257,43 @@ bool IslandPanelSource::openEditor(int id)
 {
     if (!editorOpener()) return false;
     editorOpener()(id);
+    return true;
+}
+
+// ── 收起条上的「主界面」「设置」按钮（2026-11-04 · m20578 ⑥）───────────────
+namespace {
+std::function<void()> &homeOpener()
+{
+    static std::function<void()> fn;
+    return fn;
+}
+std::function<void()> &settingsOpener()
+{
+    static std::function<void()> fn;
+    return fn;
+}
+}   // namespace
+
+void IslandPanelSource::setHomeOpener(std::function<void()> opener)
+{
+    homeOpener() = std::move(opener);
+}
+
+void IslandPanelSource::setSettingsOpener(std::function<void()> opener)
+{
+    settingsOpener() = std::move(opener);
+}
+
+bool IslandPanelSource::openHome()
+{
+    if (!homeOpener()) return false;
+    homeOpener()();
+    return true;
+}
+
+bool IslandPanelSource::openSettings()
+{
+    if (!settingsOpener()) return false;
+    settingsOpener()();
     return true;
 }

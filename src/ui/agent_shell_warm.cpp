@@ -100,6 +100,14 @@ void AgentShell::wireIslandEditorHook()
     IslandPanelSource::setEditorOpener([](int) {
         AgentShell::openPanelToTab(QStringLiteral("interface"));
     });
+    // m20578 ⑥：收起条上的「主界面」「设置」按钮。
+    // 「主界面」开面板首屏；「设置」开面板并切到「interface」分类（灵动岛设置卡所在）。
+    IslandPanelSource::setHomeOpener([] {
+        AgentShell::openPanel();
+    });
+    IslandPanelSource::setSettingsOpener([] {
+        AgentShell::openPanelToTab(QStringLiteral("interface"));
+    });
 }
 
 void AgentShell::prewarmPanel(int delayMs)
