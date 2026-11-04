@@ -135,34 +135,9 @@ struct ClassPlan {
     }
 };
 
-// 科目
-struct Subject {
-    QString id;
-    QString name;
-    QString simplifiedName;
-    QString teacher;
-    QString room;
-
-    QJsonObject toJson() const {
-        QJsonObject obj;
-        obj["Id"] = id;
-        obj["Name"] = name;
-        obj["SimplifiedName"] = simplifiedName;
-        obj["Teacher"] = teacher;
-        obj["Room"] = room;
-        return obj;
-    }
-
-    static Subject fromJson(const QJsonObject& obj) {
-        Subject s;
-        s.id = obj["Id"].toString();
-        s.name = obj["Name"].toString();
-        s.simplifiedName = obj["SimplifiedName"].toString();
-        s.teacher = obj["Teacher"].toString();
-        s.room = obj["Room"].toString();
-        return s;
-    }
-};
+// 科目：见 subject.h（2026-11-04 抽出 —— 本文件在行数台账内只减不增，
+// 而 Subject 要补户外标记 + ClassIsland 原生字段兼容，净增 15 行会破门禁）。
+#include "subject.h"
 
 // 课表群：多个 ClassPlan 的容器
 struct ClassPlanGroup {

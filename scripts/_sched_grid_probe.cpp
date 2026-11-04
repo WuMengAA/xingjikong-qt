@@ -76,6 +76,43 @@ int main(int argc, char** argv) {
     printf("   首个非空简称=%s\n", abbr.toUtf8().constData());
     ok(abbr.size() <= 2, "A9 简称是短文本（≤2 字）", abbr);
 
+    // ⑥ 科目字段契约（2026-11-04）：ClassIsland 原生用 Initial/TeacherName/IsOutDoor，
+    //    我们用 SimplifiedName/Teacher。读必须两套都认，写必须两套都写 ——
+    //    只认一套会让真机读不到简称（或我们的编辑器丢掉户外标记）。
+    {
+        QJsonObject native;
+        native["Id"] = "s-native";
+        native["Name"] = "体育";
+        native["Initial"] = "体";
+        native["TeacherName"] = "王老师";
+        native["IsOutDoor"] = true;
+        const Subject sn = Subject::fromJson(native);
+        ok(sn.simplifiedName == "体", "B1 读到原生 Initial", sn.simplifiedName);
+        ok(sn.teacher == "王老师", "B2 读到原生 TeacherName", sn.teacher);
+        ok(sn.isOutdoor, "B3 读到原生 IsOutDoor");
+
+        QJsonObject ours;
+        ours["Id"] = "s-ours";
+        ours["Name"] = "数学";
+        ours["SimplifiedName"] = "数";
+        ours["Teacher"] = "李老师";
+        const Subject so = Subject::fromJson(ours);
+        ok(so.simplifiedName == "数", "B4 回落读我们的 SimplifiedName", so.simplifiedName);
+        ok(so.teacher == "李老师", "B5 回落读我们的 Teacher", so.teacher);
+
+        // 双写：同一份档案给两套消费者都能读到
+        const QJsonObject w = sn.toJson();
+        ok(w["Initial"].toString() == "体" && w["SimplifiedName"].toString() == "体",
+           "B6 写出两套简称字段", w["Initial"].toString() + "/" + w["SimplifiedName"].toString());
+        ok(w["TeacherName"].toString() == "王老师" && w["Teacher"].toString() == "王老师",
+           "B7 写出两套老师字段");
+        ok(w["IsOutDoor"].toBool(), "B8 写出户外标记");
+
+        const Subject rt = Subject::fromJson(w);
+        ok(rt.simplifiedName == sn.simplifiedName && rt.teacher == sn.teacher
+           && rt.isOutdoor == sn.isOutdoor, "B9 双写后往返不丢字段");
+    }
+
     printf("\nRESULT: PASS %d / FAIL %d\n", g_pass, g_fail);
     return g_fail == 0 ? 10 : 20;
 }

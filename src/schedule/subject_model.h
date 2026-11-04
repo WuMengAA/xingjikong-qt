@@ -15,6 +15,7 @@ public:
         SimplifiedNameRole,
         TeacherRole,
         RoomRole,
+        IsOutdoorRole,   // 2026-11-04：ClassIsland 科目页有「户外课程?」列
     };
 
     explicit SubjectModel(QObject* parent = nullptr);
@@ -31,6 +32,7 @@ public:
         roles[SimplifiedNameRole] = "simplifiedName";
         roles[TeacherRole] = "teacher";
         roles[RoomRole] = "room";
+        roles[IsOutdoorRole] = "isOutdoor";
         return roles;
     }
 
@@ -64,6 +66,17 @@ public:
     }
     Q_INVOKABLE QString teacherAt(int row) const {
         return (row >= 0 && row < m_subjects.size()) ? m_subjects[row].teacher : QString();
+    }
+    // 户外课程标记（ClassIsland 科目页「户外课程?」列，2026-11-04）
+    Q_INVOKABLE bool isOutdoorAt(int row) const {
+        return (row >= 0 && row < m_subjects.size()) ? m_subjects[row].isOutdoor : false;
+    }
+    Q_INVOKABLE bool setOutdoorAt(int row, bool on) {
+        if (row < 0 || row >= m_subjects.size()) return false;
+        if (m_subjects[row].isOutdoor == on) return true;
+        m_subjects[row].isOutdoor = on;
+        emit dataChanged(index(row, 0), index(row, 0), {IsOutdoorRole});
+        return true;
     }
     Q_INVOKABLE bool addSubjectQml(const QString& name) {
         return addSubjectQml2(name, name.left(1));

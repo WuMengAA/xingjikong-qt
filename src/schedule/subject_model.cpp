@@ -39,6 +39,8 @@ QVariant SubjectModel::data(const QModelIndex& index, int role) const {
         return s.teacher;
     case RoomRole:
         return s.room;
+    case IsOutdoorRole:
+        return s.isOutdoor;
     default:
         return {};
     }
@@ -69,6 +71,10 @@ bool SubjectModel::setData(const QModelIndex& index, const QVariant& value, int 
         break;
     case RoomRole:
         s.room = value.toString();
+        changed = true;
+        break;
+    case IsOutdoorRole:
+        s.isOutdoor = value.toBool();
         changed = true;
         break;
     }
