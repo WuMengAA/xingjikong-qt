@@ -60,4 +60,15 @@ bool show(const QString &face, const QJsonObject &params, int durationMs,
 // 收起面板（岛回到空闲 / 或回落到上一条内容，走既有 enterIdle 路径）。
 void close();
 
+// 「本时段」还剩多少毫秒（2026-11-04 · 岛最小化胶囊的自动恢复时刻）。
+//
+// 口径与倒计时面的无 to 分支**完全一致**（同一份 todayLessons、同一个
+// TimesyncDomain::now()）：正在上课 → 撑到下课；课间 → 撑到下一节上课。
+// 已经放学/今天无课 → 返回 0，调用方**不排恢复**（免得整条收起条在放学后
+// 突然弹回来，那比一直最小化更烦人）。
+//
+// 为什么放这里：边界推算只有这一处真源。散到 island.cpp 再算一遍，
+// 迟早出现"倒计时说还差 3 分钟、胶囊却说下课了"这种自相矛盾。
+qint64 msUntilBoundary();
+
 }   // namespace PanelDomain

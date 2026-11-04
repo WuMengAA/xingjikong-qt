@@ -321,4 +321,21 @@ void close()
     IslandOverlay::instance()->closePanel();
 }
 
+qint64 msUntilBoundary()
+{
+    if (!g_clock) return 0;                 // 课表未就绪 ⇒ 不排自动恢复
+    const QDateTime now = TimesyncDomain::now();
+    const QTime cur = now.time();
+    const QList<ScheduleClock::LessonInfo> lessons = g_clock->todayLessons();
+    for (const auto &l : lessons) {         // 正在上课 → 撑到下课
+        if (cur >= l.startTime && cur < l.endTime)
+            return qMax<qint64>(0, now.msecsTo(QDateTime(now.date(), l.endTime)));
+    }
+    for (const auto &l : lessons) {         // 课间 → 撑到下一节上课
+        if (l.startTime > cur)
+            return qMax<qint64>(0, now.msecsTo(QDateTime(now.date(), l.startTime)));
+    }
+    return 0;                               // 已放学/今天无课 ⇒ 不排
+}
+
 }   // namespace PanelDomain

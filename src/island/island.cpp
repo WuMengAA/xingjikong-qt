@@ -28,7 +28,8 @@
 #include "island.h"
 #include "island_bridge.h"       // P0-0：historySnapshotJson() 复用桥的 history() 组装口径
 #include "island_layout.h"       // 岛组件布局（顺序/启用/缩放），设置页与岛壳共用同一实例
-#include "island_panel_source.h"  // 岛「期/倒」取数源（panelSource context property）
+#include "island_panel_source.h"
+#include "island_capsule.h"   // 2026-11-04（m18334）：收起条「收起最小化」QML 入口  // 岛「期/倒」取数源（panelSource context property）
 #include "../ui/svgiconprovider.h"
 #include "../media/whale_audio.h"
 // 2026-10-22：系统媒体识别实例，注入 QML 给岛面/排期中心读「本机正在放什么」。
@@ -106,6 +107,11 @@ static const int kBarW = 520;
 // **展开态仍是 520**（各面按 520 设计，改它等于把所有面版式推翻）。
 static const int kIdleBarW = 680;
 static const int kBarH = 38;
+// 2026-11-04（m18334）「收起最小化」：小胶囊 = 只留身份 + 一枚时间槽的窄条。
+// 尺寸刻意"小而可点"（112×26，命中区大于视觉高度由 QML 侧负责），
+// 且**不是隐藏** —— 老师得看得见它还活着。
+static const int kMiniCapW = 112;
+static const int kMiniCapH = 26;
 // 活动态胶囊的最小宽度（原来写死 200；收到文件时路径很长会撑宽，短文案时兜这个下限）
 static const int kMinContentW = 200;
 // 触控容差 kDragSlop 已随指针域搬到 island_touch.cpp（本文件不再用）。
@@ -309,6 +315,9 @@ IslandOverlay::IslandOverlay(QWidget *parent)
     m_quick->rootContext()->setContextProperty(QStringLiteral("islandLayout"), islandLayoutInstance());
     // 2026-11-03：岛「期/倒」面取数源。同 islandLayout：context property（管理端共用 IslandRoot 无此模块）。
     m_quick->rootContext()->setContextProperty(QStringLiteral("panelSource"), islandPanelSourceInstance());
+    // 2026-11-04（m18334）：「收起最小化」。同 islandLayout —— context property 而非 QML 单例模块，
+    // 因为 IslandIdleFace 也被管理端 InteractDialog 复用，那边没有这个实例（QML 里带 typeof 守卫）。
+    m_quick->rootContext()->setContextProperty(QStringLiteral("islandCapsule"), islandCapsuleInstance());
     // 小鲸鱼音效实例（QML 侧 WhaleMascot 通过 bridgeRef.whaleClicked/whaleLongPressed 触发，
     // 不直接用 whaleAudio，但留这个 context property 以备将来 QML 直接调 playByName）。
     m_quick->rootContext()->setContextProperty(QStringLiteral("whaleAudio"), WhaleAudio::instance());
@@ -371,11 +380,15 @@ IslandOverlay::~IslandOverlay()
 // 离屏探针/Session0 拿到的几何和实际路径对不上号会白浪费时间，统一用 kIdleW。
 QRect IslandOverlay::geometryForIdle() const
 {
+    // 2026-11-04（m18334）：最小化胶囊 —— 仍顶部居中，只是窄且矮。**不隐藏**。
+    const bool mini = m_minimized;
+    const int w = mini ? kMiniCapW : kIdleBarW;
+    const int h = mini ? kMiniCapH : kBarH;
     QScreen *screen = QGuiApplication::primaryScreen();
-    if (!screen) return QRect(0, 0, kIdleBarW, kBarH);
+    if (!screen) return QRect(0, 0, w, h);
     const QRect sg = screen->geometry();
     // 菜单栏：顶部居中定宽横条（y+8 贴顶，比活动态 y+24 更近顶）
-    return QRect(sg.x() + (sg.width() - kIdleBarW) / 2, sg.y() + 8, kIdleBarW, kBarH);
+    return QRect(sg.x() + (sg.width() - w) / 2, sg.y() + 8, w, h);
 }
 
 // 活动态的位置：宽度由内容决定（上限 60% 屏宽），顶部居中 y=24。

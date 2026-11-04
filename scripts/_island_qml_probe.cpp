@@ -171,7 +171,10 @@ static void captureAndSave(IslandOverlay *isl, QQuickWidget *q, const QString &o
         << " geom=" << isl->geometry().width() << "x" << isl->geometry().height()
         << " idle=" << (isl->isIdle() ? 1 : 0)
         << " expanded=" << (isl->isExpanded() ? 1 : 0)
-        << " interactive=" << (isl->interactive() ? 1 : 0) << "\n";
+        << " interactive=" << (isl->interactive() ? 1 : 0)
+        // 2026-11-04（m18334）：最小化态必须能从 dump 直接判读 ——
+        //   收起条 mini=true 且 geom 112x26；点回后 mini=false 且 expanded 仍为 0。
+        << " minimized=" << (isl->isMinimized() ? 1 : 0) << "\n";
     out << "quickwidget=" << (q ? "found" : "NULL") << "\n";
     if (!q) { out.flush(); return; }
     out << "quick status=" << int(q->status())
@@ -461,6 +464,11 @@ int main(int argc, char *argv[])
     int endAtMsArg = 0;    // 2026-11-01：验 EndTime（绝对结束时刻）覆盖 durationMs
     bool touchMode = false;       // 2026-11-02：验「有触摸就等到无触摸才收起」
     bool providersMode = false;   // 2026-11-01：验通知提供方注册表（纯逻辑，不开窗）
+    // 2026-11-04（m18334）：「收起最小化」。--minimize 在 --idle 之后调 setMinimized(true)，
+    //   验几何收到 112×26 + 小胶囊排版；--minimize-collapse 走 QML 按钮那条真实入口
+    //   （islandCapsule.minimize()）再点一下，验「点胶囊只回完整收起条、不展开整页」。
+    bool minimizeMode = false;
+    bool minimizeCollapse = false;
     bool queueMode = false;       // 2026-11-01：验排队与仲裁（低优先不顶掉 + 补播）
     bool vhclear = false;   // #Win7 排障：vh 模块销毁清空路径验收（见文件头注释）
     bool automation = false; // 2026-10-27 Phase 3：注入真 AutomationEngine 验「自」面
@@ -513,6 +521,8 @@ int main(int argc, char *argv[])
         if (a == QLatin1String("--panel-json") && i + 1 < argc)
             panelJsonArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--panel-collapse")) panelCollapse = true;
+        if (a == QLatin1String("--minimize")) minimizeMode = true;
+        if (a == QLatin1String("--minimize-collapse")) { minimizeMode = true; minimizeCollapse = true; }
         if (a == QLatin1String("--profile") && i + 1 < argc)
             profileArg = QString::fromLocal8Bit(argv[++i]);
         if (a == QLatin1String("--out") && i + 1 < argc)
@@ -856,6 +866,26 @@ int main(int argc, char *argv[])
         idleClock->start();
         PanelDomain::init(idleClock);
         isl->ensureIdle();
+        // 2026-11-04（m18334）：最小化。--minimize 走 C++ 入口，--minimize-collapse 再补一次
+        //   「点胶囊」—— 判据是 setMinimized(false) 后 **仍 idle 且未展开**（不展开整页）。
+        if (minimizeMode) {
+            isl->setMinimized(true);
+            fprintf(stderr, "PROBE: setMinimized(true) geom=%dx%d\n",
+                    isl->geometry().width(), isl->geometry().height());
+            fflush(stderr);
+            // 点胶囊走的是 QML 那条真实入口：root.bridgeRef.requestExpand(true)。
+            //   必须验桥（不是直接 setMinimized(false)）—— 用户点的是 QML，
+            //   桥里若漏了 m_minimized 守卫，点一下就会展开整页（正是要防的回归）。
+            if (minimizeCollapse) {
+                QQuickWidget *qw = findQuick(isl);
+                if (QQuickItem *ri2 = qw ? qw->rootObject() : nullptr) {
+                    QObject *br = ri2->property("bridgeRef").value<QObject *>();
+                    if (br) QMetaObject::invokeMethod(br, "requestExpand", Q_ARG(bool, true));
+                    fprintf(stderr, "PROBE: bridge.requestExpand(true) sent\n");
+                    fflush(stderr);
+                }
+            }
+        }
     } else if (!morphModeArg.isEmpty()) {
         // 2026-10-27（灵动岛 6 形态骨架）：强制形态层接管收起态 —— 先给一条占位通知
         // 让岛以「可见收起态」上屏（morph 层 visible 与 idle 无关，但岛本身得先可见），

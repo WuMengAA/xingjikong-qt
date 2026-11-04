@@ -151,6 +151,14 @@ void IslandOverlay::mouseReleaseEvent(QMouseEvent *ev)
     // 岛体：点一下展开看详情，**再点一下收回**（切换语义）。
     // ⚠️ 原来这里恒传 true：展开后再点毫无反应，而注释/归档都写的是"再点收回"，
     //    触屏用户又基本不会想到"上推"这个手势，结果点开就收不回去。
+    //
+    // 2026-11-04（m18334）：最小化胶囊态点一下**只回到完整收起条**，不是展开整页。
+    //   用户原话「但不是展开到整个页面」—— 落到这里就是：展开动作被拦成"退最小化"。
+    if (m_minimized) {
+        setMinimized(false);
+        ev->accept();
+        return;
+    }
     setExpanded(!m_expanded);
     ev->accept();
 }

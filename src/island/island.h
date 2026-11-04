@@ -302,9 +302,8 @@ public:
     // 开机就让空闲胶囊常驻（不等第一条通知先出现过）
     void ensureIdle();
 
-    // 切换展开（点击展开看详情）/ 收起
-    void setExpanded(bool on);
-    bool isExpanded() const { return m_expanded; }
+    void setExpanded(bool on); void setMinimized(bool on);   // setMinimized 见 island_minimize.cpp（m18334）
+    bool isExpanded() const { return m_expanded; } bool isMinimized() const { return m_minimized; }
     // 2026-11-02：同时重排 m_autoClose（见 .cpp 说明）；按住/松开由 QML 经 bridge 上报。
     void noteActivity();
     void setTouching(bool on);
@@ -562,6 +561,7 @@ private:
     bool m_interactive = false;   // 默认穿透
     bool m_idle = true;           // 空闲与否（无任务/通知）
     bool m_idleEnabled = true;    // 空闲半胶囊开关
+    bool m_minimized = false;     // 2026-11-04（m18334）：收起条已缩成小胶囊（撑到本时段结束）
     bool m_hadContent = false;    // 从来没显示过内容 ⇒ 展开时给"暂无通知"
     bool m_contentActive = false; // 这条内容还在活动期（决定收起是回"标题胶囊"还是直接回空闲半胶囊）
     // 淡出中：m_fadeAnim 的 finished 被淡入/淡出共用，只有这个为真时 finished 才 hide。

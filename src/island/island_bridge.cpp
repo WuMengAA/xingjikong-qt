@@ -362,6 +362,10 @@ void IslandBridge::fireAction(const QString &label)
 void IslandBridge::requestExpand(bool on)
 {
     if (!m_host) return;
+    // 2026-11-04（m18334）：收起条最小化成小胶囊后，点它**只回完整收起条**，
+    // 不是展开整页（用户原话「但不是展开到整个页面」）。QML 点击走这里，
+    // 原生点击走 island_touch.cpp 同款守卫 —— 两条路都得拦，只拦一条等于没拦。
+    if (on && m_host->isMinimized()) { m_host->setMinimized(false); return; }
     m_host->setExpanded(on);
 }
 
