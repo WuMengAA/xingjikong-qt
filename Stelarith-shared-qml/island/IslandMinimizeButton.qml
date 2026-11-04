@@ -23,6 +23,7 @@ Item {
 
     property var th: null
     property bool hovered: false
+    property string iconName: "chevron-right"
 
     implicitWidth: 18
     implicitHeight: 18
@@ -40,7 +41,7 @@ Item {
 
     SvgIcon {
         anchors.centerIn: parent
-        name: "chevron-right"
+        name: btn.iconName
         tint: btn.th ? btn.th.sub : "#C8C8C8"
         px: 12
     }

@@ -143,7 +143,9 @@ Item {
             }
         }
 
-        // 2026-11-04（m18334）：「收起最小化」。QML 是唯一入口，状态全在 C++（§10.9）。
+        // 2026-11-04（m20578 ⑥）：收起条加「主界面」「设置」两按钮（走 panelSource 钩子，零破 C++ 账）。
+        IslandMinimizeButton { th: face.th; iconName: "monitor"; anchors.verticalCenter: parent.verticalCenter; onClicked: if (typeof panelSource !== "undefined" && panelSource && panelSource.openHome) panelSource.openHome() }
+        IslandMinimizeButton { th: face.th; iconName: "settings"; anchors.verticalCenter: parent.verticalCenter; onClicked: if (typeof panelSource !== "undefined" && panelSource && panelSource.openSettings) panelSource.openSettings() }
         IslandMinimizeButton {
             th: face.th
             anchors.verticalCenter: parent.verticalCenter
