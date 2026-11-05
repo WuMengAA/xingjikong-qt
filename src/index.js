@@ -32,6 +32,7 @@ import { bindDeviceCore, bindReply, bindOriginOf, bindQrOfTicket, readBody,
 // 设备身份（2026-11-05）：改名 + 同名判定 + 改名钉住（防重连被自报主机名顶回）
 import { applyNamePin, markNameConflicts, handleDeviceRename } from './device-identity.js';
 import { hitRate, clientIp } from './ratelimit.js';
+import { danmakuWordsPayload, DANMAKU_WORDS_PATH } from './danmaku-words.js';   // 祝福弹幕词表（公开只读，见下）
 // 噪音存证（2026-10-30 · P0-2 云端）：事件接收 + 图片 5 分钟到期 + 元数据长期 + 按班鉴权
 import { storeNoiseIncident, listNoiseIncidents, readNoiseEvidence, sweepExpiredNoise } from './noise-evidence.js';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
@@ -725,6 +726,10 @@ const server = http.createServer((req, res) => {
     res.end(body);
     return;
   }
+
+  // 祝福弹幕词表（2026-11-05 · 公开只读）：被控端无管理面令牌，挂 /api/interact/* 会被 401 拒；
+  // 必须在 isManageApi 之前（:915）返回，真源 danmaku-words.js + 同目录 danmaku-words.json。
+  if (req.method === 'GET' && u.pathname === DANMAKU_WORDS_PATH) return send(200, danmakuWordsPayload());
 
   // ── 公开只读：发布版本信息（2026-10-06 加）──────────────────────────────
   // 给**官网下载中心**用：站点服务端来取，渲染"当前版本 / 下载地址 / sha256"。

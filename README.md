@@ -310,3 +310,33 @@ python Stelarith-cloud\scripts\vault.py check
 - 设备改名后的 namePin 在**设备真实重连**时是否真顶住自报名，未做真实设备验证
   （只有单元级 `applyNamePin` 断言）。
 - `bind.html` 在手机浏览器的实际版式未截图核对。
+
+## 十四、祝福弹幕词表下发端点（加减归档 2026-11-05 · 用户点单「1345」①）
+
+### 14.1 边界：不造第二套审核真源
+
+审核闭环早在 `interact.js:194 submitBlessing` → `index.js:1783/1800` 审批 →
+`index.js:2542 broadcastBlessingDanmaku` 已存在（详见 control 仓 README §7.1）。本批**只补词表下发**，
+不重复造端点；被控端 `src/system/danmaku_wordlist.cpp` 拉取后与本机三词取并集。
+
+### 14.2 新增（删除即回退）
+
+| 文件 | 职责 |
+|---|---|
+| `src/danmaku-words.js` | `DANMAKU_WORDS_PATH='/api/danmaku/words'`、`sanitizeWords()`（去非串/去空白/截断 64/去重/限量 200）、`loadDanmakuWords()`（缺文件/坏 JSON 回落空表、绝不抛）、`danmakuWordsPayload()` 带 `cacheSeconds:30` |
+| `src/danmaku-words.json` | 空表起步（`words:[]`），管理员改这份热更新；本机三词兜底不写进来 |
+| `tests/regression-danmaku-words.mjs` | 三层：L1 纯逻辑 / L2 隔离实例 HTTP 8883（无鉴权 200 + 对照 `/api/interact/*` 401）/ L3 删薄壳反向（404） |
+
+### 14.3 修改（薄壳，守 index.js 行数）
+
+- `src/index.js`：`:30` 附近加 `import { danmakuWordsPayload, DANMAKU_WORDS_PATH } from './danmaku-words.js';`；
+  公开只读区 `/api/plugins` 之后（`:731`，**在 `isManageApi:915` 之前**）加一行
+  `if (req.method === 'GET' && u.pathname === DANMAKU_WORDS_PATH) return send(200, danmakuWordsPayload());`。
+- 为什么必须公开：被控端只有设备令牌、HTTP 调用不带 `Authorization`，挂 `/api/interact/*` 会被 401 拒。
+- `index.js` 3561 行 < 台账 3562（净 +3，仍在额度内）。
+
+### 14.4 验证与未验证
+
+- `node tests/regression-danmaku-words.mjs` **17/0 PASS**（含反向删薄壳 ⇒ 404，证明 L2 非假阴性）。
+- 未验证：生产 8788 未重启（跑 2026-11-03 旧进程，按铁律 4 不动）；真被控端拉取未端到端；
+  `danmaku-words.json` 手改后真机 30min 热更新周期未实测。
