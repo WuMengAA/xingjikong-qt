@@ -236,3 +236,77 @@ python Stelarith-cloud\scripts\vault.py check
 - set --value 显式传值会进进程列表（慎用）；默认从 stdin 读。
 - 名字禁路径分隔符（防逃逸写盘）；空值拒绝。
 - 已验证：加解密回环 / 篡改字节 / 同长度错 key / 换错 key / 空值 / 逐条独立——全优雅。
+
+---
+
+## 十三、班级绑定统一 + 扫码选设备直接绑（加减归档 2026-11-05 · 用户 m01083 / m01202）
+
+### 13.1 三条线一起收
+
+| 问题（用户 m01083 原话） | 处置 | 状态 |
+|---|---|---|
+| 「每一个班都必须是一个独立的后台」 | 每班数据域早已按 `classCode` 隔离（class-room / class-data / timetable / attendance / songkey） | 已存在，本批未改 |
+| 绑定 API 不统一 | 五路（admin / code / qr / device / **class-scan**）全部归 `bindDeviceCore` | ✅ 本批补齐 |
+| 设备重名 | 新增 `src/device-identity.js`（重名判定 + 改名 API + **namePin 钉住**） | ✅ 本批 |
+| 扫码选设备直接绑（m01202） | `/api/bind/info` 回候选清单 + `/api/bind/confirm` 认 `uid` + `bind.html` 设备列表 | ✅ 本批 |
+
+### 13.2 新增（可回退：全为新增文件，删除即回退）
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `src/bind-api.js` | 282 | 五路统一绑定核心 + `classScanCandidates/classScanDecide/classScanBind` |
+| `src/device-identity.js` | — | 重名判定 `markNameConflicts` + 改名 `handleDeviceRename` + `applyNamePin` |
+| `tests/regression-class-scan.mjs` | 148 | 扫码绑定的纯逻辑断言（26 条）+ 反向验证 |
+| `tests/regression-bind-unify.mjs` | 523 | 端到端 HTTP 16 条（含 ⑮ 扫码选设备 / ⑯ 换设备拒绝） |
+
+> ⚠️ `bind-api.js` **不在** `oversize-legacy.json` 台账内（非白名单），可正常增长；
+> `bind.html` 也不受 `test-file-size` 管（不在扫描后缀）。
+
+### 13.3 修改（可回退：`git checkout` 即回退）
+
+| 文件 | 行数变化 | 说明 |
+|---|---|---|
+| `src/index.js` | 3562 → **3557**（净减，白名单余 5 行） | 删 `needsDeviceInput`、删 confirm 的假成功块、接 `classScanBind`；加设备改名路由 |
+| `src/class-admin-classes.js` | +39 −? | `adminIssueBindCode` 增加回 `matrix/size/version/scanUrl`（调 `bindQrOfTicket`），旧字段一个不动 |
+| `src/class-admin.js` | +1 −1 | `adminIssueBindCode(...)` 多传 `req`（拼扫码地址要看请求 Host） |
+| `src/bind.html` | 266 → **296** | kind=class 显示设备列表 + 6 位码兜底；`submit()` 带 `body.uid` |
+
+### 13.4 关键设计（为什么这么做）
+
+- **票是唯一凭据**：`class-scan` 进 `TICKET_ONLY_CHANNELS`，`requireManage:false`。
+  班级 / 租户**全从票里取，绝不读请求体**——否则匿名手机页就是一条跨租户绕道。
+- **七道拒**（`classScanDecide`）：`BAD_TICKET` / `TICKET_USED` / `TICKET_EXPIRED` /
+  `NO_UID` / `DEVICE_UNKNOWN` / `DEVICE_BOUND` / `CROSS_TENANT`。
+- **候选清单脱敏**：只回 `{uid,name,online}`，且只列「同租户 + 未分班」的设备。
+- **删掉 confirm 的提前返回**：原 `t.state==='bound'` 直接回成功是个安全洞
+  （攻击者可换设备拿假成功），改由核心判一次性。
+- **namePin 为什么必须有**：`registry.markConnected` 是「设备自报名优先」，
+  被控端每次重连都报 `QHostInfo::localHostName()` ⇒ 管理端改的名字下一次重连就被顶回去，
+  功能看起来像没做。改名时同登记 `namePin`，register 落 meta 前 `applyNamePin` 覆盖。
+
+### 13.5 验证证据（实跑）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 纯逻辑 | `node tests/regression-class-scan.mjs` | **26 通过 / 0 失败 · 反向验证 PASS**（坏版本红 2 条） |
+| 端到端 | `node tests/regression-bind-unify.mjs` | **16 通过 / 0 失败** |
+| 端到端反向 | `node tests/regression-bind-unify.mjs --reverse` | **14 通过 / 2 失败**（⑮⑯ 变红）⇒ 非假阴性 |
+| 生产零污染 | `grep -c` 生产 `events.log` | 测试假数据 0 命中（隔离 `mkdtempSync` + 环境变量前置） |
+| 语法 | `node --check` × 4 文件 | 全过 |
+
+**测试隔离的关键坑**：`src/config.js` 在**模块评估期**读死 `EVENTS_FILE`/`CLASS_DIR_DB_FILE`，
+所以必须**先设环境变量、再 `await import()`**（静态 `import` 会被 hoist 到前面 ⇒ 隔离失效、写脏生产库）。
+
+**反向验证的关键坑**：坏版本抽掉判据后会放行到 `bindDeviceCore` → `resolveClassCode`，
+独立 `data:` 模块没有初始化 class-dir ⇒ 抛异常逃逸、整个反向验证判 FAIL。
+修法：每条探针 `try/catch`、异常计为红（异常本身就是"放行了本该拒的设备"的正确信号）。
+
+### 13.6 未验证（如实声明）
+
+- **生产 8788 未重启**：跑的是 2026-11-03 18:25 的进程，不含本批任何改动
+  （实测 `POST /api/class/bindcode` 不回 `matrix`；隔离实例同源码则正常回 `size=29 version=3`）。
+  按铁律 4 未动生产进程。
+- 真手机扫码绑定的**真人端到端**未做（只有 HTTP 层 ⑮⑯ 覆盖）。
+- 设备改名后的 namePin 在**设备真实重连**时是否真顶住自报名，未做真实设备验证
+  （只有单元级 `applyNamePin` 断言）。
+- `bind.html` 在手机浏览器的实际版式未截图核对。

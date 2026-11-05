@@ -25,7 +25,12 @@ import { currentAgentPackage, currentViewerPackage, buildProvisionBat, recordPro
   recentProvision, resolveAsset, agentWsUrl, viewerWsUrl } from './provision.js';
 import { ensureQmlPatch, qmlPatchManifest, qmlPatchZipPath } from './qml-patch.js';
 // 设备绑定（2026-10-20）：二维码矩阵生成 + 一次性绑定票据（零依赖，自带单测）
-import { makeQrMatrix, issueDeviceBind, issueClassBind, getTicket, markBound, pollDeviceBind } from './bind-qr.js';
+import { issueDeviceBind, getTicket, pollDeviceBind } from './bind-qr.js';
+// 绑班唯一核心（2026-11-05）：四条绑班路收敛到 bindDeviceCore，口径只有一处（bind-api.js 头注）
+import { bindDeviceCore, bindReply, bindOriginOf, bindQrOfTicket, readBody,
+  classScanCandidates, classScanBind } from './bind-api.js';
+// 设备身份（2026-11-05）：改名 + 同名判定 + 改名钉住（防重连被自报主机名顶回）
+import { applyNamePin, markNameConflicts, handleDeviceRename } from './device-identity.js';
 import { hitRate, clientIp } from './ratelimit.js';
 // 噪音存证（2026-10-30 · P0-2 云端）：事件接收 + 图片 5 分钟到期 + 元数据长期 + 按班鉴权
 import { storeNoiseIncident, listNoiseIncidents, readNoiseEvidence, sweepExpiredNoise } from './noise-evidence.js';
@@ -263,15 +268,15 @@ import {
   duplexActive, sendAudioToTeacher,
   broadcastScreenToAgents, setScreenBroadcasting, isScreenBroadcasting,
   // 2026-10-08 分班制 + 已知设备表 + 云端存储信息
-  setDeviceMeta, getDeviceRole, getDeviceTenant,
-  bindDeviceToClass, unbindDeviceFromClass, listClasses, getDevicesOfClass,
-  notifyClassBoundIfOnline,
+  getDeviceRole, getDeviceTenant,
+  listClasses, getDevicesOfClass,
   getStorageInfo, isClassCodeValid, hydrateClassesFromDir,
   recomputeDeviceEnv,
   getVncAccess, setVncAccess, verifyVncPassword,
 } from './registry.js';
 // 班级身份唯一真源（2026-10-20）：码/名/别名的解析与落盘。所有绑班入口只认它。
-import { initClassDir, resolveClassCode, registerExternalCode, listClassDir, classDirSize } from './class-dir.js';
+// 2026-11-05：resolveClassCode 已随绑班逻辑搬进 bind-api.js（入口层不再直接归一）。
+import { initClassDir, listClassDir, classDirSize } from './class-dir.js';
 // 班级房间（2026-10-24 持久房间）：消息历史 + 成员表，落 class-room.db。
 // 「每班一个永不停息的子服务器」的落地形态，物理上是一个持久房间而非一个进程。
 import { initClassRoom } from './class-room.js';
@@ -1069,7 +1074,14 @@ const server = http.createServer((req, res) => {
     const visible = filterDevices(ident, listDevices(), undefined, (d) => (d && d.tenantId) || null);
     // 2026-10-20（RBAC 第二批）：字段脱敏 —— 受限身份一律剥 ip/mac 系字段
     // （老师/助教不拿敏感字段；当前 listDevices 本就不含 ip/mac，此为防御性守卫）。
-    return send(200, { ok: true, count: visible.length, devices: maskDevices(ident, visible) });
+    // 2026-11-05（设备去重）：每台多一个 nameConflict —— 同租户内还有别的设备同名。
+    //   为什么不落在 registry.listDevices：那里是"设备表裸数据"，而冲突是**按租户**的语义
+    //   （两校各有「1班讲台」不算冲突），租户口径属于权限层，写进 listDevices 会被
+    //   /ws 广播与运维诊断一起带上错口径。标记在 HTTP 出口做，存量数据一条不改。
+    return send(200, {
+      ok: true, count: visible.length,
+      devices: maskDevices(ident, markNameConflicts(visible)),
+    });
   }
 
   // ── 2026-10-20 · RBAC 第二批：用户 claims 管理（云端回填存储的运维面）────────
@@ -1231,7 +1243,8 @@ const server = http.createServer((req, res) => {
   //    能看出「哪些站点 class_id 归到哪个班」，属于管理面信息。
   const isViewerApi = u.pathname === '/api/storage' || u.pathname === '/api/classes'
     || u.pathname === '/api/classes/dir'
-    || u.pathname === '/api/device/bind-class' || u.pathname === '/api/me/classes'
+    || u.pathname === '/api/device/bind-class' || u.pathname === '/api/device/rename'
+    || u.pathname === '/api/me/classes'
     || u.pathname === '/api/env/test-whitelist'   // 2026-10-24 环境白名单（viewer 面板可看可改）
     || u.pathname.startsWith('/api/class/');   // 2026-10-24 班级管理四路由（/api/class/ 前缀不撞 /api/classes）
   if (isViewerApi) {
@@ -1343,38 +1356,45 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'POST' && u.pathname === '/api/device/bind-class') {
     // 管理端把某设备绑到某班（或改绑）。body: { uid, classCode, className? }，也兼容 query。
-    // ⚠️ 2026-10-13 修：原来这行写 `JSON.parse(String(data))`，而**该作用域里根本没有 data**
-    //    （全文件另一个 data 在 WS 作用域），`String(data)` 抛 ReferenceError 被右侧空 catch
-    //    吞掉 ⇒ body 恒为 {}，**JSON body 从来没被读过**，按注释用 body 调用的客户端只会拿到
-    //    「缺 uid」而且悄无声息（正是本文件反复强调禁止的 fail-silent）。改为真正读 body。
-    let raw = '';
-    req.on('data', (c) => { raw += c; if (raw.length > 1e4) req.destroy(); });
-    req.on('end', () => {
-      let body = {};
-      try { body = JSON.parse(raw || '{}'); } catch { /* 非法 JSON → 走 query */ }
-      const uid = String(body.uid ?? u.searchParams.get('uid') ?? '').trim();
-      const classCode = String(body.classCode ?? u.searchParams.get('classCode') ?? '').trim();
-      const className = String(body.className ?? u.searchParams.get('className') ?? '').trim();
-      if (!uid) return send(400, { ok: false, error: '缺 uid' });
-      // 2026-10-20（班级真源统一）：允许**只给班级名**——管理台手里常常只有「高二(3)班」，
-      // 没有内部码。统一解析器负责同码/同名/别名归一，管理台不必先查一遍码再下发。
-      // ⚠️ 2026-11-02：解析**必须带租户**。不带的话两所学校都用「高二(3)班」这个名字时，
-      //   后绑的那台会并进先登记那个学校的班（lookup 是 (租户,码/名) 的复合键，不传就全落默认租户）。
-      const tn = classTenantFor(identityFromAuth(req.__auth), classCode || className);
-      const resolved = resolveClassCode({ code: classCode, name: className, source: 'admin', tenantId: tn });
-      if (!resolved.ok) {
-        const msg = (classCode || className)
-          ? '班级码格式不合法（需 6-16 位字母数字或 -_）'
-          : '缺班级（班级码或班级名至少给一个）';
-        return send(400, { ok: false, error: msg });
-      }
-      const r = bindDeviceToClass(resolved.code, uid, className, 'cloud', tn);
-      // G4（2026-10-24）：设备在线就立刻下发 class-bound，被控端更新 classcode.txt
-      //   ⇒ 缩略图上报随即开工（它要求 classCode 非空）。否则要等设备重连才知道。
-      if (r.ok) notifyClassBoundIfOnline(uid, r.classCode, r.class.name);
-      return send(r.ok ? 200 : 400, { ok: r.ok, ...r });
+    // 2026-11-05（绑班唯一核心）：本段原来内联了"解析班级码 + 解析租户 + 绑班 + 下发"整套，
+    //   **漏了 canManageMembers 与重认证门** —— 任何持 viewer 令牌/票据者能把任意设备塞进
+    //   任意班，跨租户也拦不住（真阳性权限绕道）。现在整段业务搬进 bind-api.bindDeviceCore，
+    //   权限、租户、票的一次性、G4 下发全由那一处统一裁决；本处只做「读 body → 调核心 → 回执」。
+    //   重认证门与 /api/class/* 同口径（绑班是写操作，一张没验证过的旧票不该能改班级归属）。
+    const whoBC = req.__auth || {};
+    if (whoBC.mode === 'ticket' && !isFresh(whoBC.uid, REAUTH_INTERVAL_MS)) {
+      pushEvent('warn', '管理端重认证拦截：绑定班级需重新验证', { uid: whoBC.uid });
+      return send(403, { ok: false, ecode: 'AU1002', code: 'REAUTH_REQUIRED', error: '需要重新验证密码后再操作' });
+    }
+    return readBody(req, (body) => {
+      const b = body || {};
+      const o = bindDeviceCore({
+        channel: 'admin',
+        uid: String(b.uid ?? u.searchParams.get('uid') ?? '').trim(),
+        classCode: String(b.classCode ?? u.searchParams.get('classCode') ?? '').trim(),
+        className: String(b.className ?? u.searchParams.get('className') ?? '').trim(),
+        ident: identityFromAuth(req.__auth),
+        // 租户沿用既有口径：该班已归属唯一租户就用它，否则用调用方租户（新班落建班人租户）
+        tenantId: classTenantFor(identityFromAuth(req.__auth),
+          String(b.classCode ?? u.searchParams.get('classCode')
+            ?? b.className ?? u.searchParams.get('className') ?? '').trim()),
+        source: 'admin',
+      });
+      const r = bindReply(o);
+      return send(r.status, r.body);
     });
-    return;
+  }
+
+  // ── 设备身份（2026-11-05）：改名 + 同名判定 ────────────────────────────
+  // 这是**写操作**：必须过重认证门（与 /api/class/* 同一口径），否则一张没验证过的旧票
+  // 就能改全网设备名。判权（按设备班级 canAccess）在 device-identity 里。
+  if (req.method === 'POST' && u.pathname === '/api/device/rename') {
+    const who = req.__auth || {};
+    if (who.mode === 'ticket' && !isFresh(who.uid, REAUTH_INTERVAL_MS)) {
+      pushEvent('warn', '管理端重认证拦截：设备改名需重新验证', { uid: who.uid });
+      return send(403, { ok: false, ecode: 'AU1002', code: 'REAUTH_REQUIRED', error: '需要重新验证密码后再操作' });
+    }
+    return handleDeviceRename(req, res, u, send, identityFromAuth(who));
   }
 
   // ── 被控端访问密码（2026-10-26）：设置/清除 + 查询状态 ──
@@ -1587,14 +1607,8 @@ const server = http.createServer((req, res) => {
 
   // 扫出来的地址必须是**手机能访问**的公网地址。优先用请求自己的 Host（反代会带
   // x-forwarded-proto），必要时用 STE_BIND_PUBLIC_ORIGIN 显式覆盖（自建/内网调试）。
-  function bindOrigin() {
-    const explicit = String(process.env.STE_BIND_PUBLIC_ORIGIN || '').trim();
-    if (explicit) return explicit.replace(/\/+$/, '');
-    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').trim();
-    if (!host) return '';
-    const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
-    return `${proto}://${host}`;
-  }
+  // 2026-11-05：实现搬进 bind-api.bindOriginOf —— 班级码也要拼同一个扫码地址，
+  // 两处各算一遍必然漂移（一处带端口一处不带，扫出来就打到别的端口）。
 
   // 老师手输"班级名称"时，服务端要给它一个稳定的班级码 —— 这件事**只有 class-dir.js 一处实现**
   // （2026-10-20 统一）。这里原来有个内联 deriveClassCode：先查同名班、否则 sha256 派生。
@@ -1611,25 +1625,20 @@ const server = http.createServer((req, res) => {
     const uid = String(u.searchParams.get('uid') || '').trim();
     const issued = issueDeviceBind(uid);
     if (!issued.ok) return send(400, { ok: false, error: issued.error });
-    const origin = bindOrigin();
-    const scanUrl = origin ? `${origin}/bind?c=${issued.ticket.code}` : '';
-    let qr;
-    try {
-      // 内容就是落地页地址：扫码即打开手机页，不需要老师装任何 App。
-      // 拿不到 origin 时退化成一个短内容（只放码），保证矩阵仍能生成 —— 但这时
-      // 扫码打开不了落地页，所以同时把 scanUrl 留空让调用方知道降级了。
-      qr = makeQrMatrix(scanUrl || issued.ticket.code);
-    } catch (e) {
-      pushEvent('warn', '二维码生成失败', { uid, error: String(e.message || e) });
+    // 二维码与扫码地址统一由 bind-api 算（内容就是落地页地址，扫码即打开手机页，
+    // 不需要老师装任何 App）。班级码走的是同一个函数 —— 两处各拼一次必然漂移。
+    const qr = bindQrOfTicket(issued.ticket, '', req);
+    if (!qr.matrix) {
+      pushEvent('warn', '二维码生成失败', { uid, error: qr.qrError });
       return send(500, { ok: false, error: '二维码没能生成出来，请稍后重试或改用「输入绑定码」' });
     }
     return send(200, {
       ok: true,
       code: issued.ticket.code,
-      matrix: qr.rows,
+      matrix: qr.matrix,
       size: qr.size,
       version: qr.version,
-      scanUrl,
+      scanUrl: qr.scanUrl,
       expiresAt: issued.ticket.expireAt,
       ttlSec: Math.round((issued.ticket.expireAt - Date.now()) / 1000),
     });
@@ -1673,13 +1682,12 @@ const server = http.createServer((req, res) => {
       });
     }
     if (t.uid && t.uid !== uid) return send(409, { ok: false, error: '这个绑定码属于另一台设备' });
-    // 2026-11-02 多租户：租户从**票**里取（发码时已钉死），不再按 classCode 反查 ——
-    // 两校同码时反查是歧义的，反查不到就会把设备绑进默认组织（跨校串班）。
-    const bind = bindDeviceToClass(t.classCode, uid, t.className, 'cloud',
-                                     normalizeTenantId(t.tenantId));
-    if (!bind.ok) return send(400, { ok: false, error: bind.error });
-    markBound(code, { classCode: t.classCode, className: bind.class.name, uid });
-    return send(200, { ok: true, classCode: t.classCode, className: bind.class.name || t.className || '' });
+    // 2026-11-05（绑班唯一核心）：本体交给 bind-api.bindDeviceCore —— 班级/租户取**票里钉死**的，
+    //   绑班 + 在线下发 + markBound 一处裁决。上面几条前置判断保留，因为它们是设备端
+    //   三种不同提示（换码 / 换设备 / 去扫码），属于回执差异，不是绑班逻辑。
+    const core = bindDeviceCore({ channel: 'code', uid, ticket: t, source: 'cloud' });
+    if (!core.ok) return send(400, { ok: false, code: core.code, error: core.error });
+    return send(200, { ok: true, classCode: core.classCode, className: core.className });
   }
 
   // 手机落地页
@@ -1723,57 +1731,41 @@ const server = http.createServer((req, res) => {
       classCode: t.classCode || '',
       className: t.className || '',
       deviceUid: t.kind === 'device' ? t.uid : '',
-      // 管理员码（kind=class）没有设备身份可用 ⇒ 手机页不提供"确认绑定"，
-      // 改为把 6 位码显示出来让老师回大屏敲（见 bind.html）。
-      needsDeviceInput: t.kind === 'class',
       expiresAt: t.expireAt,
-      // 只回老师点名要选的东西：班级名与在线数，不回设备清单
+      // 管理员码（kind=class）：手机扫后选一台同租户未分班设备直接绑（6 位码仍可回大屏输）。
+      devices: t.kind === 'class' ? classScanCandidates(listDevices(), t) : [],
+      // 只回老师点名要选的东西：班级名与在线数，不回全平台设备清单
       classes: listClasses(infoTenant).map((c) => ({ code: c.code, name: c.name, onlineCount: c.onlineCount })),
     });
   }
 
   if (req.method === 'POST' && u.pathname === '/api/bind/confirm') {
-    let raw = '';
-    req.on('data', (c) => { raw += c; if (raw.length > 4e3) req.destroy(); });
-    req.on('end', () => {
-      let body = {};
-      try { body = JSON.parse(raw || '{}'); } catch { /* 非法 JSON → 走 query */ }
-      const code = String(body.code ?? u.searchParams.get('c') ?? '').trim();
+    return readBody(req, (body) => {
+      const b = body || {};
+      const code = String(b.code ?? u.searchParams.get('c') ?? '').trim();
       const t = getTicket(code);
       if (!t) return send(410, { ok: false, error: '绑定码已过期，请回到教室电脑上刷新二维码' });
-      if (t.state === 'bound') {
-        return send(200, { ok: true, alreadys: true, classCode: t.classCode, className: t.className });
-      }
+      // 已绑票的幂等/换设备拒绝统一在 bindDeviceCore / classScanBind 里判 ——
+      // 入口层不提前回 ok:true，否则换设备重试会拿到「假成功」（本文件反复禁止）。
       if (t.kind === 'class') {
-        // 管理员码是"给设备敲的"：手机扫它没有设备身份可用（票里没 uid），
-        // 所以这里**不能**假装绑定成功（那也是本文件反复禁止的假成功）。
-        // 手机页会直接显示这 6 位码，让老师回教室电脑上敲。
-        return send(400, {
-          ok: false,
-          error: '这个绑定码要在教室电脑上输入，请回到大屏按提示操作',
-        });
+        // 班级码扫码选设备：候选清单只来自云端 listDevices()，判权全在 classScanBind 里。
+        const r = bindReply(classScanBind(t, b.uid, listDevices()));
+        if (!r.body.ok) return send(r.status, { ok: false, error: r.body.error, code: r.body.code });
+        return send(200, { ok: true, uid: r.body.uid, classCode: r.body.classCode, className: r.body.className });
       }
-      // kind='device'：班级由老师在手机上选/填
-      let classCode = String(body.classCode ?? '').trim();
-      const className = String(body.className ?? '').trim();
-      // 2026-11-02 多租户：设备自助码绑定 —— 租户只能取**设备当前归属**，不取请求参数。
-      // 设备还没归属过 ⇒ 默认组织（存量数据的唯一落点）。
-      const devTenant = normalizeTenantId(getDeviceTenant(t.uid));
-      // 统一解析（2026-10-20）：选了已有班 / 输了新班名 / 带了个外部码，都归一到同一个 canonical。
-      // 不再有"派生码与站点 class_id 并行"的第二个发行方。
-      const resolved = resolveClassCode({ code: classCode, name: className, source: 'device', tenantId: devTenant });
-      if (!resolved.ok) {
-        const msg = (!classCode && !className) ? '请选择一个班级，或输入班级名称' : resolved.error;
-        return send(400, { ok: false, error: msg });
-      }
-      classCode = resolved.code;
-      const bind = bindDeviceToClass(classCode, t.uid, className, 'cloud', devTenant);
-      if (!bind.ok) return send(400, { ok: false, error: bind.error });
-      const finalName = bind.class.name || className || classCode;
-      markBound(code, { classCode, className: finalName });
-      return send(200, { ok: true, classCode, className: finalName });
+      // kind='device'：班级由老师在手机上选/填。租户只能取**设备当前归属**（不取请求参数），
+      // 设备还没归属过 ⇒ 默认组织。
+      const core = bindDeviceCore({
+        channel: 'device', uid: t.uid, ticket: t,
+        classCode: String(b.classCode ?? ''), className: String(b.className ?? ''),
+        tenantId: normalizeTenantId(getDeviceTenant(t.uid)), source: 'device',
+      });
+      const r = bindReply(core);
+      // 这一路给的是手机网页（bind.html），只要 ok/error/className/classCode 四个字段，
+      // 失败时把核心的人话原样带出去 —— 不再另写一套提示语。
+      if (!r.body.ok) return send(r.status, { ok: false, error: r.body.error, code: r.body.code });
+      return send(200, { ok: true, classCode: r.body.classCode, className: r.body.className });
     });
-    return;
   }
 
   // ── 互动数据（2026-10-15 · 灵动岛扩展组件6）──
@@ -3211,6 +3203,9 @@ wss.on('connection', (ws, req) => {
         // 之后以云端 knownDevices 为准 —— 归一逻辑在 registry.normalizeDeviceRole。
         role: (p.payload && typeof p.payload.role === 'string') ? p.payload.role : null,
       };
+      // 2026-11-05（改名去重）：管理员在后台改过的名字要**钉住** —— 否则设备每次重连都
+      // 自报一次主机名，registry.markConnected 里 "meta.name 优先" 就把管理员的改名顶回去。
+      applyNamePin(uid, regMeta);
       markConnected(uid, String(version || ''), ws, regCaps, regMeta);
       // 班级域（2026-10-23 · #458）：该设备所在班的订阅者收到 member.online
       // （班级归属取云端 knownDevices 表，设备没绑班时模块内静默跳过）

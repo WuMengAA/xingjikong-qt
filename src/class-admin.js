@@ -72,7 +72,8 @@ export function handleClassAdminApi(req, res, u, send, ident = null) {
         r = adminMyClasses(ident);
       } else if (action === 'bindcode') {
         // 班级接入码（2026-10-25 收归我方）：发码 / 作废。权限同 member-*。
-        r = adminIssueBindCode(String(body.classCode ?? ''), ident);
+        // 2026-11-05：多传 req —— 回执要带二维码矩阵，扫码地址得看请求自己的 Host（含反代头）。
+        r = adminIssueBindCode(String(body.classCode ?? ''), ident, req);
       } else if (action === 'bindcode-revoke') {
         r = adminRevokeBindCode(String(body.code ?? ''), ident);
       } else if (action === 'publish') {

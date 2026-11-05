@@ -13,7 +13,7 @@
 
 import { resolveClassCode, renameClass, deleteClass, getClass } from './class-dir.js';
 import {
-  bindDeviceToClass, unbindDeviceFromClass, listClasses, notifyClassBoundIfOnline, pushEvent,
+  unbindDeviceFromClass, listClasses, notifyClassBoundIfOnline, pushEvent,
   dropClassIndex, sendToClassDevices,
 } from './registry.js';
 import { dropClassSubs, pushClassEvent } from './class-events.js';
@@ -25,6 +25,7 @@ import { canAccess } from './perms.js';
 import { dropClassData } from './class-data.js';
 import { dropClassAttendance } from './class-attendance.js';
 import { issueClassBind, getTicket, revokeTicket } from './bind-qr.js';
+import { bindDeviceCore, bindQrOfTicket } from './bind-api.js';
 import { tenantOf, findClass, crossTenantHint, canManageMembers, canReadClass } from './class-admin-shared.js';
 
 /* 发布卡片类型白名单（2026-11-02 拆分回归修复）。
@@ -136,20 +137,22 @@ export function adminUnbindDevice(code, uid, ident = null) {
 
 /**
  * 入班/换班：把一台设备绑到某班（在线即下发 class-bound，G4）。
- * 与 index.js 的 /api/device/bind-class 同一实现；给 /api/class/bind 是为了
- * 让管理端四个班级写操作同走 /api/class/ 前缀（QML 侧一个 ClassAdmin 打全部）。
+ * 2026-11-05（用户点单「绑定逻辑多路接口统一成一个核心 API」）：本体搬进
+ * bind-api.bindDeviceCore(channel='admin')——与 /api/device/bind-class、
+ * 设备输码、手机扫码四条路共用一套判权与一套回执。本函数只剩"挑渠道 + 转回执形状"。
+ * 回执字段保持原样（ok/classCode/name），改这里会打断管理端四个班级写操作的调用方。
  */
 export function adminBindDevice(code, uid, name = '', ident = null) {
   const c = String(code ?? '').trim();
   const u = String(uid ?? '').trim();
   if (!c || !u) return { ok: false, error: '缺班级码或 uid' };
-  const tn = tenantOf(ident);
-  if (!canManageMembers(ident, c)) return { ok: false, error: '无权限管理该班' };
-  const r = bindDeviceToClass(c, u, name, 'cloud', tn);
-  if (!r.ok) return r;
-  notifyClassBoundIfOnline(u, r.classCode, r.class.name);
-  pushEvent('info', '管理端将设备加入班级', { classCode: r.classCode, uid: u });
-  return { ok: true, classCode: r.classCode, name: r.class.name };
+  const core = bindDeviceCore({
+    channel: 'admin', uid: u, classCode: c, className: String(name ?? ''),
+    ident, tenantId: tenantOf(ident), source: 'cloud',
+  });
+  if (!core.ok) return { ok: false, code: core.code, error: core.error };
+  pushEvent('info', '管理端将设备加入班级', { classCode: core.classCode, uid: core.uid });
+  return { ok: true, classCode: core.classCode, name: core.className };
 }
 
 /**
@@ -247,7 +250,7 @@ export function adminMyClasses(ident) {
  * 不复用 /api/admin/bindcode：那是管理面路由、全项目零调用者，已随本批删除；
  * 班级域的事归 /api/class/*，鉴权口径也才和面板其他地方一致。
  */
-export function adminIssueBindCode(code, ident = null) {
+export function adminIssueBindCode(code, ident = null, req = null) {
   const c = String(code ?? '').trim();
   if (!c) return { ok: false, error: '缺班级码' };
   const { hit, tn } = findClass(c, ident);
@@ -259,8 +262,13 @@ export function adminIssueBindCode(code, ident = null) {
   pushEvent('info', '已生成班级接入码', {
     classCode: hit.code, code: t.code, by: ident?.uid ?? 'system',
   });
-  // 不回 matrix：接入码是给**设备输**的（6 位无歧义字符），手机扫它也没有设备身份
-  // 可用（bind.html 对 kind=class 只把码显示出来）。少算一次 QR = 少一处能错的地方。
+  // 2026-11-05（用户点单「确保我可以扫码或输入…绑定码」）：**同时回二维码矩阵**。
+  // 原注释「不回 matrix，少算一次 QR = 少一处能错的地方」的前提已不成立 ——
+  // 现在同一张码既要能敲（6 位无歧义字符）也要能扫（落到 /bind 页显示这 6 位），
+  // 贴一张纸两种用法都要支持；且 bind-api 已把矩阵生成做成"失败不影响发码"。
+  // 旧字段一个不动，只增 matrix/size/version/scanUrl（qrError 仅失败时出现）。
+  // req 用来拼扫码地址（反代头 / STE_BIND_PUBLIC_ORIGIN），传不到就退回码本身当内容。
+  const qr = bindQrOfTicket(t, '', req);
   return {
     ok: true,
     classCode: hit.code,
@@ -269,6 +277,11 @@ export function adminIssueBindCode(code, ident = null) {
     expiresAt: t.expireAt,
     // 供 UI 显示"还剩多久"：秒数比时间戳好渲染，且不受两端时钟漂移影响太大。
     ttlSec: Math.max(0, Math.round((t.expireAt - Date.now()) / 1000)),
+    matrix: qr.matrix,
+    size: qr.size,
+    version: qr.version,
+    scanUrl: qr.scanUrl,
+    ...(qr.qrError ? { qrError: qr.qrError } : {}),
   };
 }
 

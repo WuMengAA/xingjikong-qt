@@ -119,6 +119,13 @@
       <input type="text" id="newName" placeholder="输入班级名称，例如 高二8班" autocomplete="off" maxlength="20">
     </div>
 
+    <!-- 班级接入码（kind=class）：手机扫后选一台同校未分班设备直接绑；
+         上面 bigCode 仍显示 6 位码，作为「回大屏敲码」兜底入口。 -->
+    <div id="devicePickWrap" class="hidden">
+      <p class="label">选择要绑定到「<span id="bindClassName"></span>」的设备</p>
+      <div class="classes" id="deviceList"></div>
+    </div>
+
     <div style="height:24px"></div>
     <button id="confirmBtn">确认绑定</button>
   </div>
@@ -135,7 +142,7 @@
 (function () {
   var qs = new URLSearchParams(location.search);
   var code = (qs.get('c') || '').trim().toUpperCase();
-  var state = { info: null, selected: '' };
+  var state = { info: null, selected: '', selectedDevice: '', kind: '' };
 
   function el(id) { return document.getElementById(id); }
   function show(id) {
@@ -173,21 +180,41 @@
         return;
       }
       state.info = data;
+      state.kind = data.kind || '';
       show('panel');
       if (data.deviceUid) {
         el('deviceBox').style.display = 'flex';
         el('deviceCode').textContent = data.deviceUid;
       }
 
-      if (data.needsDeviceInput) {
-        // 管理员按班生成的码：票里没有设备身份 ⇒ 手机端绑定不了，
-        // 老老实实告诉老师"回大屏敲这 6 位"，绝不假装成功。
-        el('title').textContent = '请在设备端上输入这个绑定码';
-        el('subtitle').textContent = '这个码对应「' + (data.className || data.classCode) + '」';
+      if (state.kind === 'class') {
+        // 班级接入码：手机扫后选一台同校未分班设备直接绑；6 位码同时保留，
+        // 老师也可以在教室电脑上手动输码（/api/device/activate 那条路没变）。
+        el('title').textContent = '选一台设备，绑定到这个班';
+        el('subtitle').textContent = '目标班级「' + (data.className || data.classCode) + '」· 也可以在大屏上输入下面这 6 位码';
         el('bigCode').textContent = data.code || '';
         el('bigCode').style.display = 'block';
         el('pickWrap').classList.add('hidden');
-        el('confirmBtn').classList.add('hidden');
+        el('devicePickWrap').classList.remove('hidden');
+        el('bindClassName').textContent = data.className || data.classCode || '';
+        var dlist = el('deviceList');
+        var candidates = data.devices || [];
+        if (!candidates.length) {
+          dlist.innerHTML = '<div class="sub" style="text-align:left;margin:0">这个学校暂时没有可分班的在线设备，请先让设备连上云端，或回大屏手动输入绑定码。</div>';
+        }
+        candidates.forEach(function (d) {
+          var node = document.createElement('div');
+          node.className = 'cls';
+          node.innerHTML = '<span class="dot"></span><span class="n"></span><span class="meta"></span>';
+          node.querySelector('.n').textContent = d.name || d.uid;
+          node.querySelector('.meta').textContent = d.online ? '在线' : '离线';
+          node.addEventListener('click', function () {
+            Array.prototype.forEach.call(dlist.querySelectorAll('.cls'), function (x) { x.classList.remove('sel'); });
+            node.classList.add('sel');
+            state.selectedDevice = d.uid;
+          });
+          dlist.appendChild(node);
+        });
       } else if (data.classCode) {
         // 兼容：码里已带班级（未来若允许"设备码 + 预置班级"）
         el('title').textContent = '确认绑定到「' + (data.className || data.classCode) + '」？';
@@ -229,7 +256,10 @@
 
   function submit() {
     var body = { code: code };
-    if (state.selected) {
+    if (state.kind === 'class') {
+      if (!state.selectedDevice) { fail('请先选一台要绑定的设备。'); return; }
+      body.uid = state.selectedDevice;
+    } else if (state.selected) {
       body.classCode = state.selected;
     } else {
       var name = (el('newName').value || '').trim();
