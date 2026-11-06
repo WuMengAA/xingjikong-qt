@@ -227,8 +227,47 @@
         "alpha",
         "stable"
       ]
+    },
+    "agent:0.6.68:cd7d665ea8da84c4": {
+      "product": "agent",
+      "version": "0.6.68",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.68.exe",
+      "sha256": "cd7d665ea8da84c46376da2bef02b21da0a2cedc64817a4cf992f831f0c1713c",
+      "size": 38247774,
+      "notes": "灵动岛收起条宽度随内容自适应（夹[680,1100]）；收起条新增主界面/设置两个按钮（std::function 钩子，零破账）",
+      "mandatory": false,
+      "publishedAt": "2026-11-04T05:16:13.367Z",
+      "manualTiers": [
+        "alpha"
+      ]
+    },
+    "agent:0.6.69-alpha.1:486cc0a3866422d8": {
+      "product": "agent",
+      "version": "0.6.69-alpha.1",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.69-alpha.1.exe",
+      "sha256": "486cc0a3866422d8f40ac0f8071176787978b0ade1cbf2faa16ce58beb6b93e3",
+      "size": 38271178,
+      "notes": "✨新增 岛面透明度两档可调：底色与文字分开滑\n✨新增 点岛上方空白处收岛：不占焦点也不挡课件\n🔧修复 通知跑马灯压住历史列表：超长改滚动\n🔧修复 通知红条串到下一条：改一次性消费\n🔧修复 弹幕与循环提醒绕过关开关：门控前移\n🔧修复 通知优先级永远中性：补注入提供方\n🔧修复 浅色全屏通知红底黑字看不清：改白字\n🔧修复 1024 老屏收起条伸出左边：宽度夹屏宽\n—— 代号「清账」· 通知与岛面这一轮的债全平 🟠",
+      "mandatory": false,
+      "publishedAt": "2026-11-05T01:44:44.807Z",
+      "manualTiers": [
+        "alpha"
+      ]
+    },
+    "agent:0.6.70-alpha.1:678ade130037807b": {
+      "product": "agent",
+      "version": "0.6.70-alpha.1",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.70-alpha.1.exe",
+      "sha256": "678ade130037807b58ad8fc08617e4e840203f1903adec310a0b68859622b55e",
+      "size": 38318569,
+      "notes": "✨新增 弹幕敏感词云端热更新：本机三词兜底、只增不减\n✨新增 软件内显示更新日志：两端同源、真换行原样展示\n✨新增 测试反馈入口：非强制、课间可交、可手工兜底\n✨新增 课表中心：点岛选班、本机档案完整编辑\n✨新增 本地自循环：断网自持、本机事件自动点火\n✨新增 收起条独立编辑器：长按定位、四槽可关可排序\n🔧修复 三态称谓混乱：统一展开面/收起条/空闲岛\n🔧升级 字号收令牌 + 三形态尺寸基准：三米可读\n—— 代号「自持」· 教室机自己能跑，管理端不再必需 🟠",
+      "mandatory": false,
+      "publishedAt": "2026-11-06T12:43:34.871Z",
+      "manualTiers": [
+        "alpha"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-04T01:20:51.404Z"
+  "generatedAt": "2026-11-06T12:43:34.872Z"
 }
