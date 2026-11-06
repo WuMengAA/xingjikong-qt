@@ -33,6 +33,7 @@ import { bindDeviceCore, bindReply, bindOriginOf, bindQrOfTicket, readBody,
 import { applyNamePin, markNameConflicts, handleDeviceRename } from './device-identity.js';
 import { hitRate, clientIp } from './ratelimit.js';
 import { danmakuWordsPayload, DANMAKU_WORDS_PATH } from './danmaku-words.js';   // 祝福弹幕词表（公开只读，见下）
+import { deviceGet } from './device-api.js';   // 设备侧只读总入口（课表/班级清单，见 :736）
 // 噪音存证（2026-10-30 · P0-2 云端）：事件接收 + 图片 5 分钟到期 + 元数据长期 + 按班鉴权
 import { storeNoiseIncident, listNoiseIncidents, readNoiseEvidence, sweepExpiredNoise } from './noise-evidence.js';
 import { PORT, HOST, DEV_TOKEN, DEV_TOKEN_IS_DEFAULT, HANDSHAKE_TIMEOUT_MS, SWEEP_INTERVAL_MS,
@@ -731,12 +732,10 @@ const server = http.createServer((req, res) => {
   // 必须在 isManageApi 之前（:915）返回，真源 danmaku-words.js + 同目录 danmaku-words.json。
   if (req.method === 'GET' && u.pathname === DANMAKU_WORDS_PATH) return send(200, danmakuWordsPayload());
 
-  // ── 公开只读：发布版本信息（2026-10-06 加）──────────────────────────────
-  // 给**官网下载中心**用：站点服务端来取，渲染"当前版本 / 下载地址 / sha256"。
-  // 为什么单独开一个**不带鉴权**的端点：官网是公网站点，不该持有管理端令牌；
-  // 而 /api/ota/latest 归管理面鉴权。这里只回"已经公开"的信息（版本号、公开下载 URL、
-  // 大小、sha256、说明），**不含任何令牌**，暴露了也没有额外风险。
-  // 与 ota.json 同源 → 发版时只改一处，官网自动跟着变，不需要两处各写一套。
+  // 设备侧课表只读（2026-11-06 · 用户 m08463 第 3 项）：被控端只有设备令牌，班级域 /api/class/* 恒 401，
+  // 故这里用与 /api/recordings/upload 同一套设备令牌鉴权，只回自己所在班。真源 device-timetable.js。
+  if (req.method === 'GET' && u.pathname.startsWith('/api/device/')) { const r = deviceGet(u, req, { devToken: DEV_TOKEN, verifyTicket: verifyAgentTicket }); if (r) return send(r.status, r.body); }
+
   // ── 2026-10-18 · VoiceHub 广播状态（公开只读诊断）──────────────────────
   // 为什么公开：内容就是"谁在播什么"，教室大屏本来就公开显示，不含任何令牌或个人信息
   // （publisherName 是显示名，契约明确"不要写进任何对外日志"，这里只透传不落日志）。

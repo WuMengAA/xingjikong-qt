@@ -340,3 +340,40 @@ python Stelarith-cloud\scripts\vault.py check
 - `node tests/regression-danmaku-words.mjs` **17/0 PASS**（含反向删薄壳 ⇒ 404，证明 L2 非假阴性）。
 - 未验证：生产 8788 未重启（跑 2026-11-03 旧进程，按铁律 4 不动）；真被控端拉取未端到端；
   `danmaku-words.json` 手改后真机 30min 热更新周期未实测。
+
+
+## 十五、设备侧课表只读端点（加减归档 2026-11-06 · 用户 m08463 第 3 项）
+
+### 15.1 为什么必须有这条端点
+
+- `index.js:1249` 的 `isViewerApi` 含 `/api/class/` 前缀 ⇒ 班级域全部要 `CLOUD_VIEWER_TOKEN` 或票据，
+  被控端只有 `CLOUD_WS_TOKEN`（设备令牌）恒 401。
+- 现役下放是云端**主动 push**（`class-timetable-push.js` 的 `sendToClassDevices(code,'timetable-apply')`），
+  只在班级在线且被触发时发；首次开机 / 错过推送 / 重装就再也拿不到。本批补「设备主动拉一次」。
+- 与 §十三 / §十四 同构：**不造第二套下发真源**，只读现成的 `getTimetable()` / `getDeviceClassCode()`。
+
+### 15.2 新增（删除即回退）
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `src/device-timetable.js` | 110 | `deviceTimetable({uid,classCodeOf,tenantOf,read})` 六分支（缺 uid 400 / 未分班 NO_CLASS / 有班无课表 NO_TIMETABLE / 正常 透传 profile / read 抛 500 / ok:false 400）；`deviceTimetableDefault()` 绑真源 |
+| `src/device-api.js` | 新增 | 设备侧 GET 一次分派：`/api/device/timetable`（读本班）+ `/api/device/classes`（本租户班级清单，脱敏 `code/name/onlineCount`）+ `?classCode=` 选班预览；`authDevice()`（静态 DEV_TOKEN 或 agent ticket，票里 uid 权威不可被 query 覆盖）、`teq()` 定长比较 |
+| `tests/regression-device-timetable.mjs` | 311 | 三层回归（L1 纯逻辑 / L1b 选班与鉴权 / L2 隔离实例 HTTP 8891 / L3 摘薄壳反向） |
+
+关键安全约束：班级清单**不下发 `devices` 数组**；选班预览必须校验班号在本租户清单里，
+不在回 **403 `NO_SUCH_CLASS`** 且不区分「不存在」与「跨租户」（区分等于泄露别校班号真实存在）。
+
+### 15.3 修改（薄壳，守 index.js 行数）
+
+| 文件 | 变化 | 行为差异 | 恢复 |
+|---|---|---|---|
+| `src/index.js` | `:36` import 改 `deviceGet`；`:737` 原单行薄壳改成**分派一行** `if (req.method==='GET' && u.pathname.startsWith('/api/device/')) { const r = deviceGet(u,req,{devToken:DEV_TOKEN,verifyTicket:verifyAgentTicket}); if (r) return send(r.status,r.body); }` | 设备侧新增端点只改 `device-api.js`，不再动 index.js | 退回原单行薄壳 |
+| `src/index.js` 行数 | **3561** < 台账 3562 | 守 §10.5 零余量纪律 | — |
+
+之后新增设备端点只改 `device-api.js` —— 这是把「一次分派」抽出来的全部理由（index.js 有规模门禁）。
+
+### 15.4 验证与未验证
+
+- `node tests/regression-device-timetable.mjs` **67 通过 / 0 失败**：L1 18 + L1b 20（含票优先、票 ok 但无 uid 不算通过、Bearer 大小写不敏感、跨租户班号 403）+ L2 24（隔离实例 8891，建班/写课表/绑设备/拉取 profile 逐字节一致/未分班不串班）+ L3 反向（摘薄壳 ⇒ 端点 404，相邻 `/api/plugins` 仍 200）。
+- 两个复用坑：① `config.js` 模块评估期读死 env ⇒ 隔离必须设 env 后再动态 import；② 子进程 stdout 必须落文件（Fastify 每请求一条日志灌满 PIPE 会阻塞事件循环）。
+- 未验证：生产 8788 未重启（旧进程，按铁律 4 不动）；真被控端 HTTP 拉取端到端未跑；`onlineCount` 脱敏未做真机多租户越权实测。
