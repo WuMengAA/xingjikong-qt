@@ -1,6 +1,10 @@
 /**
  * CIMS 课表/时间表供给模块（2026-10-17）
  *
+ * ★ 2026-11-09 退役（m06644）：CIMS 不再作为课表来源。本模块仅保留只读状态端点，
+ *   总开关已硬置 false（见 CFG），周期拉取与上线钩子均不再运行。迁移定案见
+ *   ai-docs/迁移-CIMS退役与课表真源-2026-11-09.md。
+ *
  * 背景（架构裁决）：ClassIsland 插件 v1.5.0.0 起零云端直连，唯一对外通道是连被控端
  * 插件宿主（ws://127.0.0.1:26789），由被控端 executeAction → PluginHost dispatch 分发。
  * 原先由插件私拉的四类 CIMS 通信（资源同步/命令轮询/状态上报/消息拉取）整体拆除后，
@@ -44,8 +48,13 @@ const ACTION_APPLY_PROFILE = 'classisland_apply_profile';
 /** 只取这三类——插件 classisland_apply_profile 的入参形状就这三个键。 */
 const WANTED_TYPES = ['ClassPlan', 'TimeLayout', 'Subjects'];
 
+// 2026-11-09 · CIMS 退役（用户 m06644）：课表真源已迁到云端 class_timetable
+// （/api/class/timetable-save 写、timetable-push 下发、被控端 pullSelfTimetable 开机补拉）。
+// 总开关硬置 false：startCimsScheduler() 与 onDeviceOnline() 首行都判 !CFG.enabled
+// 即返回 ⇒ 零改 index.js 就能停掉周期定时器与上线钩子；.env 里残留的
+// CIMS_ENABLED=true 也从此不再生效。导出/状态端点保留（管理台只读展示 enabled:false）。
 const CFG = {
-  enabled: (process.env.CIMS_ENABLED || 'false').trim() === 'true',
+  enabled: false,
   baseUrl: (process.env.CIMS_BASE_URL || 'http://127.0.0.1:8096').replace(/\/+$/, ''),
   baseDomain: (process.env.CIMS_BASE_DOMAIN || 'localhost').trim(),
   slug: (process.env.CIMS_SLUG || 'demo-class').trim(),
