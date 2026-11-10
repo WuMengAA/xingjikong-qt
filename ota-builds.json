@@ -292,8 +292,21 @@
       "manualTiers": [
         "alpha"
       ]
+    },
+    "agent:0.6.71-alpha.3:045e85c8c67a535d": {
+      "product": "agent",
+      "version": "0.6.71-alpha.3",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.71-alpha.3.exe",
+      "sha256": "045e85c8c67a535d6ef72fe1dd37e16ed0fe22f8692b9f5291b0ca50b2f24297",
+      "size": 37687857,
+      "notes": "修复 · 点击/滑动卡顿（活动节流120ms）· 整周课表1s缓存 · SVG图标256上限缓存 · 展开态岛宽自适应[520,900] ｜ 代号「顺流」",
+      "mandatory": false,
+      "publishedAt": "2026-11-10T17:35:21.435Z",
+      "manualTiers": [
+        "alpha"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-10T13:41:06.186Z"
+  "generatedAt": "2026-11-10T17:35:21.436Z"
 }
