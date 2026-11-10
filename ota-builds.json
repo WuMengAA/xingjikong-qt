@@ -279,8 +279,21 @@
       "manualTiers": [
         "alpha"
       ]
+    },
+    "agent:0.6.71-alpha.2:2ce8cea253937394": {
+      "product": "agent",
+      "version": "0.6.71-alpha.2",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.71-alpha.2.exe",
+      "sha256": "2ce8cea253937394cb05a7d306d51cc5a1d059c1a3ef3ffa5f10cdf9da579f3b",
+      "size": 37691591,
+      "notes": "🟢 新增 · 官方规则集 · 前台窗口与科目判据接入\n🟢 新增 · 气象预警 · 插件注入天气与降水数据\n🔵 修复 · 规则上下文 · 内置时间量统一装配\n—— 代号「定盘」· 判据有源，规则方准 🟠",
+      "mandatory": false,
+      "publishedAt": "2026-11-10T13:41:06.185Z",
+      "manualTiers": [
+        "alpha"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-07T04:21:36.494Z"
+  "generatedAt": "2026-11-10T13:41:06.186Z"
 }
