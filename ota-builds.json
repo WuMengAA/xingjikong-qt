@@ -318,8 +318,21 @@
       "manualTiers": [
         "alpha"
       ]
+    },
+    "agent:0.6.71-alpha.5:f9b765f8cbe25e88": {
+      "product": "agent",
+      "version": "0.6.71-alpha.5",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.71-alpha.5.exe",
+      "sha256": "f9b765f8cbe25e88f83e5ef02b612d4309d1dca5f534665ebcc7e5c4890c4e1c",
+      "size": 37729181,
+      "notes": "EEW 地震速报快照注入框架: 被控端 earthquake_push 分支 + USGS 适配器 CLI + 规则集联动; 插件市场条目如实化; 课程组件单一化(课表加载失败出包层修复已在位)",
+      "mandatory": false,
+      "publishedAt": "2026-11-11T14:44:42.887Z",
+      "manualTiers": [
+        "alpha"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-11T12:46:07.883Z"
+  "generatedAt": "2026-11-11T14:44:42.888Z"
 }
