@@ -305,8 +305,21 @@
       "manualTiers": [
         "alpha"
       ]
+    },
+    "agent:0.6.71-alpha.4:90fefe934c3373ec": {
+      "product": "agent",
+      "version": "0.6.71-alpha.4",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.71-alpha.4.exe",
+      "sha256": "90fefe934c3373ec2b332eb05a69777a67da5a5e72cd27480f0ed180aad41d57",
+      "size": 37727340,
+      "notes": "🟢 新增 · 课程组件单一化（列表/时段/进度条）· 官方规则集数据源 · cron 与时间状态触发器 · classisland:// 接管 · 学生自助选班 · 通知样式覆盖链 · 天气真实推送（Open-Meteo）\n🔵 修复 · 交互卡顿 120ms 节流 · 整周课表 1s 缓存 · SVG 图标缓存 · 岛宽自适应 · 出包同步补齐课程组件（课表加载失败）\n—— 代号「归流」· 判据有源，规则方准 🟠",
+      "mandatory": false,
+      "publishedAt": "2026-11-11T12:46:07.882Z",
+      "manualTiers": [
+        "alpha"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-10T17:35:21.436Z"
+  "generatedAt": "2026-11-11T12:46:07.883Z"
 }
