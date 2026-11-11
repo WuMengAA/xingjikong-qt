@@ -24,7 +24,7 @@
     "name": "地震预警（EEW）",
     "version": "1.0.0",
     "author": "Stelarith 官方",
-    "description": "接入地震预警数据源（预警信息经本地 API 注入），收到预警时在灵动岛以「强调·全屏」形态强制提醒，并联动通知中心与规则集「存在气象预警」判据。与官方《提醒》的「强调全屏 + 音效默认禁用」口径一致：预警优先级最高、默认不自动朗读。待上传下载包。",
+    "description": "被控端内置能力（0.6.71+）：运维或定时任务把 USGS 地震速报快照经 earthquake_push 指令下发，被控端校验去重后以「强调·全屏」形态强制提醒，并联动 eqAlert/eqMag/eqPlace 三个规则变量与 earthquakeReport 事件。诚实边界：USGS 是事后速报与 PAGER 灾后评估，非秒级到达前预警；ICL 无公开免费端点。音效与朗读默认禁用（官方《提醒》口径）。downloadUrl 为空是刻意的：能力已内置被控端，无需下载包。",
     "minAgentVersion": "0.6.71",
     "permissions": ["island", "notify", "ruleset"],
     "downloadUrl": ""
