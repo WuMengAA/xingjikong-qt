@@ -331,8 +331,34 @@
       "manualTiers": [
         "alpha"
       ]
+    },
+    "agent:0.6.72:33ae14d421bf87a2": {
+      "product": "agent",
+      "version": "0.6.72",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.72.exe",
+      "sha256": "33ae14d421bf87a2828b2509e66ca15b8e73488edd6a6f2b82618a27c67ddd55",
+      "size": 37740650,
+      "notes": "v0.6.72",
+      "mandatory": false,
+      "publishedAt": "2026-11-12T10:51:30.879Z",
+      "manualTiers": [
+        "alpha"
+      ]
+    },
+    "viewer:0.6.72:e35aa1e91318a788": {
+      "product": "viewer",
+      "version": "0.6.72",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-viewer-setup-0.6.72.exe",
+      "sha256": "e35aa1e91318a7884e44a5f89e98dc3ac818df8054beb264495b3c0668fbd2b6",
+      "size": 23473079,
+      "notes": "v0.6.72",
+      "mandatory": false,
+      "publishedAt": "2026-11-12T10:52:01.890Z",
+      "manualTiers": [
+        "alpha"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-11T14:44:42.888Z"
+  "generatedAt": "2026-11-12T10:52:01.891Z"
 }
