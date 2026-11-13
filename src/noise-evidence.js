@@ -27,6 +27,23 @@ const RECORDINGS_ROOT = process.env.CLOUD_RECORDINGS_DIR
 const EVIDENCE_DIR = join(RECORDINGS_ROOT, 'noise_evidence');   // 图片（5 分钟）
 const META_DIR = join(RECORDINGS_ROOT, 'noise_events');          // 元数据（长期）
 
+/**
+ * 「有数就写，没数就不写」—— 2026-11-14 修的一类事故。
+ *
+ * 旧写法是 Number(payload.x) || 0：被控端把「没测到」序列化成 JSON null
+ * （NaN 没法进 JSON），Number(null) 正好是 0，于是库里「没测到」变成了「测得 0 dB」。
+ * 后果不是显示难看，而是**判据失效**：0 dB 是环境绝对静音，与真实读数混在一起之后，
+ * 任何按 dB 做的阈值判断、排行、对照都没法信。
+ *
+ * 现在只接受「真的能解析成有限数」的输入，其余**整个字段不出现**。
+ * 上层用 Object.hasOwn(meta, 'db') 区分「有读数」与「没有读数」，语义不再丢失。
+ */
+function numOrAbsent(target, key, raw) {
+  if (raw === null || raw === undefined || raw === '') return;   // 明确没有
+  const v = Number(raw);
+  if (Number.isFinite(v)) target[key] = v;
+}
+
 function b64decode(s) {
   if (typeof s !== 'string' || !s) return null;
   try { return Buffer.from(s, 'base64'); } catch { return null; }
@@ -52,16 +69,27 @@ export function storeNoiseIncident(uid, payload = {}) {
     at: new Date(validAt).toISOString(),
     atMs: validAt,
     periodKey,
+    // hits 是有意义的自然数（0 = 没累计到），保持 0 兜底；
+    // 三个 dB 读数不同 —— 缺失与 0 是两件事，交给 numOrAbsent 决定写不写。
     hits: Number(payload.hits) || 0,
-    db: Number(payload.db) || 0,
-    baselineDb: Number(payload.baselineDb) || 0,
-    thresholdDb: Number(payload.thresholdDb) || 0,
     desktop: false,
     camera: false,
     desktopError: '',
     cameraError: '',
     expiry,
   };
+
+  numOrAbsent(meta, 'db', payload.db);
+  numOrAbsent(meta, 'baselineDb', payload.baselineDb);
+  numOrAbsent(meta, 'thresholdDb', payload.thresholdDb);
+
+  // 声学指纹（「是什么声音」，2026-11-14 起被控端会带上）。原样透传，只做类型收窄：
+  // 云端不认识声学，硬做校验只会把将来加的字段挡在门外。
+  // 关键仍是「有没有」：没有 spectrum 字段 = 这台设备还没跑带指纹的版本，
+  // 与「采到了但全是 0」必须能分开。
+  if (payload.spectrum && typeof payload.spectrum === 'object') {
+    meta.spectrum = payload.spectrum;
+  }
 
   const savedImages = [];
   const errors = [];
