@@ -1,6 +1,6 @@
 // 噪音存证（2026-10-30 · P0-2 云端）
 //
-// 职责：接收被控端发来的 noise_incident 事件（两张图 base64 + 元数据），落盘；
+// 职责：接收被控端发来的 noise_incident 事件（三张图 base64 + 元数据），落盘；
 //   · 图片仅保留 5 分钟（从触发时刻起算），到期后拉不到（读时判定 + 周期清理）；
 //   · 元数据（节次 / 次数 / 读数 / 频次依赖）长期保留。
 //
@@ -74,8 +74,12 @@ export function storeNoiseIncident(uid, payload = {}) {
     hits: Number(payload.hits) || 0,
     desktop: false,
     camera: false,
+    // 声谱图（2026-11-14）：把触发那一窗的声音画成图。它与画面证据互补 ——
+    // 屏幕在"教室很吵"这一刻常常毫无异常，而声音的形状已经把"是空调还是人"说清。
+    spectrogram: false,
     desktopError: '',
     cameraError: '',
+    spectrogramError: '',
     expiry,
   };
 
@@ -93,10 +97,15 @@ export function storeNoiseIncident(uid, payload = {}) {
 
   const savedImages = [];
   const errors = [];
+  // 字段名 → 落盘后缀。三路一致：库里只看后缀认得出是哪一张，
+  // 且 readNoiseEvidence / sweepExpiredNoise 用同一个正则，不会漏掉新加的一路。
+  // ⚠️ 后缀必须与 readNoiseEvidence 的 /-(desk|cam|spec)\.jpg$/ 保持同步 ——
+  //    两处不一致的后果是"图存了但永远读不出来"，且不会报任何错。
+  const SUFFIX = { desktop: 'desk', camera: 'cam', spectrogram: 'spec' };
   const saveImg = (field, b64, errField) => {
     const buf = b64decode(payload[field]);
     if (buf && buf.length) {
-      const fname = `${id}-${field === 'desktop' ? 'desk' : 'cam'}.jpg`;
+      const fname = `${id}-${SUFFIX[field]}.jpg`;
       const dir = join(EVIDENCE_DIR, uid);
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, fname), buf);
@@ -110,6 +119,7 @@ export function storeNoiseIncident(uid, payload = {}) {
   };
   saveImg('desktop', payload.desktop, 'desktopError');
   saveImg('camera', payload.camera, 'cameraError');
+  saveImg('spectrogram', payload.spectrogram, 'spectrogramError');
 
   // 元数据长期保留：即使两张图都抓不到，事件本身也要留（频次 / 排行依赖它）。
   const mdir = join(META_DIR, uid);
@@ -137,7 +147,7 @@ export function listNoiseIncidents(uid) {
  * 元数据里记了 expiry，读时即时判定，不依赖文件系统时间。
  */
 export function readNoiseEvidence(uid, filename) {
-  const base = filename.replace(/-(desk|cam)\.jpg$/, '');
+  const base = filename.replace(/-(desk|cam|spec)\.jpg$/, '');
   const mfile = join(META_DIR, uid, `${base}.json`);
   if (!existsSync(mfile)) return null;
   let meta;
@@ -158,7 +168,7 @@ export function sweepExpiredNoise() {
     if (!statSync(dir).isDirectory()) continue;
     const mdir = join(META_DIR, uid);
     for (const f of readdirSync(dir)) {
-      const m = /^(.*)-(desk|cam)\.jpg$/.exec(f);
+      const m = /^(.*)-(desk|cam|spec)\.jpg$/.exec(f);
       if (!m) continue;
       let expired = true;
       const metaFile = join(mdir, `${m[1]}.json`);

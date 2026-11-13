@@ -87,7 +87,16 @@ ok('事件入库', () => assert.equal(r6.ok, true));
 ok('元数据文件存在', () => assert.ok(existsSync(join(DIR, 'noise_events', 'cls_b', r6.id + '.json'))));
 ok('desktop 标 false', () => assert.equal(r6.meta.desktop, false));
 ok('两个原因都留了', () => assert.equal(r6.meta.desktopError, '锁屏'));
-ok('errors 列出两条', () => assert.equal(r6.errors.length, 2));
+// 2026-11-14：三路全失败 = **三条**原因。加了声谱图这一路之后，
+// 原来是 2 条（桌面/摄像头），现在是 3 条 —— 这条断言本身没变语义
+// （"每一路失败都要留一条原因"），只是把路数如实跟上。
+// 若哪天变成 2 条，说明声谱图那一路的失败原因被静默吞掉了。
+ok('errors 三路全失败列出三条', () => assert.equal(r6.errors.length, 3));
+ok('errors 里点名了声谱图这一路', () => {
+  assert.ok(r6.errors.some(e => e.startsWith('spectrogram:')));
+  assert.deepEqual(r6.errors.map(e => e.split(':')[0]).sort(),
+                   ['camera', 'desktop', 'spectrogram']);
+});
 
 console.log('[7] 列表按时间倒序 + 跨设备隔离');
 const r7 = storeNoiseIncident('cls_b', { at: new Date(Date.now() + 1000).toISOString() });
