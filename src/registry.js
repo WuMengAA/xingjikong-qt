@@ -18,6 +18,7 @@ import { resolveClassCode, getClass, listClassDir, listClassDirAll, tenantOfClas
 // 租户身份（2026-11-02 多租户）：设备与班级都要记「哪所学校」。
 // registry 只存归属，不解析票、不做鉴权 —— 那分别是 perms.js / index.js 的事。
 import { DEFAULT_TENANT, normalizeTenantId } from './tenant.js';
+import { shouldAutoSubscribe, watchersOf, relayBudget, idleSnapshot, pushFrameGate, resetGateState } from './frame-governance.js';
 // 环境白名单（2026-10-24）：设备是 test 还是 prod，云端唯一裁决（设备自报一律忽略）。
 import { isTestUid } from './env-gate.js';
 
@@ -415,10 +416,6 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
     recentFrame: old?.recentFrame ?? null,
     // 能力清单（2026-10-06 契合度）：被控端 register 带上来，云端**原样转给管端**，
     // 管端据此把不支持的按钮置灰，别让人点下去才吃一句"未知指令"。
-    // 重连时新包没带就沿用旧的 —— 老版本被控端发不回来，总不能让管端一见旧包
-    // 就以为这台机器"什么都不会"、把整排按钮全灰掉。
-    // 能力清单（2026-10-06 契合度）：被控端 register 带上来，云端**原样转给管端**，
-    // 管端据此把不支持的按钮置灰，别让人点下去才吃一句"未知指令"。
     // 重连时的合并口径 = **字段级沿用**，不是整包替换：
     //   · 老版本被控端压根不发 caps → 沿用旧的，不许让管端一见旧包就以为这台机器"什么都不会"
     //   · 部分上报（例如重连只带 screen）→ 没带的字段从旧值留着，不许把 input/power 抹掉
@@ -435,7 +432,9 @@ export function markConnected(uid, version, ws, caps = null, meta = null) {
   // 刚上线：之前那些"订阅/退订"它一条都没收到过（那时它不在线，全记成 warn 了）。
   // 补发一次当前的"你在被看着"结论，否则新上线会停在"没人看"上一直不抓屏。
   // 没人看时这次推送只是白跑一回 send（uids 空数组），比让它永久空转强。
-  pushWatchToAgent(String(uid || '').trim());
+  // 上线先清闸门状态：设备重启后运行期开关回落默认「开」，必须强制重算重发一次。
+  resetGateState(String(uid || '').trim());
+  pushWatchToAgent(String(uid || '').trim());   // 内部按最新 watchers 调 pushFrameGate
   // 上线 → 把最新设备表推给所有管理端（含它自己），离线状态立刻刷新（根因修复）。
   broadcastDevices();
 }
@@ -887,13 +886,12 @@ export function pushWatchToAgent(uid) {
     pushEvent('warn', '没人看这台的通知没送到设备（这台此刻不在线）', { uid: key, type: 'watch' });
     return { ok: false, watchers: -1 };
   }
-  const uids = [];
-  for (const [ws, v] of viewers) {
-    if (ws.readyState !== 1) continue;
-    if (v.subs.has(key)) uids.push(key);
-  }
+  const n = watchersOf(viewers, key);
+  const uids = n > 0 ? [key] : [];
   try {
     sendTo(d.ws, 'watch', { uids });
+    // 观看结论变化 → 让设备启/停抓屏。sendInstruction 在本文件后面定义（函数声明已提升）。
+    pushFrameGate(key, n, sendInstruction);
   } catch (e) {
     pushEvent('error', '没人看这台的通知写给设备失败', { uid: key, error: e.message });
     return { ok: false, watchers: -1 };
@@ -919,7 +917,7 @@ export function autoSubscribeViewers(uid) {
   const key = String(uid || '');
   let n = 0;
   for (const [ws, v] of viewers) {
-    if (!v.auto) continue;
+    if (!shouldAutoSubscribe(v, key)) continue;   // ★ 一个 auto 管端只补第一台，别攒 N×M 幽灵订阅
     if (ws.readyState !== 1) { viewers.delete(ws); continue; }
     v.subs.add(key);
     n++;
@@ -976,7 +974,8 @@ export function broadcastFrame(uid, buf, frameSeq = 0) {
       viewers.delete(ws);
     }
   }
-  return { hits, bytes: buf.length };
+  // 单台设备最多喂给 RELAY_FANOUT_MAX 个管端，防 N×M 扇出把云端出口打满。
+  return { hits: relayBudget(hits), bytes: buf.length };
 }
 
 /**
@@ -1311,5 +1310,6 @@ export function ensureEventsFile() {
 // 给访问器而不是 export const devices —— 后者会让任何模块都能 devices.clear()，
 // 一清就是全线设备集体掉线且不报错。Map 本身引用语义不变，调用方照样 for...of。
 export function registryDevices() { return devices; }
+export function frameIdleSnapshot() { return idleSnapshot([...devices.keys()], viewers); }
 
 export { broadcastAudioToAgents, broadcastScreenToAgents, duplexActive, isAudioBroadcasting, isScreenBroadcasting, sendAudioToTeacher, setAudioBroadcasting, setScreenBroadcasting } from './registry-media.js';
