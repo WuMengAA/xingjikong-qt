@@ -377,3 +377,84 @@ python Stelarith-cloud\scripts\vault.py check
 - `node tests/regression-device-timetable.mjs` **67 通过 / 0 失败**：L1 18 + L1b 20（含票优先、票 ok 但无 uid 不算通过、Bearer 大小写不敏感、跨租户班号 403）+ L2 24（隔离实例 8891，建班/写课表/绑设备/拉取 profile 逐字节一致/未分班不串班）+ L3 反向（摘薄壳 ⇒ 端点 404，相邻 `/api/plugins` 仍 200）。
 - 两个复用坑：① `config.js` 模块评估期读死 env ⇒ 隔离必须设 env 后再动态 import；② 子进程 stdout 必须落文件（Fastify 每请求一条日志灌满 PIPE 会阻塞事件循环）。
 - 未验证：生产 8788 未重启（旧进程，按铁律 4 不动）；真被控端 HTTP 拉取端到端未跑；`onlineCount` 脱敏未做真机多租户越权实测。
+
+## 十六、安全封堵 + 噪音按班上报 + 重复合并（加减归档 2026-11-15 · 用户 m29848）
+
+口径（用户 m29905 / m29968）：**不产 HTML、不套外部标准条文，只按项目自己的真源收敛**。
+本批只改干净文件；他线未提交件（`src/index.js`、`src/main.cpp`、`viewerbackend.cpp`、
+`AccountMenu.qml`、7 个 admin-server 文件、大批 QML 与 VoiceHub 接线）一行不碰。
+
+### 16.1 改动清单（删除即回退）
+
+| 文件 | 变化 | 作用 |
+|---|---|---|
+| `src/perms.js` | `:48` 无 claims 时 `scopes: []`（原 `null`） | 裸 uid 票据从「全权」变零权限；静态运维令牌 `mode==='token'` 仍是唯一 `scopes:null` 全权通道 |
+| `src/perms.js` | `:26` import `TENANT_ID_RE`，删 `:29` 本地正则副本 | 租户 id 正则与 `tenant.js` 单一真源 |
+| `src/tenant.js` | `:33` 改 `export const TENANT_ID_RE` | 供 perms.js 复用，格式逐字不变 |
+| `src/user-claims.js` | 8 处注释纠偏 | 「无 claims ⇒ 全权」全部改成「零权限」；`[]` 与「无 claims」不再有语义差 |
+| `src/ticket.js` | `:75` 注释纠偏 | 旧票纯 uid 不再自称全权 |
+| `src/registry.js` | `:981-1006` 两段重复 JSDoc 合一；别名改 `export const relayTerminalFrame = relayToSubscribers;` | 删掉同体两名的转发层，导出名与调用点零变化 |
+| `package.json` | `test:unit` 追加 2 个单测 | 门禁化，不靠人肉 review |
+| `tests/unit-auth-failclosed.mjs` | 新增 9 断言 | 静态令牌全权 / 裸票零权限 / 脱敏 / 白名单回填 / 删授权不放大 / 票内 claims 优先 |
+| `tests/unit-noise-class-event.mjs` | 新增 17 断言 | 班级归属只认云端表、四道闸、去重零行为变化 |
+| `Stelarith-control-qt/src/noise/noise_setup.cpp` | 163→203 行 | 新增 `sendNoiseClassEvent()`；`thresholdReached` 挂 `noise_alert`；`ensureNoise()` 注入 `setClassEventSink()` |
+| `Stelarith-control-qt/src/noise/noise_incident_pipeline.h/.cpp` | 59→66 / 46→66 行 | 新增 `ClassEventSink`（`std::function`，不加 signal 不动 moc/CMake）；存证结案投 `noise_incident` 摘要 |
+
+### 16.2 行为差异
+
+- **安全**：`identityFromAuth()` 对普通票永远返回 scopes 数组 ⇒ `index.js` 里散落的 5 处
+  `ident.scopes === null` 判全权自动收紧；`viewerbackend.cpp:1097-1131` 收到数组即
+  `setIdentity()` + `applyServerRole()` ⇒ `m_roleLocked=true`，本地「切管理员」按钮锁死。
+  站点 claims 票、`user-claims` 白名单、`platform_admin` 三条合法路径不受影响。
+- **噪音**：上课自动开启本就存在（`noiseOnLessonStart()` 由 `main.cpp:4175` 接课表钟）；
+  本批补齐「对应班级」：超阈与存证各发一条低频 `class-event`，走云端既有
+  `handleAgentClassMsg()`（班级归属只认 `knownDevices`，载荷不带 classCode），viewer
+  班级 Timeline 的 `data.message` 直接显示，云端与 viewer 零改动。2 秒一拍的
+  `noise_sample` 仍走原订阅中继；三张 base64 图仍走 `noise_incident` 取证，不塞进
+  64KB 班级事件（每节次最多 2 条，不会冲光 200 条历史水位）。
+- **重复合并**：只合能安全合的两处，且保持导出名不变（`index.js` 仍 import 旧名）。
+  其余重复见 16.5，按 AGENTS §2「不删非本次自建文件」只登记不动手。
+
+### 16.3 验证证据（命令 + 数字）
+
+- `node tests/unit-auth-failclosed.mjs` **PASS 9 / FAIL 0**；
+  `node tests/unit-noise-class-event.mjs` **PASS 17 / FAIL 0**；
+  `npm test`（10 套单测）**EXIT=0，逐套全绿**（14/26/13/21/16/13/14/14/9/17，合计 157 通过 / 0 失败）。
+- 反向验证（把 `handleAgentClassMsg` 的 `getDeviceClassCode(uid)` 改成误信自报 `classCode`）⇒
+  **BAD_EXIT=1 / PASS 15 FAIL 2**，两条信任模型断言精准变红；`finally` 按字节恢复后
+  **FINAL_EXIT=0 / PASS 17 FAIL 0**。安全侧同样做过反向（`:48` 改回 `null` ⇒ 新单测红）。
+- 端侧：`python scripts/_c1obj.py src/noise/noise_setup.cpp` **rc=0**；
+  `python scripts/_noise_pipeline_probe.py` **exit=0 / FAILS=0**（22 条，含新增 7 条按班摘要断言：
+  不带 classCode、不带三张图、原取证上报仍走 MockTransport）。
+- 门禁 17 件：**14 绿**。3 红与本批无关且可复现：`test-file-size` 5 项全在他线
+  （`viewerbackend.cpp` 2409/2282、`viewerbackend.h` 1126/1098、`timetable_hub.cpp` 637、
+  `AttachedSettingsVmCore.h` 423、`ClassDeviceTile.qml` 210）；`test-change-contract` 43 项全是
+  基线之后历史提交；`test-ota-guard` 需 127.0.0.1:18999 服务（ECONNREFUSED）。
+- WIP 复核：cloud / control 两仓 `git status --short -- <本批路径>` 无一条他线夹带；
+  提交一律精确 pathspec。
+
+### 16.4 未验证（如实记账）
+
+- 生产 8788 与现役被控端**未重启**（AGENTS §2 铁律 4）；真机上课→超阈→班级 Timeline
+  端到端未跑，只跑通隔离单测 / 离屏探针 / 单文件编译。
+- 全量 `python scripts/_build_agent.py` **BUILD_EXIT=0**（8/8 ninja 步：噪声三件重编 + moc + 链接 + qml/island/ui 同步；
+  `[island-parity] OK 47 件` / `[ui-parity] OK 26 件`）。首次后台 job 报宿主侧
+  `EXECUTOR_UNAVAILABLE: Niubash preparation failed ... hardlink`，重试即通过，非代码失败。
+  唯一编译告警是既有 `noise_incident_pipeline.cpp(34): warning C4858`（QtConcurrent 返回 QFuture 未接），非本批引入。
+- 静态 `ADMIN_TOKEN` / `VIEWER_TOKEN` 仍是全权通道，本批**没有**做令牌轮换或票据吊销；
+  已有裸 uid 票在 TTL 内仍可用，只是权限为零。
+- 端侧探针 `scripts/_noise_pipeline_probe.cpp` 沿用既有「不入库」口径，保留在工作区便于复跑。
+
+### 16.5 重复内容盘点（全方位评估，只合能安全合的）
+
+| 重复 | 处置 | 理由 |
+|---|---|---|
+| `relayToSubscribers` / `relayTerminalFrame` 同体两名 | **已合**（本批） | 干净文件 + 导出名不变 + 单测断言同一函数 |
+| `TENANT_ID_RE` 在 `perms.js` / `tenant.js` 两份字面量 | **已合**（本批） | 干净文件 + 导出面最小改动 |
+| `admin-server` 与 `Stelarith-cloud` 两套后端 | 登记不合 | 两条线各自在跑，合并需点单与停机窗口 |
+| `admin-server._githead_bak_20261108` 整仓备份 | 登记不删 | 非本次自建，批量删需备份 + 清单 + 人确认 |
+| 权限判据三份（cloud/perms.js、admin-server/rbac/identity.js、viewer/permission_manager.cpp） | 登记不合 | 跨语言跨仓，且 viewer 文件是他线 WIP |
+| `index.js` 仍用旧别名 `relayTerminalFrame` | 登记不改 | 他线 WIP；别名保留即行为不变 |
+| 发布副本 `_b10_release/src/noise`、`_b28_release/src/noise`、根目录 `*.obj/*.log` 等 | 登记不删 | 非本次自建，可能是他线归档 |
+
+一句话：**合并的判据不是「看起来一样」，而是「干净文件 + 导出面不变 + 有断言守住零行为变化」**。

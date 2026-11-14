@@ -29,8 +29,9 @@ import { fileURLToPath } from 'node:url';
 /** 存量数据的归属：任何没有 tenant 信息的对象都落这里。**不可删除**。 */
 export const DEFAULT_TENANT = 'tn_default';
 
-/** 租户 id 格式：tn_ + [a-z0-9_-]{2,32}。与班级码同一「小写、稳定、可 grep」口径。 */
-const TENANT_ID_RE = /^tn_[a-z0-9_-]{2,32}$/;
+/** 租户 id 格式：tn_ + [a-z0-9_-]{2,32}。与班级码同一「小写、稳定、可 grep」口径。
+ *  2026-11-15 起导出：perms.js 此前复制了同一份字面量，现统一以这里为真源。 */
+export const TENANT_ID_RE = /^tn_[a-z0-9_-]{2,32}$/;
 
 const DEFAULT_FILE = join(dirname(fileURLToPath(import.meta.url)), '..', 'tenants.json');
 

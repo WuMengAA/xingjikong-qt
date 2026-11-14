@@ -4,12 +4,12 @@
 //   权限真源在站点（permissions.ts + 用户档案），由站点签进 viewer 票的 claims；
 //   但站点不在本三仓（外部工程，改不动），当前站点签的票是 bare-uid（第 3 段纯 uid、
 //   无 claims）⇒ verifyViewerTicket 拿不到 roles/scopes ⇒ identityFromAuth scopes=null
-//   ⇒ 全权，权限永远流动不起来。
+//   ⇒（旧行为）全权；2026-11-15 起无 claims 一律零权限，见 perms.js。
 //
 //   打通方案（契约 §4.4 推荐项 A 的延展，最干净、零回归）：
 //   云端建 claims 存储，鉴权时按 uid 回填 —— bare-uid 票在鉴权瞬间按 uid 从本存储
 //   取 roles/scopes 补进 identity（applyStoredClaims），权限就真正流动了：
-//     · 存储为空 / 未配 => 行为 = 今天（全权，零回归）；
+//     · 存储为空 / 未配 => 行为 = 零权限（fail-closed，见 perms.js）；
 //     · 站点将来全面签发 claims 票 => 票自带 claims，本存储自动退役（回填不覆盖票内 claims）。
 //
 // 存储形态：内存 Map + 落盘 JSON（重启不丢）。默认文件 <云端根>/user-claims.json，
@@ -18,8 +18,8 @@
 // 纪律：
 //   · claims 结构与票内 claims 同构：{schoolId?, roles[], scopes[]}；
 //   · set/delete 由调用方记审计（谁改的）；本模块只管存取，不写日志；
-//   · 写盘走 tmp+rename 原子替换，损坏不崩服务（退化空存储，行为=今天）；
-//   · scopes 必须显式数组：[] = 显式零权限（与「无 claims ⇒ 全权」严格区分，契约 §4.4）。
+//   · 写盘走 tmp+rename 原子替换，损坏不崩服务（空存储 = 人票零权限，静态令牌通道仍在）；
+//   · scopes 必须显式数组：[] = 零权限（「无 claims」同样零权限，契约 §4.4）。
 
 import { readFileSync, renameSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -45,7 +45,7 @@ export function initUserClaims(filePath = DEFAULT_FILE) {
       }
     }
   } catch (e) {
-    // 损坏不崩服务：退化为空存储（行为=今天，全权）。原文件保留待人工处置。
+    // 损坏不崩服务：退化为空存储（人票零权限，fail-closed）。原文件保留待人工处置。
     claims.clear();
   }
   return { loaded: claims.size, file };
@@ -75,7 +75,7 @@ function persist() {
   return true;
 }
 
-/** 取一个人的 claims（无记录 = null，调用方按「全权」对待）。 */
+/** 取一个人的 claims（无记录 = null → identityFromAuth 给零权限）。 */
 export function getUserClaims(uid) {
   if (!uid) return null;
   return claims.get(String(uid)) ?? null;
@@ -95,7 +95,7 @@ export function setUserClaims(uid, c, by = 'unknown') {
   return { ok: true, saved: { ...norm }, persisted };
 }
 
-/** 删除一个人的记录（删掉 = 回到「无 claims ⇒ 全权」）。 */
+/** 删除一个人的记录（删掉 = 回到「无 claims ⇒ 零权限」，权限只会变小）。 */
 export function deleteUserClaims(uid) {
   const id = String(uid || '').trim();
   const existed = id ? claims.delete(id) : false;
@@ -113,7 +113,7 @@ export function listUserClaims() {
 /**
  * 鉴权回填（RBAC 第二批核心）：票没带 claims（旧票 bare uid）但存储里登记了
  * 该 uid 的 claims ⇒ 回填进 auth.claims，identityFromAuth 就能读到 roles/scopes。
- * 存储没有 / 票已带 claims / 非票模式 ⇒ 原样返回（行为不变）。
+ * 存储没有 / 票已带 claims / 非票模式 ⇒ 原样返回；没记录时由 perms.js 判零权限。
  * 注意：直接改入参对象（auth 是鉴权函数新建的，无共享引用风险）。
  */
 export function applyStoredClaims(auth) {

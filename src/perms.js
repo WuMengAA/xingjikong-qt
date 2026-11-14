@@ -10,23 +10,23 @@
 //   ③ 云端任何「返回设备 / 下发指令」的路径必须过 can()；WS 广播必须过 scope 过滤。
 //   ④ 前端隐藏 ≠ 权限；后端校验是唯一安全边界。
 //
-// 向后兼容（契约 §4.4，取推荐项 A）：
-//   · 旧票（第 3 段是纯 uid、无 claims）⇒ scopes=null ⇒ **全权**（生产现状就是全权，
-//     收紧会立刻断现有老师机；等站点全面签发 claims 票后再收）。
+// 向后兼容（契约 §4.4 · 2026-11-15 收紧为 fail-closed）：
+//   · 旧票（第 3 段是纯 uid、无 claims）⇒ scopes=[] ⇒ **零权限**（能签票 ≠ 能管设备，
+//     合法老师由站点 claims 票或 user-claims 白名单授予）。
 //   · 长期静态令牌 CLOUD_VIEWER_TOKEN ⇒ **全权**（老机器/离线机房不能断），但会记审计。
-//   · claims 票显式 scopes=[] ⇒ 无任何数据权限（与「无 claims」严格区分）。
+//   · claims 票显式 scopes=[] ⇒ 无任何数据权限（「无 claims」同样零权限）。
 //
 // 租户（2026-11-02 · class_id 全链路多租户）：
 //   · **云端仍然不是租户真源**。租户来自票里的 claims.tenantId（或由 schoolId 解析），
 //     看不到就落默认组织（tenant.js 的 DEFAULT_TENANT）。
 //   · 判权顺序：**先判租户，再判 scope**。租户不同直接拒 —— 只比 classCode 在多校时代
 //     会把「隔壁学校的同码班」一起放行（两校都在用站点 class_0102 这类外部码）。
-//   · 豁免只有三种：全权身份（scopes=null）/ 平台超管 / 调用方没给目标租户（无从判，向后兼容）。
+//   · 豁免只有三种：全权身份（scopes=null，仅静态运维令牌）/ 平台超管 / 调用方没给目标租户（无从判，向后兼容）。
 
-import { DEFAULT_TENANT, deriveTenantId, normalizeTenantId } from './tenant.js';
+import { DEFAULT_TENANT, TENANT_ID_RE, deriveTenantId, normalizeTenantId } from './tenant.js';
 
-/** 租户 id 格式（与 tenant.js 同一口径；这里是本地副本，避免为一条正则去改模块导出面）。 */
-const TENANT_ID_RE = /^tn_[a-z0-9_-]{2,32}$/;
+/** 租户 id 正则直接复用 tenant.js 的真源（2026-11-15 去重：两份字面量会各自漂移）。 */
+// TENANT_ID_RE 由上方 import 提供（单一真源，不再本地复制）
 //
 // scope 语义（契约 §4.2）：type ∈ {class, grade, school}，id 是班级码形态
 // （class_xlzx_2028_08）；授权父节点覆盖子节点（school 覆盖所有 class_<校>_*，
@@ -45,7 +45,7 @@ export function identityFromAuth(auth) {
     uid: auth.uid ?? claims?.uid ?? null,
     schoolId: claims?.schoolId ?? null,
     roles: Array.isArray(claims?.roles) ? claims.roles : [],
-    scopes: Array.isArray(claims?.scopes) ? claims.scopes : null,
+    scopes: Array.isArray(claims?.scopes) ? claims.scopes : [],   // 无 claims ⇒ 显式零权限（fail-closed）
     // 2026-11-02 多租户：票里显式带 tenantId 就用它；只有 schoolId 就解析一次；
     // 都没有 ⇒ 默认组织。**绝不接受客户端参数指定租户**（本函数只读票）。
     tenantId: claimTenant(claims),
@@ -100,7 +100,7 @@ export function canAccess(ident, classCode, opts = {}) {
 
   // ── 租户闸（先于一切 scope 判定）──────────────────────────────────
   // 三条豁免，各自有明确理由：
-  //   ① ident.scopes === null  → 静态令牌/旧票，契约 §4.4 规定全权（含跨校）
+  //   ① ident.scopes === null  → 仅静态运维令牌，契约 §4.4（含跨校）
   //   ② isPlatform(ident)      → 平台级超管，本来就是跨校角色
   //   ③ 目标租户未知（没传）    → 无从判起，交回原有 scope 逻辑（向后兼容，
   //                              调用方逐步补上 tenantId 就能收紧）
@@ -110,7 +110,7 @@ export function canAccess(ident, classCode, opts = {}) {
     if (mine !== tgtTenant) return false;   // 跨租户：一律拒，不看 scope
   }
 
-  if (ident.scopes === null) return true;              // 全权：静态令牌 / 旧票（契约 §4.4-A）
+  if (ident.scopes === null) return true;              // 全权：仅静态运维令牌（契约 §4.4-A）
   if (isPlatform(ident)) return true;                  // 平台级超管
   if (!classCode) return false;                        // 目标设备没有班级归属 → 谁都不该碰
   for (const s of ident.scopes) {

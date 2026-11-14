@@ -26,7 +26,7 @@ const b64u = (b) => Buffer.from(b).toString('base64url');
  * @param {object|null} claims 可选（2026-10-20 · RBAC 第二批）：权限 claims
  *   {schoolId?, roles, scopes}。传入时第 3 段编 base64url(JSON{...claims, uid})，
  *   verifyViewerTicket 会把它当 claims 读出来（roles/scopes 直接进 identity，权限生效）；
- *   不传时保持旧票（第 3 段纯 uid），云端鉴权时按 uid 从 user-claims 存储回填（见 user-claims.js）。
+ *   不传时保持旧票（第 3 段纯 uid），云端按 uid 从 user-claims 回填；白名单外零权限。
  *   注意：claims.uid 一律以参数 uid 为准，防止调用方两处不一致（票据身份必须唯一）。
  */
 export function mintViewerTicket(uid, ttlMs = VIEWER_TICKET_TTL_MS, claims = null) {
@@ -72,7 +72,7 @@ export function verifyViewerTicket(ticket) {
   try {
     const raw = Buffer.from(uidB64, 'base64url').toString('utf8');
     // 2026-10-15（权限契约 §4.1）：第 3 段可以是「纯 uid」（旧票）或「base64url(JSON claims)」
-    // （新票）。JSON.parse 失败 ⇒ 旧票纯 uid，行为与今天完全一致（全权，见 perms.js）。
+    // （新票）。JSON.parse 失败 ⇒ 旧票纯 uid，无 claims ⇒ 零权限（fail-closed，见 perms.js）。
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {

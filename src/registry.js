@@ -979,14 +979,10 @@ export function broadcastFrame(uid, buf, frameSeq = 0) {
 }
 
 /**
- * 把被控端主动吐出来的 **terminal_* 文本帧** 转给订阅了这台的管理端。
- * 不能复用 broadcastFrame：那条发的是 image/jpeg 二进制帧（makeFrame 合成），
- * 终端流式输出要的是普通 JSON 文本帧，走不着那条路。
- * @returns 命中几个管理端
- */
-/**
  * 按 uid 推给**订阅了这台设备**的管理端（谁订阅推谁，不群发）。返回命中数。
  * 终端流式帧、噪音样本/告警等流式消息都走它 —— 共同点是"只在有人盯着这台时才推"。
+ * （2026-11-15 去重：此前上面还叠着一段 terminal_* 的旧注释，描述错位且同一件事
+ *   被两份 JSDoc 讲了两遍；合为一份。）
  */
 export function relayToSubscribers(uid, type, payload) {
   let hits = 0;
@@ -1000,10 +996,8 @@ export function relayToSubscribers(uid, type, payload) {
   return hits;
 }
 
-/** 被控端远程终端的流式帧（保留旧名；内部就是"按 uid 推给订阅者"）。 */
-export function relayTerminalFrame(uid, type, payload) {
-  return relayToSubscribers(uid, type, payload);
-}
+/** 被控端远程终端的流式帧（保留旧名；就是同一个函数，不再包一层转发）。 */
+export const relayTerminalFrame = relayToSubscribers;
 
 /** 设备表广播（管理端每几秒刷一次列表用）。 */
 export function broadcastDevices() {
