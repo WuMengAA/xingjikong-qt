@@ -458,3 +458,68 @@ python Stelarith-cloud\scripts\vault.py check
 | 发布副本 `_b10_release/src/noise`、`_b28_release/src/noise`、根目录 `*.obj/*.log` 等 | 登记不删 | 非本次自建，可能是他线归档 |
 
 一句话：**合并的判据不是「看起来一样」，而是「干净文件 + 导出面不变 + 有断言守住零行为变化」**。
+
+## 十七、实例自治 + 六角色预设 + 独立部署文档（加减归档 2026-11-15 · 用户 m30108 / m30161）
+
+口径：用户裁决「云端就没有控制其他云端的权利」「不要以行业标准行事，懂得变通」，并补七条架构建议。
+按项目真源收敛 —— **不换栈、不重写后台、不产 HTML**；只改干净文件，他线 WIP（index.js / config.js /
+viewer QML / admin-server 7 件）一行不碰。完整文档见 `docs/开发文档-班级后台-2026-11-15.md`。
+
+### 17.1 改动清单（删除即回退）
+
+| 文件 | 变化 | 作用 |
+|---|---|---|
+| `src/instance.js` | 新增 78 行 | 自治契约单一真源：`crossCloudControl:false` / `resolvePublicBase()` / `wsUrlOf()` / `provisionReadiness()` / 禁用的跨云端键 / `isVendorBase()` / `foreignBaseConfigured()` |
+| `src/provision.js` | 199 行，8 处替换 | 去掉 `https://control.245959623.xyz` 默认回落；两个装机 bat 生成器在 `publicBase()` 为空时抛错（fail-closed） |
+| `src/class-roles.js` | 新增 76 行 | 六角色 → claims 预设纯函数，**不参与判定**；判定仍是 `perms.js:canAccess()` + `class-admin-shared.js` 成员表 |
+| `scripts/check-standalone.mjs` | 新增 84 行 | 独立部署自检：Node 22.5+ / node:sqlite / ws / 本实例地址 / 三把强令牌 / 禁止键；`--strict` 额外拒官方域名与站点依赖 |
+| `tests/unit-instance-sovereignty.mjs` | 新增 38 行 / 20 断言 | 地址不回落、ws/wss 派生、禁用键、源码不含官方域名 |
+| `tests/unit-class-roles.mjs` | 新增 70 行 / 23 断言 | 六角色形状 + 灌进真 `canAccess()` 验证跨班/跨租户隔离与 `maskDevice` 脱敏 |
+| `.env.example` | 55→65 行 | `CLOUD_WS_HOST` + `CLOUD_PUBLIC_BASE` 一等配置；独立部署提示 `STE_SITE_URL` 留空 |
+| `package.json` | +2 测试链 + `test:standalone` | 门禁化 |
+| `docs/开发文档-班级后台-2026-11-15.md` | 新增 421 行 | API 调用 / 功能进度与使用 / 单独部署三块；七条建议逐条给「本项目落点 + 不做与为什么」 |
+| 本地 `.env` | +3 行（**不入库**） | 现役实例显式声明自己的 `CLOUD_PUBLIC_BASE=https://control.245959623.xyz`，保住现役装机包行为 |
+
+### 17.2 行为差异
+
+- **别人单独部署**：旧代码装机 bat 会连回我方官方域名；现在不填自己的 `CLOUD_PUBLIC_BASE`
+  直接拒发装机包，绝不猜、绝不回落。我方云端没有跨实例控制通道，别的实例也连不回我方。
+- **现役实例**：已在本地 `.env` 显式填回自己的地址，装机包行为逐字不变（只是默认值不再写死在代码里）。
+- **六角色**：超级管理员 / 学校管理员 / 班主任 / 任课老师 / 学生 / 家长各自有确定的 claims 形状；
+  学生与家长 `scopes` 是**非空数组**（零权限 fail-closed 口径），只有 `platform_admin` 与静态令牌能跨租户。
+- **技术栈**：不变。Node 原生 http/ws + `node:sqlite` 继续是现役真源；admin-server 的 PG/Redis 适配层保留。
+  NestJS / Svelte / Docker 只在文档里写清「为什么现在不做」，不落第二套代码。
+
+### 17.3 验证证据（命令 + 数字）
+
+- `node tests/unit-instance-sovereignty.mjs` **PASS 20 / FAIL 0**；`node tests/unit-class-roles.mjs` **PASS 23 / FAIL 0**；
+  `npm test`（12 套）**EXIT=0**，末尾三套 `PASS=17 FAIL=0` / `PASS 20 / FAIL 0` / `PASS 23 / FAIL 0`。
+- `node --check src/{provision,instance,class-roles}.js` 三件全 0；
+  `node scripts/check-standalone.mjs --strict` 对现役 `.env` 返回 **exit 1**，唯一原因
+  `CLOUD_PUBLIC_BASE 仍指向本项目官方域名；独立部署必须填学校自己的域名` —— 严格判据确实生效。
+- 反向验证口径：把 `resolvePublicBase` 的默认值改回官方域名，`unit-instance-sovereignty` 的
+  「provision.js 不再硬编码官方域名」与「不配地址 ⇒ 空串」两条断言会同时变红（本批未改回，留作门禁哨兵）。
+- 文档事实全部来自逐行读代码：`class-admin.js` 28 个 action、`PUBLISH_TYPES` 4 类、
+  `ATTENDANCE_STATUSES` 4 态、`store.js` 指令 4 态、`class-events.js` 四道闸、`REGISTER` 回执字段。
+
+### 17.4 未验证（如实记账）
+
+- 生产 8788 与现役被控端**未重启**（AGENTS §2 铁律 4）；现役进程仍持旧 provision 代码，
+  下轮按 `stelarith-deploy` SOP 重启才完全生效。
+- 独立部署只跑静态自检 + 纯函数断言，**没有在另一台机器真装一套并连设备**；
+  自检不校验 TLS 证书、不探测端口可达性。
+- 六角色预设只验到 `canAccess` / `maskDevice`；`class_members` 的写权限未做真 HTTP 集成。
+- 成绩 / 家长绑定 / 通知已读 / 作业收缴 / 软删除 **没有**，文档明确标 ⬜，不拿设计稿冒充进度。
+- `scripts/backup.mjs` 仍不含 `class-room.db` / `class-dir.db`；删库→快照恢复演练未做。
+
+### 17.5 七条建议的处置（用户 m30161）
+
+| 条 | 处置 |
+|---|---|
+| 1 模块化别写死 | 既有 `class-admin*.js` 按对象拆 + `classroom-*.js` 并列；文档固化，不重写 |
+| 2 RBAC 六角色 | 新增 `class-roles.js` 预设 + 23 断言；判定真源不变 |
+| 3 三列预留 | `sqlite-schema.sql` 复合主键已含 `school_id`；文档 + 断言固化，不迁移现役数据 |
+| 4 安全审计 | 已有 `events.log` / `backup.mjs` / `maskDevice`；软删除与登录表列为待点单 |
+| 5 流程不是 Excel 页 | 文档列 6 条状态机；缺的流程直说没有 |
+| 6 部署运维 | 文档给 A/B 两档；不装 PG/Redis、不切生产、不假装有对象存储与告警 |
+| 7 换主流栈 | **明确不采纳**：现役在生产 + UI 迁移在途 + 两套后端并存 ⇒ 换栈 = 第二套真源 |

@@ -18,6 +18,7 @@
 import { existsSync, readdirSync, statSync, appendFileSync, readFileSync } from 'node:fs';
 import { join, normalize, extname, sep } from 'node:path';
 import { ASSETS_DIR } from './config.js';
+import { resolvePublicBase, wsUrlOf } from './instance.js';
 
 /** 装机包产物目录（用户把 .exe 丢进来即可，不强制命名）。 */
 export const PKG_DIR = join(ASSETS_DIR, 'pkg');
@@ -27,10 +28,11 @@ export const PROVISION_DIR = join(ASSETS_DIR, 'provision');
 
 /**
  * 云端对外 Base URL。
- * 生产是 https://control.245959623.xyz；本机联调想走 http 就用 env 覆盖。
+ * 独立部署必须显式填 CLOUD_PUBLIC_BASE（本实例自己的对外地址）；不填就不生成装机包，
+ * 绝不偷偷指向任何外部实例（实例自治契约，见 src/instance.js）。
  */
 export function publicBase() {
-  return String(process.env.CLOUD_PUBLIC_BASE || 'https://control.245959623.xyz').replace(/\/+$/, '');
+  return resolvePublicBase();
 }
 
 /**
@@ -39,16 +41,12 @@ export function publicBase() {
  *    而且连接直接连不上（2026-10-05 第一版就写错了，这里按 http/https 分别换 ws/wss）。
  */
 export function agentWsUrl() {
-  const base = publicBase();
-  const scheme = /^https:/i.test(base) ? 'wss' : 'ws';
-  return `${scheme}://${base.replace(/^https?:\/\//i, '')}/ws/agent`;
+  return wsUrlOf(publicBase(), '/ws/agent');
 }
 
 /** 管理端（老师机）连云端的 ws 入口。同样是 wss，别写成 https。 */
 export function viewerWsUrl() {
-  const base = publicBase();
-  const scheme = /^https:/i.test(base) ? 'wss' : 'ws';
-  return `${scheme}://${base.replace(/^https?:\/\//i, '')}/ws/viewer`;
+  return wsUrlOf(publicBase(), '/ws/viewer');
 }
 
 /** /assets 下的静态资源前缀。 */
@@ -152,6 +150,7 @@ export function buildViewerProvisionBat(label, token) {
   if (!pkg) throw new Error('assets/pkg 目录下还没有 .msi 安装包，先把 stelarith-viewer-msi-0.5.0.msi 放进去');
 
   const base = publicBase();
+  if (!base) throw new Error('独立部署未配置 CLOUD_PUBLIC_BASE：请在 .env 填本实例自己的对外地址，云端不会替你指向任何外部实例');
   const scriptUrl = `${base}${ASSET_PREFIX}${PROVISION_VIEWER_SCRIPT}`;
   const installerUrl = `${base}${ASSET_PREFIX}pkg/${pkg}`;
   const safe = String(label || 'teacher').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'teacher';
@@ -184,6 +183,7 @@ export function buildAgentProvisionBat(uid, token) {
   // ⚠️ 别在这里再加一个 '/' —— ASSET_PREFIX 自带前导斜杠，多一个就变成 //assets/... ，
   //    Node 不会帮你折叠双斜杠，resolveAsset 拿到的相对路径会少一层，直接 404。
   const base = publicBase();
+  if (!base) throw new Error('独立部署未配置 CLOUD_PUBLIC_BASE：请在 .env 填本实例自己的对外地址，云端不会替你指向任何外部实例');
   const scriptUrl = `${base}${ASSET_PREFIX}${PROVISION_SCRIPT}`;
   const installerUrl = `${base}${ASSET_PREFIX}pkg/${pkg}`;
   // 离线兜底：若 U 盘里已放了同名 exe，脚本会优先用它，不去下载
