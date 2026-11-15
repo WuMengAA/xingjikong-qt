@@ -541,3 +541,54 @@ viewer QML / admin-server 7 件）一行不碰。完整文档见 `docs/开发文
 `python scripts/backup-restore-drill.py` PASS 34 / FAIL 0；`node scripts/backup.mjs --root <隔离目录>` 六类源全落盘。
 全链 13 套单测 EXIT=0；反向验证 4 组（文档漂移 / action 写错 / 备份脚本第二份 SOURCES / 清单漏两库）全部抓到并按字节恢复。
 未验证：生产库上没跑恢复、没重启 8788；绝对路径库恢复要人工放回；备份不做加密/异地/定时器。
+
+## 十八、备份加密 + 异地副本 + 定时语义（2026-11-15 · 用户 m30600）
+
+上一节最后一句「备份不做加密/异地/定时器」是本节的起点。补齐方式是**多一个脚本，不改备份集**：
+`scripts/backup.mjs` 仍负责从 `src/class-catalog.js` 的 `BACKUP_ITEMS` 出明文快照（单一真源不动），
+`scripts/backup-vault.mjs` 只负责把那份快照**加密、打包、投递、清理**。
+
+### 18.1 改动清单
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `scripts/backup-vault.mjs` | 255 新增 | 加密归档 / 解密还原 / 本地副本 / 可插拔 ESM sink / 保留策略 / 周期语义 |
+| `scripts/backup-vault-drill.py` | 新增 | 33 条断言演练（见 18.3） |
+
+**没有改**：`src/class-catalog.js`（备份清单真源）、`scripts/backup.mjs`（明文快照逻辑）、
+`src/config.js`（他线 WIP 期间不碰）、任何定时任务注册点。
+
+### 18.2 设计取舍
+
+- **零第三方依赖**：只用 `node:crypto`。密钥派生 `scryptSync(passphrase, salt, 32, {N:16384,r:8,p:1})`，
+  加密 `aes-256-gcm` + 随机 12 字节 iv。仓库没装 encryption 库，也不该为一个脚本装。
+- **明文可被校验**：`.vault` 的 header 行带 `plainSha256`。GCM 只保护密文（它认证的是 iv+密文），
+  **header 不在保护范围内** —— 所以解密后必须再比一次摘要，这条单独有断言守着（反向验证 C 组就靠它变红）。
+- **密钥不落地**：只读 `BACKUP_VAULT_KEY` 或 `--passphrase-file`。**没有默认口令**，缺了就 exit != 0。
+  代码里不打印口令、不写进 header、不写日志。
+- **异地是接口不是实现**：`--remote-dir` 是本地另一个目录，`--sink <esm>` 动态 import 一个模块调
+  `put({localPath, name})`。仓库不认任何云厂商 SDK；接 S3/OSS 是学校自己写 15 行 sink 的事。
+- **定时只演练语义**：`--schedule --cycles N --interval-ms M` 在进程内串行跑 N 个周期，进程退出即停。
+  删掉一个周期就停，不需要清理任何注册项 —— **故意不注册** Windows 计划任务 / PM2 cron / systemd timer。
+
+### 18.3 验证证据
+
+`python scripts/backup-vault-drill.py` → **VAULT PASS 33 / FAIL 0**，覆盖：
+
+- 与明文链接得上（`backup.mjs --root` 出的快照直接当 `--source`）；
+- 加密后 `.vault` 里搜不到源文件里的明文哨兵、搜不到口令；
+- 解密后**文件集等于快照文件集**、4 个 SQLite 库逐个 `SELECT` 回读 sentinel、流水文件字节一致；
+- 三种失败：错口令 / 篡改密文末字节 / **改 header 的 plainSha256**，全部 exit != 0 且不产出文件；
+- 缺口令时明确拒绝，且错误文案里能看出「不提供默认口令」；
+- `--sink` 模块真被调用并写进另一个目录；
+- `--schedule --cycles 3 --keep 2` 后 vault-dir 与 remote-dir **各只剩 2 份**。
+
+反向验证：把 `plainSha256` 校验那一行注释掉 → 同一条演练变 **30 / FAIL 3**（三条断言全红），
+`try/finally` 按字节恢复后回到 33/0。
+
+### 18.4 未验证
+
+- **生产库上没跑**：演练全在 `D:/Stelarith/_demo/_vault_drill` 的隔离目录，现役库一个字节没动。
+- **没有真对象存储**：`--sink` 只验了「模块被调用」，没接过 S3/OSS/MinIO。
+- **没有真定时器**：周期语义是进程内 `setTimeout` 串行，崩了就停；生产要活定时得靠计划任务。
+- **口令轮换没有**：改口令后旧 `.vault` 只能用旧口令解，没有 re-encrypt 子命令。
