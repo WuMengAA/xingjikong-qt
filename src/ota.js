@@ -16,20 +16,21 @@
 //   }
 // }
 //
-// 更新通道（2026-10-10 加）：除 ota.json（stable）外，可存在 ota-<channel>.json
-// （如 ota-gray.json），形态完全一致。latestFor(product, channel) 读对应通道清单；
-// 通道清单缺失即回落 null（该通道"无更新"），不会去读 stable。灰度发布 = 把候选版本
-// 发到 ota-gray.json，只有 register 带 channel=gray 的设备拿得到，不惊动全网。
-// （2026-10-20：管理台 POST /api/admin/ota 也支持带 channel 直接写灰度清单，
-//  走 manifestFileFor() 同一真源，不再只能运维手工编辑文件。）
+// 更新通道（2026-11-16 用户裁决「合并更新渠道 / 取消灰度」）：
+//   ota.json 是唯一对外清单；任何 alpha/gray/beta/rc/自定义 channel 都归到 stable。
+//   构建注册表 ota-builds.json 仍保留历史审计字段，但分发时**不再按档位等待**：
+//   所有设备拿同一份「最新版本」，不再出现 5 小时 / 24 小时的可见性差。
+//   旧 ota-<channel>.json 文件只作为历史遗留文件保留，运行时不再读取。
+//   路径穿越防护仍保留：channel 永远不参与文件路径拼接。
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { OTA_MANIFEST_FILE } from './config.js';
-import {
-  loadBuilds, pickBuildFor, hasBuilds, recordBuild, normalizeChannelName, thresholdFor,
-  visibleInChannel, PROMOTE_BETA_MS, PROMOTE_STABLE_MS,
-} from './ota-promote.js';
+import { loadBuilds, hasBuilds, recordBuild } from './ota-promote.js';
+
+/** 单一渠道判据：所有请求都归到 stable，旧名只用于兼容日志与审计。 */
+export const OTA_CHANNELS_UNIFIED = true;
+export function unifiedChannel() { return 'stable'; }
 
 /**
  * 通道 → 清单文件路径（2026-10-20 抽为单一真源）。
@@ -47,10 +48,27 @@ import {
  *    （路径穿越）。不合规一律回落 stable 清单，**绝不**把 ../ 之类拼进文件名。
  */
 export function manifestFileFor(channel) {
-  const ch = String(channel || '').trim();
-  if (ch === '' || ch === 'stable') return OTA_MANIFEST_FILE;
-  if (!/^[a-z0-9_-]{1,16}$/.test(ch)) return OTA_MANIFEST_FILE;
-  return path.join(path.dirname(OTA_MANIFEST_FILE), `ota-${ch}.json`);
+  // 2026-11-16 取消灰度：channel 只用于日志/兼容，**绝不拼进文件名**。
+  // 这是比旧白名单更强的形态：alpha/gray/beta/rc/../secret 都落回同一个稳定清单。
+  void channel;
+  return OTA_MANIFEST_FILE;
+}
+
+/** 单渠道下从构建注册表挑最新：按版本序优先，发布时间只作同版本/兜底排序。 */
+export function pickUnifiedBuild(reg, product, now = Date.now()) {
+  const builds = (reg && reg.builds) || {};
+  let best = null;
+  let bestAt = -Infinity;
+  for (const rec of Object.values(builds)) {
+    if (!rec || rec.product !== product) continue;
+    if (!parseVersion(rec.version)) continue;
+    const raw = Date.parse(rec.publishedAt);
+    const at = Number.isFinite(raw) ? raw : -Infinity;
+    if (!best) { best = rec; bestAt = at; continue; }
+    const cmp = cmpVersion(rec.version, best.version);
+    if (cmp > 0 || (cmp === 0 && at > bestAt)) { best = rec; bestAt = at; }
+  }
+  return best;
 }
 
 /** 读取并解析清单；文件不存在/坏 JSON → null（调用方据此说"没发布过版本"）。
@@ -132,10 +150,10 @@ export function cmpVersion(a, b) {
  * @param {string} [channel] 设备渠道（alpha/gray/beta/rc/stable/空/未知）
  *  @param {number} [now]   当前毫秒时间戳（注入以便单测；省略即 Date.now()） */
 export function latestFor(product, channel, now = Date.now()) {
-  // ① 新链路：构建注册表 + 时间晋升
+  // ① 新链路：构建注册表。取消灰度后**不再看时间晋升/档位**，只拿版本最新的一份。
   const reg = loadBuilds(OTA_MANIFEST_FILE);
   if (hasBuilds(reg, product)) {
-    const pick = pickBuildFor(reg, product, channel, now);
+    const pick = pickUnifiedBuild(reg, product, now);
     if (pick) {
       return {
         version: String(pick.version || ''),
@@ -145,17 +163,16 @@ export function latestFor(product, channel, now = Date.now()) {
         notes: String(pick.notes || ''),
         mandatory: !!pick.mandatory,
         // 附带给客户端/管理台看的信息，不影响既有字段消费方
-        channel: normalizeChannelName(channel),
+        channel: unifiedChannel(),
         publishedAt: String(pick.publishedAt || ''),
-        appearAfterMs: thresholdFor(channel),
+        appearAfterMs: 0,
+        unifiedChannels: OTA_CHANNELS_UNIFIED,
       };
     }
-    // 该渠道此刻还没有任何构建可见（比如刚发 alpha 5 分钟内问 beta）→ 如实回 null，
-    // **不要**回落到旧清单：那会把某个历史版本当成"该渠道最新"，反而更乱。
     return null;
   }
-  // ② 兼容链路：旧的多清单文件
-  const m = loadManifest(channel);
+  // ② 兼容链路：只有一份 stable 清单；channel 参数在 manifestFileFor() 已被归掉。
+  const m = loadManifest(unifiedChannel());
   if (!m || !m.products || typeof m.products !== 'object') return null;
   const p = m.products[product];
   if (!p || typeof p !== 'object') return null;
@@ -192,17 +209,20 @@ export function promotionStatus(product, channel, now = Date.now()) {
     version: latest.version,
     publishedAt: latest.publishedAt,
     ageMs,
-    inAlpha: visibleInChannel('alpha', ageMs),
-    inBeta: visibleInChannel('beta', ageMs),
-    inStable: visibleInChannel('stable', ageMs),
-    betaAt: new Date(at + PROMOTE_BETA_MS).toISOString(),
-    stableAt: new Date(at + PROMOTE_STABLE_MS).toISOString(),
+    // 历史字段保留给旧管理端解析；单渠道下三档同视，不再分批。
+    unifiedChannels: OTA_CHANNELS_UNIFIED,
+    channel: unifiedChannel(),
+    inAlpha: true,
+    inBeta: true,
+    inStable: true,
+    betaAt: new Date(at).toISOString(),
+    stableAt: new Date(at).toISOString(),
   };
 }
 
 /**
  * OTA 资产健康检查（2026-10-31 加 · 404 事故闭环）。
- * 云端启动时跑一次：遍历 stable + 全部 ota-<channel>.json 清单里每个产品的 url，
+ * 云端启动时跑一次：遍历唯一正式清单里每个产品的 url，
  * 只对「指向本机资产目录」的 url 核对本地文件存在性 —— 资产被清/漏发会立刻告警，
  * 而不是等教室机报"更新失败"。
  *
@@ -215,15 +235,8 @@ export function promotionStatus(product, channel, now = Date.now()) {
 export function assetHealthCheck() {
   const missing = [];
   let checked = 0;
+  // 取消灰度后只扫唯一清单：历史 ota-<channel>.json 不再影响启动自检。
   const channels = [''];
-  // 扫同目录的 ota-<channel>.json（stable 之外的灰度/候选通道）
-  try {
-    const dir = path.dirname(OTA_MANIFEST_FILE);
-    for (const f of readdirSync(dir)) {
-      const m = /^ota-([a-z0-9_-]{1,16})\.json$/.exec(f);
-      if (m) channels.push(m[1]);
-    }
-  } catch { /* 读目录失败就当只有 stable */ }
 
   for (const ch of channels) {
     const m = loadManifest(ch);

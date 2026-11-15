@@ -592,3 +592,32 @@ viewer QML / admin-server 7 件）一行不碰。完整文档见 `docs/开发文
 - **没有真对象存储**：`--sink` 只验了「模块被调用」，没接过 S3/OSS/MinIO。
 - **没有真定时器**：周期语义是进程内 `setTimeout` 串行，崩了就停；生产要活定时得靠计划任务。
 - **口令轮换没有**：改口令后旧 `.vault` 只能用旧口令解，没有 re-encrypt 子命令。
+
+## 十九、单一更新渠道 + 咸林中学校区 + 教师扫码网关（2026-11-16 · 用户 m33430 / m33515）
+
+### 1. 取消灰度
+
+- 用户裁决「合并被控端更新渠道 / 取消灰度」。`src/ota.js` 新增 `OTA_CHANNELS_UNIFIED=true` 与 `unifiedChannel()`；`manifestFileFor(channel)` 永远返回 `OTA_MANIFEST_FILE`，`alpha/gray/beta/rc/../secret` 都不再参与文件路径拼接。
+- `latestFor()` 从 `ota-builds.json` 按**版本序**挑最新，不再等 5h/24h 分档；旧 `ota-.json` 文件保留但不读。`promotionStatus()` 保留旧字段名但全部置为统一正式渠道，避免旧管理端解析崩。
+- 被控端 `channelCanonical()` 把所有旧档归一到 `stable`；设置页只给一个「正式」按钮；旧 `promotion` 快照不再挡升级。
+- 行业依据：[Martin Fowler · Canary Release](<https://martinfowler.com/bliki/CanaryRelease.html>) 把灰度定义为「逐步放量降低风险」；本项目现在选择**统一渠道 + 发版前验证**，不再让设备按档位拿不同版本。
+
+### 2. 咸林中学校区与 12 班课表
+
+- 新增 `src/campus-registry.js`：登记「渭南市华州区咸林中学校区」，返回校区服务器 `publicBase / agentWsUrl / viewerWsUrl`，班级可**选择校区服务器**并拿到装机信封；对外地址严格 `协议://主机[:端口]`，不收路径/查询。
+- 新增 `src/campus-server.mjs`：隔离端口 `CAMPUS_PORT`（默认 18099）提供 `/api/campus/servers`、`/api/campus/classes/choose`、`/api/campus/teacher-gateway`、`/api/campus/teacher-gate`；不碰现役 8788、不写生产库。
+- 新增 `scripts/init-xianlin-campus.mjs`：用 `D:/Stelarith/_backup/classisland-2026-10-06/instance2/Profiles/Default.json`（190081B / 24 groups / 72 plans / 4 TimeLayouts / 23 Subjects）在隔离目录建租户、注册 12 班、按 `ClassPlans` 首次出现序归一化 12 份课表，并模拟 12 台设备各自 `GET /api/device/timetable` 拉本班课表。
+- 实测：`INIT EXIT=0 / groups=12 / plans=72 / classes=12 / devicePullable=12`。反向验证：用只有 2 个群的 `D:/Classlsland/data/Profiles/Default.json` 跑，明确报 `档案不是 12 班全校课表：groups=2` 并退出 1。
+
+### 3. 端侧解耦 / 教师扫码网关
+
+- 新增 `src/teacher-gateway.js`：白名单只有 `my-classes / timetable / timetable-delivery / class-scan-bind`；`teacherScanPlan()` 只产出 `channel:"class-scan"` 的最小计划，明确 `requireManage:false / allowCreateClass:false / allowBatch:false`。
+- 绝对不复制判权：入口层仍必须调用既有唯一核心 `classScanBind(ticket, uid, devices)`；本网关不 import registry / bind-api，避免第二套绑定真源。
+- `StudentClassPicker.qml` 文案改为「本机可独立运行；老师扫码只是绑定班级」「断网可用」「稍后再说」，不再写成「之后由老师统一管理」。
+- 权限依据：[NIST CSRC · least privilege](<https://csrc.nist.gov/glossary/term/least_privilege>)；教师扫码渠道不提供超级管理员、批量、建班、删除班、导入名单/考勤等动作。
+
+### 4. 验证与边界
+
+- `tests/unit-ota-unified.mjs` 20/0；`tests/unit-ota-promote.mjs` 56/0；`tests/unit-version-compare.mjs` 41/0；`tests/unit-campus-teacher.mjs` 14/0；`tests/unit-campus-server.mjs` 12/0。已接入 `npm test`。
+- 本批**没有**生产推送、没有改 `assets/pkg`、没有动 OTA 清单、没有重启 8788 / 8090 / 在线被控端。用户点名 v0.6.70，但 HEAD 两端 CMakeLists 是 0.6.72 且 `assets/pkg` 无稳定 0.6.70；生产发版版本仍待用户裁决。
+- 未验证：干净生产库上真注册 12 班没跑（只在隔离目录跑）；校区服务没接进 `src/index.js`（那是他线 WIP，按 AGENTS §2 不碰）；12 台真设备没实连。
