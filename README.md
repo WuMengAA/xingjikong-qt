@@ -499,7 +499,7 @@ viewer QML / admin-server 7 件）一行不碰。完整文档见 `docs/开发文
   `CLOUD_PUBLIC_BASE 仍指向本项目官方域名；独立部署必须填学校自己的域名` —— 严格判据确实生效。
 - 反向验证口径：把 `resolvePublicBase` 的默认值改回官方域名，`unit-instance-sovereignty` 的
   「provision.js 不再硬编码官方域名」与「不配地址 ⇒ 空串」两条断言会同时变红（本批未改回，留作门禁哨兵）。
-- 文档事实全部来自逐行读代码：`class-admin.js` 28 个 action、`PUBLISH_TYPES` 4 类、
+- 文档事实全部来自逐行读代码：`class-admin.js` 29 个 action、`PUBLISH_TYPES` 4 类、
   `ATTENDANCE_STATUSES` 4 态、`store.js` 指令 4 态、`class-events.js` 四道闸、`REGISTER` 回执字段。
 
 ### 17.4 未验证（如实记账）
@@ -510,16 +510,34 @@ viewer QML / admin-server 7 件）一行不碰。完整文档见 `docs/开发文
   自检不校验 TLS 证书、不探测端口可达性。
 - 六角色预设只验到 `canAccess` / `maskDevice`；`class_members` 的写权限未做真 HTTP 集成。
 - 成绩 / 家长绑定 / 通知已读 / 作业收缴 / 软删除 **没有**，文档明确标 ⬜，不拿设计稿冒充进度。
-- `scripts/backup.mjs` 仍不含 `class-room.db` / `class-dir.db`；删库→快照恢复演练未做。
+- 生产库上没跑过恢复演练；隔离目录的 `scripts/backup-restore-drill.py` 已实跑（见 §17.6）。
 
 ### 17.5 七条建议的处置（用户 m30161）
 
 | 条 | 处置 |
 |---|---|
-| 1 模块化别写死 | 既有 `class-admin*.js` 按对象拆 + `classroom-*.js` 并列；文档固化，不重写 |
+| 1 模块化别写死 | 既有 `class-admin*.js` 按对象拆；`classroom-*.js` 是他线 WIP 未入库；代码真源固化，不重写 |
 | 2 RBAC 六角色 | 新增 `class-roles.js` 预设 + 23 断言；判定真源不变 |
 | 3 三列预留 | `sqlite-schema.sql` 复合主键已含 `school_id`；文档 + 断言固化，不迁移现役数据 |
 | 4 安全审计 | 已有 `events.log` / `backup.mjs` / `maskDevice`；软删除与登录表列为待点单 |
 | 5 流程不是 Excel 页 | 文档列 6 条状态机；缺的流程直说没有 |
 | 6 部署运维 | 文档给 A/B 两档；不装 PG/Redis、不切生产、不假装有对象存储与告警 |
 | 7 换主流栈 | **明确不采纳**：现役在生产 + UI 迁移在途 + 两套后端并存 ⇒ 换栈 = 第二套真源 |
+
+### 17.6 代码真源 + 备份收敛（2026-11-15 · 用户 m30305）
+
+| 文件 | 变化 | 作用 |
+|---|---|---|
+| `src/class-catalog.js` | 新增 | 模块 / 流程 / 进度 / 备份清单唯一真源；不参与运行时判定 |
+| `scripts/class-catalog-blocks.mjs` | 新增 | 把五个渲染块输出 JSON 给 Python 同步桥 |
+| `scripts/sync-class-doc.py` | 新增 | 文档 `CATALOG:*` 块生成 / `--check` 漂移判据 |
+| `tests/unit-class-catalog.mjs` | 新增 | 29 action / 7 组状态词 / 4 个库名 / 备份脚本 / 文档块逐项对账 |
+| `scripts/backup-restore-drill.py` | 新增 | 隔离目录造 4 库 + 3 文件 → 快照 → 删库 → 恢复 → 回读 |
+| `scripts/backup.mjs` | 改写 | 备份集从真源派生；补 `class-room.db` / `class-dir.db` / `interact.db`；写 manifest |
+| `docs/开发文档-班级后台-2026-11-15.md` | 5 个生成块 | 不再手写模块表 / 进度表 / 流程 / action / 备份段 |
+| `package.json` | test:unit +1 | 挂上 `unit-class-catalog.mjs` |
+
+验证证据：`node tests/unit-class-catalog.mjs` PASS 62 / FAIL 0；`python scripts/sync-class-doc.py --check` PASS 5 blocks；
+`python scripts/backup-restore-drill.py` PASS 34 / FAIL 0；`node scripts/backup.mjs --root <隔离目录>` 六类源全落盘。
+全链 13 套单测 EXIT=0；反向验证 4 组（文档漂移 / action 写错 / 备份脚本第二份 SOURCES / 清单漏两库）全部抓到并按字节恢复。
+未验证：生产库上没跑恢复、没重启 8788；绝对路径库恢复要人工放回；备份不做加密/异地/定时器。
