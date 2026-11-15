@@ -25,7 +25,11 @@ import { readFileSync, renameSync, writeFileSync, existsSync, mkdirSync } from '
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DEFAULT_FILE = join(dirname(fileURLToPath(import.meta.url)), '..', 'user-claims.json');
+// 默认放在云端根。**支持 CLOUD_USER_CLAIMS_FILE 覆盖**（2026-11-15 加）：
+// 一体化运行包把可写数据统一放 data/，而 app/ 目录按"随包只读"对待；
+// 没有这个覆盖，声明了只读的目录会被写进文件，升级覆盖包时数据就丢。
+const DEFAULT_FILE = process.env.CLOUD_USER_CLAIMS_FILE
+  || join(dirname(fileURLToPath(import.meta.url)), '..', 'user-claims.json');
 
 // uid -> { schoolId?, roles[], scopes[], updatedAt }
 const claims = new Map();
