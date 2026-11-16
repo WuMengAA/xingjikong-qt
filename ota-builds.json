@@ -357,8 +357,21 @@
       "manualTiers": [
         "alpha"
       ]
+    },
+    "agent:0.6.73:969b7011390ecef6": {
+      "product": "agent",
+      "version": "0.6.73",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.73.exe",
+      "sha256": "969b7011390ecef6cd90f472ffd42e01643d1cb798bab1e03b5054db3467bc70",
+      "size": 37952061,
+      "notes": "【修复】回落路径按天择一+slotIndex去重，消除全新安装重复课表；课表提醒端到端已验证",
+      "mandatory": false,
+      "publishedAt": "2026-11-16T14:40:10.199Z",
+      "manualTiers": [
+        "stable"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-12T10:52:01.891Z"
+  "generatedAt": "2026-11-16T14:40:10.200Z"
 }
