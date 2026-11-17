@@ -370,8 +370,21 @@
       "manualTiers": [
         "stable"
       ]
+    },
+    "agent:0.6.74:5f6f1297973c74cf": {
+      "product": "agent",
+      "version": "0.6.74",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.74.exe",
+      "sha256": "5f6f1297973c74cfc6ce45bd6cc714e51e20730f2adc543cf223f5e7e3ba1676",
+      "size": 37956995,
+      "notes": "🔧修复 绑定适配：开机自动补拉云端课表\n🔧修复 离线绑定：运行中补拉不再漏下发\n—— 代号「补链」· 愿每台设备都接得住 🟠",
+      "mandatory": false,
+      "publishedAt": "2026-11-17T03:40:44.230Z",
+      "manualTiers": [
+        "stable"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-16T14:40:10.200Z"
+  "generatedAt": "2026-11-17T03:40:44.231Z"
 }
