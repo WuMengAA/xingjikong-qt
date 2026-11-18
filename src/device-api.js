@@ -17,11 +17,13 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { getTimetable } from './class-data.js';
 import { deviceTimetable } from './device-timetable.js';
-import { getDeviceClassCode, getDeviceTenant, listClasses } from './registry.js';
+import { getDeviceClassCode, getDeviceTenant, getDevice, listClasses } from './registry.js';
+import { clientProfile } from './device-ledger.js';
 
 export const DEVICE_GET_PREFIX = '/api/device/';
 export const PATH_TIMETABLE = '/api/device/timetable';
 export const PATH_CLASSES = '/api/device/classes';
+export const PATH_SELF = '/api/device/self';
 
 /** 定长比较（长度不同直接 false，不泄露长度）。 */
 function teq(a, b) {
@@ -147,12 +149,38 @@ export function timetableOfClass({ uid, classCode, tenantOf, list, read }) {
 }
 
 /**
+ * 设备查自己的客户端档案（2026-11-18 · 被控端主体地位）。
+ *
+ * 这是「每一台被控端都是一个客户端」在协议层的落点：设备启动后不必等管理端，
+ * 自己就能确认「云端认我是谁、我叫什么、我归哪个班/哪所学校、我是第几次接入、
+ * 我的补充信息（名称/班级/校区/用途）还缺哪几项」。
+ *
+ * 返回里的 initialized 四标志是给 OOBE 用的：缺哪项就引导补哪项，全齐了就不再打扰。
+ * 没接入过的 uid（查无档案）回 404 + NO_PROFILE —— **不凭空造档案**，
+ * 避免设备自报一个 uid 就让云端长出一条记录（那正是被灌爆内存的老路）。
+ */
+export function selfForDevice({ uid, onlineOf, profileOf }) {
+  const u = String(uid || '').trim();
+  if (!u) return { status: 400, body: { ok: false, error: '缺少设备标识' } };
+  let prof = null;
+  try {
+    prof = (profileOf || clientProfile)(u, (onlineOf || getDevice)(u));
+  } catch (e) {
+    return { status: 500, body: { ok: false, error: `读客户端档案失败：${e && e.message ? e.message : e}` } };
+  }
+  if (!prof) {
+    return { status: 404, body: { ok: false, code: 'NO_PROFILE', uid: u, error: '这台设备还没有注册记录' } };
+  }
+  return { status: 200, body: { ok: true, ...prof } };
+}
+
+/**
  * 设备侧 GET 总入口。
  * @returns {{status:number, body:object}|null} null = 不归本模块处理（调用方继续往下走）
  */
 export function deviceGet(u, req, deps = {}) {
   const path = String((u && u.pathname) || '');
-  if (path !== PATH_TIMETABLE && path !== PATH_CLASSES) return null;
+  if (path !== PATH_TIMETABLE && path !== PATH_CLASSES && path !== PATH_SELF) return null;
 
   const params = (u && u.searchParams) || new URLSearchParams();
   const a = authDevice({
@@ -165,6 +193,10 @@ export function deviceGet(u, req, deps = {}) {
 
   // 票里带 uid 时以票为准（不许用 query 覆盖）；只有静态令牌才允许 ?uid=
   const uid = a.uid || String(params.get('uid') || '').trim();
+
+  if (path === PATH_SELF) {
+    return selfForDevice({ uid, onlineOf: deps.onlineOf, profileOf: deps.profileOf });
+  }
 
   if (path === PATH_CLASSES) {
     return classesForDevice({

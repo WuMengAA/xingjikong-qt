@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "npm run test:unit",
-    "test:unit": "node tests/unit-ecodes.mjs && node tests/unit-bind-qr.mjs && node tests/unit-class-dir.mjs && node tests/unit-tenant.mjs && node tests/unit-perms-tenant.mjs && node tests/unit-class-data-tenant.mjs && node tests/unit-class-room-tenant.mjs && node tests/unit-class-attendance-tenant.mjs && node tests/unit-auth-failclosed.mjs && node tests/unit-noise-class-event.mjs && node tests/unit-instance-sovereignty.mjs && node tests/unit-class-roles.mjs && node tests/unit-class-catalog.mjs && node tests/unit-ota-unified.mjs && node tests/unit-ota-promote.mjs && node tests/unit-version-compare.mjs && node tests/unit-campus-teacher.mjs && node tests/unit-campus-server.mjs",
+    "test:unit": "node tests/unit-ecodes.mjs && node tests/unit-bind-qr.mjs && node tests/unit-class-dir.mjs && node tests/unit-tenant.mjs && node tests/unit-perms-tenant.mjs && node tests/unit-class-data-tenant.mjs && node tests/unit-class-room-tenant.mjs && node tests/unit-class-attendance-tenant.mjs && node tests/unit-auth-failclosed.mjs && node tests/unit-noise-class-event.mjs && node tests/unit-instance-sovereignty.mjs && node tests/unit-class-roles.mjs && node tests/unit-class-catalog.mjs && node tests/unit-ota-unified.mjs && node tests/unit-ota-promote.mjs && node tests/unit-version-compare.mjs && node tests/unit-device-ledger.mjs && node tests/unit-campus-teacher.mjs && node tests/unit-campus-server.mjs",
     "test:standalone": "node scripts/check-standalone.mjs --strict",
     "test:class-dir": "node tests/unit-class-dir.mjs",
     "test:tenant": "node tests/unit-tenant.mjs && node tests/unit-perms-tenant.mjs",

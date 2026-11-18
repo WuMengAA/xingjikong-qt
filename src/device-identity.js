@@ -18,8 +18,9 @@
 // 被控端每次重连都上报 QHostInfo::localHostName()，于是"管理端改的名字"下一次重连
 // 就被旧主机名顶回去，功能看起来像没做。所以改名时同时登记一条 namePin，
 // 并在 register 落 meta 前用 applyNamePin(uid, regMeta) 覆盖自报名。
-// 钉住的表只在内存（与 registry 的 knownDevices / 班级索引同款），云端重启后失效 ——
-// 这一条如实记进交付未验证/限制项，不假装它是持久化的。
+// 钉住的表 2026-11-18 起**持久化**进设备账本（device-ledger.js 的 name_pin 列）：
+// 改名是管理端的人工决定，云端重启（发版/watchdog 拉起）后不该失效。内存 Map 降级为
+// 热缓存，读不到时回账本取 —— 账本不可用时退回纯内存（与改造前行为一致，不更坏）。
 //
 // ── 纪律 ──────────────────────────────────────────────────────────────
 //   · 重名判定只在**同一个租户内**做：两所学校各有一台「1班讲台」是合理的；
@@ -31,11 +32,12 @@ import {
   getDeviceClassCode, getDeviceTenant, listDevices, pushEvent, setDeviceMeta, broadcastDevices,
 } from './registry.js';
 import { normalizeTenantId } from './tenant.js';
+import { getNamePin, setNamePin, ledgerStats } from './device-ledger.js';
 
 /** 设备名上限（与 register 侧 slice(0,64) 同口径，避免"改了名但注册又被截断"的错位）。 */
 export const DEVICE_NAME_MAX = 64;
 
-/** uid -> 人工钉住的名字。改名成功即登记；applyNamePin 在 register 时覆盖自报名。 */
+/** uid -> 人工钉住的名字。**热缓存**：真源在 device-ledger 的 name_pin 列（跨重启）。 */
 const namePins = new Map();
 
 function normName(v) {
@@ -62,15 +64,22 @@ function validateName(raw) {
  * @returns {object} 同一个 regMeta 对象（就地改写 name，返回它便于链式调用）
  */
 export function applyNamePin(uid, regMeta) {
-  const pin = namePins.get(String(uid ?? '').trim());
+  const u = String(uid ?? '').trim();
+  // 先查热缓存，未命中再回账本（云端刚重启时缓存是空的，这里是唯一恢复点）。
+  let pin = namePins.get(u);
+  if (!pin) {
+    pin = getNamePin(u);
+    if (pin) namePins.set(u, pin);
+  }
   if (!pin) return regMeta;
   if (regMeta && typeof regMeta === 'object') regMeta.name = pin;
   return regMeta;
 }
 
-/** 诊断：当前钉住多少台（运维/测试用）。 */
+/** 诊断：当前钉住多少台（运维/测试用）。以账本为准，内存缓存只作补充。 */
 export function pinnedNameCount() {
-  return namePins.size;
+  const inLedger = Number(ledgerStats().pinned) || 0;
+  return Math.max(inLedger, namePins.size);
 }
 
 /**
@@ -166,7 +175,13 @@ export function renameDevice({ uid = '', name = '', ident = null, tenantId = nul
   }
   const before = listDevices().find((d) => String(d.uid) === u);
   setDeviceMeta(u, { name: finalName });
-  if (pin) namePins.set(u, finalName); else namePins.delete(u);
+  if (pin) {
+    namePins.set(u, finalName);
+    setNamePin(u, finalName);   // 落账本：云端重启后 applyNamePin 仍能取回
+  } else {
+    namePins.delete(u);
+    setNamePin(u, '');          // 显式取消钉住
+  }
   broadcastDevices();   // 改名后立刻推设备表，管端不用等下一轮轮询
   pushEvent('info', '管理端修改设备名称', {
     uid: u, name: finalName, previous: (before && before.name) || null,

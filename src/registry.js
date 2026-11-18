@@ -21,6 +21,9 @@ import { DEFAULT_TENANT, normalizeTenantId } from './tenant.js';
 import { shouldAutoSubscribe, watchersOf, relayBudget, idleSnapshot, pushFrameGate, resetGateState } from './frame-governance.js';
 // 环境白名单（2026-10-24）：设备是 test 还是 prod，云端唯一裁决（设备自报一律忽略）。
 import { isTestUid } from './env-gate.js';
+// 设备身份账本（2026-11-18）：knownDevices 原本纯内存，云端一重启绑定识别全丢。
+// 下面第 39 行把它换成会落盘的 LedgerMap —— 本文件因此**只多 2 行**，不动任何写入点。
+import { hydrateKnown, LedgerMap } from './device-ledger.js';
 
 /** 出向统一走协议层：对端是 v1 就发信封，是旧客户端就发旧扁平格式（过渡期不断链）。 */
 function sendTo(ws, type, payload, id = '') {
@@ -36,7 +39,9 @@ const devices = new Map();
  * 离线设备从列表里彻底消失 —— 管理端「离线状态不显示」就是这么来的。
  * 现在 online 由 `devices.has(uid)` 派生，name / classCode / version 落在这张表里，重连沿用、离线保留。
  */
-const knownDevices = new Map();
+// 落盘版（2026-11-18）：hydrateKnown 从 device-ledger.db 装回上次的身份，LedgerMap 拦 set/get
+// 让「改名 / 绑班 / 解绑 / 改用途 / env 重算」全部自动落盘。写失败只报错不崩，云端照常起。
+const knownDevices = hydrateKnown(new LedgerMap());
 
 /* 上限护栏（2026-10-13）：uid 由设备自报，而设备令牌是全班/全校共用的 ⇒ 不设上限时
  * 可被无限灌 uid 把这张表撑爆内存（一条 register 加一条，永不释放）。
