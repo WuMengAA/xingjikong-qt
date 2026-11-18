@@ -1,0 +1,59 @@
+{
+  "kind": "stelarith.static-portal.manifest",
+  "schema": 1,
+  "generatedAt": "2026-11-18T22:50:00+08:00",
+  "product": "星集控 · 静态集控（Cloudflare Pages 交付）",
+  "purpose": "对外静态资源入口：安装包/装机脚本/客户端资源的可审计清单；只暴露可公开文件。",
+  "runtimeDependency": "无：本包是纯静态页，不连云端、不下发指令、不含令牌。",
+  "distribution": {
+    "target": "Cloudflare Pages",
+    "presets": {
+      "projectName": "stelarith-static",
+      "branch": "main",
+      "buildCommand": "node scripts/build-static-portal.mjs",
+      "buildOutput": "build/static-portal"
+    },
+    "publicBase": "https://static.245959623.xyz",
+    "limits": {
+      "source": "https://developers.cloudflare.com/pages/platform/limits/ (HTTP 200, 2026-11-18)",
+      "singleAsset": "25 MiB",
+      "note": "安装包均 >25 MiB，Pages 只托管清单/脚本/索引；大文件走既有 /assets/ 云端回源或 R2。"
+    },
+    "uploadNote": "Dashboard 拖拽 build/static-portal 到 Pages 项目 stelarith-static（需 CF 账号）；或给 API Token 加当前出口 IP 白名单后跑 wrangler pages deploy。"
+  },
+  "sources": [
+    {
+      "id": "agent-installers",
+      "label": "被控端安装包",
+      "source": "assets/pkg/stelarith-agent-setup-*.exe",
+      "public": null,
+      "note": "安装包 36–37 MiB > Pages 25 MiB 单文件上限（官方文档实查）；不复制，保留云端 /assets/pkg/ 或迁 R2。"
+    },
+    {
+      "id": "viewer-installers",
+      "label": "管理端安装包",
+      "source": "assets/pkg/stelarith-viewer-setup-*.exe",
+      "public": null,
+      "note": "安装包 36–37 MiB > Pages 25 MiB 单文件上限（官方文档实查）；不复制，保留云端 /assets/pkg/ 或迁 R2。"
+    },
+    {
+      "id": "provision",
+      "label": "装机脚本",
+      "source": "assets/provision/*.ps1",
+      "public": "provision/",
+      "note": "脚本内含占位符，不含令牌"
+    },
+    {
+      "id": "qml-patch",
+      "label": "QML 热更包（演示分发）",
+      "source": "assets/qml-patch/*.zip",
+      "public": "qml-patch/",
+      "note": "4.57 MiB < Pages 25 MiB 单文件上限；客户端当前仍走 /api/qml-patch/download，Pages 版只作镜像预览。"
+    }
+  ],
+  "safety": [
+    "不复制 .env / *.json / *.log / 令牌 / 数据库",
+    "不复制 ota.json（线上清单不在库）",
+    "安装包仅按 ota-builds.json 的发布记录白名单复制"
+  ]
+}

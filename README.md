@@ -621,3 +621,11 @@ viewer QML / admin-server 7 件）一行不碰。完整文档见 `docs/开发文
 - `tests/unit-ota-unified.mjs` 20/0；`tests/unit-ota-promote.mjs` 56/0；`tests/unit-version-compare.mjs` 41/0；`tests/unit-campus-teacher.mjs` 14/0；`tests/unit-campus-server.mjs` 12/0。已接入 `npm test`。
 - 本批**没有**生产推送、没有改 `assets/pkg`、没有动 OTA 清单、没有重启 8788 / 8090 / 在线被控端。用户点名 v0.6.70，但 HEAD 两端 CMakeLists 是 0.6.72 且 `assets/pkg` 无稳定 0.6.70；生产发版版本仍待用户裁决。
 - 未验证：干净生产库上真注册 12 班没跑（只在隔离目录跑）；校区服务没接进 `src/index.js`（那是他线 WIP，按 AGENTS §2 不碰）；12 台真设备没实连。
+
+
+## 静态集控资源站（Cloudflare Pages · 2026-11-18）
+
+- **真源**：`static-portal/manifest.json`（白名单 + 口径）；**构建脚本**：`scripts/build-static-portal.mjs`（108 行，node --check 0，重复构建 catalog SHA 稳定）；**产物**：`build/static-portal/`（gitignore，5 文件 / 4,807,987 B；index.html + 两个装机脚本 + qml-patch 镜像 + catalog.json）。
+- **CF 事实（web_fetch HTTP 200）**：`https://developers.cloudflare.com/pages/platform/limits/` 明文「The maximum file size for a single Cloudflare Pages site asset is 25 MiB」；被控端/管理端安装包 36–44 MiB **一律不上传 Pages**，继续走云端 `/assets/pkg/` 或迁 R2。反向验证：临时把 `agent-installers.public` 打开，脚本对 21 个 exe 全部打印 `SKIP >25MiB`，恢复后 5 文件 0 SKIP。
+- **部署**：Cloudflare Dashboard 建 Pages 项目 `stelarith-static`（branch main / build command `node scripts/build-static-portal.mjs` / output `build/static-portal`），或 CF Token 加当前出口 IP 白名单后 `npx wrangler pages deploy build/static-portal --project-name=stelarith-static --branch=main`。本机 Token（vault `cf_api`）被 CF 按来源 IPv6 拒绝（error 9109 `Cannot use the access token from location: 240e:...`），**本轮未部署、未建项目、未改 DNS**。
+- **边界**：纯静态、只读、无令牌、不连云端 API、不下发指令；页面只列可公开资源与 SHA-256。
