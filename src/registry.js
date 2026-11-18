@@ -196,6 +196,7 @@ export function hydrateClassesFromDir() {
     }
     if (rec.name) c.name = rec.name;
   }
+  for (const [u, kd] of knownDevices) if (kd.classCode) addToClassIndex(u, kd.classCode, '', kd.tenantId);  // 2026-11-18 归属也从账本倒推：只灌班名的话重启后「班→设备」全空，按班下发与班级看板一起失灵
   return n;
 }
 
