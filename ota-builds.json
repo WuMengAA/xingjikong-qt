@@ -383,8 +383,21 @@
       "manualTiers": [
         "stable"
       ]
+    },
+    "agent:0.6.75:7406922e4746ced6": {
+      "product": "agent",
+      "version": "0.6.75",
+      "url": "https://control.245959623.xyz/assets/pkg/stelarith-agent-setup-0.6.75.exe",
+      "sha256": "7406922e4746ced692c3e35f41fe93fded7efc65122c5f0df9809953981a0f40",
+      "size": 37976570,
+      "notes": "v0.6.75",
+      "mandatory": false,
+      "publishedAt": "2026-11-18T02:18:37.536Z",
+      "manualTiers": [
+        "stable"
+      ]
     }
   },
   "generatedBy": "src/ota-promote.js",
-  "generatedAt": "2026-11-17T03:40:44.231Z"
+  "generatedAt": "2026-11-18T02:18:37.537Z"
 }
