@@ -43,6 +43,21 @@ try {
     const deny = await j('POST', '/api/campus/teacher-gate', { action: a });
     ok('拒 '+a, deny.status === 403 && deny.body.ok === false);
   }
+  // ── 2026-11-19 新建 / 加入校区（隔离内存态）─────────────────────────
+  const before = await j('GET', '/api/campus/onboarding/state');
+  ok('初始 1 校区 0 成员', before.body.ok && before.body.state.campuses.length === 1 && before.body.state.members.length === 0);
+  const created = await j('POST', '/api/campus/create', { id:'XL-ZX', name:'咸林中学', publicBase:'https://x.example.cn', classCount:12 });
+  ok('新建校区 200', created.status === 200 && created.body.campus.id === 'xl-zx');
+  const dup = await j('POST', '/api/campus/create', { id:'xl-zx', name:'重复', publicBase:'https://x.example.cn', classCount:1 });
+  ok('重复 id 409', dup.status === 409);
+  const joined = await j('POST', '/api/campus/join', { uid:'dev00001', campusId:'XL-ZX', role:'TEACHER', name:'1班讲台' });
+  ok('加入校区 200', joined.status === 200 && joined.body.created && joined.body.member.role === 'teacher');
+  const rejoin = await j('POST', '/api/campus/join', { uid:'dev00001', campusId:'xl-zx', role:'admin' });
+  ok('重复加入只更新角色', rejoin.status === 200 && !rejoin.body.created && rejoin.body.member.role === 'admin');
+  const mine = await j('GET', '/api/campus/mine?uid=dev00001');
+  ok('我的校区可见 1 个', mine.body.ok && mine.body.campuses.length === 1 && mine.body.campuses[0].id === 'xl-zx');
+  const badJoin = await j('POST', '/api/campus/join', { uid:'dev00002', campusId:'nope', role:'teacher' });
+  ok('未知校区加入 400', badJoin.status === 400 && badJoin.body.ok === false);
   const miss = await j('GET', '/api/campus/nope');
   ok('未知路由 404', miss.status === 404);
 } catch (e) { fail++; console.error('FAIL 冒烟异常 ' + (e.stack || e)); }
