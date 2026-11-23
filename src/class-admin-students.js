@@ -1,6 +1,6 @@
 // 班级内容：学生名单 + 课表（2026-11-02 · 屎山整理 #4，从 class-admin.js 逐字搬出）
 //
-// 课表口径：ClassIsland 档案 → 归一化信封（TIMETABLE_SCHEMA）。CIMS 退役后课表回落到
+// 课表口径：ClassIsland 档案 → 归一化信封（TIMETABLE_SCHEMA）。旧课表供给退役后回落到
 // 我们自己的库，但格式保持与 ClassIsland 互通：老师手里的档案能直接导进来。
 // adminListTimetableGroups 用 classIslandGroupMeta 的「首次出现序」推断群顺序与
 // 「几班」标签 —— 12 个群经常同名，靠名字猜必错。
