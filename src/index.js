@@ -393,7 +393,7 @@ import {
 import { handleClassAdminApi, adminMyClasses, handleTimetableReceipt } from './class-admin.js';
 // 用户 claims 存储（2026-10-20 · RBAC 第二批）：票无 claims 时按 uid 回填身份，权限真正流动
 import { initUserClaims, applyStoredClaims, setUserClaims, deleteUserClaims, listUserClaims } from './user-claims.js';
-// CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
+// 旧课表供给模块已退役
 // 2026-11-09：旧课表供给模块导入已随退役整体移除（迁移定案 §5）。
 import { expireTerminalHistory } from './store.js';
 
@@ -960,9 +960,9 @@ const server = http.createServer((req, res) => {
     applyStoredClaims(req.__auth);
 
     // 2026-10-26（大范围找活 · 审计面三）：admin/* 平台级端点统一平台身份闸门。
-    // 此前 isManageApi 只认「有效令牌或有效票据」，而 config/ota/cims/provision/songkeys
+    // 此前 isManageApi 只认「有效令牌或有效票据」，而 config/ota/provision/songkeys
     // 的 handler 内部都不查 isPlatformIdent —— 于是「只属于某个班的受限教师票据」也能
-    // 改写服务端令牌、发全校 OTA、拉装机包（含设备令牌）、下发 CIMS。
+    // 改写服务端令牌、发全校 OTA、拉装机包（含设备令牌）、下发课表配置。
     // 现统一要求：平台超管（roles 含 platform_admin）或全权身份（静态令牌 / scopes=null）。
     // 与既有 user-claims / broadcast-club 的守门口径一致。
     if (isAdminApi) {
