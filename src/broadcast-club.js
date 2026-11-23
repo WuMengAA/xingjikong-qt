@@ -21,7 +21,6 @@ import { mintViewerTicket, verifyViewerTicket } from './ticket.js';
 import {
   VOICEHUB_WRITE_BASE, VOICEHUB_WRITE_KEY, CLUB_MEMBERS_FILE, CLUB_AUDIT_FILE, CLUB_TOKEN_TTL_MS,
 } from './config.js';
-import { resolveBases } from './voicehub-sources.js';
 
 const DEFAULT_MEMBERS = join(dirname(fileURLToPath(import.meta.url)), '..', CLUB_MEMBERS_FILE);
 const auditFile = CLUB_AUDIT_FILE;
@@ -156,53 +155,20 @@ function vhKey() { return VOICEHUB_WRITE_KEY || ''; }
 
 export function voicehubConfigured() { return !!vhBase() && !!vhKey(); }
 
-export async function proxyGetSchedules(opts = {}) {
-  // 2026-11-07（用户 m13419 → m13469 裁决 schedule_source=「新源优先 + 8799 回退」）：
-  //   · 读顺序 = resolveBases()（netlify 主 → music 备）→ 本机写代理 VOICEHUB_WRITE_BASE（8799）。
-  //   · 回退触发条件 = 拉不到（网络错/非 200/坏 JSON）**或空数组 []**。依据：取证时已向用户
-  //     明确「两个新源 /api/songs/public 都返回 []，8799 有真实排期」，用户在此前提下选
-  //     「新源优先 + 8799 回退」；若把 [] 当权威，回退永不发生、裁决等于失效。
-  //   · 所有源都合法但都空 ⇒ 返回最后一个空数组（合法「无排期」，不是错误）。
-  //   · 写（proxyReorder）**仍只走 vhBase()**：换源重试写会造成重复写入。
-  //   · opts（仅探针/隔离实例用）：{ bases: string[], fetchFn } 可注入，生产调用方不传，
-  //     避免 config.js 在模块评估期读死 env 导致隔离测试改不了源顺序。
-  const fetchFn = typeof opts.fetchFn === 'function' ? opts.fetchFn : fetch;
-  let bases;
-  if (Array.isArray(opts.bases)) {
-    bases = opts.bases.map((s) => String(s).trim().replace(/\/+$/, '')).filter(Boolean);
-  } else {
-    bases = resolveBases({}, process.env.VOICEHUB_BASE_URL);
-    const writeBase = vhBase();
-    if (writeBase && !bases.includes(writeBase)) bases.push(writeBase);
+export async function proxyGetSchedules() {
+  const base = vhBase();
+  if (!base) return { ok: false, code: 0, error: '云端未配置 VoiceHub 写地址（STE_VOICEHUB_WRITE_BASE）' };
+  try {
+    const r = await fetch(`${base}/api/songs/public`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+    const text = await r.text();
+    if (!r.ok) return { ok: false, code: r.status, error: `VoiceHub 返回 HTTP ${r.status}` };
+    return { ok: true, data: text }; // 原样透传，客户端按既有契约解析数组
+  } catch (e) {
+    return { ok: false, code: 0, error: `拉取排期失败：${e.message}` };
   }
-  if (!bases.length) return { ok: false, code: 0, error: '云端未配置任何 VoiceHub 排期源' };
-
-  let lastErr = null;
-  let lastEmpty = null;
-  for (const base of bases) {
-    try {
-      const r = await fetchFn(`${base}/api/songs/public`, {
-        headers: { accept: 'application/json' },
-        signal: AbortSignal.timeout(12000),
-      });
-      if (!r.ok) { lastErr = `VoiceHub 返回 HTTP ${r.status}`; continue; }
-      const text = await r.text();
-      let arr;
-      try { arr = JSON.parse(text); } catch { lastErr = '排期响应不是合法 JSON'; continue; }
-      if (!Array.isArray(arr)) { lastErr = '排期响应不是数组'; continue; }
-      if (arr.length === 0) { lastEmpty = text; continue; }   // 空表 ⇒ 试下一个源
-      return { ok: true, data: text, source: base };           // 有数据 ⇒ 权威，原样透传
-    } catch (e) {
-      lastErr = `拉取排期失败：${e.message}`;
-    }
-  }
-  if (lastEmpty !== null) return { ok: true, data: lastEmpty, source: 'empty' };
-  return { ok: false, code: 0, error: lastErr || '所有排期源均不可用' };
 }
 
 export async function proxyReorder(pairs) {
-  // ⚠️ 2026-11-07：写**只走** vhBase()（本机 8799 / 生产代理地址），不套用读的多源
-  //    fallback。写请求一旦发出可能已到达对端，换源重试 = 重复写入排期（至多一次原则）。
   const base = vhBase();
   const key = vhKey();
   if (!base || !key) return { ok: false, code: 0, error: '云端未配置 VoiceHub 写地址/密钥' };

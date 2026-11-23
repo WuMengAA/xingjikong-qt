@@ -1,8 +1,8 @@
 /**
  * 班级课表 · ClassIsland 档案规范化（2026-10-25）
  *
- * 背景：旧版课表体系是「ClassIsland 官方档案 + 资源集」那一套（cp_files / tl_files /
- * sub_files）。旧供给退役后，课表要落回我们自己的 class_timetable（class-data.js），
+ * 背景：CIMS 时期课表是「ClassIsland 官方档案 + 资源集」那一套（cp_files / tl_files /
+ * sub_files）。CIMS 退役后，课表要落回我们自己的 class_timetable（class-data.js），
  * 但**不能自成一套格式** —— 老师手里的档案、教室里的 ClassIsland 客户端、
  * 以后的平板端都要能互通，所以：
  *   · 入：ClassIsland 官方 Profile（ClassPlans / TimeLayouts / Subjects / ClassPlanGroups）
@@ -17,10 +17,10 @@
  *   · 4 份 TimeLayout（周日 / 周1234 / 周5 / 周1 各一套「高二通用」）、23 个科目。
  *
  * 群 → 班的映射（**唯一的坑，别再猜**）：完整档案里 12 个群**全叫「新课表群」**，
- *   靠名字分不出谁是谁。权威口径来自旧版课表导入器：**保持 ClassPlanGroups
+ *   靠名字分不出谁是谁。权威口径来自 CIMS `schedule_importer.py`：**保持 ClassPlanGroups
  *   的声明顺序、只留有课表的群**，按序命名 1班…12班（`docs/phase4-班级课表导入验证报告.md`
  *   给出了 12 个班周一的逐班课表）。但 2026-10-25 实测发现**声明顺序本身也会变**：
- *   `pre-stelarith`（旧版真正导入的那份）声明序 = 12/12 对得上，
+ *   `pre-stelarith`（CIMS 真正导入的那份）声明序 = 12/12 对得上，
  *   `pre-groupfix`（改名之后）声明序 **0/12**、只有「ClassPlans 首次出现序」才是 12/12 ——
  *   因为改名把那个群在 ClassPlanGroups 里挪到了末尾。故：
  *     · 排序一律用 **ClassPlans 里 AssociatedGroup 的首次出现顺序**（两份档案都 12/12，实测）；
@@ -29,7 +29,7 @@
  *
  * TimeType 语义（**踩过坑，别再猜**）：`0 = 上课`、`1 = 课间`、`3 = 行动`。
  *   第一版按「1=上课」写，导入后数学只剩 20 分钟、语文 5 分钟 —— 因为 1 都是
- *   早操/早点/预备这类短时段。权威依据：旧版课表导入器
+ *   早操/早点/预备这类短时段。权威依据：CIMS 导入器
  *   `app/services/schedule_importer.py::_layout_class_count` 就是 `TimeType == 0` 计数，
  *   且该校真实档案（1班课表群）12 节课正好对上 12 个 type=0 时段。
  *   只有 type=0 占「第 N 节」，其余条目仍保留在作息里给人看。

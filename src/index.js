@@ -224,8 +224,6 @@ import {
   verifyClubMember, mintClubToken, verifyClubToken, voicehubConfigured,
   proxyGetSchedules, proxyReorder, auditReorder, readAudit,
 } from './broadcast-club.js';
-import { dispatchBroadcastCommand, handleScheduleReorder } from './broadcast-actions.js';
-import { handleClassroomHttp } from './classroom-http.js';
 import { parseIncoming, parseFrame, parseAnyFrame, wrapOutgoing, errorPayload, ERR, PROTOCOL_VERSION } from './protocol.js';
 import { timingSafeEqual } from 'node:crypto';
 
@@ -395,7 +393,9 @@ import {
 import { handleClassAdminApi, adminMyClasses, handleTimetableReceipt } from './class-admin.js';
 // 用户 claims 存储（2026-10-20 · RBAC 第二批）：票无 claims 时按 uid 回填身份，权限真正流动
 import { initUserClaims, applyStoredClaims, setUserClaims, deleteUserClaims, listUserClaims } from './user-claims.js';
-// 2026-11-09：旧课表供给模块导入已随退役整体移除（迁移定案 §5）。
+// CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
+import { onDeviceOnline as cimsOnDeviceOnline, startCimsScheduler, syncDevice as cimsSyncDevice,
+  syncAll as cimsSyncAll, cimsStatus } from './cims.js';
 import { expireTerminalHistory } from './store.js';
 
 /**
@@ -745,7 +745,7 @@ const server = http.createServer((req, res) => {
     const body = JSON.stringify({
       ok: !!voiceHubBridge,
       // 未启用（启动失败/未配置）时如实回 null，不假装"没有广播"
-      ...(d ? { pollMs: d.pollMs, staleMs: d.staleMs, lastOkAgoMs: d.lastOkAgoMs, lastError: d.lastError, bases: d.bases, activeBase: d.activeBase } : {}),
+      ...(d ? { pollMs: d.pollMs, staleMs: d.staleMs, lastOkAgoMs: d.lastOkAgoMs, lastError: d.lastError } : {}),
       state: d ? d.state : { status: 'disabled', broadcast: null },
     });
     res.writeHead(200, {
@@ -756,6 +756,7 @@ const server = http.createServer((req, res) => {
     });
     return res.end(body);
   }
+
   // ── 2026-10-23 · 广播社成员（管理端独立身份）────────────────────────────
   // 账号自管在云端；成员令牌 = viewer 票（claims 带 broadcast_club 角色 + station）。
   // 写排期经云端代理到 VoiceHub（密钥云端持有），每次写落审计。
@@ -778,13 +779,12 @@ const server = http.createServer((req, res) => {
       });
       return undefined;
     }
-    // 其余子路由均需成员令牌（I1：command = 广播台指令，成员票即可，不放开管理面）
-    if (sub === 'schedules' || sub === 'schedules/reorder' || sub === 'command') {
+    // 其余子路由均需成员令牌
+    if (sub === 'schedules' || sub === 'schedules/reorder') {
       const auth = req.headers.authorization || '';
       const tok = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
       const v = verifyClubToken(tok);
       if (!v.ok) return send(401, { ok: false, code: 'TOKEN_INVALID', error: v.reason || '未授权：需要广播社成员令牌' });
-      if (req.method === 'POST' && sub === 'command') return dispatchBroadcastCommand({ req, res, send, v });
       if (req.method === 'GET' && sub === 'schedules') {
         proxyGetSchedules().then((r) => {
           if (!r.ok) return send(r.code && r.code >= 400 && r.code < 500 ? r.code : 502, { ok: false, error: r.error });
@@ -821,6 +821,7 @@ const server = http.createServer((req, res) => {
     }
     return send(404, { ok: false, error: '未知的 broadcast-club 子路由' });
   }
+
   if (req.method === 'GET' && u.pathname === '/api/public/ota') {
     // ⚠️ 2026-10-14 测试通道抓到的缺口：本端点此前走通用 send()，**不带 cache-control**
     //    ⇒ 公网 CDN/代理按启发式缓存，发布新版本后官网下载中心可能几分钟不刷新。
@@ -894,16 +895,10 @@ const server = http.createServer((req, res) => {
 
   // ── 健康端点（2026-11-23 · 云端稳定性体检补缺）────────────────────────
   // 必须放在 isManageApi 鉴权门**之前**：监控/负载均衡不带令牌也要能探活。
-  // 只回不敏感信息：ok / uptimeSec / version —— 不回令牌、设备数、内部路径。
-  // 为什么需要：云端此前 /health 404，进程内部卡死时外部只能看到 TCP 通，发现不了。
+  // 只回 ok/uptimeSec/version —— 不回令牌、设备数、内部路径。
   if (req.method === 'GET' && u.pathname === '/health') {
-    return send(200, {
-      ok: true,
-      service: 'stelarith-cloud',
-      uptimeSec: Math.floor(process.uptime()),
-      version: 'v1',
-      ts: Date.now(),
-    });
+    return send(200, { ok: true, service: 'stelarith-cloud',
+      uptimeSec: Math.floor(process.uptime()), version: 'v1', ts: Date.now() });
   }
 
   // HTTP 管理面鉴权（2026-10-04 · 乙阶段收尾 + 补洞）：
@@ -926,7 +921,6 @@ const server = http.createServer((req, res) => {
     // 2026-10-23 · 广播社成员管理（仅全权/平台超管）
     u.pathname.startsWith('/api/admin/broadcast-club');
   const isManageApi =
-    u.pathname.startsWith('/api/classroom/') ||   // 2026-11-10 班级一站式服务（复用既有 401 门）
     u.pathname === '/api/instructions' || u.pathname === '/api/devices' ||
     u.pathname === '/api/events' || u.pathname === '/api/frame' ||
     u.pathname === '/api/instructions/pending' || u.pathname === '/api/instructions/notice' ||
@@ -967,9 +961,9 @@ const server = http.createServer((req, res) => {
     applyStoredClaims(req.__auth);
 
     // 2026-10-26（大范围找活 · 审计面三）：admin/* 平台级端点统一平台身份闸门。
-    // 此前 isManageApi 只认「有效令牌或有效票据」，而 config/ota/provision/songkeys
+    // 此前 isManageApi 只认「有效令牌或有效票据」，而 config/ota/cims/provision/songkeys
     // 的 handler 内部都不查 isPlatformIdent —— 于是「只属于某个班的受限教师票据」也能
-    // 改写服务端令牌、发全校 OTA、拉装机包（含设备令牌）、下发课表配置。
+    // 改写服务端令牌、发全校 OTA、拉装机包（含设备令牌）、下发 CIMS。
     // 现统一要求：平台超管（roles 含 platform_admin）或全权身份（静态令牌 / scopes=null）。
     // 与既有 user-claims / broadcast-club 的守门口径一致。
     if (isAdminApi) {
@@ -981,10 +975,6 @@ const server = http.createServer((req, res) => {
         return send(403, { ok: false, ecode: 'PV4002', code: 'NO_DEVICE_PERMISSION', error: '需要平台管理员身份' });
       }
     }
-
-  // 2026-11-10 · 班级一站式服务：班级=隔离单元，单一入口（已在 isManageApi 过 401 门）。
-  // 并列新建，不改任何旧 class-*.js；旧 5 条接入通道暂标记退役、待切换（classroom-http.js）。
-  if (handleClassroomHttp(req, res, u, send, identityFromAuth(req.__auth))) return undefined;
 
   // ── 2026-10-18 · 班级点歌凭据管理（管理面鉴权，见上 isAdminApi）──────────
   // GET  /api/admin/songkeys            → 清单（**只有 tail，无明文**）
@@ -1610,9 +1600,6 @@ const server = http.createServer((req, res) => {
 
   // ── 设备绑定：二维码 + 绑定码（2026-10-20）────────────────────────────────
   //
-  // ⚠️ 2026-11-10 退役标记：本段 5 条并行接入通道（bind-class / activate / bind-qr /
-  //   bindcode / bind/confirm）**暂保留但不再演进**，新接入统一走 /api/classroom/:tenant/:code/join
-  //   （班级=隔离单元，单一判据 canJoinUnit）。待调用方切换完成后再整段移除，见 classroom-http.js。
   // 背景：OOBE 向导（被控端首次启动引导）有两条绑定路，**云端一条都没有** ——
   //   ① 扫码路 GET /api/device/bind-qr 与 GET /api/device/bind-status
   //   ② 输码路 POST /api/device/activate
@@ -2282,15 +2269,38 @@ const server = http.createServer((req, res) => {
     return undefined;
   }
 
-  // ── 旧课表供给路由已整体移除（2026-11-09 退役收尾）────────────────────────
-  // 旧课表真源迁移说明见 §5：
-  // 课表唯一真源已是 class-room.db 的 class_timetable，不再接受旧来源。
-  // 原先的旧式 status/pull/apply 端点 虽在面板隐藏入口，
-  // 手工持令牌仍可触发拉取/下发 ⇒ 属「退役后仍可触发」的安全残留，今一并删除。
-  if (u.pathname.startsWith('/api/admin/cims')) {
-    pushEvent('warn', '已退役的课表端点被调用，已拒绝', { path: u.pathname });
-    return send(410, { ok: false, ecode: 'CIMS_RETIRED',
-      error: '旧课表供给已退役；课表请走 /api/class/timetable-save 与 timetable-apply 通道' });
+  // ── CIMS 课表供给管理端（2026-10-17）────────────────────────────────────
+  // GET  /api/admin/cims/status          配置（脱敏）+ 各设备缓存/最近同步结果
+  // POST /api/admin/cims/pull   {uid?}   只拉取刷缓存，不下发
+  // POST /api/admin/cims/apply  {uid?}   拉取并立即下发（无视"有无变化"）；不带 uid = 全部在线设备
+  // ⚠️ 管理 API 不受 CIMS_ENABLED 门控——持令牌的人显式点的动作就是意图；
+  //    CIMS_ENABLED 只管自动路径（设备上线钩子 + 周期同步）。
+  if (req.method === 'GET' && u.pathname === '/api/admin/cims/status') {
+    return send(200, { ok: true, cims: cimsStatus() });
+  }
+
+  if (req.method === 'POST' && (u.pathname === '/api/admin/cims/pull' || u.pathname === '/api/admin/cims/apply')) {
+    const wantApply = u.pathname.endsWith('/apply');
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', async () => {
+      let payload;
+      try { payload = JSON.parse(body || '{}'); }
+      catch (e) { return send(400, { ok: false, error: 'JSON 解析失败: ' + e.message }); }
+      const uid = payload.uid ? String(payload.uid).trim() : '';
+      pushEvent('info', `管理面板触发 CIMS 课表${wantApply ? '下发' : '拉取'}`, { uid: uid || '(全部在线)' });
+      try {
+        if (uid) {
+          const r = await cimsSyncDevice(uid, { apply: wantApply, force: wantApply });
+          return send(r.ok ? 200 : 502, { ok: r.ok, result: r });
+        }
+        const r = await cimsSyncAll({ apply: wantApply, force: wantApply });
+        return send(200, { ok: true, result: r });
+      } catch (e) {
+        return send(500, { ok: false, error: e.message });
+      }
+    });
+    return undefined;
   }
 
   // GET /api/admin/provision?uid=class_xxx_2028_08  → 一枚这台机器专属的装机 bat
@@ -3058,7 +3068,8 @@ setInterval(() => {
   }
 }, INTERACT_SWEEP_INTERVAL_MS);
 
-// 2026-11-09：旧课表周期同步调度已随退役整体移除（课表真源 = class-room.db/class_timetable）。
+// CIMS 课表周期同步（2026-10-17）：CIMS_ENABLED=true 且 CIMS_PULL_INTERVAL_SEC>0 才启。
+startCimsScheduler();
 
 // OTA 资产健康自检（2026-10-31 加 · 404 事故闭环）：清单指向本地 assets 的文件必须存在。
 // 10-30 事故 = assets/pkg/ 被清空，清单/接口全部正常、教室机下载却 404，静默到"更新失败"才暴露。
@@ -3251,7 +3262,9 @@ wss.on('connection', (ws, req) => {
       });
       // 重连补发：这台机器掉线期间"已下发未回执"的指令，按原顺序重发给它（内部无待补发则不动作）。
       replayPending(ws, uid);
-      // 2026-11-09：旧课表上线同步钩子已随退役移除；课表由 pullSelfTimetable() 按班补拉。
+      // CIMS 课表上线同步（2026-10-17）：后台拉取，按配置决定是否立即下发。
+      // ⚠️ 不 await：注册路径上多一次 CIMS 往返会把握手拖慢；模块内部自带异常兜底。
+      cimsOnDeviceOnline(uid);
       return;
     }
 
@@ -3366,8 +3379,8 @@ wss.on('connection', (ws, req) => {
     // 点歌 / 反馈点赞 / 祝福弹幕：学生不可信输入，云端落库（interact.js）+ 限额闸门，
     // 再广播给管理端（待审队列实时可见）。班级归属以云端 knownDevices 表为准
     // （设备自报的 classCode 只是兜底 —— 自报值不可信）。
-    // ⚠️ 三类要落库（等审批内容，非实时遥测）；审计走 interact 库。2026-11-09：排期重排改走云端代发（移除端侧 apiKey）。
-    if (p.type === 'schedule_reorder' && handleScheduleReorder({ p, uid, snd, ws, pushEvent })) return;
+    // ⚠️ 与噪音不同，这三类**要落库**：它们是等审批的内容，不是实时遥测。
+    // ⚠️ 不走事件流水（一节课几十条会把运维事件挤掉）——审计走 interact 库本身。
     if (p.type === 'song_request' || p.type === 'feedback' || p.type === 'blessing') {
       const classCode = getDeviceClassCode(uid) || String(p.payload?.classCode || '').slice(0, 32);
       const base = { uid, classCode };
@@ -3534,7 +3547,6 @@ server.listen(PORT, HOST, () => {
           // 用 wrapOutgoing 自动按对端版本选格式（与 snd 同口径），失败只吞单台。
           try { d.ws.send(wrapOutgoing(d.ws.__v1 === true, 'voicehub_nowplaying', payload)); } catch { /* 单台失败不影响其他 */ }
         }
-        try { broadcastToViewers('voicehub_nowplaying', payload); } catch { /* P3 定案 A：管理端只读镜像；共用 sig 去重，不增频率 */ }
         if (state.status === 'playing') {
           pushEvent('info', 'VoiceHub 广播状态已更新', {
             title: state.broadcast?.title || '', artist: state.broadcast?.artist || '',

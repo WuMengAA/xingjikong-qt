@@ -55,7 +55,7 @@ export function buildAuthorize(redirectUri) {
   u.searchParams.set('redirect_uri', redirectUri);
   u.searchParams.set('response_type', 'code');
   u.searchParams.set('state', state);
-  u.searchParams.set('scope', 'class profile');   // scope 名称已中性化
+  u.searchParams.set('scope', 'cims profile');
   return { authorizeUrl: u.toString(), state };
 }
 

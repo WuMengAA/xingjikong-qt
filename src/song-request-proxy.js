@@ -1,4 +1,4 @@
-// 星集控 · 班级点歌代发（2026-10-18，2026-11-07 去死域名）
+// 星集控 · 班级点歌代发（2026-10-18）
 // ─────────────────────────────────────────────────────────────────────────────
 // 为什么由云端代发（用户拍板 A1：被控端各自绑定一个账号，点歌跟随账号同步）：
 //   被控端只能"请求点歌"，不能"直接点"——Key 不下发到端上，
@@ -15,16 +15,8 @@
 //   · 点歌进来是"**申请**"，由 VoiceHub 的音乐管理员审核/排期 —— 我们不替人做决定。
 //
 // ⚠️ 日志红线：**绝不打印 Key**；错误信息里若带上游回显，也要先脱敏。
-//
-// 2026-11-07（用户 m13419「联动一下广播站」）：
-//   · 旧 DEFAULT_BASE = 'https://voicehub.245959623.xyz' 是 Vercel 欠费停用的死域名
-//     （实测 404/402），点歌因此恒失败。基址统一改从 voicehub-sources.js 取。
-//   · ⚠️ 写操作**只打主源**（resolveBases(...)[0]，可被 o.baseUrl / VOICEHUB_BASE_URL 覆盖），
-//     **不自动换源重试**：请求可能已到达对端，换源重试会造成重复点歌（写必须「至多一次」）。
-//     多源 fallback 是只读桥（voicehub-bridge.js::pollOnce）的能力，不套用到写。
-//   · 生产实际写目标由 .env 的 VOICEHUB_BASE_URL 决定（另轮单独申请，本批不改生产）。
 
-import { resolveBases } from './voicehub-sources.js';
+const DEFAULT_BASE = 'https://voicehub.245959623.xyz';
 const TIMEOUT_MS = 15_000;
 
 /** 把上游错误文本里的疑似 key 抹掉（vhub_xxx 或 32+ 位十六进制）。 */
@@ -37,7 +29,7 @@ function scrub(s) {
 /**
  * 代发一条点歌申请。
  * @param {object} o
- * @param {string} [o.baseUrl]     VoiceHub 基址（显式指定优先；不传用主源）
+ * @param {string} o.baseUrl       VoiceHub 基址
  * @param {string} o.apiKey        该班的 Key（**只在内存里，不进日志**）
  * @param {string} o.title
  * @param {string} o.artist
@@ -46,8 +38,7 @@ function scrub(s) {
  * @returns {Promise<{ok:boolean, code?:number, error?:string, data?:any}>}
  */
 export async function requestSongViaVoiceHub(o = {}) {
-  // 写只打主源；详见文件头注释（防重复点歌）。
-  const base = resolveBases({ baseUrl: o.baseUrl }, process.env.VOICEHUB_BASE_URL)[0];
+  const base = String(o.baseUrl || process.env.VOICEHUB_BASE_URL || DEFAULT_BASE).replace(/\/+$/, '');
   const key = String(o.apiKey || '').trim();
   const title = String(o.title || '').trim();
   const artist = String(o.artist || '').trim();
