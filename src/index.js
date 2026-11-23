@@ -893,6 +893,14 @@ const server = http.createServer((req, res) => {
     return send(200, { ok: true, signedIn: true, mode: 'ticket', user: v.uid, exp: v.exp });
   }
 
+  // ── 健康端点（2026-11-23 · 云端稳定性体检补缺）────────────────────────
+  // 必须放在 isManageApi 鉴权门**之前**：监控/负载均衡不带令牌也要能探活。
+  // 只回 ok/uptimeSec/version —— 不回令牌、设备数、内部路径。
+  if (req.method === 'GET' && u.pathname === '/health') {
+    return send(200, { ok: true, service: 'stelarith-cloud',
+      uptimeSec: Math.floor(process.uptime()), version: 'v1', ts: Date.now() });
+  }
+
   // HTTP 管理面鉴权（2026-10-04 · 乙阶段收尾 + 补洞）：
   // /api/instructions / /api/devices / /api/events / /api/frame / /api/instructions/pending
   // 是"发指令/读设备表/读画面/读事件"的管理操作，此前完全无鉴权 ——
