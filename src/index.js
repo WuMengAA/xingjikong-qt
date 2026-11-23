@@ -394,8 +394,7 @@ import { handleClassAdminApi, adminMyClasses, handleTimetableReceipt } from './c
 // 用户 claims 存储（2026-10-20 · RBAC 第二批）：票无 claims 时按 uid 回填身份，权限真正流动
 import { initUserClaims, applyStoredClaims, setUserClaims, deleteUserClaims, listUserClaims } from './user-claims.js';
 // CIMS 课表/时间表供给（2026-10-17）：云端拉 CIMS → 经被控端 dispatch 给 ClassIsland 插件
-import { onDeviceOnline as cimsOnDeviceOnline, startCimsScheduler, syncDevice as cimsSyncDevice,
-  syncAll as cimsSyncAll, cimsStatus } from './cims.js';
+// 2026-11-09：旧课表供给模块导入已随退役整体移除（迁移定案 §5）。
 import { expireTerminalHistory } from './store.js';
 
 /**
@@ -2269,38 +2268,10 @@ const server = http.createServer((req, res) => {
     return undefined;
   }
 
-  // ── CIMS 课表供给管理端（2026-10-17）────────────────────────────────────
-  // GET  /api/admin/cims/status          配置（脱敏）+ 各设备缓存/最近同步结果
-  // POST /api/admin/cims/pull   {uid?}   只拉取刷缓存，不下发
-  // POST /api/admin/cims/apply  {uid?}   拉取并立即下发（无视"有无变化"）；不带 uid = 全部在线设备
-  // ⚠️ 管理 API 不受 CIMS_ENABLED 门控——持令牌的人显式点的动作就是意图；
-  //    CIMS_ENABLED 只管自动路径（设备上线钩子 + 周期同步）。
-  if (req.method === 'GET' && u.pathname === '/api/admin/cims/status') {
-    return send(200, { ok: true, cims: cimsStatus() });
-  }
-
-  if (req.method === 'POST' && (u.pathname === '/api/admin/cims/pull' || u.pathname === '/api/admin/cims/apply')) {
-    const wantApply = u.pathname.endsWith('/apply');
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', async () => {
-      let payload;
-      try { payload = JSON.parse(body || '{}'); }
-      catch (e) { return send(400, { ok: false, error: 'JSON 解析失败: ' + e.message }); }
-      const uid = payload.uid ? String(payload.uid).trim() : '';
-      pushEvent('info', `管理面板触发 CIMS 课表${wantApply ? '下发' : '拉取'}`, { uid: uid || '(全部在线)' });
-      try {
-        if (uid) {
-          const r = await cimsSyncDevice(uid, { apply: wantApply, force: wantApply });
-          return send(r.ok ? 200 : 502, { ok: r.ok, result: r });
-        }
-        const r = await cimsSyncAll({ apply: wantApply, force: wantApply });
-        return send(200, { ok: true, result: r });
-      } catch (e) {
-        return send(500, { ok: false, error: e.message });
-      }
-    });
-    return undefined;
+  // 旧课表供给路由已整体退役：统一返回 410，课表真源 = class-room.db/class_timetable。
+  if (u.pathname.startsWith('/api/admin/cims')) {
+    return send(410, { ok: false, ecode: 'CIMS_RETIRED',
+      error: '旧课表供给已退役；课表请走 /api/class/timetable-save 与 timetable-apply 通道' });
   }
 
   // GET /api/admin/provision?uid=class_xxx_2028_08  → 一枚这台机器专属的装机 bat
@@ -3068,8 +3039,7 @@ setInterval(() => {
   }
 }, INTERACT_SWEEP_INTERVAL_MS);
 
-// CIMS 课表周期同步（2026-10-17）：CIMS_ENABLED=true 且 CIMS_PULL_INTERVAL_SEC>0 才启。
-startCimsScheduler();
+// 旧课表供给调用已随退役移除。
 
 // OTA 资产健康自检（2026-10-31 加 · 404 事故闭环）：清单指向本地 assets 的文件必须存在。
 // 10-30 事故 = assets/pkg/ 被清空，清单/接口全部正常、教室机下载却 404，静默到"更新失败"才暴露。
@@ -3262,9 +3232,7 @@ wss.on('connection', (ws, req) => {
       });
       // 重连补发：这台机器掉线期间"已下发未回执"的指令，按原顺序重发给它（内部无待补发则不动作）。
       replayPending(ws, uid);
-      // CIMS 课表上线同步（2026-10-17）：后台拉取，按配置决定是否立即下发。
-      // ⚠️ 不 await：注册路径上多一次 CIMS 往返会把握手拖慢；模块内部自带异常兜底。
-      cimsOnDeviceOnline(uid);
+// 旧课表供给调用已随退役移除。
       return;
     }
 
