@@ -17,6 +17,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { getTimetable } from './class-data.js';
 import { deviceTimetable } from './device-timetable.js';
+import { deviceBroadcastDefault, initBroadcastMirror } from './device-broadcast.js';
 import { getDeviceClassCode, getDeviceTenant, getDevice, listClasses } from './registry.js';
 import { clientProfile } from './device-ledger.js';
 
@@ -24,6 +25,7 @@ export const DEVICE_GET_PREFIX = '/api/device/';
 export const PATH_TIMETABLE = '/api/device/timetable';
 export const PATH_CLASSES = '/api/device/classes';
 export const PATH_SELF = '/api/device/self';
+export const PATH_BROADCAST = '/api/device/broadcast/schedule';
 
 /** 定长比较（长度不同直接 false，不泄露长度）。 */
 function teq(a, b) {
@@ -180,7 +182,7 @@ export function selfForDevice({ uid, onlineOf, profileOf }) {
  */
 export function deviceGet(u, req, deps = {}) {
   const path = String((u && u.pathname) || '');
-  if (path !== PATH_TIMETABLE && path !== PATH_CLASSES && path !== PATH_SELF) return null;
+  if (path !== PATH_TIMETABLE && path !== PATH_CLASSES && path !== PATH_SELF && path !== PATH_BROADCAST) return null;
 
   const params = (u && u.searchParams) || new URLSearchParams();
   const a = authDevice({
@@ -193,6 +195,22 @@ export function deviceGet(u, req, deps = {}) {
 
   // 票里带 uid 时以票为准（不许用 query 覆盖）；只有静态令牌才允许 ?uid=
   const uid = a.uid || String(params.get('uid') || '').trim();
+
+  // 广播排期只读（方案 C T2）：真源在广播端本地，云端只是镜像；只回自己班。
+  if (path === PATH_BROADCAST) {
+    initBroadcastMirror();
+    const r = deviceBroadcastDefault({
+      uid,
+      date: params.get('date') || '',
+      classCodeOf: deps.classCodeOf || getDeviceClassCode,
+      tenantOf: deps.tenantOf || getDeviceTenant,
+      classNameOf: deps.classNameOf || ((code, tenant) => {
+        try { return (listClasses(tenant) || []).find((c) => c.code === code)?.name || ''; }
+        catch { return ''; }
+      }),
+    });
+    return r;
+  }
 
   if (path === PATH_SELF) {
     return selfForDevice({ uid, onlineOf: deps.onlineOf, profileOf: deps.profileOf });
